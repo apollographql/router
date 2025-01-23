@@ -836,13 +836,7 @@ mod tests {
 
         async {
             test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header(CONTENT_LENGTH, "0")
-                        .header("custom-header", "val1")
-                        .header("x-log-request", HeaderValue::from_static("log"))
-                        .build()
-                        .unwrap(),
+                .router_service(
                     |_r|async  {
                         Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
@@ -852,6 +846,14 @@ mod tests {
                             .build()
                             .expect("expecting valid response"))
                     },
+                )
+                .call(
+                    router::Request::fake_builder()
+                        .header(CONTENT_LENGTH, "0")
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .build()
+                        .unwrap()
                 )
                 .await
                 .expect("expecting successful response");
@@ -872,11 +874,8 @@ mod tests {
         async {
             // Without the header to enable custom event
             test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header("custom-header", "val1")
-                        .build()
-                        .unwrap(),
+                .router_service(
+
                     |_r| async {
                         let context_with_error = Context::new();
                         let _ = context_with_error
@@ -890,6 +889,10 @@ mod tests {
                             .expect("expecting valid response"))
                     },
                 )
+                .call(router::Request::fake_builder()
+                    .header("custom-header", "val1")
+                    .build()
+                    .unwrap())
                 .await
                 .expect("expecting successful response");
         }
@@ -909,11 +912,7 @@ mod tests {
         async {
             // Without the header to enable custom event
             test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header("custom-header", "val1")
-                        .build()
-                        .unwrap(),
+                .router_service(
                     |_r| async {
                         Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
@@ -924,6 +923,10 @@ mod tests {
                             .expect("expecting valid response"))
                     },
                 )
+                .call(router::Request::fake_builder()
+                    .header("custom-header", "val1")
+                    .build()
+                    .unwrap())
                 .await
                 .expect("expecting successful response");
         }
@@ -942,20 +945,19 @@ mod tests {
 
         async {
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -977,33 +979,32 @@ mod tests {
             let ctx = Context::new();
             ctx.insert(OPERATION_NAME, String::from("Test")).unwrap();
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query Test { foo }")
                         .context(ctx)
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    Ok(supergraph::Response::fake_builder()
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                        .expect("expecting valid response"))
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1021,24 +1022,23 @@ mod tests {
 
         async {
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    let context_with_error = Context::new();
+                    let _ = context_with_error
+                        .insert(CONTAINS_GRAPHQL_ERROR, true)
+                        .unwrap();
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .context(context_with_error)
+                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        let context_with_error = Context::new();
-                        let _ = context_with_error
-                            .insert(CONTAINS_GRAPHQL_ERROR, true)
-                            .unwrap();
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .context(context_with_error)
-                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1056,19 +1056,18 @@ mod tests {
 
         async {
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1094,19 +1093,18 @@ mod tests {
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
             test_harness
-                .call_subgraph(
+                .subgraph_service("subgraph", |_r| async {
+                    subgraph::Response::fake2_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
                         .subgraph_request(subgraph_req)
                         .build(),
-                    |_r| {
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1132,20 +1130,19 @@ mod tests {
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
             test_harness
-                .call_subgraph(
+                .subgraph_service("subgraph", |_r| async {
+                    subgraph::Response::fake2_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .subgraph_name("subgraph")
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
                         .subgraph_request(subgraph_req)
                         .build(),
-                    |_r| {
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .subgraph_name("subgraph")
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1153,4 +1150,97 @@ mod tests {
         .with_subscriber(assert_snapshot_subscriber!())
         .await
     }
+<<<<<<< HEAD
+=======
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_connector_events_request() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let connector_info = ConnectorInfo {
+                subgraph_name: "subgraph".to_string(),
+                source_name: Some("source".to_string()),
+                http_method: HTTPMethod::Get.as_str().to_string(),
+                url_template: "/test".to_string(),
+            };
+            let context = Context::default();
+            context
+                .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
+                .unwrap();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+            http_request
+                .headers_mut()
+                .insert("x-log-request", HeaderValue::from_static("log"));
+            let http_request = HttpRequest {
+                http_request,
+                context: context.clone(),
+            };
+            test_harness
+                .http_client_service("subgraph", |http_request| async move {
+                    Ok(HttpResponse {
+                        http_response: http::Response::builder()
+                            .status(200)
+                            .header("x-log-request", HeaderValue::from_static("log"))
+                            .body(body::empty())
+                            .expect("expecting valid response"),
+                        context: http_request.context.clone(),
+                    })
+                })
+                .call(http_request)
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_connector_events_response() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let connector_info = ConnectorInfo {
+                subgraph_name: "subgraph".to_string(),
+                source_name: Some("source".to_string()),
+                http_method: HTTPMethod::Get.as_str().to_string(),
+                url_template: "/test".to_string(),
+            };
+            let context = Context::default();
+            context
+                .insert(CONNECTOR_INFO_CONTEXT_KEY, connector_info)
+                .unwrap();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+            http_request
+                .headers_mut()
+                .insert("x-log-response", HeaderValue::from_static("log"));
+            let http_request = HttpRequest {
+                http_request,
+                context: context.clone(),
+            };
+            test_harness
+                .http_client_service("subgraph", |http_request| async move {
+                    Ok(HttpResponse {
+                        http_response: http::Response::builder()
+                            .status(200)
+                            .header("x-log-response", HeaderValue::from_static("log"))
+                            .body(body::empty())
+                            .expect("expecting valid response"),
+                        context: http_request.context.clone(),
+                    })
+                })
+                .call(http_request)
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+>>>>>>> 5915d746 (Improve PluginTestHarness for multi call (#6623))
 }

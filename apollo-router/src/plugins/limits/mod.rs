@@ -267,16 +267,24 @@ mod test {
     async fn test_body_content_length_limit_exceeded() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|r| async {
+                let body = r.router_request.into_body();
+                let _ = router::body::into_bytes(body).await?;
+                panic!("should have failed to read stream")
+            })
+            .call(
                 router::Request::fake_builder()
                     .body("This is a test")
                     .build()
                     .unwrap(),
+<<<<<<< HEAD
                 |r| async {
                     let body = r.router_request.into_body();
                     let _ = get_body_bytes(body).await?;
                     panic!("should have failed to read stream")
                 },
+=======
+>>>>>>> 5915d746 (Improve PluginTestHarness for multi call (#6623))
             )
             .await;
         assert!(resp.is_ok());
@@ -298,6 +306,7 @@ mod test {
     async fn test_body_content_length_limit_ok() {
         let plugin = plugin().await;
         let resp = plugin
+<<<<<<< HEAD
             .call_router(
                 router::Request::fake_builder().body("").build().unwrap(),
                 |r| async {
@@ -306,6 +315,19 @@ mod test {
                     assert!(body.is_ok());
                     Ok(router::Response::fake_builder().build().unwrap())
                 },
+=======
+            .router_service(|r| async {
+                let body = r.router_request.into_body();
+                let body = router::body::into_bytes(body).await;
+                assert!(body.is_ok());
+                Ok(router::Response::fake_builder().build().unwrap())
+            })
+            .call(
+                router::Request::fake_builder()
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+>>>>>>> 5915d746 (Improve PluginTestHarness for multi call (#6623))
             )
             .await;
 
@@ -328,13 +350,13 @@ mod test {
     async fn test_header_content_length_limit_exceeded() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|_| async { panic!("should have rejected request") })
+            .call(
                 router::Request::fake_builder()
                     .header("Content-Length", "100")
                     .body("")
                     .build()
                     .unwrap(),
-                |_| async { panic!("should have rejected request") },
             )
             .await;
         assert!(resp.is_ok());
@@ -356,13 +378,13 @@ mod test {
     async fn test_header_content_length_limit_ok() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|_| async { Ok(router::Response::fake_builder().build().unwrap()) })
+            .call(
                 router::Request::fake_builder()
                     .header("Content-Length", "5")
                     .body("")
                     .build()
                     .unwrap(),
-                |_| async { Ok(router::Response::fake_builder().build().unwrap()) },
             )
             .await;
         assert!(resp.is_ok());
@@ -385,9 +407,18 @@ mod test {
         // We should not be translating errors that are not limit errors into graphql errors
         let plugin = plugin().await;
         let resp = plugin
+<<<<<<< HEAD
             .call_router(
                 router::Request::fake_builder().body("").build().unwrap(),
                 |_| async { Err(BoxError::from("error")) },
+=======
+            .router_service(|_| async { Err(BoxError::from("error")) })
+            .call(
+                router::Request::fake_builder()
+                    .body(router::body::empty())
+                    .build()
+                    .unwrap(),
+>>>>>>> 5915d746 (Improve PluginTestHarness for multi call (#6623))
             )
             .await;
         assert!(resp.is_err());
@@ -397,11 +428,32 @@ mod test {
     async fn test_limits_dynamic_update() {
         let plugin = plugin().await;
         let resp = plugin
-            .call_router(
+            .router_service(|r| async move {
+                // Before we go for the body, we'll update the limit
+                r.context.extensions().with_lock(|lock| {
+                    let control: &BodyLimitControl =
+                        lock.get().expect("mut have body limit control");
+                    assert_eq!(control.remaining(), 10);
+                    assert_eq!(control.limit(), 10);
+                    control.update_limit(100);
+                });
+                let body = r.router_request.into_body();
+                let _ = router::body::into_bytes(body).await?;
+
+                // Now let's check progress
+                r.context.extensions().with_lock(|lock| {
+                    let control: &BodyLimitControl =
+                        lock.get().expect("mut have body limit control");
+                    assert_eq!(control.remaining(), 86);
+                });
+                Ok(router::Response::fake_builder().build().unwrap())
+            })
+            .call(
                 router::Request::fake_builder()
                     .body("This is a test")
                     .build()
                     .unwrap(),
+<<<<<<< HEAD
                 |r| async move {
                     // Before we go for the body, we'll update the limit
                     r.context.extensions().with_lock(|lock| {
@@ -422,6 +474,8 @@ mod test {
                     });
                     Ok(router::Response::fake_builder().build().unwrap())
                 },
+=======
+>>>>>>> 5915d746 (Improve PluginTestHarness for multi call (#6623))
             )
             .await;
         assert!(resp.is_ok());
