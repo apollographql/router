@@ -381,10 +381,7 @@ impl PlannerMode {
             .map(|(name, schema_str)| {
                 let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
                     .map_err(|errors| SchemaError::Validate(errors.into()))?;
-                Ok((
-                    name,
-                    SubgraphSchema::new(schema),
-                ))
+                Ok((name, SubgraphSchema::new(schema)))
             })
             .collect()
     }
