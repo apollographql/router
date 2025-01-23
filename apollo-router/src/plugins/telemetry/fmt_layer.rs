@@ -266,6 +266,8 @@ mod tests {
     use std::sync::MutexGuard;
 
     use apollo_compiler::name;
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -296,6 +298,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
+    use crate::query_planner::fetch::Variables;
     use crate::services::connector::request_service::transport;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
@@ -884,6 +887,34 @@ connector:
                     inputs: Default::default(),
                     selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
                 };
+                let schema = Arc::new(
+                    Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./")
+                        .unwrap(),
+                );
+
+                let original_request = crate::services::connect::Request::builder()
+                    .service_name("subgraph_Query_a_0".into())
+                    .context(crate::context::Context::default())
+                    .operation(Arc::new(
+                        ExecutableDocument::parse_and_validate(
+                            &schema,
+                            "query { a { f } a2: a { f2: f } }".to_string(),
+                            "./",
+                        )
+                        .unwrap(),
+                    ))
+                    .variables(Variables {
+                        variables: Default::default(),
+                        inverted_paths: Default::default(),
+                        contextual_arguments: Default::default(),
+                    })
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .body(graphql::Request::builder().build())
+                            .unwrap(),
+                    ))
+                    .build();
+                let original_request = Arc::new(original_request);
                 let connector_request = Request {
                     context: context.clone(),
                     connector: connector.clone(),
@@ -907,6 +938,7 @@ connector:
                             path: "@.id".to_string(),
                         },
                     ],
+                    original_request,
                 };
                 let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
@@ -1132,6 +1164,34 @@ connector:
                     inputs: Default::default(),
                     selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
                 };
+                let schema = Arc::new(
+                    Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./")
+                        .unwrap(),
+                );
+
+                let original_request = crate::services::connect::Request::builder()
+                    .service_name("subgraph_Query_a_0".into())
+                    .context(crate::context::Context::default())
+                    .operation(Arc::new(
+                        ExecutableDocument::parse_and_validate(
+                            &schema,
+                            "query { a { f } a2: a { f2: f } }".to_string(),
+                            "./",
+                        )
+                        .unwrap(),
+                    ))
+                    .variables(Variables {
+                        variables: Default::default(),
+                        inverted_paths: Default::default(),
+                        contextual_arguments: Default::default(),
+                    })
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .body(graphql::Request::builder().build())
+                            .unwrap(),
+                    ))
+                    .build();
+                let original_request = Arc::new(original_request);
                 let connector_request = Request {
                     context: context.clone(),
                     connector: connector.clone(),
@@ -1155,6 +1215,7 @@ connector:
                             path: "@.id".to_string(),
                         },
                     ],
+                    original_request,
                 };
                 let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);

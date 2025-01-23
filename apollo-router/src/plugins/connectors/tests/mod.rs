@@ -1461,7 +1461,11 @@ async fn test_variables() {
         .await;
     Mock::given(method("POST"))
         .and(path("/f"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({}))
+                .insert_header("value", "myothercoolheader"),
+        )
         .mount(&mock_server)
         .await;
     let uri = mock_server.uri();
@@ -1469,7 +1473,7 @@ async fn test_variables() {
     let response = execute(
         &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
         &uri,
-        "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
+        "{ f(arg: \"arg\") { arg context config sibling status extra request response f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
           "preview_connectors": {
@@ -1490,7 +1494,10 @@ async fn test_variables() {
             }
           }
         })),
-        |_| {},
+        |request| {
+          let headers = request.router_request.headers_mut();
+          headers.insert("value", "coolheader".parse().unwrap());
+        },
     )
     .await;
 
@@ -1509,6 +1516,8 @@ async fn test_variables() {
             "config": "C",
             "status": 200
           },
+          "request": "coolheader",
+          "response": "myothercoolheader",
           "f": {
             "arg": "arg",
             "context": "B",
@@ -1528,13 +1537,13 @@ async fn test_variables() {
             Matcher::new()
                 .method("POST")
                 .path("/f")
-                .query("arg=rg&context=B&config=C")
+                .query("arg=rg&context=B&config=C&header=coolheader")
                 .header("x-source-context".into(), "B".try_into().unwrap())
                 .header("x-source-config".into(), "C".try_into().unwrap())
                 .header("x-connect-arg".into(), "g".try_into().unwrap())
                 .header("x-connect-context".into(), "B".try_into().unwrap())
                 .header("x-connect-config".into(), "C".try_into().unwrap())
-                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C" }))
+                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "request": "coolheader" }))
                 ,
             Matcher::new()
                 .method("POST")

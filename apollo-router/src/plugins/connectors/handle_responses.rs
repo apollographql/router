@@ -25,6 +25,7 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::services::connect;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::connector::request_service::transport::http::HttpResponse;
@@ -76,6 +77,7 @@ impl RawResponse {
         connector: Arc<Connector>,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        original_request: Arc<connect::Request>,
     ) -> connector::request_service::Response {
         let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
@@ -90,6 +92,8 @@ impl RawResponse {
                     connector.config.as_ref(),
                     context,
                     Some(parts.status.as_u16()),
+                    original_request,
+                    Some(&parts),
                 );
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -297,6 +301,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     context: &Context,
     debug_request: Option<ConnectorDebugHttpRequest>,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    original_request: Arc<connect::Request>,
 ) -> connector::request_service::Response {
     match result {
         // This occurs when we short-circuit the request when over the limit
@@ -346,7 +351,7 @@ pub(crate) async fn process_response<T: HttpBody>(
             };
             if is_success {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                raw.map_response(result, connector, context, debug_context)
+                raw.map_response(result, connector, context, debug_context, original_request)
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                 raw.map_error(result, connector, context, debug_context)
@@ -539,6 +544,8 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -549,8 +556,10 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
+    use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::plugins::connectors::make_requests::ResponseKey;
+    use crate::query_planner::fetch::Variables;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
     use crate::Context;
@@ -600,6 +609,34 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
+        );
+
+        let original_request = crate::services::connect::Request::builder()
+            .service_name("subgraph_Query_a_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a { f } a2: a { f2: f } }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+        let original_request = Arc::new(original_request);
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -608,6 +645,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request.clone(),
             )
             .await
             .mapped_response,
@@ -618,6 +656,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request,
             )
             .await
             .mapped_response,
@@ -700,6 +739,34 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
+        );
+
+        let original_request = crate::services::connect::Request::builder()
+            .service_name("subgraph_Query_a_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a { f } a2: a { f2: f } }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+        let original_request = Arc::new(original_request);
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -708,6 +775,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request.clone(),
             )
             .await
             .mapped_response,
@@ -718,6 +786,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request,
             )
             .await
             .mapped_response,
@@ -810,6 +879,35 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
+        );
+
+        let original_request = crate::services::connect::Request::builder()
+            .service_name("subgraph_Query_a_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a { f } a2: a { f2: f } }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+
+        let original_request = Arc::new(original_request);
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -818,6 +916,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request.clone(),
             )
             .await
             .mapped_response,
@@ -828,6 +927,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request,
             )
             .await
             .mapped_response,
@@ -942,6 +1042,34 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
+        );
+
+        let original_request = crate::services::connect::Request::builder()
+            .service_name("subgraph_Query_a_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a { f } a2: a { f2: f } }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+        let original_request = Arc::new(original_request);
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
@@ -950,6 +1078,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request.clone(),
             )
             .await
             .mapped_response,
@@ -960,6 +1089,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request.clone(),
             )
             .await
             .mapped_response,
@@ -970,6 +1100,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request.clone(),
             )
             .await
             .mapped_response,
@@ -980,6 +1111,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                original_request,
             )
             .await
             .mapped_response,
@@ -1168,6 +1300,33 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
 
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
+        );
+
+        let original_request = crate::services::connect::Request::builder()
+            .service_name("subgraph_Query_a_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a { f } a2: a { f2: f } }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .build();
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -1176,6 +1335,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                Arc::new(original_request),
             )
             .await
             .mapped_response,

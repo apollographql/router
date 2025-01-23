@@ -9,6 +9,7 @@ use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
+use http::response::Parts;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -44,6 +45,8 @@ impl RequestInputs {
         config: Option<&CustomConfiguration>,
         context: &Context,
         status: Option<u16>,
+        original_request: Arc<connect::Request>,
+        response_parts: Option<&Parts>,
     ) -> IndexMap<String, Value> {
         let mut map = IndexMap::with_capacity_and_hasher(variables_used.len(), Default::default());
 
@@ -89,6 +92,45 @@ impl RequestInputs {
                     Namespace::Status.as_str().into(),
                     Value::Number(status.into()),
                 );
+            }
+        }
+
+        // Add headers from the original router request
+        if variables_used.contains(&Namespace::Request) {
+            let headers: Map<ByteString, Value> = original_request
+                .supergraph_request
+                .headers()
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.as_str().into(),
+                        value.to_str().unwrap_or_default().into(),
+                    )
+                })
+                .collect();
+            let request_object = json!({
+                "headers": Value::Object(headers)
+            });
+            map.insert(Namespace::Request.as_str().into(), request_object);
+        }
+
+        // Add headers from the connectors response
+        if variables_used.contains(&Namespace::Response) {
+            if let Some(response_parts) = response_parts {
+                let headers: Map<ByteString, Value> = response_parts
+                    .headers
+                    .iter()
+                    .map(|(key, value)| {
+                        (
+                            key.as_str().into(),
+                            value.to_str().unwrap_or_default().into(),
+                        )
+                    })
+                    .collect();
+                let response_object = json!({
+                    "headers": Value::Object(headers)
+                });
+                map.insert(Namespace::Response.as_str().into(), response_object);
             }
         }
 
@@ -187,7 +229,7 @@ pub(crate) fn make_requests(
         connector,
         service_name,
         request_params,
-        &request,
+        request,
         debug,
     )
 }
@@ -197,10 +239,11 @@ fn request_params_to_requests(
     connector: Arc<Connector>,
     service_name: &str,
     request_params: Vec<ResponseKey>,
-    original_request: &connect::Request,
+    original_request: connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
+    let original_request = Arc::new(original_request);
     for response_key in request_params {
         let connector = connector.clone();
         let (transport_request, mapping_problems) = make_request(
@@ -210,8 +253,10 @@ fn request_params_to_requests(
                 connector.config.as_ref(),
                 &original_request.context,
                 None,
+                original_request.clone(),
+                None,
             ),
-            original_request,
+            &original_request,
             debug,
         )?;
 
@@ -222,6 +267,7 @@ fn request_params_to_requests(
             transport_request,
             key: response_key,
             mapping_problems,
+            original_request: original_request.clone(),
         });
     }
 

@@ -841,6 +841,8 @@ mod tests {
     use std::str::FromStr;
 
     use apollo_compiler::name;
+    use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -862,6 +864,7 @@ mod tests {
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
+    use crate::query_planner::fetch::Variables;
     use crate::services::connector::request_service::transport;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
@@ -1238,6 +1241,36 @@ mod tests {
                 inputs: Default::default(),
                 selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
             };
+
+            let schema = Arc::new(
+                Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./")
+                    .unwrap(),
+            );
+
+            let original_request = crate::services::connect::Request::builder()
+                .service_name("subgraph_Query_a_0".into())
+                .context(Context::default())
+                .operation(Arc::new(
+                    ExecutableDocument::parse_and_validate(
+                        &schema,
+                        "query { a { f } a2: a { f2: f } }".to_string(),
+                        "./",
+                    )
+                    .unwrap(),
+                ))
+                .variables(Variables {
+                    variables: Default::default(),
+                    inverted_paths: Default::default(),
+                    contextual_arguments: Default::default(),
+                })
+                .supergraph_request(Arc::new(
+                    http::Request::builder()
+                        .body(graphql::Request::builder().build())
+                        .unwrap(),
+                ))
+                .build();
+            let original_request = Arc::new(original_request);
+
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
@@ -1245,6 +1278,7 @@ mod tests {
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
+                original_request,
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
@@ -1320,6 +1354,36 @@ mod tests {
                 inputs: Default::default(),
                 selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
             };
+
+            let schema = Arc::new(
+                Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./")
+                    .unwrap(),
+            );
+
+            let original_request = crate::services::connect::Request::builder()
+                .service_name("subgraph_Query_a_0".into())
+                .context(Context::default())
+                .operation(Arc::new(
+                    ExecutableDocument::parse_and_validate(
+                        &schema,
+                        "query { a { f } a2: a { f2: f } }".to_string(),
+                        "./",
+                    )
+                    .unwrap(),
+                ))
+                .variables(Variables {
+                    variables: Default::default(),
+                    inverted_paths: Default::default(),
+                    contextual_arguments: Default::default(),
+                })
+                .supergraph_request(Arc::new(
+                    http::Request::builder()
+                        .body(graphql::Request::builder().build())
+                        .unwrap(),
+                ))
+                .build();
+            let original_request = Arc::new(original_request);
+
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
@@ -1327,6 +1391,7 @@ mod tests {
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
+                original_request,
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
