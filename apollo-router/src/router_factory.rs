@@ -684,7 +684,7 @@ pub(crate) async fn create_plugins(
     // This check must _not_ be removed. If we have the plugin registered but there aren't claims
     // in the license, the plugin's constructor will error out when looking for those claims
     if let Some(_limits) = license.get_limits() {
-        add_optional_apollo_plugin!("router_limits");
+        add_mandatory_apollo_plugin!("router_limits");
     } else {
         // If there are no limits and thereby no router_limits plugin, remove it from the registry
         apollo_plugins_config.remove("apollo.router_limits");
@@ -770,7 +770,9 @@ fn inject_schema_id(
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use schemars::JsonSchema;
     use serde::Deserialize;
@@ -778,13 +780,20 @@ mod test {
     use tower_http::BoxError;
 
     use crate::configuration::Configuration;
+    use crate::configuration::APOLLO_PLUGIN_PREFIX;
     use crate::plugin::Plugin;
+    use crate::plugin::PluginFactory;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::spec::Schema;
+    use crate::uplink::license_enforcement::LicenseLimits;
+    use crate::uplink::license_enforcement::LicenseState;
+    use crate::uplink::license_enforcement::TpsLimit;
+
+    use super::*;
 
     // Always starts and stops plugin
 
@@ -831,10 +840,39 @@ mod test {
 
     register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
+    async fn create_service(
+        config: Configuration,
+        license: Option<LicenseState>,
+    ) -> Result<(), BoxError> {
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &config)?;
+
+        let is_telemetry_disabled = false;
+        let service = YamlRouterFactory
+            .create(
+                is_telemetry_disabled,
+                Arc::new(config),
+                Arc::new(schema),
+                None,
+                None,
+                license.unwrap_or_default(),
+            )
+            .await;
+        service.map(|_| ())
+    }
+
     #[tokio::test]
     async fn test_yaml_no_extras() {
         let config = Configuration::builder().build().unwrap();
-        let service = create_service(config).await;
+        let service = create_service(config, None).await;
+        assert!(service.is_ok())
+    }
+
+    #[tokio::test]
+    async fn test_no_router_limits_plugin_when_no_license() {
+        let config = Configuration::builder().build().unwrap();
+        // no license
+        let service = create_service(config, None).await;
         assert!(service.is_ok())
     }
 
@@ -848,7 +886,7 @@ mod test {
         "#,
         )
         .unwrap();
-        let service = create_service(config).await;
+        let service = create_service(config, None).await;
         assert!(service.is_ok())
     }
 
@@ -862,7 +900,7 @@ mod test {
         "#,
         )
         .unwrap();
-        let service = create_service(config).await;
+        let service = create_service(config, None).await;
         assert!(service.is_err())
     }
 
@@ -878,26 +916,8 @@ mod test {
         "#,
         )
         .unwrap();
-        let service = create_service(config).await;
+        let service = create_service(config, None).await;
         assert!(service.is_err())
-    }
-
-    async fn create_service(config: Configuration) -> Result<(), BoxError> {
-        let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Schema::parse(schema, &config)?;
-
-        let is_telemetry_disabled = false;
-        let service = YamlRouterFactory
-            .create(
-                is_telemetry_disabled,
-                Arc::new(config),
-                Arc::new(schema),
-                None,
-                None,
-                Default::default(),
-            )
-            .await;
-        service.map(|_| ())
     }
 
     #[test]
@@ -913,5 +933,83 @@ mod test {
             &config.apollo.schema_id,
             "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
         );
+    }
+
+    #[tokio::test]
+    async fn test_router_limits_plugin_added_when_no_limits() {
+        let configuration = Configuration::default();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &configuration).unwrap();
+
+        let mut map = HashMap::new();
+        map.insert(
+            "test".to_string(),
+            Arc::new(Valid::assume_valid(
+                apollo_compiler::Schema::builder().build().unwrap(),
+            )),
+        );
+        let subgraph_schemas = Arc::new(map);
+
+        //let license = LicenseState::Licensed { limits: None };
+        let license = LicenseState::Licensed {
+            limits: Some(LicenseLimits {
+                tps: Some(TpsLimit {
+                    capacity: 1,
+                    interval: Duration::from_millis(500),
+                }),
+            }),
+        };
+
+        let plugins = create_plugins(
+            &configuration,
+            &schema,
+            subgraph_schemas,
+            None,
+            None,
+            license,
+        )
+        .await
+        .unwrap()
+        .iter()
+        .map(|(p, _)| p.clone())
+        .collect::<Vec<String>>();
+
+        let found = plugins.iter().find(|p| **p == "apollo.router_limits");
+        assert!(found.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_router_limits_plugin_not_added_when_no_limits() {
+        let configuration = Configuration::default();
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Schema::parse(schema, &configuration).unwrap();
+
+        let mut map = HashMap::new();
+        map.insert(
+            "test".to_string(),
+            Arc::new(Valid::assume_valid(
+                apollo_compiler::Schema::builder().build().unwrap(),
+            )),
+        );
+        let subgraph_schemas = Arc::new(map);
+
+        let license = LicenseState::Licensed { limits: None };
+
+        let plugins = create_plugins(
+            &configuration,
+            &schema,
+            subgraph_schemas,
+            None,
+            None,
+            license,
+        )
+        .await
+        .unwrap()
+        .iter()
+        .map(|(p, _)| p.clone())
+        .collect::<Vec<String>>();
+
+        let found = plugins.iter().find(|p| **p == "apollo.router_limits");
+        assert!(found.is_none());
     }
 }
