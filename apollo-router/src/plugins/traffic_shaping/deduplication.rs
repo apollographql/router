@@ -106,7 +106,7 @@ where
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
                                         request.context,
-                                        request.subgraph_name.unwrap_or_default(),
+                                        request.subgraph_name,
                                         request.id,
                                     )
                                 })
@@ -160,7 +160,7 @@ where
                         SubgraphResponse::new_from_response(
                             response.0.response,
                             context,
-                            response.0.subgraph_name.unwrap_or_default(),
+                            response.0.subgraph_name,
                             id,
                         )
                     });

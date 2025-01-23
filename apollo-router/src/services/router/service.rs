@@ -222,10 +222,6 @@ impl Service<RouterRequest> for RouterService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // This service eventually calls `QueryAnalysisLayer::parse_document()`
-        // which calls `compute_job::execute()`
-        // XXX(@goto-bus-stop): this reads to me like we should propagate `poll_ready` calls down to
-        // QueryAnalysisLayer :)
         self.supergraph_service.poll_ready(cx)
     }
 

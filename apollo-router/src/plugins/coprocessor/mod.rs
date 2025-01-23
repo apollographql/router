@@ -1097,7 +1097,7 @@ where
             let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
-                subgraph_name: Some(subgraph_name),
+                subgraph_name,
                 id: request.id,
             };
 

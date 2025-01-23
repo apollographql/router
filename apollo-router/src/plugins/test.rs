@@ -194,7 +194,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         );
 
         self.plugin
-            .subgraph_service(&name.expect("subgraph name must be populated"), service)
+            .subgraph_service(&name, service)
             .call(request)
             .await
     }

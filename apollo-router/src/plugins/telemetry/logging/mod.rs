@@ -90,6 +90,7 @@ mod test {
                         subgraph::Response::fake2_builder()
                             .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}).to_string())
+                            .subgraph_name("subgraph")
                             .build()
                             .expect("expecting valid response")
                     },

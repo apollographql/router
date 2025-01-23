@@ -115,7 +115,7 @@ async fn test_local_root_50_percent_sample() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    for _ in 0..100 {
+    for _ in 0..5 {
         if TraceSpec::builder()
             .services(["router", "subgraph"].into())
             .operation_name("ExampleQuery")

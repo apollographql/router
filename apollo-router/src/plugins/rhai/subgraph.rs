@@ -22,6 +22,7 @@ pub(super) fn request_failure(
             .and_data(body.data)
             .and_label(body.label)
             .and_path(body.path)
+            .subgraph_name(String::default()) // XXX: We don't know the subgraph name
             .build()
     } else {
         Response::error_builder()
@@ -31,6 +32,7 @@ pub(super) fn request_failure(
             }])
             .context(context)
             .status_code(error_details.status)
+            .subgraph_name(String::default()) // XXX: We don't know the subgraph name
             .build()
     };
 
@@ -47,6 +49,7 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             .and_data(body.data)
             .and_label(body.label)
             .and_path(body.path)
+            .subgraph_name(String::default()) // XXX: We don't know the subgraph name
             .build()
     } else {
         Response::error_builder()
@@ -56,6 +59,7 @@ pub(super) fn response_failure(context: Context, error_details: ErrorDetails) ->
             }])
             .status_code(error_details.status)
             .context(context)
+            .subgraph_name(String::default()) // XXX: We don't know the subgraph name
             .build()
     }
 }

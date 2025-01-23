@@ -1002,7 +1002,7 @@ mod test {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
-            req.subgraph_name.unwrap_or_default(),
+            req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
     }

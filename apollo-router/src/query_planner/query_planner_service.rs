@@ -1133,6 +1133,7 @@ mod tests {
                         Ok(subgraph::Response::builder()
                             .extensions(crate::json_ext::Object::new())
                             .context(request.context)
+                            .subgraph_name(String::default())
                             .build())
                     }
                 })

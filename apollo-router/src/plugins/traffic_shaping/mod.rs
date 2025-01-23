@@ -328,8 +328,8 @@ impl Plugin for TrafficShaping {
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
-                    |req: &subgraph::Request| req.context.clone(),
-                    move |ctx, future| {
+                    |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
+                    move |(ctx, subgraph_name), future| {
                         async {
                             let response: Result<SubgraphResponse, BoxError> = future.await;
                             match response {
@@ -342,6 +342,7 @@ impl Plugin for TrafficShaping {
                                         .build();
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                        .subgraph_name(subgraph_name)
                                         .error(error)
                                         .context(ctx)
                                         .build())
@@ -354,6 +355,7 @@ impl Plugin for TrafficShaping {
                                         .build();
                                     Ok(SubgraphResponse::error_builder()
                                         .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                        .subgraph_name(subgraph_name)
                                         .error(error)
                                         .context(ctx)
                                         .build())

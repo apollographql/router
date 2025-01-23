@@ -227,6 +227,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
             SubgraphResponse::fake_builder()
                 .error(error)
                 .context(req.context)
+                .subgraph_name(req.subgraph_name.clone())
                 .id(req.id)
                 .build()
         };

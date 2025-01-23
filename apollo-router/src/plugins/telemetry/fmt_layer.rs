@@ -801,6 +801,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .subgraph_name("subgraph")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
@@ -825,6 +826,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .subgraph_name("subgraph_bis")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
@@ -977,6 +979,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .subgraph_name("subgraph")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
@@ -1001,6 +1004,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .subgraph_name("subgraph_bis")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);

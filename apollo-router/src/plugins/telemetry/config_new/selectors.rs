@@ -1348,10 +1348,11 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => request
-                .subgraph_name
-                .clone()
-                .map(opentelemetry::Value::from),
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => {
+                Some(request.subgraph_name.clone().into())
+            }
+            // .clone()
+            // .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphOperationKind { .. } => request
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -1531,10 +1532,11 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => response
-                .subgraph_name
-                .clone()
-                .map(opentelemetry::Value::from),
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => {
+                Some(response.subgraph_name.clone().into())
+            }
+            // .clone()
+            // .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphResponseBody {
                 subgraph_response_body,
                 default,
@@ -1601,7 +1603,7 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::Cache { cache, entity_type } => {
                 let cache_info: CacheSubgraph = response
                     .context
-                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()?))
+                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()))
                     .ok()
                     .flatten()?;
 

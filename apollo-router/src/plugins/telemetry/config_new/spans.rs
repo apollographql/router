@@ -781,6 +781,7 @@ mod test {
         let values = spans.attributes.on_response(
             &subgraph::Response::fake2_builder()
                 .header("my-header", "test_val")
+                .subgraph_name(String::default())
                 .build()
                 .unwrap(),
         );
@@ -813,6 +814,7 @@ mod test {
             &subgraph::Response::fake2_builder()
                 .header("my-header", "test_val")
                 .status_code(http::StatusCode::OK)
+                .subgraph_name(String::default())
                 .build()
                 .unwrap(),
         );
@@ -845,6 +847,7 @@ mod test {
             &subgraph::Response::fake2_builder()
                 .header("my-header", "test_val")
                 .status_code(http::StatusCode::OK)
+                .subgraph_name(String::default())
                 .build()
                 .unwrap(),
         );

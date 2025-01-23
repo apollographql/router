@@ -590,9 +590,7 @@ impl CacheService {
                     ControlFlow::Break(response) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
                         let _ = response.context.insert(
-                            CacheMetricContextKey::new(
-                                response.subgraph_name.clone().unwrap_or_default(),
-                            ),
+                            CacheMetricContextKey::new(response.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
                         );
                         Ok(response)
@@ -600,9 +598,7 @@ impl CacheService {
                     ControlFlow::Continue((request, mut root_cache_key)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
-                            CacheMetricContextKey::new(
-                                request.subgraph_name.clone().unwrap_or_default(),
-                            ),
+                            CacheMetricContextKey::new(request.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
                         );
 
@@ -742,6 +738,7 @@ impl CacheService {
                                 .context(context)
                                 .data(Value::Object(data))
                                 .errors(new_errors)
+                                .subgraph_name(self.name)
                                 .extensions(Object::new())
                                 .build();
                             CacheControl::no_store().to_headers(response.response.headers_mut())?;
@@ -910,7 +907,7 @@ async fn cache_lookup_root(
                     .data(value.0.data)
                     .extensions(Object::new())
                     .context(request.context)
-                    .and_subgraph_name(request.subgraph_name.clone())
+                    .subgraph_name(request.subgraph_name.clone())
                     .build();
 
                 value
@@ -1037,7 +1034,7 @@ async fn cache_lookup_entities(
         let mut response = subgraph::Response::builder()
             .data(data)
             .extensions(Object::new())
-            .and_subgraph_name(request.subgraph_name)
+            .subgraph_name(request.subgraph_name)
             .context(request.context)
             .build();
 
