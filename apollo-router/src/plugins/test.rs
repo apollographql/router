@@ -1,12 +1,13 @@
-use apollo_compiler::validation::Valid;
-use pin_project_lite::pin_project;
-use serde_json::Value;
 use std::any::TypeId;
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
+
+use apollo_compiler::validation::Valid;
+use pin_project_lite::pin_project;
+use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
