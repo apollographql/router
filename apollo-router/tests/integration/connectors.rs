@@ -42,7 +42,7 @@ async fn test_auth_incompatible_warnings_on_all() -> Result<(), BoxError> {
 
     router.start().await;
     router
-        .assert_log_contains(r#""subgraphs":"connectors","message":"plugin `authentication` is enabled for connector-enabled subgraphs"#)
+        .wait_for_log_message(r#""subgraphs":"connectors","message":"plugin `authentication` is enabled for connector-enabled subgraphs"#)
         .await;
 
     Ok(())
@@ -84,7 +84,7 @@ async fn test_auth_incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
 
     router.start().await;
     router
-        .assert_log_contains(r#""subgraphs":"connectors","message":"plugin `authentication` is enabled for connector-enabled subgraphs"#)
+        .wait_for_log_message(r#""subgraphs":"connectors","message":"plugin `authentication` is enabled for connector-enabled subgraphs"#)
         .await;
 
     Ok(())
@@ -137,7 +137,7 @@ async fn test_auth_incompatible_warnings_with_overrides() -> Result<(), BoxError
 
     router.start().await;
     router
-        .assert_log_contains(r#""subgraph":"connectors","sources":"jsonPlaceholder","message":"plugin `authentication` is enabled for a connector-enabled subgraph"#)
+        .wait_for_log_message(r#""subgraph":"connectors","sources":"jsonPlaceholder","message":"plugin `authentication` is enabled for a connector-enabled subgraph"#)
         .await;
 
     Ok(())
@@ -229,7 +229,7 @@ async fn test_headers_incompatible_warnings_on_all() -> Result<(), BoxError> {
 
     router.start().await;
     router
-        .assert_log_contains(r#""subgraph":"connectors","message":"plugin `headers` indirectly targets a connector-enabled subgraph"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `headers` indirectly targets a connector-enabled subgraph"#)
         .await;
 
     Ok(())
@@ -269,7 +269,7 @@ async fn test_headers_incompatible_warnings_on_subgraph() -> Result<(), BoxError
 
     router.start().await;
     router
-        .assert_log_contains(r#""subgraph":"connectors","message":"plugin `headers` is explicitly configured for connector-enabled subgraph"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `headers` is explicitly configured for connector-enabled subgraph"#)
         .await;
 
     Ok(())
