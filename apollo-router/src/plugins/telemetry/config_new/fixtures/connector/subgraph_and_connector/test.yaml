@@ -18,17 +18,17 @@ events:
         status: 200
         data:
           hello: "world"
-    - context:
-        map:
-          "apollo_router::connector::info":
-            subgraph_name: reviews
-            source_name: reviews_api
-            http_method: GET
-            url_template: "/reviews"
-    - http_request:
+    - connector_request:
+        subgraph_name: reviews
+        source_name: reviews_api
+        http_method: GET
+        url_template: "/reviews"
         uri: "/reviews"
-        method: GET
-    - http_response:
+    - connector_response:
+        subgraph_name: reviews
+        source_name: reviews_api
+        http_method: GET
+        url_template: "/reviews"
         status: 200
         body: |
           { "foo": "bar" }
