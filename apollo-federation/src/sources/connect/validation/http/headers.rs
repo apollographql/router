@@ -11,16 +11,17 @@ use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::graphql::GraphQLString;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::HeaderSource;
 
 pub(crate) fn validate_arg<'a>(
     http_arg: &'a [(Name, Node<Value>)],
-    expression_context: &expression::Context,
     coordinate: HttpHeadersCoordinate<'a>,
+    schema: &SchemaInfo,
 ) -> Vec<Message> {
-    let sources = &expression_context.schema.sources;
+    let sources = &schema.sources;
     let mut messages = Vec::new();
     let Some(headers_arg) = get_arg(http_arg) else {
         return messages;
@@ -62,8 +63,7 @@ pub(crate) fn validate_arg<'a>(
                         GraphQLString::new(node, sources)
                             .ok()
                             .and_then(|expression| {
-                                expression
-                                    .line_col_for_subslice(location, expression_context.schema)
+                                expression.line_col_for_subslice(location, schema)
                             })
                             .into_iter()
                             .collect(),
@@ -97,20 +97,28 @@ pub(crate) fn validate_arg<'a>(
                 // This should never fail in practice, we convert to GraphQLString only to hack in location data
                 continue;
             };
+            let expression_context = match coordinate {
+                HttpHeadersCoordinate::Source { .. } => {
+                    expression::Context::for_source(schema, &expression, Code::InvalidHeader)
+                }
+                HttpHeadersCoordinate::Connect { connect, .. } => {
+                    expression::Context::for_connect_request(
+                        schema,
+                        connect,
+                        &expression,
+                        Code::InvalidHeader,
+                    )
+                }
+            };
             messages.extend(
                 header_value
                     .expressions()
                     .filter_map(|expression| {
-                        expression::validate(expression, expression_context).err()
+                        expression::validate(expression, &expression_context).err()
                     })
-                    .flatten()
-                    .map(|err| Message {
-                        code: Code::InvalidHeader,
-                        message: format!("In {coordinate}: {}", err.message),
-                        locations: expression
-                            .line_col_for_subslice(err.location, expression_context.schema)
-                            .into_iter()
-                            .collect(),
+                    .map(|mut err| {
+                        err.message = format!("In {coordinate}: {}", err.message);
+                        err
                     }),
             );
         }
