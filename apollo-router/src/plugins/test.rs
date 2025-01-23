@@ -272,8 +272,10 @@ where
         self.call(FakeDefault::default()).await
     }
 
-    /// Returns if the service is ready
-    pub(crate) async fn is_ready(&self) -> bool {
+    /// Returns the result of calling `poll_ready` on the service.
+    /// This is useful for testing things where a service may exert backpressure, but load shedding is not
+    /// is expected elsewhere in the pipeline.
+    pub(crate) async fn poll_ready(&self) -> Poll<Result<(), S::Error>> {
         PollReadyFuture {
             _phantom: Default::default(),
             service: self.service.clone().lock_owned().await,
@@ -297,17 +299,14 @@ impl<Req, S> Future for PollReadyFuture<Req, S>
 where
     S: Service<Req>,
 {
-    type Output = bool;
+    type Output = Poll<Result<(), S::Error>>;
 
     fn poll(
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let mut this = self.project();
-        match this.service.poll_ready(cx) {
-            Poll::Ready(_) => Poll::Ready(true),
-            Poll::Pending => Poll::Ready(false),
-        }
+        Poll::Ready(this.service.poll_ready(cx))
     }
 }
 
@@ -412,7 +411,7 @@ mod test_for_harness {
 
         for _ in 0..2 {
             let response = service.call_default().await.unwrap();
-            assert!(service.is_ready().await);
+            assert!(service.poll_ready().await.is_ready());
             assert_eq!(
                 response.response.headers().get("x-custom-header"),
                 Some(&HeaderValue::from_static("test-value"))
@@ -461,11 +460,11 @@ mod test_for_harness {
         // Join will progress each future in turn, so we are guaranteed that the service will enter not
         // ready state..
         let request = service.call_default();
-        let (resp, ready) = join!(request, service.is_ready());
+        let (resp, poll) = join!(request, service.poll_ready());
         assert!(resp.is_ok());
-        assert!(!ready);
+        assert!(poll.is_pending());
         // Now that the first request has completed, the service should be ready again
-        assert!(service.is_ready().await)
+        assert!(service.poll_ready().await.is_ready())
     }
 
     #[tokio::test]
