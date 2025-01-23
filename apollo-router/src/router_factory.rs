@@ -166,9 +166,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                             PluginInit::builder()
                                 .config(plugin_config.clone())
                                 .supergraph_sdl(schema.raw_sdl.clone())
-                                .supergraph_schema_id(Arc::new(
-                                    schema.schema_id.as_str().to_owned(),
-                                ))
+                                .supergraph_schema_id(schema.schema_id.clone().into_inner())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
