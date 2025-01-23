@@ -174,29 +174,12 @@ checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.25.0"
-dependencies = [
- "ahash",
- "apollo-parser 0.8.4",
- "ariadne",
- "indexmap 2.7.1",
- "rowan",
- "serde",
- "serde_json_bytes",
- "thiserror 1.0.69",
- "triomphe",
- "typed-arena",
- "uuid",
-]
-
-[[package]]
-name = "apollo-compiler"
-version = "1.25.0"
+version = "1.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d810db7b42773a4082426bcd58658cb9b311c5b74febd255130a9dcfc13109d"
+checksum = "615145d8c4b53ea4e6c15261adbb71cefad3a6834c4a12158f89a484f0769fb2"
 dependencies = [
  "ahash",
- "apollo-parser 0.8.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "ariadne",
  "indexmap 2.7.1",
  "rowan",
@@ -223,7 +206,7 @@ dependencies = [
 name = "apollo-federation"
 version = "2.0.0-preview.4"
 dependencies = [
- "apollo-compiler 1.25.0",
+ "apollo-compiler",
  "derive_more",
  "either",
  "hashbrown 0.15.2",
@@ -260,21 +243,12 @@ dependencies = [
 name = "apollo-federation-cli"
 version = "0.1.0"
 dependencies = [
- "apollo-compiler 1.25.0",
+ "apollo-compiler",
  "apollo-federation",
  "clap",
  "insta",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.8.4"
-dependencies = [
- "memchr",
- "rowan",
- "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -295,7 +269,7 @@ dependencies = [
  "access-json",
  "ahash",
  "anyhow",
- "apollo-compiler 1.25.0",
+ "apollo-compiler",
  "apollo-environment-detector",
  "apollo-federation",
  "arc-swap",
@@ -468,7 +442,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "2.0.0-preview.4"
 dependencies = [
- "apollo-parser 0.8.4",
+ "apollo-parser",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -483,9 +457,11 @@ dependencies = [
 [[package]]
 name = "apollo-smith"
 version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "95a04f64d4d4f0048201967b8064257de212ab240fd74e2b153691b39b0e8721"
 dependencies = [
- "apollo-compiler 1.25.0",
- "apollo-parser 0.8.4",
+ "apollo-compiler",
+ "apollo-parser",
  "arbitrary",
  "indexmap 2.7.1",
  "once_cell",
@@ -5917,7 +5893,7 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "apollo-parser 0.8.4",
+ "apollo-parser",
  "apollo-router",
  "apollo-smith",
  "async-trait",
@@ -6486,7 +6462,7 @@ dependencies = [
 name = "shape"
 version = "0.4.2"
 dependencies = [
- "apollo-compiler 1.25.0",
+ "apollo-compiler",
  "indexmap 2.7.1",
  "serde_json",
  "serde_json_bytes",
@@ -6701,7 +6677,7 @@ name = "supergraph_sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "apollo-compiler 1.25.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-compiler",
  "apollo-router",
  "async-trait",
  "tower 0.5.2",
