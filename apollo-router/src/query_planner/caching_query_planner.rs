@@ -20,7 +20,6 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::fetch::QueryHash;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
@@ -42,7 +41,9 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
+use crate::spec::SchemaHash;
 use crate::spec::SpecError;
 use crate::Configuration;
 
@@ -60,6 +61,26 @@ pub(crate) enum ConfigMode {
     Js(Arc<QueryPlannerConfig>),
 }
 
+/// Hashed value of query planner configuration for use in cache keys.
+#[derive(Clone, Hash, PartialEq, Eq)]
+// XXX(@goto-bus-stop): I think this probably should not be pub(crate), but right now all fields in
+// the cache keys are pub(crate), which I'm not going to change at this time :)
+pub(crate) struct ConfigModeHash(Vec<u8>);
+
+impl std::fmt::Display for ConfigModeHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+impl std::fmt::Debug for ConfigModeHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ConfigModeHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
+}
+
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
@@ -73,7 +94,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    config_mode_hash: Arc<QueryHash>,
+    config_mode_hash: Arc<ConfigModeHash>,
 }
 
 fn init_query_plan_from_redis(
@@ -150,7 +171,7 @@ where
                     .hash(&mut hasher);
             }
         };
-        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
+        let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
 
         Ok(Self {
             cache,
@@ -207,7 +228,7 @@ where
                                 hash,
                                 metadata,
                                 plan_options,
-                                config_mode: _,
+                                config_mode_hash: _,
                                 schema_id: _,
                             },
                             _,
@@ -217,7 +238,7 @@ where
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
-                            config_mode: self.config_mode_hash.clone(),
+                            config_mode_hash: self.config_mode_hash.clone(),
                         },
                     )
                     .take(count)
@@ -262,7 +283,7 @@ where
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
-                        config_mode: self.config_mode_hash.clone(),
+                        config_mode_hash: self.config_mode_hash.clone(),
                     });
                 }
             }
@@ -278,7 +299,7 @@ where
             hash,
             metadata,
             plan_options,
-            config_mode: _,
+            config_mode_hash: _,
         } in all_cache_keys
         {
             let doc = match query_analysis
@@ -293,10 +314,10 @@ where
                 query: query.clone(),
                 operation: operation_name.clone(),
                 hash: doc.hash.clone(),
-                schema_id: Arc::clone(&self.schema.schema_id),
+                schema_id: self.schema.schema_id.clone(),
                 metadata,
                 plan_options,
-                config_mode: self.config_mode_hash.clone(),
+                config_mode_hash: self.config_mode_hash.clone(),
             };
 
             if experimental_reuse_query_plans {
@@ -484,10 +505,10 @@ where
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
-            schema_id: Arc::clone(&self.schema.schema_id),
+            schema_id: self.schema.schema_id.clone(),
             metadata,
             plan_options,
-            config_mode: self.config_mode_hash.clone(),
+            config_mode_hash: self.config_mode_hash.clone(),
         };
 
         let context = request.context.clone();
@@ -626,12 +647,15 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
-    pub(crate) schema_id: Arc<String>,
     pub(crate) operation: Option<String>,
     pub(crate) hash: Arc<QueryHash>,
+    // XXX(@goto-bus-stop): It's probably correct to remove this, since having it here is
+    // misleading. The schema ID is *not* used in the Redis cache, but it's okay because the QueryHash
+    // is schema-aware.
+    pub(crate) schema_id: SchemaHash,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: Arc<QueryHash>,
+    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
 }
 
 const ROUTER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -648,7 +672,7 @@ impl std::fmt::Display for CachingQueryKey {
         "^plan_options".hash(&mut hasher);
         self.plan_options.hash(&mut hasher);
         "^config_mode".hash(&mut hasher);
-        self.config_mode.hash(&mut hasher);
+        self.config_mode_hash.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
@@ -666,7 +690,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: Arc<QueryHash>,
+    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
 }
 
 struct StructHasher {
@@ -859,7 +883,7 @@ mod tests {
                         referenced_fields_by_type: Default::default(),
                     }
                     .into(),
-                    query: Arc::new(Query::empty()),
+                    query: Arc::new(Query::empty_for_tests()),
                     query_metrics: Default::default(),
                     estimated_size: Default::default(),
                 };
