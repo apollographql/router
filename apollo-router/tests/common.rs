@@ -817,10 +817,8 @@ impl IntegrationTest {
     #[allow(dead_code)]
     #[cfg(target_family = "unix")]
     pub async fn graceful_shutdown(&mut self) {
-        // Send a sig term and then wait for the process to finish.
-        unsafe {
-            libc::kill(self.pid(), libc::SIGTERM);
-        }
+        let router = self.router.as_mut().expect("router must have been started");
+        router.start_kill().expect("unable to kill router");
         self.assert_shutdown().await;
     }
 
