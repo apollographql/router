@@ -19,10 +19,10 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
+use crate::spec::QueryHash;
 
 /// A planner key.
 ///
@@ -69,7 +69,7 @@ impl QueryPlan {
                 .into(),
             root: Arc::new(root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() })),
             formatted_query_plan: Default::default(),
-            query: Arc::new(Query::empty()),
+            query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
         }
@@ -378,58 +378,39 @@ impl PlanNode {
     pub(crate) fn init_parsed_operations_and_hash_subqueries(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
-        supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         match self {
             PlanNode::Fetch(fetch_node) => {
-                fetch_node.init_parsed_operation_and_hash_subquery(
-                    subgraph_schemas,
-                    supergraph_schema_hash,
-                )?;
+                fetch_node.init_parsed_operation_and_hash_subquery(subgraph_schemas)?;
             }
 
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
-                    node.init_parsed_operations_and_hash_subqueries(
-                        subgraph_schemas,
-                        supergraph_schema_hash,
-                    )?;
+                    node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
             }
             PlanNode::Parallel { nodes } => {
                 for node in nodes {
-                    node.init_parsed_operations_and_hash_subqueries(
-                        subgraph_schemas,
-                        supergraph_schema_hash,
-                    )?;
+                    node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
             }
-            PlanNode::Flatten(flatten) => flatten.node.init_parsed_operations_and_hash_subqueries(
-                subgraph_schemas,
-                supergraph_schema_hash,
-            )?,
+            PlanNode::Flatten(flatten) => flatten
+                .node
+                .init_parsed_operations_and_hash_subqueries(subgraph_schemas)?,
             PlanNode::Defer { primary, deferred } => {
                 if let Some(node) = primary.node.as_mut() {
-                    node.init_parsed_operations_and_hash_subqueries(
-                        subgraph_schemas,
-                        supergraph_schema_hash,
-                    )?;
+                    node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
                 for deferred_node in deferred {
                     if let Some(node) = &mut deferred_node.node {
-                        Arc::make_mut(node).init_parsed_operations_and_hash_subqueries(
-                            subgraph_schemas,
-                            supergraph_schema_hash,
-                        )?
+                        Arc::make_mut(node)
+                            .init_parsed_operations_and_hash_subqueries(subgraph_schemas)?
                     }
                 }
             }
             PlanNode::Subscription { primary: _, rest } => {
                 if let Some(node) = rest.as_mut() {
-                    node.init_parsed_operations_and_hash_subqueries(
-                        subgraph_schemas,
-                        supergraph_schema_hash,
-                    )?;
+                    node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
             }
             PlanNode::Condition {
@@ -438,16 +419,10 @@ impl PlanNode {
                 else_clause,
             } => {
                 if let Some(node) = if_clause.as_mut() {
-                    node.init_parsed_operations_and_hash_subqueries(
-                        subgraph_schemas,
-                        supergraph_schema_hash,
-                    )?;
+                    node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
                 if let Some(node) = else_clause.as_mut() {
-                    node.init_parsed_operations_and_hash_subqueries(
-                        subgraph_schemas,
-                        supergraph_schema_hash,
-                    )?;
+                    node.init_parsed_operations_and_hash_subqueries(subgraph_schemas)?;
                 }
             }
         }

@@ -1,6 +1,7 @@
 ---
-source: apollo-router/src/query_planner/bridge_query_planner.rs
+source: apollo-router/src/query_planner/query_planner_service.rs
 expression: plan.root
+snapshot_kind: text
 ---
 Fetch(
     FetchNode {
@@ -15,7 +16,11 @@ Fetch(
         output_rewrites: None,
         context_rewrites: None,
         schema_aware_hash: QueryHash(
+<<<<<<< HEAD:apollo-router/src/query_planner/snapshots/apollo_router__query_planner__bridge_query_planner__tests__plan_root.snap
             "65e550250ef331b8dc49d9e2da8f4cd5add979720cbe83ba545a0f78ece8d329",
+=======
+            "4105c3b46a60c2f68297c5f13c8455e4f22122f4e6d38f3c4d9e870cc07990e6",
+>>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622)):apollo-router/src/query_planner/snapshots/apollo_router__query_planner__query_planner_service__tests__plan_root.snap
         ),
         authorization: CacheKeyMetadata {
             is_authenticated: false,

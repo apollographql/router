@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/type_conditions.rs
 expression: response
+snapshot_kind: text
 ---
 {
   "data": {
@@ -141,7 +142,11 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
+<<<<<<< HEAD
               "schemaAwareHash": "65c1648beef44b81ac988224191b18ff469c641fd33032ef0c84165245018b62",
+=======
+              "schemaAwareHash": "1632c390b36440b872e929531433045c45d543b28ee5452c8e2ed29e989216a5",
+>>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -154,7 +159,70 @@ expression: response
                 {
                   "kind": "Flatten",
                   "path": [
+<<<<<<< HEAD
                     "",
+=======
+                    "searchListOfList",
+                    "@",
+                    "@|[ArticleResult]",
+                    "sections",
+                    "@"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "artworkSubgraph",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "GallerySection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "EntityCollectionSection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [
+                      "articleResultParam"
+                    ],
+                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on GallerySection { artwork(params: $articleResultParam) } ..._generated_onEntityCollectionSection2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { artwork(params: $articleResultParam) title }",
+                    "operationName": "Search__artworkSubgraph__1",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "contextRewrites": null,
+                    "schemaAwareHash": "ca74ee896977e09e7467fdc5a03698e748c88209df8c84f85293bd63cb4afa8b",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                },
+                {
+                  "kind": "Flatten",
+                  "path": [
+>>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
                     "searchListOfList",
                     "@",
                     "@|[MovieResult]",
@@ -265,7 +333,11 @@ expression: response
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
+<<<<<<< HEAD
                     "schemaAwareHash": "3874fd9db4a0302422701b93506f42a5de5604355be7093fa2abe23f440161f9",
+=======
+                    "schemaAwareHash": "692bb14128b6c838ddc7223c195fd6c47ef867685f195e88002b918d11be065e",
+>>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
