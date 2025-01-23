@@ -80,11 +80,7 @@ snapshot_kind: text
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-<<<<<<< HEAD
-              "schemaAwareHash": "18631e67bb0c6b514cb51e8dff155a2900c8000ad319ea4784e5ca8b1275aca2",
-=======
-              "schemaAwareHash": "d406d6b0a5762bf096ec0e86318ae6485042b9bc7190417330783148728e9ed3",
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
+              "schemaAwareHash": "49f8587a3706924dd91c4ed142e4cb7341599769c6f2e7e974b683390c378771",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -97,69 +93,7 @@ snapshot_kind: text
                 {
                   "kind": "Flatten",
                   "path": [
-<<<<<<< HEAD
                     "",
-=======
-                    "search",
-                    "@|[ArticleResult]",
-                    "sections",
-                    "@"
-                  ],
-                  "node": {
-                    "kind": "Fetch",
-                    "serviceName": "artworkSubgraph",
-                    "requires": [
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "GallerySection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      },
-                      {
-                        "kind": "InlineFragment",
-                        "typeCondition": "EntityCollectionSection",
-                        "selections": [
-                          {
-                            "kind": "Field",
-                            "name": "__typename"
-                          },
-                          {
-                            "kind": "Field",
-                            "name": "id"
-                          }
-                        ]
-                      }
-                    ],
-                    "variableUsages": [
-                      "articleResultParam"
-                    ],
-                    "operation": "query Search__artworkSubgraph__1($representations: [_Any!]!, $articleResultParam: String) { _entities(representations: $representations) { ... on GallerySection { artwork(params: $articleResultParam) } ..._generated_onEntityCollectionSection2_0 } } fragment _generated_onEntityCollectionSection2_0 on EntityCollectionSection { artwork(params: $articleResultParam) title }",
-                    "operationName": "Search__artworkSubgraph__1",
-                    "operationKind": "query",
-                    "id": null,
-                    "inputRewrites": null,
-                    "outputRewrites": null,
-                    "contextRewrites": null,
-                    "schemaAwareHash": "ca74ee896977e09e7467fdc5a03698e748c88209df8c84f85293bd63cb4afa8b",
-                    "authorization": {
-                      "is_authenticated": false,
-                      "scopes": [],
-                      "policies": []
-                    }
-                  }
-                },
-                {
-                  "kind": "Flatten",
-                  "path": [
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
                     "search",
                     "@|[MovieResult]",
                     "sections",
@@ -208,7 +142,7 @@ snapshot_kind: text
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-                    "schemaAwareHash": "7f3ec4c2c644d43e54d95da83790166d87ab6bfcb31fe5692d8262199bff6d3f",
+                    "schemaAwareHash": "2eb874d1637f6040c73f22dc50551f321610897debe931d1a3cb448227cfb679",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -268,11 +202,7 @@ snapshot_kind: text
                     "inputRewrites": null,
                     "outputRewrites": null,
                     "contextRewrites": null,
-<<<<<<< HEAD
-                    "schemaAwareHash": "3874fd9db4a0302422701b93506f42a5de5604355be7093fa2abe23f440161f9",
-=======
-                    "schemaAwareHash": "692bb14128b6c838ddc7223c195fd6c47ef867685f195e88002b918d11be065e",
->>>>>>> 8c813273 (Improve performance of query hashing by using a precomputed schema hash (#6622))
+                    "schemaAwareHash": "ce53c44a5993b8f0d085dddde949dfadc615d385821c70fe6b43338b2abf732a",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
