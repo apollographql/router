@@ -675,6 +675,35 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_insert_from_request_body_with_old_access_json_notation() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_request", "my_operation_name"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+                name: "header_from_request".try_into()?,
+                path: JsonPathInst::from_str(".operationName").unwrap(),
+                default: None,
+            }))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_remove_exact() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
         mock.expect_call()
