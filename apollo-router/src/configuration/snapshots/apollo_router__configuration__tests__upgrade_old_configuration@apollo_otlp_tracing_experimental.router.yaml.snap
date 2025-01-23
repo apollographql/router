@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  apollo:
+    otlp_tracing_sampler: always_on
