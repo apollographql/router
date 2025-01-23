@@ -1,11 +1,11 @@
 //! Connect service request and response types.
 
+use std::fmt::Debug;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use static_assertions::assert_impl_all;
-use std::fmt::Debug;
 use tower::BoxError;
 
 use crate::graphql;
