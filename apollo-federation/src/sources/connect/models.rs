@@ -615,7 +615,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -736,6 +736,8 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                request_headers: {},
+                response_headers: {},
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -868,8 +870,10 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                request_headers: {},
+                response_headers: {},
             },
         }
-        "###);
+        "#);
     }
 }
