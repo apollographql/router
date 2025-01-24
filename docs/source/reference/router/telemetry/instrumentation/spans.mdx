@@ -124,11 +124,11 @@ The `mode` option enables the router spans to either use legacy attributes in th
 
 Valid values:
 
-* `spec_compliant` 
-* `deprecated` (default)
+* `spec_compliant` (default)
+* `deprecated`
 
 #### `spec_compliant`
-This mode follows the OpenTelemetry spec. Attributes that were previously added to spans that did not follow conventions are now removed.
+This mode is the default and follows the OpenTelemetry spec. Attributes that were previously added to spans that did not follow conventions are now removed.
 
 You will likely gain a significant performance improvement by using this mode as it reduces the number of attributes that are added to spans.
 
@@ -142,7 +142,7 @@ telemetry:
 For now this is not the default, however it will be in a future release.
 
 #### `deprecated`
-This mode is the default and follows the previous behavior if you have not configured the `mode` option to `spec_compliant`.
+This mode follows the previous behavior which is deprecated.
 ```yaml title="router.yaml"
 telemetry:
   instrumentation:
@@ -153,7 +153,7 @@ Attributes are added to spans that do not follow OpenTelemetry conventions.
 
 <Note>
 
-The `mode` option will be defaulted to `spec_compliant` in a future release, and eventually removed. 
+The `mode` option will eventually be removed in a future release. 
 
 </Note>
 
@@ -256,5 +256,5 @@ telemetry:
 | `attributes`                          | [standard attributes](/router/configuration/telemetry/instrumentation/standard-attributes)\|[selectors](/router/configuration/telemetry/instrumentation/selectors)    |                                | The attributes of the span.              |
 | `condition`                           | [conditions](/router/configuration/telemetry/instrumentation/conditions)                                                |                                | The condition for adding a custom attribute. |
 | `default_attribute_requirement_level` | `required`\|`recommended`                                                 | `required`                     | The default attribute requirement level. |
-| `mode`                                | `spec_compliant` \| `deprecated`                                          | `deprecated`                   | The attributes of the span.              |
+| `mode`                                | `spec_compliant` \| `deprecated`                                          | `spec_compliant`                   | The attributes of the span.              |
 
