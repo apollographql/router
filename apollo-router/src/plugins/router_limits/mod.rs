@@ -84,6 +84,11 @@ impl PluginPrivate for RouterLimits {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
+                            u64_counter!(
+                                "apollo.router_limits.tps.limit_enforced",
+                                "TPS Rate Limiting triggered",
+                                1u64
+                            );
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited")
                                 .extension_code("ROUTER_TPS_LIMIT_REACHED")
@@ -117,6 +122,7 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::DynPlugin;
     use crate::plugins::test::PluginTestHarness;
@@ -281,5 +287,80 @@ mod test {
         assert!(r3
             .await
             .is_ok_and(|resp| resp.response.status().is_success()));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_metrics_emitted() {
+        // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
+        async {
+            // GIVEN
+            // * router limits plugin
+            // * license with limits
+
+            let license = LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: Some(TpsLimit {
+                        capacity: 1,
+                        interval: Duration::from_millis(500),
+                    }),
+                }),
+            };
+            let router_limits_plugin = get_router_limits_plugin(license).await.unwrap();
+
+            let mut mock_service = MockRouterService::new();
+            mock_service.expect_call().times(0..3).returning(|_| {
+                Ok(RouterResponse::fake_builder()
+                    .data(json!({ "test": 5678_u32 }))
+                    .build()
+                    .unwrap())
+            });
+            mock_service
+                .expect_clone()
+                .returning(MockRouterService::new);
+
+            // WHEN
+            // * the router is called three times with a capacity of 1 and a interval of 500ms with a
+            // delay between the second and third calls
+
+            // THEN
+            // * the first call succeeds
+            // * the second call violates the tps limit
+            // * the third call, being out of the rate limiting interval, succeeds
+            let mut svc = router_limits_plugin.router_service(mock_service.boxed());
+            let response: RouterResponse = svc
+                .ready()
+                .await
+                .expect("it is ready")
+                .call(RouterRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(StatusCode::OK, response.response.status());
+
+            let response: RouterResponse = svc
+                .ready()
+                .await
+                .expect("it is ready")
+                .call(RouterRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap();
+            assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
+
+            let j: serde_json::Value = serde_json::from_slice(
+                &crate::services::router::body::into_bytes(response.response)
+                    .await
+                    .expect("we have a body"),
+            )
+            .expect("our body is valid json");
+
+            // THEN
+            // * there's an appropriate rate limiting message
+            assert_eq!(
+                "Your request has been rate limited",
+                j["errors"][0]["message"]
+            );
+            assert_counter!("apollo.router_limits.tps.limit_enforced", 1);
+        }
+        .with_metrics()
+        .await;
     }
 }
