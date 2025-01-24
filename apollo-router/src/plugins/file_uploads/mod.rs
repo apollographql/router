@@ -42,8 +42,6 @@ mod rearrange_query_plan;
 
 type Result<T> = std::result::Result<T, error::FileUploadError>;
 
-// FIXME: check if we need to hide docs
-#[doc(hidden)] // Only public for integration tests
 struct FileUploadsPlugin {
     enabled: bool,
     limits: MultipartRequestLimits,
