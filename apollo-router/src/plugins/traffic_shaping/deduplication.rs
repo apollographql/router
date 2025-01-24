@@ -13,7 +13,6 @@ use tokio::sync::broadcast::{self};
 use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Layer;
-use tower::ServiceExt;
 
 use crate::batching::BatchQuery;
 use crate::graphql::Request;
@@ -188,14 +187,14 @@ where
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service = self.service.clone();
-        let inner = std::mem::replace(&mut self.service, service);
+        let mut inner = std::mem::replace(&mut self.service, service);
 
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
 
             Box::pin(async move { Self::dedup(inner, wait_map, request).await })
         } else {
-            Box::pin(async move { inner.oneshot(request).await })
+            Box::pin(async move { inner.call(request).await })
         }
     }
 }

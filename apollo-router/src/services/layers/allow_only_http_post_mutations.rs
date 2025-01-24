@@ -29,8 +29,6 @@ use crate::services::SupergraphResponse;
 /// This layer requires that a ParsedDocument is available on the context and that the request has
 /// a valid GraphQL operation and operation name. If these conditions are not met the layer will
 /// return early with an unspecified error response.
-// XXX(@goto-bus-stop): since this layer holds no state, we should have no problem making it
-// `Clone`able.
 #[derive(Default)]
 pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
 

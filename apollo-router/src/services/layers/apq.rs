@@ -75,6 +75,9 @@ impl APQLayer {
 
     /// Supergraph service implementation for Automatic Persisted Queries.
     ///
+    /// For more information about APQ:
+    /// https://www.apollographql.com/docs/apollo-server/performance/apq.
+    ///
     /// If APQ is disabled, it rejects requests that try to use a persisted query hash.
     /// If APQ is enabled, requests using APQ will populate the cache and use the cache as needed,
     /// see [`apq_request`] for details.

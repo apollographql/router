@@ -3,6 +3,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
@@ -22,7 +23,7 @@ use crate::configuration::shared::DnsResolutionStrategy;
 /// the background task is also created, it needs to be spawned on top of an executor before using the client,
 /// or dns requests will block.
 #[derive(Debug, Clone)]
-pub(crate) struct AsyncHyperResolver(TokioAsyncResolver);
+pub(crate) struct AsyncHyperResolver(Arc<TokioAsyncResolver>);
 
 impl AsyncHyperResolver {
     /// constructs a new resolver from default configuration, using [read_system_conf](https://docs.rs/hickory-resolver/0.24.1/hickory_resolver/system_conf/fn.read_system_conf.html)
@@ -32,7 +33,7 @@ impl AsyncHyperResolver {
         let (config, mut options) = read_system_conf()?;
         options.ip_strategy = dns_resolution_strategy.into();
 
-        Ok(Self(TokioAsyncResolver::tokio(config, options)))
+        Ok(Self(Arc::new(TokioAsyncResolver::tokio(config, options))))
     }
 }
 
@@ -47,7 +48,6 @@ impl Service<Name> for AsyncHyperResolver {
 
     fn call(&mut self, name: Name) -> Self::Future {
         let resolver = self.0.clone();
-        let resolver = std::mem::replace(&mut self.0, resolver);
 
         Box::pin(async move {
             Ok(resolver

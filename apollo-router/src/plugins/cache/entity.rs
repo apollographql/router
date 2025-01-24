@@ -525,6 +525,7 @@ impl Service<subgraph::Request> for CacheService {
         &mut self,
         _cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
+        // Since we are calling a clone of ourselves, there is no back-pressure to preserve here.
         Poll::Ready(Ok(()))
     }
 
@@ -550,7 +551,7 @@ impl CacheService {
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
         {
-            return self.service.ready().await?.call(request).await;
+            return self.service.call(request).await;
         }
         let query = request
             .subgraph_request
@@ -564,7 +565,7 @@ impl CacheService {
 
         // the response will have a private scope but we don't have a way to differentiate users, so we know we will not get or store anything in the cache
         if is_known_private && private_id.is_none() {
-            return self.service.ready().await?.call(request).await;
+            return self.service.call(request).await;
         }
 
         if !request
@@ -602,7 +603,7 @@ impl CacheService {
                             CacheSubgraph(cache_hit),
                         );
 
-                        let mut response = self.service.ready().await?.call(request).await?;
+                        let mut response = self.service.call(request).await?;
 
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -659,7 +660,7 @@ impl CacheService {
                     }
                 }
             } else {
-                let mut response = self.service.ready().await?.call(request).await?;
+                let mut response = self.service.call(request).await?;
                 if let Some(invalidation_extensions) = response
                     .response
                     .body_mut()
@@ -691,7 +692,7 @@ impl CacheService {
                 ControlFlow::Break(response) => Ok(response),
                 ControlFlow::Continue((request, mut cache_result)) => {
                     let context = request.context.clone();
-                    let mut response = match self.service.ready().await?.call(request).await {
+                    let mut response = match self.service.call(request).await {
                         Ok(response) => response,
                         Err(e) => {
                             let e = match e.downcast::<FetchError>() {

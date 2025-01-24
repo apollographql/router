@@ -97,10 +97,10 @@ static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct RouterService {
-    apq_layer: APQLayer,
+    apq_layer: Arc<APQLayer>,
     persisted_query_layer: Arc<PersistedQueryLayer>,
-    query_analysis_layer: QueryAnalysisLayer,
-    batching: Batching,
+    query_analysis_layer: Arc<QueryAnalysisLayer>,
+    batching: Arc<Batching>,
     supergraph_service: supergraph::BoxCloneService,
 }
 
@@ -116,10 +116,10 @@ impl RouterService {
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
 
         RouterService {
-            apq_layer,
+            apq_layer: Arc::new(apq_layer),
             persisted_query_layer,
-            query_analysis_layer,
-            batching,
+            query_analysis_layer: Arc::new(query_analysis_layer),
+            batching: Arc::new(batching),
             supergraph_service,
         }
     }
@@ -263,8 +263,16 @@ impl RouterService {
                 {
                     Err(response) => response,
                     Ok(request) => {
-                        // This is safe to do because we cloned the entire router_service before
-                        // calling it.
+                        // self.supergraph_service here is a clone of the service that was readied
+                        // in RouterService::poll_ready. Clones are un-ready by default, so this
+                        // self.supergraph_service is actually not ready, which is why we need to
+                        // oneshot it here. That technically breaks backpressure, but because we are
+                        // still readying the supergraph service before calling into the router
+                        // service, backpressure is actually still exerted at that point--there's
+                        // just potential for some requests to slip through the cracks and end up
+                        // queueing up at this .oneshot() call.
+                        //
+                        // Not ideal, but an improvement on the situation in Router 1.x.
                         self.supergraph_service.oneshot(request).await?
                     }
                 },
