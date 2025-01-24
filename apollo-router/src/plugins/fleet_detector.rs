@@ -44,7 +44,8 @@ struct SystemGetter {
 impl SystemGetter {
     fn new() -> Self {
         let mut system = System::new();
-        system.refresh_all();
+        system.refresh_cpu_all();
+        system.refresh_memory();
         Self {
             system,
             start: Instant::now(),
