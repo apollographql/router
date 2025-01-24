@@ -32,6 +32,7 @@ use super::location::WithRange;
 use crate::sources::connect::variable::VariableNamespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
+use crate::sources::connect::Namespace;
 
 // ParseResult is the internal type returned by most ::parse methods, as it is
 // convenient to use with nom's combinators. The top-level JSONSelection::parse
@@ -245,7 +246,7 @@ impl JSONSelection {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
-            .filter_map(|var_ref| {
+            .filter_map(|var_ref: VariableReference<'_, Namespace>| {
                 if var_ref.namespace.namespace != Namespace::Request
                     && var_ref.namespace.namespace != Namespace::Response
                 {
