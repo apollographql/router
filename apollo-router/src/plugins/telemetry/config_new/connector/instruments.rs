@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Unit;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -253,7 +252,7 @@ impl ConnectorInstruments {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
-                        .with_unit(Unit::new("s"))
+                        .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
                         .init(),
                 ),
@@ -266,7 +265,7 @@ impl ConnectorInstruments {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
                         .init(),
                 ),
@@ -283,7 +282,7 @@ impl ConnectorInstruments {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
                         .init(),
                 ),

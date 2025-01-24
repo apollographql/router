@@ -1,6 +1,5 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,7 +8,6 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::Stream;
@@ -47,6 +45,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::Telemetry;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
 use crate::services::fetch_service::FetchServiceFactory;
@@ -62,7 +61,7 @@ use crate::spec::Schema;
 #[derive(Clone)]
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
@@ -632,7 +631,7 @@ async fn consume_responses(
 #[derive(Clone)]
 pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) plugins: Arc<Plugins>,
     pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
 }

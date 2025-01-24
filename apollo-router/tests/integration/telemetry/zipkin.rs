@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
@@ -142,6 +142,10 @@ impl Verifier for ZipkinTraceSpec {
 
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
+    }
+
+    fn verify_resources(&self, _trace: &Value) -> Result<(), BoxError> {
+        Ok(())
     }
 }
 

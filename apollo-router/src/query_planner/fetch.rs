@@ -1,10 +1,11 @@
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -95,7 +96,12 @@ impl From<ast::OperationType> for OperationKind {
     }
 }
 
-pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Schema>>>;
+pub(crate) type SubgraphSchemas = HashMap<String, SubgraphSchema>;
+
+pub(crate) struct SubgraphSchema {
+    pub(crate) schema: Arc<Valid<apollo_compiler::Schema>>,
+    pub(crate) implementers_map: HashMap<Name, apollo_compiler::schema::Implementers>,
+}
 
 /// A fetch node.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -411,7 +417,7 @@ impl FetchNode {
     pub(crate) fn deferred_fetches(
         current_dir: &Path,
         id: &Option<String>,
-        deferred_fetches: &HashMap<String, Sender<(Value, Vec<Error>)>>,
+        deferred_fetches: &std::collections::HashMap<String, Sender<(Value, Vec<Error>)>>,
         value: &Value,
         errors: &[Error],
     ) {
@@ -575,7 +581,7 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        self.operation.init_parsed(schema)?;
+        self.operation.init_parsed(&schema.schema)?;
         Ok(())
     }
 
@@ -585,11 +591,12 @@ impl FetchNode {
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         let schema = &subgraph_schemas[self.service_name.as_ref()];
-        let doc = self.operation.init_parsed(schema)?;
+        let doc = self.operation.init_parsed(&schema.schema)?;
 
         if let Ok(hash) = QueryHashVisitor::hash_query(
-            schema,
+            &schema.schema,
             supergraph_schema_hash,
+            &schema.implementers_map,
             doc,
             self.operation_name.as_deref(),
         ) {
