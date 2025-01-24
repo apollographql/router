@@ -10,7 +10,9 @@ Apollo GraphOS provides the observability signals and tools your team needs to m
 
 GraphOS collects its metrics from clients, routers, and subgraphs. By default, GraphOS Router automatically [reports operation and field usage metrics to GraphOS Studio](/graphos/platform/insights/sending-operation-metrics#from-the-apollo-router-or-apollo-server). 
 
-If you need more data than what GraphOS collects by default, you can declaratively configure your router to collect and export additional telemetry to your observability tools.
+To gain deeper insights into the health of your supergraph, you can configure your GraphOS Router to collect telemetry about requests as they're processed through the pipeline of the router request lifecycle. The router provides both standard and customizable signals.
+
+GraphOS supports exporting its collected metrics to various observability tools. GraphOS Studio offers a Datadog integration, and GraphOS Router provides exporters for several observability tools and APMs.
 
 <Tip>
 
@@ -50,7 +52,7 @@ Both the GraphOS Router and Apollo Router Core run a request-handling pipeline w
 
 <Wistia WistiaId="009wt60p7a" />
 
-To enable observability, the router supports telemetry that can be added and customized in every stage of the router request lifecycle. You can add logs, metrics, and traces and export them to your application performance monitoring (APM) solution.
+To enable observability, the router supports telemetry that can be added and customized in different stages of the router request lifecycle. You can add logs, metrics, and traces and export them to your application performance monitoring (APM) solution.
 
 To learn more, go to [Router Telemetry](/graphos/routing/observability/telemetry), then browse the pages in [Router Telemetry](/graphos/reference/router/telemetry/log-exporters/overview) reference docs.
 
