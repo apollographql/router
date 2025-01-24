@@ -124,7 +124,7 @@ fn validate_shape(
         }),
         ShapeCase::Object { .. } => Err(Message {
             code: context.code,
-            message: format!("object values aren't valid here: {shape:?}"),
+            message: "object values aren't valid here".to_string(),
             locations: transform_locations(&shape.locations, context, expression_offset),
         }),
         ShapeCase::One(shapes) => {
