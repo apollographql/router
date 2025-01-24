@@ -9,7 +9,7 @@ use http::HeaderValue;
 use http::Method;
 use http::Uri;
 use mime::APPLICATION_JSON;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tower_service::Service;
