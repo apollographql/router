@@ -104,7 +104,7 @@ impl RequestInputs {
                 .headers()
                 .iter()
                 .filter_map(|(key, value)| {
-                    if headers_used.contains::<String>(&key.as_str().into()) {
+                    if headers_used.contains(key.as_str()) {
                         return Some((
                             key.as_str().into(),
                             value.to_str().unwrap_or_default().into(),
@@ -128,7 +128,7 @@ impl RequestInputs {
                     .headers
                     .iter()
                     .filter_map(|(key, value)| {
-                        if headers_used.contains::<String>(&key.as_str().into()) {
+                        if headers_used.contains(key.as_str()) {
                             return Some((
                                 key.as_str().into(),
                                 value.to_str().unwrap_or_default().into(),
