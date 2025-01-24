@@ -73,7 +73,7 @@ where
                         .expect("cannot fail");
                     u64_counter!(
                         "apollo_router_http_requests_total",
-                        "Total number of HTTP requests made.",
+                        "Total number of HTTP requests made. (deprecated)",
                         1,
                         status = StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16() as i64,
                         error = format!(
