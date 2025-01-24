@@ -3,7 +3,6 @@ use std::collections::HashSet;
 use std::fmt::Write;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use std::task::Poll;
 use std::time::Duration;
 
 use http::header;
@@ -523,10 +522,9 @@ impl Service<subgraph::Request> for CacheService {
 
     fn poll_ready(
         &mut self,
-        _cx: &mut std::task::Context<'_>,
+        cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        // Since we are calling a clone of ourselves, there is no back-pressure to preserve here.
-        Poll::Ready(Ok(()))
+        self.service.poll_ready(cx)
     }
 
     fn call(&mut self, request: subgraph::Request) -> Self::Future {

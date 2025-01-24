@@ -100,7 +100,9 @@ pub(crate) struct RouterService {
     apq_layer: Arc<APQLayer>,
     persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: Arc<QueryAnalysisLayer>,
-    batching: Arc<Batching>,
+    // Cannot be under Arc. Batching state must be preserved for each RouterService
+    // instance
+    batching: Batching,
     supergraph_service: supergraph::BoxCloneService,
 }
 
@@ -119,7 +121,7 @@ impl RouterService {
             apq_layer: Arc::new(apq_layer),
             persisted_query_layer,
             query_analysis_layer: Arc::new(query_analysis_layer),
-            batching: Arc::new(batching),
+            batching,
             supergraph_service,
         }
     }
