@@ -15,6 +15,7 @@ use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::SocketEndpoint;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -105,7 +106,7 @@ impl TracingConfigurator for Config {
                     .with(&agent.endpoint.to_socket(), |b, s| b.with_endpoint(s))
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
-                    BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                    BatchSpanProcessor::builder(exporter, NamedTokioRuntime::new("jaeger-agent"))
                         .with_batch_config(batch_processor.clone().into())
                         .build()
                         .filtered(),
@@ -137,10 +138,13 @@ impl TracingConfigurator for Config {
                     .with_batch_processor_config(batch_processor.clone().into())
                     .build_collector_exporter::<runtime::Tokio>()?;
                 Ok(builder.with_span_processor(
-                    BatchSpanProcessor::builder(exporter, runtime::Tokio)
-                        .with_batch_config(batch_processor.clone().into())
-                        .build()
-                        .filtered(),
+                    BatchSpanProcessor::builder(
+                        exporter,
+                        NamedTokioRuntime::new("jaeger-collector"),
+                    )
+                    .with_batch_config(batch_processor.clone().into())
+                    .build()
+                    .filtered(),
                 ))
             }
             _ => Ok(builder),
