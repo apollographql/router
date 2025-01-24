@@ -1,18 +1,18 @@
 description: Connector HTTP client duration metric
 events:
-  - - context:
-        map:
-          "apollo_router::connector::info":
-            subgraph_name: posts
-            source_name: posts_api
-            http_method: GET
-            url_template: "/posts"
-    - http_request:
+  - - connector_request:
+        subgraph_name: posts
+        source_name: posts_api
+        http_method: GET
+        url_template: "/posts"
         uri: "/posts"
-        method: GET
         headers:
           custom_request_header: custom_request_header_value
-    - http_response:
+    - connector_response:
+        subgraph_name: posts
+        source_name: posts_api
+        http_method: GET
+        url_template: "/posts"
         status: 200
         body: |
           { "foo": "bar" }

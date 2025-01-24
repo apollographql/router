@@ -17,6 +17,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::query_planner::QueryPlannerService;
+use crate::services::connector;
 use crate::services::execution;
 use crate::services::http;
 use crate::services::router;
@@ -109,7 +110,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
 
         let plugin_init = PluginInit::builder()
             .config(config_for_plugin.clone())
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(Arc::new(parsed_schema))
             .subgraph_schemas(Arc::new(
@@ -209,6 +210,29 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
         );
 
         ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn call_connector_request_service(
+        &self,
+        request: connector::request_service::Request,
+        response_fn: fn(
+            connector::request_service::Request,
+        ) -> connector::request_service::Response,
+    ) -> Result<connector::request_service::Response, BoxError> {
+        let service: connector::request_service::BoxService =
+            connector::request_service::BoxService::new(
+                ServiceBuilder::new().service_fn(
+                    move |req: connector::request_service::Request| async move {
+                        Ok((response_fn)(req))
+                    },
+                ),
+            );
+
+        self.plugin
+            .connector_request_service(service)
+            .call(request)
+            .await
     }
 }
 
