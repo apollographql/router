@@ -11,6 +11,8 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use itertools::Itertools;
 
+use crate::sources::connect::validation::Code;
+
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 #[derive(Clone, PartialEq)]
@@ -69,6 +71,15 @@ impl<'schema> VariableContext<'schema> {
             .map(|s| s.to_string())
             .sorted()
             .join(", ")
+    }
+
+    /// Get the error code for this context
+    pub(crate) fn error_code(&self) -> Code {
+        match self.target {
+            Target::Url => Code::InvalidUrl,
+            Target::Header => Code::InvalidHeader,
+            Target::Body => Code::InvalidJsonSelection,
+        }
     }
 }
 
