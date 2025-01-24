@@ -540,7 +540,7 @@ async fn license_handler<B>(
     ) {
         u64_counter!(
             "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
+            "Total number of HTTP requests made. (deprecated)",
             1,
             status = StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
             error = LICENSE_EXPIRED_SHORT_MESSAGE
