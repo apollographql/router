@@ -128,14 +128,22 @@ fn validate_shape(
             locations: transform_locations(&shape.locations, context, expression_offset),
         }),
         ShapeCase::One(shapes) => {
-            for shape in shapes {
-                validate_shape(shape, context, expression_offset)?;
+            for inner in shapes {
+                validate_shape(
+                    &inner.with_locations(shape.locations.clone()),
+                    context,
+                    expression_offset,
+                )?;
             }
             Ok(())
         }
         ShapeCase::All(shapes) => {
-            for shape in shapes {
-                validate_shape(shape, context, expression_offset)?;
+            for inner in shapes {
+                validate_shape(
+                    &inner.with_locations(shape.locations.clone()),
+                    context,
+                    expression_offset,
+                )?;
             }
             Ok(())
         }
@@ -245,10 +253,11 @@ fn transform_locations(
 mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
-    use insta::assert_debug_snapshot;
+    use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
+    use crate::sources::connect::validation::coordinates::FieldCoordinate;
     use crate::sources::connect::JSONSelection;
 
     fn expression(selection: &str) -> Expression {
@@ -274,7 +283,7 @@ mod tests {
             object: InputObject
             array: [InputObject]
             multiLevel: MultiLevelInput
-          ): AnObject  @connect(source: "v2", http: {GET: "{EXPRESSION}"})
+          ): AnObject  @connect(source: "v2", http: {GET: """{EXPRESSION}"""})
           something: String
         }
         
@@ -296,6 +305,56 @@ mod tests {
             nested: String
         }
     "#;
+
+    fn schema_for(selection: &str) -> String {
+        SCHEMA.replace("EXPRESSION", selection)
+    }
+
+    fn validate_with_context(selection: &str) -> Result<(), Message> {
+        let schema_str = schema_for(selection);
+        let schema = Schema::parse(&schema_str, "schema").unwrap();
+        let object = schema.get_object("Query").unwrap();
+        let field = &object.fields["aField"];
+        let directive = field.directives.get("connect").unwrap();
+        let source_directive = name!("source");
+        let schema_info = SchemaInfo::new(&schema, &schema_str, &directive.name, &source_directive);
+        let expr_string = GraphQLString::new(
+            &directive
+                .argument_by_name("http", &schema)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .first()
+                .unwrap()
+                .1,
+            &schema.sources,
+        )
+        .unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context =
+            Context::for_connect_request(&schema_info, coordinate, &expr_string, Code::InvalidUrl);
+        validate(&expression(selection), &context)
+    }
+
+    /// Given a full expression replaced in `{EXPRESSION}` above, find the line/col of a substring.
+    fn location_of_expression(part: &str, full_expression: &str) -> Range<LineColumn> {
+        let schema = schema_for(full_expression);
+        let line_col_lookup = LineColLookup::new(&schema);
+        let expression_offset = schema.find(full_expression).unwrap() - 1;
+        let start_offset = expression_offset + full_expression.find(part).unwrap();
+        let (start_line, start_col) = line_col_lookup.get(start_offset);
+        let (end_line, end_col) = line_col_lookup.get(start_offset + part.len());
+        LineColumn {
+            line: start_line,
+            column: start_col,
+        }..LineColumn {
+            line: end_line,
+            column: end_col,
+        }
+    }
 
     #[rstest]
     #[case::int("$(1)")]
@@ -333,28 +392,7 @@ mod tests {
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
     fn valid_expressions(#[case] selection: &str) {
-        let schema = SCHEMA.replace("EXPRESSION", selection);
-        let schema = Schema::parse(&schema, "schema").unwrap();
-        let connect = schema.get_object("Query").unwrap().fields["aField"]
-            .directives
-            .get("connect")
-            .unwrap();
-        let source_directive = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect.name, &source_directive);
-        let expr_string = GraphQLString::new(
-            &connect
-                .argument_by_name("http", &schema)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .first()
-                .unwrap()
-                .1,
-            &schema.sources,
-        )
-        .unwrap();
-        let context = Context::for_source(&schema_info, &expr_string, Code::InvalidUrl);
-        validate(&expression(selection), &context).unwrap();
+        validate_with_context(selection).unwrap();
     }
 
     #[rstest]
@@ -370,53 +408,53 @@ mod tests {
     #[case::arg_is_array("$args.array")]
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
-    #[case::nested_unknown_property("$args.multiLevel.inner.unknown")]
     // #[case::map_array("$args.array->map(@)")]  // TODO: check for this error once we improve ->map type checking
     #[case::slice_array("$args.array->slice(0, 2)")]
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
+    #[case::this_on_query("$this.something")]
     fn invalid_expressions(#[case] selection: &str) {
-        let schema = SCHEMA.replace("EXPRESSION", selection);
-        let schema = Schema::parse(&schema, "schema").unwrap();
-        let connect = schema.get_object("Query").unwrap().fields["aField"]
-            .directives
-            .get("connect")
-            .unwrap();
-        let source_directive = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect.name, &source_directive);
-        let expr_string = GraphQLString::new(
-            &connect
-                .argument_by_name("http", &schema)
-                .unwrap()
-                .as_object()
-                .unwrap()
-                .first()
-                .unwrap()
-                .1,
-            &schema.sources,
-        )
-        .unwrap();
-        let context = Context::for_source(&schema_info, &expr_string, Code::InvalidUrl);
-        let err = validate(&expression(selection), &context);
+        let err = validate_with_context(selection);
         assert!(err.is_err());
-        assert_debug_snapshot!(err.err().unwrap());
     }
 
-    // #[test]
-    // fn this_on_query() {
-    //     let schema = Schema::parse(SCHEMA, "schema").unwrap();
-    //     let connect = name!("connect");
-    //     let source = name!("source");
-    //     let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-    //     let object = schema.get_object("Query").unwrap();
-    //     let field = object.fields.get("aField").unwrap();
-    //     let directive = field.directives.get("connect").unwrap();
-    //     let coordinate = ConnectDirectiveCoordinate {
-    //         field_coordinate: FieldCoordinate { field, object },
-    //         directive,
-    //     };
-    //     let context = Context::for_connect_request(&schema_info, coordinate);
-    //     assert!(validate(&expression("$this.something"), &context).is_err());
-    // }
+    #[test]
+    fn object_in_url() {
+        let selection = "$args.object";
+        let err = validate_with_context(selection)
+            .err()
+            .expect("objects are not allowed");
+        let expected_location = location_of_expression("object", selection);
+        assert!(
+            err.locations.contains(&expected_location),
+            "The expected location {:?} wasn't included in {:?}",
+            expected_location,
+            err.locations
+        );
+    }
+
+    #[test]
+    fn nested_unknown_property() {
+        let selection = "$args.multiLevel.inner.unknown";
+        let err = validate_with_context(selection)
+            .err()
+            .expect("missing property is unknown");
+        assert!(
+            err.message.contains("`MultiLevel`"),
+            "{} didn't reference type",
+            err.message
+        );
+        assert!(
+            err.message.contains("`unknown`"),
+            "{} didn't reference field name",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("unknown", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
 }
