@@ -289,10 +289,10 @@ async fn just_over_max_depth_with_check_disabled() {
         .build()
         .unwrap();
     let response = make_request_with_extra_config(request, |conf| {
-        conf["supergraph"]
-            .as_object_mut()
-            .unwrap()
-            .insert("introspection_check_max_depth".into(), false.into());
+        conf.as_object_mut().unwrap().insert(
+            "limits".to_owned(),
+            json!({"introspection_max_depth": false}),
+        );
     })
     .await;
     insta::assert_json_snapshot!(response, @r###"

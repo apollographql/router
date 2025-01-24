@@ -1405,6 +1405,11 @@ expression: "&schema"
           "minimum": 0.0,
           "type": "integer"
         },
+        "introspection_max_depth": {
+          "default": true,
+          "description": "Limit the depth of nested list fields in introspection queries to protect avoid generating huge responses. Default: true",
+          "type": "boolean"
+        },
         "max_aliases": {
           "default": null,
           "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
@@ -6861,11 +6866,6 @@ expression: "&schema"
         "introspection": {
           "default": false,
           "description": "Enable introspection Default: false",
-          "type": "boolean"
-        },
-        "introspection_check_max_depth": {
-          "default": true,
-          "description": "Limit the depth of nested list fields in introspection queries to protect avoid generating huge responses. Default: false",
           "type": "boolean"
         },
         "listen": {

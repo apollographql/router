@@ -9,7 +9,8 @@ In case it rejects legitimate queries, this check can be disabled in Router conf
 ```yaml
 supergraph:
   introspection: true  # Needed to enable schema introspection in the first place
-  introspection_check_max_depth: false  # Defaults to true
+limits:
+  introspection_max_depth: false  # Defaults to true
 ```
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6601
