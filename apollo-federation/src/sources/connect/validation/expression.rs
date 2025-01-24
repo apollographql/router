@@ -153,10 +153,15 @@ fn validate_shape(
                 return Err(Message {
                     code: context.code,
                     message: format!(
-                        "`{key}` must start with an argument name, like `$this` or `$args`",
-                        key = key.iter().map(|key| key.to_string()).join(".")
+                        "`{key}` must start with one of {namespaces}",
+                        key = key.iter().map(|key| key.to_string()).join("."),
+                        namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
                     ),
-                    locations: transform_locations(&shape.locations, context, expression_offset),
+                    locations: transform_locations(
+                        key.first().iter().flat_map(|key| &key.locations),
+                        context,
+                        expression_offset,
+                    ),
                 });
             } else if name.value.starts_with('$') {
                 let namespace = Namespace::from_str(&name.value).map_err(|_| Message {
@@ -235,8 +240,8 @@ fn validate_shape(
     }
 }
 
-fn transform_locations(
-    locations: &[Location],
+fn transform_locations<'a>(
+    locations: impl IntoIterator<Item = &'a Location>,
     context: &Context,
     expression_offset: usize,
 ) -> Vec<Range<LineColumn>> {
@@ -424,9 +429,39 @@ mod tests {
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
     #[case::this_on_query("$this.something")]
+    #[case::bare_field_no_var("something")]
     fn invalid_expressions(#[case] selection: &str) {
         let err = validate_with_context(selection);
         assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
+    }
+
+    #[test]
+    fn bare_field_with_path() {
+        let selection = "something.blah";
+        let err = validate_with_context(selection)
+            .err()
+            .expect("missing property is unknown");
+        let expected_location = location_of_expression("something", selection);
+        assert!(
+            err.message.contains("`something.blah`"),
+            "{} didn't reference missing arg",
+            err.message
+        );
+        assert!(
+            err.message.contains("$args"),
+            "{} didn't provide suggested variables",
+            err.message
+        );
+        assert!(
+            err.locations.contains(&expected_location),
+            "The expected location {:?} wasn't included in {:?}",
+            expected_location,
+            err.locations
+        );
     }
 
     #[test]
