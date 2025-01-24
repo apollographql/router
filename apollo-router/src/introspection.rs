@@ -163,6 +163,11 @@ impl IntrospectionCache {
             Self::execute_introspection(max_depth, &schema, &doc)
         })
         .await
+        // `expect()` propagates any panic that potentially happens in the closure, but:
+        //
+        // * We try to avoid such panics in the first place and consider them bugs
+        // * The panic handler in `apollo-router/src/executable.rs` exits the process
+        //   so this error case should never be reached.
         .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;
         response
