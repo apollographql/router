@@ -10,6 +10,7 @@ use itertools::Itertools;
 use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -199,9 +200,18 @@ fn validate_shape(
             for key in key {
                 let child = resolved.child(key.clone());
                 if child.is_none() {
+                    let message = match key.value {
+                        NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
+                            format!("`{path}` is not an array or string")
+                        }
+
+                        NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
+                            format!("`{path}` doesn't have a field named `{key}`")
+                        }
+                    };
                     return Err(Message {
                         code: context.code,
-                        message: format!("`{path}` doesn't have a field named `{key}`"),
+                        message,
                         locations: transform_locations(&key.locations, context, expression_offset),
                     });
                 }
