@@ -11,7 +11,7 @@ The exact settings depend on the bandwidth available for you to send data to you
 You can see how many spans are being dropped by enabling metrics export and looking at the:
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
-    - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
+    - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`, `zipkin-tracing`.
     - `error` = One of `channel closed`, `channel full`.
 
 By looking at the rate of batch processor errors you can decide how to tune your batch processor settings.

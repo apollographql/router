@@ -1,23 +1,30 @@
 description: Custom counter with conditions
 events:
-  - - context:
-        map:
-          "apollo_router::connector::info":
-            subgraph_name: users
-            source_name: user_api
-            http_method: GET
-            url_template: "/user/{$this.userid}"
-    - http_request:
+  - - connector_request:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/user/{$this.userid}"
         uri: "/user/1"
-        method: GET
-    - http_response:
+    - connector_response:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/user/{$this.userid}"
         status: 200
         body: |
           { "username": "foo" }
-    - http_request:
+    - connector_request:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/user/{$this.userid}"
         uri: "/user/1"
-        method: GET
-    - http_response:
+    - connector_response:
+        subgraph_name: users
+        source_name: user_api
+        http_method: GET
+        url_template: "/user/{$this.userid}"
         status: 404
         body: |
           { "error": "not found" }

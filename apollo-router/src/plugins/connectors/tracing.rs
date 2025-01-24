@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::expand::Connectors;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::KeyValue;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
 
 use crate::metrics::meter_provider;
 
@@ -114,13 +114,7 @@ mod tests {
         async {
             let config = Arc::default();
             let schema = Schema::parse(STEEL_THREAD_SCHEMA, &config).unwrap();
-            let _factory = ConnectorServiceFactory::new(
-                schema.into(),
-                Arc::default(),
-                Arc::default(),
-                Default::default(),
-                Arc::default(),
-            );
+            let _factory = ConnectorServiceFactory::empty(Arc::from(schema));
 
             assert_gauge!(
                 "apollo.router.schema.connectors",
