@@ -242,7 +242,6 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     let (_, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
     let response = response.text().await?;
-    dbg!(&response);
     assert!(response.contains("REQUEST_RATE_LIMITED"));
     assert_yaml_snapshot!(response);
 
