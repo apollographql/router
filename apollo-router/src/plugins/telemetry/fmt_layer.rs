@@ -878,6 +878,8 @@ connector:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1132,6 +1134,8 @@ connector:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),

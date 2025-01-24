@@ -39,9 +39,11 @@ impl RequestInputs {
     /// Creates a map for use in JSONSelection::apply_with_vars. It only clones
     /// values into the map if the variable namespaces (`$args`, `$this`, etc.)
     /// are actually referenced in the expressions for URLs, headers, body, or selection.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn merge(
         &self,
         variables_used: &HashSet<Namespace>,
+        headers_used: &HashSet<String>,
         config: Option<&CustomConfiguration>,
         context: &Context,
         status: Option<u16>,
@@ -95,16 +97,21 @@ impl RequestInputs {
             }
         }
 
-        // Add headers from the original router request
+        // Add headers from the original router request.
+        // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if variables_used.contains(&Namespace::Request) {
             let headers: Map<ByteString, Value> = supergraph_request
                 .headers()
                 .iter()
-                .map(|(key, value)| {
-                    (
-                        key.as_str().into(),
-                        value.to_str().unwrap_or_default().into(),
-                    )
+                .filter_map(|(key, value)| {
+                    if headers_used.contains::<String>(&key.as_str().into()) {
+                        return Some((
+                            key.as_str().into(),
+                            value.to_str().unwrap_or_default().into(),
+                        ));
+                    }
+
+                    None
                 })
                 .collect();
             let request_object = json!({
@@ -114,16 +121,21 @@ impl RequestInputs {
         }
 
         // Add headers from the connectors response
+        // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if variables_used.contains(&Namespace::Response) {
             if let Some(response_parts) = response_parts {
                 let headers: Map<ByteString, Value> = response_parts
                     .headers
                     .iter()
-                    .map(|(key, value)| {
-                        (
-                            key.as_str().into(),
-                            value.to_str().unwrap_or_default().into(),
-                        )
+                    .filter_map(|(key, value)| {
+                        if headers_used.contains::<String>(&key.as_str().into()) {
+                            return Some((
+                                key.as_str().into(),
+                                value.to_str().unwrap_or_default().into(),
+                            ));
+                        }
+
+                        None
                     })
                     .collect();
                 let response_object = json!({
@@ -248,6 +260,7 @@ fn request_params_to_requests(
             &connector.transport,
             response_key.inputs().merge(
                 &connector.request_variables,
+                &connector.request_headers,
                 connector.config.as_ref(),
                 &original_request.context,
                 None,
@@ -680,6 +693,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
@@ -811,6 +826,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
@@ -970,6 +987,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
@@ -1199,6 +1218,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -1517,6 +1538,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -1816,6 +1839,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -2035,6 +2060,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -2313,6 +2340,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -2588,6 +2617,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
@@ -2728,6 +2759,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         let requests: Vec<_> = super::make_requests(

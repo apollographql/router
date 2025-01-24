@@ -88,6 +88,7 @@ impl RawResponse {
             } => {
                 let inputs = key.inputs().merge(
                     &connector.response_variables,
+                    &connector.response_headers,
                     connector.config.as_ref(),
                     context,
                     Some(parts.status.as_u16()),
@@ -591,6 +592,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -699,6 +702,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -813,6 +818,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -937,6 +944,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -1201,6 +1210,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: selection.external_variables().collect(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()

@@ -64,6 +64,11 @@ pub struct Connector {
 
     pub request_variables: HashSet<Namespace>,
     pub response_variables: HashSet<Namespace>,
+
+    /// The request headers referenced in the connectors request mapping
+    pub request_headers: HashSet<String>,
+    /// The request or response headers referenced in the connectors response mapping
+    pub response_headers: HashSet<String>,
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -159,7 +164,9 @@ impl Connector {
         };
 
         let request_variables = transport.variables().collect();
+        let request_headers = transport.header_references().collect();
         let response_variables = connect.selection.external_variables().collect();
+        let response_headers = connect.selection.header_references().collect();
 
         let connector = Connector {
             id: id.clone(),
@@ -171,6 +178,8 @@ impl Connector {
             spec,
             request_variables,
             response_variables,
+            request_headers,
+            response_headers,
         };
 
         Ok((id, connector))
@@ -319,6 +328,29 @@ impl HttpJsonTransport {
                     .into_iter()
                     .flat_map(PathSelection::variable_reference)
             })
+    }
+
+    /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
+    fn header_references(&self) -> impl Iterator<Item = String> + '_ {
+        self.variable_references().filter_map(|var_ref| {
+            if var_ref.namespace.namespace != Namespace::Request
+                && var_ref.namespace.namespace != Namespace::Response
+            {
+                return None;
+            }
+
+            // We only care if the path references starts with "headers"
+            if !var_ref
+                .path
+                .first()
+                .map_or(false, |path| path.part == "headers")
+            {
+                return None;
+            }
+
+            // Grab the name of the header from the path
+            var_ref.path.get(1).map(|path| path.part.to_string())
+        })
     }
 }
 
