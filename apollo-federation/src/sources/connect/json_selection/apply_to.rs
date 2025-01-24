@@ -44,18 +44,10 @@ impl JSONSelection {
 
         let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
         for (var_name, var_data) in vars {
-            if let Some(known_var) = KnownVariable::from_str(var_name.as_str()) {
-                vars_with_paths.insert(
-                    known_var,
-                    (var_data, InputPath::empty().append(json!(var_name))),
-                );
-            } else {
-                errors.insert(ApplyToError::new(
-                    format!("Unknown variable {}", var_name),
-                    vec![json!(var_name)],
-                    None,
-                ));
-            }
+            vars_with_paths.insert(
+                KnownVariable::from_str(var_name.as_str()),
+                (var_data, InputPath::empty().append(json!(var_name))),
+            );
         }
         // The $ variable initially refers to the root data value, but is
         // rebound by nested selection sets to refer to the root value the

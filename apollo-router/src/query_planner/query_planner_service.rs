@@ -14,9 +14,9 @@ use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::KeyValue;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -39,7 +39,6 @@ use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchema;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
@@ -50,7 +49,6 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::operation_limits::OperationLimits;
-use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -194,10 +192,7 @@ impl QueryPlannerService {
                 .map(|(name, schema)| {
                     (
                         name.to_string(),
-                        SubgraphSchema {
-                            implementers_map: schema.schema().implementers_map(),
-                            schema: Arc::new(schema.schema().clone()),
-                        },
+                        SubgraphSchema::new(schema.schema().clone()),
                     )
                 })
                 .collect(),
@@ -247,7 +242,7 @@ impl QueryPlannerService {
         )?;
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
-            Query::extract_query_information(&self.schema, executable, operation_name)?;
+            Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -285,10 +280,7 @@ impl QueryPlannerService {
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let plan_result = self
             .plan_inner(doc, operation.clone(), plan_options, |root_node| {
-                root_node.init_parsed_operations_and_hash_subqueries(
-                    &self.subgraph_schemas,
-                    &self.schema.raw_sdl,
-                )?;
+                root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
                 root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                 Ok(())
             })
@@ -386,19 +378,15 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                         .to_executable_validate(api_schema)
                         // Assume transformation creates a valid document: ignore conversion errors
                         .map_err(|e| SpecError::ValidationError(e.into()))?;
-                    let hash = QueryHashVisitor::hash_query(
-                        this.schema.supergraph_schema(),
-                        &this.schema.raw_sdl,
-                        &this.schema.implementers_map,
-                        &executable_document,
-                        operation_name.as_deref(),
-                    )
-                    .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+                    let hash = this
+                        .schema
+                        .schema_id
+                        .operation_hash(&modified_query.to_string(), operation_name.as_deref());
                     doc = ParsedDocumentInner::new(
                         modified_query,
                         Arc::new(executable_document),
                         operation_name.as_deref(),
-                        Arc::new(QueryHash(hash)),
+                        Arc::new(hash),
                     )?;
                 }
             }
@@ -508,23 +496,21 @@ impl QueryPlannerService {
         };
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
-            key.filtered_query = new_doc.to_string();
+            let new_query = new_doc.to_string();
+            let new_hash = self
+                .schema
+                .schema_id
+                .operation_hash(&new_query, key.operation_name.as_deref());
+
+            key.filtered_query = new_query;
             let executable_document = new_doc
                 .to_executable_validate(self.schema.api_schema())
                 .map_err(|e| SpecError::ValidationError(e.into()))?;
-            let hash = QueryHashVisitor::hash_query(
-                self.schema.supergraph_schema(),
-                &self.schema.raw_sdl,
-                &self.schema.implementers_map,
-                &executable_document,
-                key.operation_name.as_deref(),
-            )
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
             doc = ParsedDocumentInner::new(
                 new_doc,
                 Arc::new(executable_document),
                 key.operation_name.as_deref(),
-                Arc::new(QueryHash(hash)),
+                Arc::new(new_hash),
             )?;
             selections.unauthorized.paths = unauthorized_paths;
         }
