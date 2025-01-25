@@ -32,9 +32,9 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tower::buffer::Buffer;
 use tower::BoxError;
 use tower::Service;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -56,7 +56,7 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
-use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
@@ -1576,7 +1576,9 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Arc<parking_lot::Mutex<subgraph::BoxCloneService>>>>,
+    pub(crate) services: Arc<
+        HashMap<String, Buffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>>,
+    >,
 }
 
 impl SubgraphServiceFactory {
@@ -1586,16 +1588,15 @@ impl SubgraphServiceFactory {
     ) -> Self {
         let mut map = HashMap::with_capacity(services.len());
         for (name, maker) in services.into_iter() {
-            let mut service = maker.make();
-            service = plugins
-                .iter()
-                .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_service(&name, acc));
-            let final_service = ServiceBuilder::new()
-                .buffered()
-                .service(service)
-                .boxed_clone();
-            map.insert(name, Arc::new(parking_lot::Mutex::new(final_service)));
+            let service = Buffer::new(
+                plugins
+                    .iter()
+                    .rev()
+                    .fold(maker.make(), |acc, (_, e)| e.subgraph_service(&name, acc))
+                    .boxed(),
+                DEFAULT_BUFFER_SIZE,
+            );
+            map.insert(name, service);
         }
 
         SubgraphServiceFactory {
@@ -1604,14 +1605,8 @@ impl SubgraphServiceFactory {
     }
 
     pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
-        // Note: This is required because SubgraphServiceFactory requires
-        // Sync access to the SubgraphService.
-        // This is only called once per subgraph per connection, so the contention on the
-        // lock should be light and the clone is a lightweight Arc Clone and should
-        // complete quickly.
-        self.services
-            .get(name)
-            .map(|svc| svc.lock().clone().boxed())
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.services.get(name).map(|svc| svc.clone().boxed())
     }
 }
 

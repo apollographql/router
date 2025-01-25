@@ -15,6 +15,7 @@ use opentelemetry::KeyValue;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
+use tower::buffer::Buffer;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -34,6 +35,7 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
@@ -931,25 +933,27 @@ impl PluggableSupergraphServiceBuilder {
         let supergraph_service =
             AllowOnlyHttpPostMutationsLayer::default().layer(supergraph_service);
 
-        let sb = ServiceBuilder::new()
-            .buffered() // XXX: Added during backpressure fixing
-            .layer(content_negotiation::SupergraphLayer::default())
-            .service(
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
-                        e.supergraph_service(acc)
-                    }),
-            )
-            .boxed_clone();
+        let sb = Buffer::new(
+            ServiceBuilder::new()
+                .layer(content_negotiation::SupergraphLayer::default())
+                .service(
+                    self.plugins
+                        .iter()
+                        .rev()
+                        .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                            e.supergraph_service(acc)
+                        }),
+                )
+                .boxed(),
+            DEFAULT_BUFFER_SIZE,
+        );
 
         Ok(SupergraphCreator {
             query_planner_service,
             schema,
             plugins: self.plugins,
             config: configuration,
-            sb: Arc::new(parking_lot::Mutex::new(sb)),
+            sb,
         })
     }
 }
@@ -961,7 +965,7 @@ pub(crate) struct SupergraphCreator {
     schema: Arc<Schema>,
     config: Arc<Configuration>,
     plugins: Arc<Plugins>,
-    sb: Arc<parking_lot::Mutex<supergraph::BoxCloneService>>,
+    sb: Buffer<supergraph::Request, BoxFuture<'static, supergraph::ServiceResult>>,
 }
 
 pub(crate) trait HasPlugins {
@@ -1010,11 +1014,8 @@ impl SupergraphCreator {
         Error = BoxError,
         Future = BoxFuture<'static, supergraph::ServiceResult>,
     > + Send {
-        // Note: This is required because SupergraphCreator implements ServiceFactory which requires
-        // Sync access to the SupergraphService.
-        // This is only called once per connection, so the contention on the lock should be light
-        // and the clone is a lightweight Arc Clone and should complete quickly.
-        self.sb.lock().clone()
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.sb.clone().boxed()
     }
 
     pub(crate) fn previous_cache(&self) -> InMemoryCachePlanner {

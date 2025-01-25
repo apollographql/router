@@ -26,6 +26,7 @@ use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
+use tower::buffer::Buffer;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -45,6 +46,7 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -887,7 +889,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-    sb: Arc<parking_lot::Mutex<router::BoxCloneService>>,
+    sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -948,24 +950,23 @@ impl RouterCreator {
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)
-        let sb = ServiceBuilder::new()
-            // NOTE: Buffer is required because the static_page service is not Clone.
-            // The buffer should be >= concurrency as per the advice
-            // at: https://docs.rs/tower/latest/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound
-            .buffered() // XXX: Added during backpressure fixing
-            .layer(static_page.clone())
-            .service(
-                supergraph_creator
-                    .plugins()
-                    .iter()
-                    .rev()
-                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-            )
-            .boxed_clone();
+        let sb = Buffer::new(
+            ServiceBuilder::new()
+                .layer(static_page.clone())
+                .service(
+                    supergraph_creator
+                        .plugins()
+                        .iter()
+                        .rev()
+                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+                )
+                .boxed(),
+            DEFAULT_BUFFER_SIZE,
+        );
 
         Ok(Self {
             supergraph_creator,
-            sb: Arc::new(parking_lot::Mutex::new(sb)),
+            sb,
         })
     }
 
@@ -977,11 +978,8 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        // Note: This is required because RouterCreator implements ServiceFactory which requires
-        // Sync access to the RouterService.
-        // This is only called once per connection, so the contention on the lock should be light
-        // and the clone is a lightweight Arc Clone and should complete quickly.
-        self.sb.lock().clone()
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.sb.clone().boxed()
     }
 }
 

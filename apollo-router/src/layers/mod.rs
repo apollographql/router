@@ -27,7 +27,15 @@ pub mod map_first_graphql_response;
 pub mod map_future_with_request_data;
 pub mod sync_checkpoint;
 
-pub(crate) const DEFAULT_BUFFER_SIZE: usize = 20_000;
+// Note: We use Buffer in many places throughout the router. 50_000 represents
+// the "maximal number of requests that can be queued for the buffered
+// service before backpressure is applied to callers". We set this to be
+// so high, 50_000, because we anticipate that many users will want to
+//
+// Think of this as a backstop for when there are no other backpressure
+// enforcing limits configured in a router. In future we may tweak this
+// value higher or lower or expose it as a configurable.
+pub(crate) const DEFAULT_BUFFER_SIZE: usize = 50_000;
 
 /// Extension to the [`ServiceBuilder`] trait to make it easy to add router specific capabilities
 /// (e.g.: checkpoints) to a [`Service`].
