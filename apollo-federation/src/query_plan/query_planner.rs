@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::fs;
 use std::num::NonZeroU32;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -60,6 +61,7 @@ pub struct QueryPlannerConfig {
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
+    pub generate_query_fragments_v2: bool,
 
     /// **TODO:** This option is not implemented, and the behaviour is *always enabled*.
     /// <https://github.com/apollographql/router/pull/5871>
@@ -96,6 +98,7 @@ impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
             generate_query_fragments: false,
+            generate_query_fragments_v2: false,
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
@@ -387,6 +390,8 @@ impl QueryPlanner {
 
         let operation_compression = if self.config.generate_query_fragments {
             SubgraphOperationCompression::GenerateFragments
+        } else if self.config.generate_query_fragments_v2 {
+            SubgraphOperationCompression::GenerateFragmentsV2
         } else {
             SubgraphOperationCompression::Disabled
         };
@@ -775,6 +780,7 @@ fn generate_condition_nodes<'a>(
 
 pub(crate) enum SubgraphOperationCompression {
     GenerateFragments,
+    GenerateFragmentsV2,
     Disabled,
 }
 
@@ -785,6 +791,11 @@ impl SubgraphOperationCompression {
             Self::GenerateFragments => {
                 let mut operation = operation;
                 operation.generate_fragments()?;
+                Ok(operation)
+            }
+            Self::GenerateFragmentsV2 => {
+                let mut operation = operation;
+                operation.generate_fragments_v2()?;
                 Ok(operation)
             }
             Self::Disabled => Ok(operation),
