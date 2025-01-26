@@ -16,6 +16,7 @@ use std::borrow::Cow;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
@@ -253,11 +254,18 @@ pub(crate) struct SelectionSet {
 
 impl PartialEq for SelectionSet {
     fn eq(&self, other: &Self) -> bool {
-        self.selections == other.selections
+        self.type_position == other.type_position && self.selections == other.selections
     }
 }
 
 impl Eq for SelectionSet {}
+
+impl Hash for SelectionSet {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_position.hash(state);
+        self.selections.hash(state);
+    }
+}
 
 mod selection_map;
 
@@ -271,7 +279,7 @@ pub(crate) use selection_map::SelectionValue;
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::IsVariant, serde::Serialize)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -609,7 +617,7 @@ mod field_selection {
     /// - For the field definition, stores the schema and the position in that schema instead of just
     ///   the `FieldDefinition` (which contains no references to the parent type or schema).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct FieldSelection {
         pub(crate) field: Field,
         pub(crate) selection_set: Option<SelectionSet>,
@@ -833,6 +841,9 @@ pub(crate) use field_selection::FieldSelection;
 pub(crate) use field_selection::SiblingTypename;
 
 mod fragment_spread_selection {
+    use std::hash::Hash;
+    use std::hash::Hasher;
+
     use apollo_compiler::Name;
     use serde::Serialize;
 
@@ -845,7 +856,7 @@ mod fragment_spread_selection {
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
 
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct FragmentSpreadSelection {
         pub(crate) spread: FragmentSpread,
         pub(crate) selection_set: SelectionSet,
@@ -884,6 +895,12 @@ mod fragment_spread_selection {
     }
 
     impl Eq for FragmentSpread {}
+
+    impl Hash for FragmentSpread {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.key().hash(state);
+        }
+    }
 
     impl HasSelectionKey for FragmentSpread {
         fn key(&self) -> SelectionKey<'_> {
@@ -1000,7 +1017,7 @@ mod inline_fragment_selection {
     /// - Stores the parent type explicitly, which means storing the position (in apollo-compiler, this
     ///   is in the parent selection set).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct InlineFragmentSelection {
         pub(crate) inline_fragment: InlineFragment,
         pub(crate) selection_set: SelectionSet,

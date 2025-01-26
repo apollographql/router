@@ -387,6 +387,7 @@ impl Configuration {
         QueryPlannerConfig {
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
+            generate_query_fragments_v2: false,
             incremental_delivery: QueryPlanIncrementalDeliveryConfig {
                 enable_defer: self.supergraph.defer_support,
             },
