@@ -1,8 +1,11 @@
+use std::fmt::Display;
+
 use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
 use shape::location::Location;
 use shape::location::SourceId;
+use shape::Shape;
 
 use super::ParseResult;
 
@@ -33,8 +36,22 @@ pub(super) fn new_span(input: &str) -> Span {
 pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
 
-    fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
-        self.range().map(|range| source_id.location(range.clone()))
+    fn shape_location(
+        &self,
+        source_id: &SourceId,
+        parent: Option<&Shape>,
+        label: impl Display,
+    ) -> Option<Location> {
+        let range = self.range()?;
+        if let Some(parent) = parent {
+            let parent_label = parent
+                .locations
+                .iter()
+                .find_map(|loc| (loc.source_id == *source_id).then_some(&loc.label))?;
+            Some(source_id.location(range, format!("{parent_label}{label}")))
+        } else {
+            Some(source_id.location(range, label))
+        }
     }
 }
 
@@ -96,6 +113,12 @@ where
 impl<T: std::hash::Hash> std::hash::Hash for WithRange<T> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.node.as_ref().hash(state)
+    }
+}
+
+impl<T: Display> Display for WithRange<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.node)
     }
 }
 

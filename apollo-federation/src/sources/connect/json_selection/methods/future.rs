@@ -55,13 +55,14 @@ fn typeof_method(
 fn typeof_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     // TODO Compute this union type once and clone it here.
-    let locations = method_name.shape_location(source_id);
+    let locations =
+        method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}"));
     Shape::one(
         [
             Shape::string_value("null", locations.clone()),
@@ -112,12 +113,16 @@ fn eq_method(
 fn eq_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(
+        source_id,
+        Some(&input_shape),
+        format!("->{method_name}"),
+    ))
 }
 
 // Like ->match, but expects the first element of each pair to evaluate to a
@@ -298,12 +303,15 @@ infix_math_op!(rem_op, %);
 fn math_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    Shape::error("TODO: math_shape", method_name.shape_location(source_id))
+    Shape::error(
+        "TODO: math_shape",
+        method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+    )
 }
 
 macro_rules! infix_math_method {
@@ -425,14 +433,18 @@ fn has_method(
 fn has_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     // TODO We could be more clever here (sometimes) based on the input_shape
     // and argument shapes.
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(
+        source_id,
+        Some(&input_shape),
+        format!("->{method_name}"),
+    ))
 }
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -669,7 +681,7 @@ fn get_shape(
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.shape_location(source_id, None, index_literal),
                     ),
                     ShapeCase::String(_) => Shape::error(
                         format!(
@@ -677,11 +689,15 @@ fn get_shape(
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.shape_location(source_id, None, index_literal),
                     ),
                     _ => Shape::error(
                         "Method ->get requires an object, array, or string input",
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
                     ),
                 },
 
@@ -719,12 +735,16 @@ fn get_shape(
                                 method_name.as_ref()
                             )
                             .as_str(),
-                            index_literal.shape_location(source_id),
+                            index_literal.shape_location(source_id, None, index_literal),
                         ),
 
                         _ => Shape::error(
                             "Method ->get requires an object, array, or string input",
-                            method_name.shape_location(source_id),
+                            method_name.shape_location(
+                                source_id,
+                                Some(&input_shape),
+                                format!("->{method_name}"),
+                            ),
                         ),
                     }
                 }
@@ -735,7 +755,7 @@ fn get_shape(
                         method_name.as_ref()
                     )
                     .as_str(),
-                    index_literal.shape_location(source_id),
+                    index_literal.shape_location(source_id, None, index_literal),
                 ),
             };
         }
@@ -743,7 +763,7 @@ fn get_shape(
 
     Shape::error(
         format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
-        method_name.shape_location(source_id),
+        method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
     )
 }
 
@@ -820,7 +840,7 @@ fn keys_shape(
         }
         _ => Shape::error(
             "Method ->keys requires an object input",
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         ),
     }
 }
@@ -881,7 +901,7 @@ fn values_shape(
         }
         _ => Shape::error(
             "Method ->values requires an object input",
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         ),
     }
 }
@@ -920,20 +940,31 @@ fn not_shape(
     source_id: &SourceId,
 ) -> Shape {
     match input_shape.case() {
-        ShapeCase::Bool(Some(value)) => {
-            Shape::bool_value(!*value, method_name.shape_location(source_id))
-        }
-        ShapeCase::Int(Some(value)) => {
-            Shape::bool_value(*value == 0, method_name.shape_location(source_id))
-        }
-        ShapeCase::String(Some(value)) => {
-            Shape::bool_value(value.is_empty(), method_name.shape_location(source_id))
-        }
-        ShapeCase::Null => Shape::bool_value(true, method_name.shape_location(source_id)),
-        ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-            Shape::bool_value(false, method_name.shape_location(source_id))
-        }
-        _ => Shape::bool(method_name.shape_location(source_id)),
+        ShapeCase::Bool(Some(value)) => Shape::bool_value(
+            !*value,
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+        ),
+        ShapeCase::Int(Some(value)) => Shape::bool_value(
+            *value == 0,
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+        ),
+        ShapeCase::String(Some(value)) => Shape::bool_value(
+            value.is_empty(),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+        ),
+        ShapeCase::Null => Shape::bool_value(
+            true,
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+        ),
+        ShapeCase::Array { .. } | ShapeCase::Object { .. } => Shape::bool_value(
+            false,
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+        ),
+        _ => Shape::bool(method_name.shape_location(
+            source_id,
+            Some(&input_shape),
+            format!("->{method_name}"),
+        )),
     }
 }
 
@@ -992,16 +1023,44 @@ fn or_shape(
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Bool(Some(true)) => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                true,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         ShapeCase::Int(Some(value)) if *value != 0 => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                true,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         ShapeCase::String(Some(value)) if !value.is_empty() => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                true,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                true,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         _ => {}
     };
@@ -1016,23 +1075,55 @@ fn or_shape(
             );
             match arg_shape.case() {
                 ShapeCase::Bool(Some(true)) => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        true,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 ShapeCase::Int(Some(value)) if *value != 0 => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        true,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 ShapeCase::String(Some(value)) if !value.is_empty() => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        true,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        true,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(
+        source_id,
+        Some(&input_shape),
+        format!("->{method_name}"),
+    ))
 }
 
 impl_arrow_method!(AndMethod, and_method, and_shape);
@@ -1080,16 +1171,44 @@ fn and_shape(
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Bool(Some(false)) => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                false,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         ShapeCase::Int(Some(value)) if *value == 0 => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                false,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         ShapeCase::String(Some(value)) if value.is_empty() => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                false,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         ShapeCase::Null => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return Shape::bool_value(
+                false,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            );
         }
         _ => {}
     };
@@ -1104,21 +1223,53 @@ fn and_shape(
             );
             match arg_shape.case() {
                 ShapeCase::Bool(Some(false)) => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        false,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 ShapeCase::Int(Some(value)) if *value == 0 => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        false,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 ShapeCase::String(Some(value)) if value.is_empty() => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        false,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 ShapeCase::Null => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return Shape::bool_value(
+                        false,
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    );
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    Shape::bool(method_name.shape_location(
+        source_id,
+        Some(&input_shape),
+        format!("->{method_name}"),
+    ))
 }

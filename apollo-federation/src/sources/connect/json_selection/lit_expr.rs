@@ -4,6 +4,9 @@
 //! incorporate dynamic $variable values in addition to the usual input data and
 //! argument values.
 
+use std::fmt::Display;
+use std::fmt::Formatter;
+
 use apollo_compiler::collections::IndexMap;
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -27,6 +30,7 @@ use super::nom_error_message;
 use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
+use super::pretty::PrettyPrintable;
 use super::ExternalVarPaths;
 use super::ParseResult;
 
@@ -241,6 +245,12 @@ impl LitExpr {
             Self::Number(n) => n.as_i64(),
             _ => None,
         }
+    }
+}
+
+impl Display for LitExpr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.pretty_print())
     }
 }
 

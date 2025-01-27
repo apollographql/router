@@ -406,7 +406,11 @@ impl ApplyToInternal for NamedSelection {
                 let output_key = alias_opt
                     .as_ref()
                     .map_or(key.as_str(), |alias| alias.name());
-                let field_shape = dollar_shape.field(key.as_str(), key.shape_location(source_id));
+                // TODO: This label should probably include the parent name somehow?
+                let field_shape = dollar_shape.field(
+                    key.as_str(),
+                    key.shape_location(source_id, Some(&input_shape), key),
+                );
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
@@ -423,7 +427,7 @@ impl ApplyToInternal for NamedSelection {
             }
             Self::Path { alias, path, .. } => {
                 let path_shape = path.compute_output_shape(
-                    input_shape,
+                    input_shape.clone(),
                     dollar_shape,
                     named_var_shapes,
                     source_id,
@@ -438,7 +442,7 @@ impl ApplyToInternal for NamedSelection {
                 output.insert(
                     alias.name().to_string(),
                     sub_selection.compute_output_shape(
-                        input_shape,
+                        input_shape.clone(),
                         dollar_shape,
                         named_var_shapes,
                         source_id,
@@ -447,7 +451,19 @@ impl ApplyToInternal for NamedSelection {
             }
         };
 
-        Shape::object(output, Shape::none(), self.shape_location(source_id))
+        Shape::object(
+            output,
+            Shape::none(),
+            self.shape_location(
+                source_id,
+                Some(&input_shape),
+                self.names()
+                    .into_iter()
+                    .next()
+                    .map(|name| format!(".{name}"))
+                    .unwrap_or_default(),
+            ),
+        )
     }
 }
 
@@ -631,7 +647,10 @@ impl ApplyToInternal for WithRange<PathList> {
                 } else if let Some(shape) = named_var_shapes.get(var_name.as_str()) {
                     shape.clone()
                 } else {
-                    Shape::name(var_name.as_str(), ranged_var_name.shape_location(source_id))
+                    Shape::name(
+                        var_name.as_str(),
+                        ranged_var_name.shape_location(source_id, None, var_name),
+                    )
                 };
                 tail.compute_output_shape(var_shape, dollar_shape, named_var_shapes, source_id)
             }
@@ -660,7 +679,10 @@ impl ApplyToInternal for WithRange<PathList> {
                                 shape.clone()
                             } else {
                                 rest.compute_output_shape(
-                                    shape.field(key.as_str(), key.shape_location(source_id)),
+                                    shape.field(
+                                        key.as_str(),
+                                        key.shape_location(source_id, Some(&shape), key),
+                                    ),
                                     dollar_shape.clone(),
                                     named_var_shapes,
                                     source_id,
@@ -673,7 +695,10 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.clone()
                     } else {
                         rest.compute_output_shape(
-                            tail.field(key.as_str(), key.shape_location(source_id)),
+                            tail.field(
+                                key.as_str(),
+                                key.shape_location(source_id, Some(&tail), key),
+                            ),
                             dollar_shape.clone(),
                             named_var_shapes,
                             source_id,
@@ -683,7 +708,10 @@ impl ApplyToInternal for WithRange<PathList> {
                     Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
                 } else {
                     rest.compute_output_shape(
-                        input_shape.field(key.as_str(), key.shape_location(source_id)),
+                        input_shape.field(
+                            key.as_str(),
+                            key.shape_location(source_id, Some(&input_shape), key),
+                        ),
                         dollar_shape.clone(),
                         named_var_shapes,
                         source_id,
@@ -745,8 +773,15 @@ impl ApplyToInternal for WithRange<PathList> {
                         )
                     }
                 } else {
-                    let message = format!("Method ->{} not found", method_name.as_str());
-                    Shape::error(message.as_str(), method_name.shape_location(source_id))
+                    let message = format!("Method ->{method_name} not found");
+                    Shape::error(
+                        message.as_str(),
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
+                    )
                 }
             }
 
@@ -807,7 +842,7 @@ impl ApplyToInternal for WithRange<LitExpr> {
         named_var_shapes: &IndexMap<&str, Shape>,
         source_id: &SourceId,
     ) -> Shape {
-        let locations = self.shape_location(source_id);
+        let locations = self.shape_location(source_id, None, self.to_string());
 
         match self.as_ref() {
             LitExpr::Null => Shape::null(locations),
@@ -943,7 +978,7 @@ impl ApplyToInternal for SubSelection {
                 self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes, source_id)
             };
 
-            return Shape::array(new_prefix, new_tail, self.shape_location(source_id));
+            return Shape::array(new_prefix, new_tail, input_shape.locations.clone());
         }
 
         // If the input shape is a named shape, it might end up being an array,
@@ -957,7 +992,7 @@ impl ApplyToInternal for SubSelection {
 
         // Build up the merged object shape using Shape::all to merge the
         // individual named_selection object shapes.
-        let mut all_shape = Shape::empty_object(self.shape_location(source_id));
+        let mut all_shape = Shape::empty_object([]);
 
         for named_selection in self.selections.iter() {
             // Simplifying as we go with Shape::all keeps all_shape relatively
@@ -974,7 +1009,7 @@ impl ApplyToInternal for SubSelection {
                         source_id,
                     ),
                 ],
-                self.shape_location(source_id),
+                [],
             );
 
             // If any named_selection item returns null instead of an object,

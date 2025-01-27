@@ -67,7 +67,7 @@ fn echo_shape(
     }
     Shape::error(
         format!("Method ->{} requires one argument", method_name.as_ref()),
-        method_name.shape_location(source_id),
+        method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
     )
 }
 
@@ -138,7 +138,7 @@ fn map_shape(
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
         return Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         );
     };
     match input_shape.case() {
@@ -166,7 +166,11 @@ fn map_shape(
             // We don't have a way to tell if this is an array, where map is applied to each
             // element, or a different value where map is applied to just one. So for now we
             // erase the type (until we add more sophisticated resolution in the future).
-            Shape::unknown(method_name.shape_location(source_id))
+            Shape::unknown(method_name.shape_location(
+                source_id,
+                Some(&input_shape),
+                format!("->{method_name}"),
+            ))
         }
         _ => first_arg.compute_output_shape(
             input_shape.clone(),
@@ -281,10 +285,17 @@ pub(super) fn match_shape(
                     method_name.range(),
                     method_args.and_then(|args| args.range()),
                 )
-                .map(|range| source_id.location(range)),
+                .map(|range| source_id.location(range, method_name.as_ref())),
             )
         } else {
-            Shape::one(result_union, method_name.shape_location(source_id))
+            Shape::one(
+                result_union,
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
+            )
         }
     } else {
         Shape::error(
@@ -292,7 +303,7 @@ pub(super) fn match_shape(
                 "Method ->{} requires at least one [candidate, value] pair",
                 method_name.as_ref(),
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         )
     }
 }
@@ -348,7 +359,8 @@ fn first_shape(
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    let location = method_name.shape_location(source_id);
+    let location =
+        method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}"));
     if method_args.is_some() {
         return Shape::error(
             format!(
@@ -438,7 +450,7 @@ fn last_shape(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         );
     }
 
@@ -447,7 +459,11 @@ fn last_shape(
             if let Some(last_char) = value.chars().last() {
                 Shape::string_value(
                     last_char.to_string().as_str(),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
                 )
             } else {
                 Shape::none()
@@ -455,10 +471,14 @@ fn last_shape(
         }
         ShapeCase::String(None) => Shape::one(
             [
-                Shape::string(method_name.shape_location(source_id)),
+                Shape::string(method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                )),
                 Shape::none(),
             ],
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         ),
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
@@ -470,16 +490,28 @@ fn last_shape(
             } else if let Some(last) = prefix.last() {
                 Shape::one(
                     [last.clone(), tail.clone(), Shape::none()],
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
                 )
             } else {
                 Shape::one(
                     [tail.clone(), Shape::none()],
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
                 )
             }
         }
-        ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
+        ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(
+            source_id,
+            Some(&input_shape),
+            format!("->{method_name}"),
+        )),
         // When there is no obvious last element, ->last gives us the input
         // value itself, which has input_shape.
         _ => input_shape.clone(),
@@ -605,9 +637,11 @@ fn slice_shape(
                 method_name.as_ref()
             ),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
+                input_shape.locations.extend(method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ));
                 input_shape.locations
             },
         ),
@@ -680,28 +714,59 @@ fn size_shape(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         );
     }
 
     match input_shape.case() {
-        ShapeCase::String(Some(value)) => {
-            Shape::int_value(value.len() as i64, method_name.shape_location(source_id))
-        }
-        ShapeCase::String(None) => Shape::int(method_name.shape_location(source_id)),
-        ShapeCase::Name(_, _) => Shape::int(method_name.shape_location(source_id)), // TODO: catch errors after name resolution
+        ShapeCase::String(Some(value)) => Shape::int_value(
+            value.len() as i64,
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
+        ),
+        ShapeCase::String(None) => Shape::int(method_name.shape_location(
+            source_id,
+            Some(&input_shape),
+            format!("->{method_name}"),
+        )),
+        ShapeCase::Name(_, _) => Shape::int(method_name.shape_location(
+            source_id,
+            Some(&input_shape),
+            format!("->{method_name}"),
+        )), // TODO: catch errors after name resolution
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
-                Shape::int_value(prefix.len() as i64, method_name.shape_location(source_id))
+                Shape::int_value(
+                    prefix.len() as i64,
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
+                )
             } else {
-                Shape::int(method_name.shape_location(source_id))
+                Shape::int(method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ))
             }
         }
         ShapeCase::Object { fields, rest, .. } => {
             if rest.is_none() {
-                Shape::int_value(fields.len() as i64, method_name.shape_location(source_id))
+                Shape::int_value(
+                    fields.len() as i64,
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
+                )
             } else {
-                Shape::int(method_name.shape_location(source_id))
+                Shape::int(method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ))
             }
         }
         _ => Shape::error(
@@ -710,9 +775,11 @@ fn size_shape(
                 method_name.as_ref()
             ),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
+                input_shape.locations.extend(method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ));
                 input_shape.locations
             },
         ),
@@ -783,7 +850,7 @@ fn entries_shape(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
-            method_name.shape_location(source_id),
+            method_name.shape_location(source_id, Some(&input_shape), format!("->{method_name}")),
         );
     }
 
@@ -801,7 +868,11 @@ fn entries_shape(
                     Shape::object(
                         key_value_pair,
                         Shape::none(),
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -810,7 +881,11 @@ fn entries_shape(
                 Shape::array(
                     entry_shapes,
                     rest.clone(),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
                 )
             } else {
                 let mut tail_key_value_pair = Shape::empty_map();
@@ -821,9 +896,17 @@ fn entries_shape(
                     Shape::object(
                         tail_key_value_pair,
                         Shape::none(),
-                        method_name.shape_location(source_id),
+                        method_name.shape_location(
+                            source_id,
+                            Some(&input_shape),
+                            format!("->{method_name}"),
+                        ),
                     ),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
                 )
             }
         }
@@ -835,17 +918,27 @@ fn entries_shape(
                 Shape::object(
                     entries,
                     Shape::none(),
-                    method_name.shape_location(source_id),
+                    method_name.shape_location(
+                        source_id,
+                        Some(&input_shape),
+                        format!("->{method_name}"),
+                    ),
                 ),
-                method_name.shape_location(source_id),
+                method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ),
             )
         }
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
+                input_shape.locations.extend(method_name.shape_location(
+                    source_id,
+                    Some(&input_shape),
+                    format!("->{method_name}"),
+                ));
                 input_shape.locations
             },
         ),
@@ -898,10 +991,14 @@ fn json_stringify_method(
 fn json_stringify_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    Shape::string(method_name.shape_location(source_id))
+    Shape::string(method_name.shape_location(
+        source_id,
+        Some(&input_shape),
+        format!("->{method_name}"),
+    ))
 }

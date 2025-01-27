@@ -13,14 +13,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
+        message: "In `@connect(http.headers:)` on `Query.object`: `$args.input` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
             23:59..23:79,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
+        message: "In `@connect(http.headers:)` on `Query.enum`: `$args.enum` doesn't have a field named `cantHaveFields`",
         locations: [
             33:56..33:70,
         ],

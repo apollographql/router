@@ -201,10 +201,15 @@ fn validate_shape(
                     })?
             };
             resolved.locations.extend(shape.locations.iter().cloned());
-            let mut path = name.value.clone();
             for key in key {
                 let child = resolved.child(key.clone());
                 if child.is_none() {
+                    let path = resolved
+                        .locations
+                        .into_iter()
+                        .find(|location| matches!(location.source_id, SourceId::Other(_)))
+                        .map(|location| location.label)
+                        .unwrap_or_default();
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
@@ -221,7 +226,6 @@ fn validate_shape(
                     });
                 }
                 resolved = child;
-                path = format!("{path}.{key}");
             }
             validate_shape(&resolved, context, expression_offset)
         }
