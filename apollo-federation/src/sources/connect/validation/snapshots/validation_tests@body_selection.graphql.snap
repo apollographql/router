@@ -1,0 +1,42 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/body_selection.graphql
+---
+[
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(http: {body:})` on `Query.dollar` must contain at least one variable reference",
+        locations: [
+            12:19..12:22,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(http: {body:})` on `Query.dollarField` must contain at least one variable reference",
+        locations: [
+            20:19..20:26,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(http: {body:})` on `Query.objectLiteral` must contain at least one variable reference",
+        locations: [
+            28:19..28:41,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(http: {body:})` on `Query.stringLiteral` must contain at least one variable reference",
+        locations: [
+            44:19..44:29,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(http: {body:})` on `Query.numericLiteral` must contain at least one variable reference",
+        locations: [
+            60:19..60:25,
+        ],
+    },
+]
