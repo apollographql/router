@@ -432,7 +432,7 @@ mod test {
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
         assert!(c.executable_document().is_none());
-        c.extensions().with_lock(|mut lock| lock.insert(document));
+        c.extensions().with_lock(|lock| lock.insert(document));
         assert!(c.executable_document().is_some());
     }
 }
