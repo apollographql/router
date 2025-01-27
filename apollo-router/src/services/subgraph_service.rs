@@ -313,12 +313,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             subgraph.service.name = service_name.clone()
                         );
                         if !created {
-                            u64_counter!(
-                                "apollo_router_deduplicated_subscriptions_total",
-                                "Total deduplicated subscription requests (deprecated)",
-                                1,
-                                mode = "callback"
-                            );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
                                 .subgraph_name(service_name.clone())
@@ -527,12 +521,6 @@ async fn call_websocket(
         subscription_stream_tx
             .send(Box::pin(handle.into_stream()))
             .await?;
-        u64_counter!(
-            "apollo_router_deduplicated_subscriptions_total",
-            "Total deduplicated subscription requests (deprecated)",
-            1,
-            mode = "passthrough"
-        );
 
         // Dedup happens here
         return Ok(SubgraphResponse::builder()

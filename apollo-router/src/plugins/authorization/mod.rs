@@ -556,12 +556,6 @@ impl Plugin for AuthorizationPlugin {
                     {
                         Ok(ControlFlow::Continue(request))
                     } else {
-                        // This is a metric and will not appear in the logs
-                        u64_counter!(
-                            "apollo_require_authentication_failure_count",
-                            "Number of unauthenticated requests (deprecated)",
-                            1
-                        );
                         tracing::error!("rejecting unauthenticated request");
                         let response = supergraph::Response::error_builder()
                             .error(
