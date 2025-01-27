@@ -93,6 +93,14 @@ where
     Ok(UNIX_EPOCH + Duration::from_secs(seconds as u64))
 }
 
+fn deserialize_instant<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let seconds = i32::deserialize(deserializer)?;
+    Ok(Duration::from_millis(seconds as u64))
+}
+
 #[derive(Debug)]
 pub(crate) struct LicenseEnforcementReport {
     restricted_config_in_use: Vec<ConfigurationRestriction>,
@@ -609,7 +617,8 @@ pub struct License {
 #[derive(Builder, Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct TpsLimit {
     pub(crate) capacity: usize,
-    #[serde(rename = "durationMs")]
+
+    #[serde(deserialize_with = "deserialize_instant", rename = "durationMs")]
     pub(crate) interval: Duration,
 }
 
@@ -808,6 +817,7 @@ mod test {
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
+    use crate::uplink::license_enforcement::TpsLimit;
     use crate::Configuration;
 
     #[track_caller]
