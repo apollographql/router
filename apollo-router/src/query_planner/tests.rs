@@ -76,10 +76,7 @@ fn service_usage() {
 ///
 /// The query planner reports the failed subgraph fetch as an error with a reason of "service
 /// closed", which is what this test expects.
-// NOTE: I'm not really sure that this test is needed now that we are fixing back-pressure.
-// EVALUATE BEFORE MERGING
 #[tokio::test]
-// #[should_panic(expected = "this panic should be propagated to the test harness")]
 async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
@@ -95,9 +92,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    // mock_products_service.expect_call().times(1).withf(|_| {
-    // panic!("this panic should be propagated to the test harness");
-    // });
+    // This clone happens in the `MakeSubgraphService` impl for MockSubgraphService.
     mock_products_service.expect_clone().return_once(|| {
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
