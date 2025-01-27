@@ -26,8 +26,6 @@ struct BodyLimitControlInner {
 /// This structure allows the body limit to be updated dynamically.
 /// It also allows the error message to be updated
 ///
-// XXX(@goto-bus-stop): The dynamic updating seems to be used only in one place, and I'm not sure
-// why it is. But I doubt that it would be the only way to solve whatever it's doing.
 #[derive(Clone)]
 pub(crate) struct BodyLimitControl {
     inner: Arc<BodyLimitControlInner>,

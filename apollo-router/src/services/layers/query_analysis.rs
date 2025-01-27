@@ -139,7 +139,6 @@ impl QueryAnalysisLayer {
                 .message("Must provide query string.".to_string())
                 .extension_code("MISSING_QUERY_STRING")
                 .build()];
-
             return Err(SupergraphResponse::builder()
                 .errors(errors)
                 .status_code(StatusCode::BAD_REQUEST)

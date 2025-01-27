@@ -42,7 +42,6 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
 use crate::layers::ServiceBuilderExt;
@@ -402,11 +401,6 @@ impl RouterService {
                         1,
                         code = "INVALID_ACCEPT_HEADER"
                     );
-                    // Useful for selector in spans/instruments/events
-                    context.insert_json_value(
-                        CONTAINS_GRAPHQL_ERROR,
-                        serde_json_bytes::Value::Bool(true),
-                    );
 
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
@@ -446,10 +440,6 @@ impl RouterService {
         {
             Ok(requests) => requests,
             Err(err) => {
-                // Useful for selector in spans/instruments/events
-                context
-                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
-
                 return router::Response::error_builder()
                     .error(
                         graphql::Error::builder()
