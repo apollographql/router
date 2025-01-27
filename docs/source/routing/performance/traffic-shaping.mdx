@@ -17,7 +17,7 @@ traffic_shaping:
       capacity: 10
       interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
-    concurrency: 100 # The router is limited to processing 100 concurrent requests. Excess requests must be rejected.
+    concurrency_limit: 100 # The router is limited to processing 100 concurrent requests. Excess requests must be rejected.
   all:
     deduplicate_query: true # Enable query deduplication for all subgraphs.
     compression: br # Enable brotli compression for all subgraphs.
@@ -93,7 +93,7 @@ By default, the router does not enforce a concurrency limit. To enforce a limit,
 ```yaml title="router.yaml"
 traffic_shaping:
   router:
-    concurrency: 100 # The router is limited to processing 100 concurrent requests. Excess requests must be rejected.
+    concurrency_limit: 100 # The router is limited to processing 100 concurrent requests. Excess requests must be rejected.
 ```
 
 <Note>
