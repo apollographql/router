@@ -77,6 +77,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
+                .with(WarnLegacyMetricsLayer)
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 
@@ -162,5 +163,35 @@ where
                 trace_id.clone()
             }
         })
+    }
+}
+
+const LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
+const LEGACY_METRIC_PREFIX_COUNTER: &str = "counter.";
+const LEGACY_METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
+const LEGACY_METRIC_PREFIX_VALUE: &str = "value.";
+
+/// Detects use of the 1.x `tracing`-based metrics events, which are no longer supported in 2.x.
+struct WarnLegacyMetricsLayer;
+
+impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if let Some(field) = event.fields().find(|field| {
+            field
+                .name()
+                .starts_with(LEGACY_METRIC_PREFIX_MONOTONIC_COUNTER)
+                || field.name().starts_with(LEGACY_METRIC_PREFIX_COUNTER)
+                || field.name().starts_with(LEGACY_METRIC_PREFIX_HISTOGRAM)
+                || field.name().starts_with(LEGACY_METRIC_PREFIX_VALUE)
+        }) {
+            tracing::error!(
+                metric_name = field.name(),
+                "Detected unsupported legacy metrics reporting, remove or migrate to opentelemetry"
+            );
+        }
     }
 }
