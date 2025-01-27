@@ -7,8 +7,9 @@ To protect against abusive requests Router now refuses to execute introspection 
 In case it rejects legitimate queries, this check can be disabled in Router configuration:
 
 ```yaml
+# Do not enable introspection in production!
 supergraph:
-  introspection: true  # Needed to enable schema introspection in the first place
+  introspection: true  # Without this, schema introspection is entirely disabled by default
 limits:
   introspection_max_depth: false  # Defaults to true
 ```
