@@ -401,9 +401,7 @@ pub(crate) mod test {
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert(query));
+        context.extensions().with_lock(|lock| lock.insert(query));
 
         context
     }
