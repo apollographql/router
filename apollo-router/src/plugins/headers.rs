@@ -374,7 +374,7 @@ impl<S> HeadersService<S> {
                                     }
                                     Err(err) => {
                                         let header_name = &from_body.name;
-                                        tracing::error!(?header_name, ?err, "cannot convert from the body into a header value for header name");
+                                        tracing::error!(%header_name, ?err, "cannot convert from the body into a header value for header name");
                                     }
                                 }
                             }
