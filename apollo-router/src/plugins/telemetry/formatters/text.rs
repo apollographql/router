@@ -390,11 +390,17 @@ where
                 Some(attrs) => Some(attrs),
                 None => {
                     let event_attributes = extensions.get_mut::<EventAttributes>();
-                    event_attributes.map(|event_attributes| event_attributes.take())
+                    event_attributes.map(|event_attributes| {
+                        event_attributes
+                            .take()
+                            .into_iter()
+                            .map(|KeyValue { key, value }| (key, value))
+                            .collect()
+                    })
                 }
             };
             if let Some(event_attributes) = event_attributes {
-                for KeyValue { key, value } in event_attributes {
+                for (key, value) in event_attributes {
                     default_visitor.log_debug_attrs(key.as_str(), &value);
                 }
             }
