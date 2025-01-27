@@ -54,6 +54,7 @@ use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
@@ -82,7 +83,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
-pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo_router::supergraph::first_event";
+pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -559,7 +560,14 @@ async fn subscription_task(
                 // If the configuration was dropped in the meantime, we ignore this update and will
                 // pick up the next one.
                 if let Some(conf) = new_configuration.upgrade() {
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, execution_service_factory.subgraph_schemas.clone(), None, None).await {
+                    let subgraph_schemas = Arc::new(
+                        execution_service_factory
+                            .subgraph_schemas
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.schema.clone()))
+                            .collect(),
+                    );
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None).await {
                         Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -601,11 +609,14 @@ async fn subscription_task(
                                     Arc::new(ConnectorServiceFactory::new(
                                         execution_service_factory.schema.clone(),
                                         execution_service_factory.subgraph_schemas.clone(),
-                                        Arc::new(http_service_factory),
                                         subscription_plugin_conf,
                                         execution_service_factory.schema
                                             .connectors.as_ref().map(|c| c.by_service_name.clone())
                                             .unwrap_or_default(),
+                                        Arc::new(ConnectorRequestServiceFactory::new(
+                                            Arc::new(http_service_factory),
+                                            execution_service_factory.plugins.clone(),
+                                        )),
                                     )),
                                  ),
 
@@ -890,13 +901,16 @@ impl PluggableSupergraphServiceBuilder {
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
                 subgraph_schemas,
-                Arc::new(self.http_service_factory),
                 subscription_plugin_conf,
                 schema
                     .connectors
                     .as_ref()
                     .map(|c| c.by_service_name.clone())
                     .unwrap_or_default(),
+                Arc::new(ConnectorRequestServiceFactory::new(
+                    Arc::new(self.http_service_factory),
+                    self.plugins.clone(),
+                )),
             )),
         ));
 

@@ -160,13 +160,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .get("telemetry")
                     .cloned();
                 if let Some(plugin_config) = &mut telemetry_config {
-                    inject_schema_id(Some(&schema.schema_id), plugin_config);
+                    inject_schema_id(schema.schema_id.as_str(), plugin_config);
                     match factory
                         .create_instance(
                             PluginInit::builder()
                                 .config(plugin_config.clone())
                                 .supergraph_sdl(schema.raw_sdl.clone())
-                                .supergraph_schema_id(schema.schema_id.clone())
+                                .supergraph_schema_id(schema.schema_id.clone().into_inner())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
@@ -311,11 +311,19 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
+
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                planner.subgraph_schemas(),
+                subgraph_schemas,
                 initial_telemetry_plugin,
                 extra_plugins,
             )
@@ -547,7 +555,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
-    let supergraph_schema_id = schema.schema_id.clone();
+    let supergraph_schema_id = schema.schema_id.clone().into_inner();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -604,10 +612,7 @@ pub(crate) async fn create_plugins(
                         // give it some. If any of the other mandatory plugins need special
                         // treatment, then we'll have to perform it here.
                         // This is *required* by the telemetry module or it will fail...
-                        inject_schema_id(
-                            Some(&Schema::schema_id(&schema.raw_sdl)),
-                            &mut plugin_config,
-                        );
+                        inject_schema_id(&supergraph_schema_id, &mut plugin_config);
                     }
                     add_plugin!(name.to_string(), factory, plugin_config);
                 }
@@ -728,7 +733,11 @@ pub(crate) async fn create_plugins(
     }
 }
 
-fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
+fn inject_schema_id(
+    // Ideally we'd use &SchemaHash, but we'll need to update a bunch of tests to do so
+    schema_id: &str,
+    configuration: &mut Value,
+) {
     if configuration.get("apollo").is_none() {
         // Warning: this must be done here, otherwise studio reporting will not work
         if apollo_key().is_some() && apollo_graph_reference().is_some() {
@@ -739,7 +748,7 @@ fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
             return;
         }
     }
-    if let (Some(schema_id), Some(apollo)) = (schema_id, configuration.get_mut("apollo")) {
+    if let Some(apollo) = configuration.get_mut("apollo") {
         if let Some(apollo) = apollo.as_object_mut() {
             apollo.insert(
                 "schema_id".to_string(),
@@ -884,7 +893,7 @@ mod test {
     fn test_inject_schema_id() {
         let mut config = json!({ "apollo": {} });
         inject_schema_id(
-            Some("8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"),
+            "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8",
             &mut config,
         );
         let config =

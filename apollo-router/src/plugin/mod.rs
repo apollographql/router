@@ -45,7 +45,6 @@ use tower::ServiceBuilder;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -75,7 +74,7 @@ pub struct PluginInit<T> {
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
@@ -96,7 +95,7 @@ where
                 Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                     .expect("failed to parse supergraph schema"),
             ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -120,7 +119,7 @@ where
                         BoxError::from(e.errors.to_string())
                     })?,
             ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -137,7 +136,7 @@ where
 
         PluginInit::fake_builder()
             .config(config)
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
@@ -176,7 +175,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
@@ -201,7 +200,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
@@ -224,7 +223,7 @@ where
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
@@ -626,6 +625,14 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -736,6 +743,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService;
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -782,6 +795,13 @@ where
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         self.http_client_service(name, service)
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.connector_request_service(service)
     }
 
     fn name(&self) -> &'static str {

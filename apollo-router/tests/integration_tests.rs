@@ -1039,7 +1039,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -1065,7 +1065,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -1085,7 +1085,7 @@ async fn query_operation_id() {
         // "## GraphQLParseFailure\n"
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .is_none()
     );
@@ -1109,7 +1109,7 @@ async fn query_operation_id() {
     // "## GraphQLUnknownOperationName\n"
     assert!(response
         .context
-        .get::<_, String>("apollo_operation_id".to_string())
+        .get::<_, String>("apollo::supergraph::operation_id")
         .unwrap()
         .is_none());
 
@@ -1132,7 +1132,7 @@ async fn query_operation_id() {
     // "## GraphQLValidationFailure\n"
     assert!(response
         .context
-        .get::<_, String>("apollo_operation_id".to_string())
+        .get::<_, String>("apollo::supergraph::operation_id")
         .unwrap()
         .is_none());
 }
