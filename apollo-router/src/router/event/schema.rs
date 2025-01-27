@@ -80,7 +80,6 @@ impl SchemaSource {
                     })
                 })
                 .boxed(),
-            #[allow(deprecated)]
             SchemaSource::File {
                 path,
                 watch,
