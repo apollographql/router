@@ -108,7 +108,7 @@ register_private_plugin!("apollo", "router_limits", RouterLimits);
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::metrics::FutureMetricsExt;
+    //use crate::metrics::FutureMetricsExt;
     use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
