@@ -3,9 +3,19 @@ use std::future::Future;
 #[cfg(test)]
 use std::pin::Pin;
 use std::sync::OnceLock;
+#[cfg(test)]
+use std::task::Context;
+#[cfg(test)]
+use std::task::Poll;
 
 #[cfg(test)]
 use futures::FutureExt;
+#[cfg(test)]
+use test_utils::ClonableManualReader;
+#[cfg(test)]
+use tokio::task::futures::TaskLocalFuture;
+#[cfg(test)]
+use tokio::task::JoinHandle;
 
 use crate::metrics::aggregation::AggregateMeterProvider;
 
@@ -1192,32 +1202,75 @@ macro_rules! assert_non_zero_metrics_snapshot {
     };
 }
 
+// The reason that this has to exist is because the UnsyncBody does not allow boxing of futures
+// because it will require Send. This manual future prevents the need for send of the original future.
 #[cfg(test)]
-pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output> + Send>>;
+pin_project_lite::pin_project! {
+    pub(crate) struct MetricFuture<T>
+    where
+        T: Future,
+    {
+        #[pin]
+        inner: T,
+        result: Option<T::Output>,
+        shutdown: Option<JoinHandle<()>>,
+    }
+}
+
+#[cfg(test)]
+impl<T> Future for MetricFuture<T>
+where
+    T: Future,
+{
+    type Output = T::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        // If we haven't gotten the result yet, poll the inner future.
+        if this.result.is_none() {
+            match this.inner.poll(cx) {
+                Poll::Ready(result) => {
+                    // We got a result, start shutting down the meter provider.
+                    *this.result = Some(result);
+                    *this.shutdown = Some(tokio::task::spawn_blocking(|| {
+                        crate::metrics::meter_provider().shutdown();
+                    }));
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+        // We got the result, now we wait for the shutdown to complete.
+        match this
+            .shutdown
+            .as_mut()
+            .expect("shutdown should be set")
+            .poll_unpin(cx)
+        {
+            Poll::Ready(_) => {
+                // Metrics have shut down. We can return the result now
+                Poll::Ready(this.result.take().expect("result should be set"))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
 
 #[cfg(test)]
 pub(crate) trait FutureMetricsExt<T> {
     fn with_metrics(
         self,
-    ) -> tokio::task::futures::TaskLocalFuture<
-        OnceLock<(AggregateMeterProvider, test_utils::ClonableManualReader)>,
-        MetricFuture<Self>,
-    >
+    ) -> TaskLocalFuture<OnceLock<(AggregateMeterProvider, ClonableManualReader)>, MetricFuture<Self>>
     where
-        Self: Sized + Future + Send + 'static,
+        Self: Sized + Future + 'static,
         <Self as Future>::Output: Send + 'static,
     {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
-            async move {
-                let result = self.await;
-                let _ = tokio::task::spawn_blocking(|| {
-                    meter_provider().shutdown();
-                })
-                .await;
-                result
-            }
-            .boxed(),
+            MetricFuture {
+                inner: self,
+                result: None,
+                shutdown: None,
+            },
         )
     }
 }
