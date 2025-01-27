@@ -17,10 +17,8 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedHashMap;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
@@ -29,8 +27,10 @@ use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::Resource;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
@@ -95,6 +95,14 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_RETURN_TYPE;
+use crate::services::connector_service::APOLLO_CONNECTOR_SELECTION;
+use crate::services::connector_service::APOLLO_CONNECTOR_SOURCE_DETAIL;
+use crate::services::connector_service::APOLLO_CONNECTOR_SOURCE_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_TYPE;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -150,16 +158,24 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
     CONDITION,
     OPERATION_NAME,
     OPERATION_TYPE,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
+    Key::from_static_str(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD),
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
-    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
-    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
+    Key::from_static_str(opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE),
+    Key::from_static_str(opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE),
+    Key::from_static_str(opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE),
+    APOLLO_CONNECTOR_TYPE,
+    APOLLO_CONNECTOR_DETAIL,
+    APOLLO_CONNECTOR_SELECTION,
+    APOLLO_CONNECTOR_FIELD_NAME,
+    APOLLO_CONNECTOR_FIELD_ALIAS,
+    APOLLO_CONNECTOR_FIELD_RETURN_TYPE,
+    APOLLO_CONNECTOR_SOURCE_NAME,
+    APOLLO_CONNECTOR_SOURCE_DETAIL,
 ];
 
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
@@ -208,8 +224,9 @@ pub(crate) struct LightSpanData {
     pub(crate) name: Cow<'static, str>,
     pub(crate) start_time: SystemTime,
     pub(crate) end_time: SystemTime,
-    pub(crate) attributes: EvictedHashMap,
+    pub(crate) attributes: HashMap<Key, Value>,
     pub(crate) status: Status,
+    pub(crate) droppped_attribute_count: u32,
 }
 
 impl LightSpanData {
@@ -217,23 +234,22 @@ impl LightSpanData {
     /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
     fn from_span_data(value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
         let filtered_attributes = match include_attr_names {
-            None => value.attributes,
-            Some(attr_names) => {
-                // Looks like this transformation will be easier after upgrading opentelemetry_sdk >= 0.21
-                // when attributes are stored as Vec<KeyValue>.
-                // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
-                let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
-                let mut new_attrs = EvictedHashMap::new(
-                    max_attr_len.try_into().expect("expected usize -> u32"),
-                    max_attr_len,
-                );
-                value.attributes.into_iter().for_each(|(key, value)| {
-                    if attr_names.contains(&key) {
-                        new_attrs.insert(KeyValue::new(key, value))
+            None => value
+                .attributes
+                .into_iter()
+                .map(|KeyValue { key, value }| (key, value))
+                .collect(),
+            Some(attr_names) => value
+                .attributes
+                .into_iter()
+                .filter_map(|kv| {
+                    if attr_names.contains(&kv.key) {
+                        Some((kv.key, kv.value))
+                    } else {
+                        None
                     }
-                });
-                new_attrs
-            }
+                })
+                .collect(),
         };
         Self {
             trace_id: value.span_context.trace_id(),
@@ -245,6 +261,7 @@ impl LightSpanData {
             end_time: value.end_time,
             attributes: filtered_attributes,
             status: value.status,
+            droppped_attribute_count: value.dropped_attributes_count,
         }
     }
 }
@@ -694,7 +711,7 @@ impl Exporter {
                         .collect()
                 }
             }
-            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
+            _ if span.attributes.contains_key(&APOLLO_PRIVATE_REQUEST) => {
                 if !self.use_legacy_request_span {
                     child_nodes.push(TreeData::Router {
                         http: Box::new(extract_http_data(span)),
@@ -1018,7 +1035,7 @@ pub(crate) fn encode_ftv1_trace(trace: &proto::reports::Trace) -> String {
 fn extract_http_data(span: &LightSpanData) -> Http {
     let method = match span
         .attributes
-        .get(&opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
+        .get(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
         .map(|data| data.as_str())
         .unwrap_or_default()
         .as_ref()
@@ -1075,8 +1092,11 @@ impl SpanExporter for Exporter {
         let send_reports = self.report_exporter.is_some() && !send_otlp;
 
         for span in batch {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
-                || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+            if span.name == SUBSCRIPTION_EVENT_SPAN_NAME
+                || span
+                    .attributes
+                    .iter()
+                    .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
             {
                 let root_span: LightSpanData =
                     LightSpanData::from_span_data(span, &self.include_attr_names);
@@ -1178,6 +1198,12 @@ impl SpanExporter for Exporter {
             exporter.shutdown()
         };
     }
+
+    fn set_resource(&mut self, resource: &Resource) {
+        if let Some(exporter) = &self.otlp_exporter {
+            exporter.set_resource(resource);
+        }
+    }
 }
 
 trait ChildNodes {
@@ -1269,11 +1295,10 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
     use std::time::SystemTime;
     use opentelemetry::Value;
-    use opentelemetry_api::KeyValue;
-    use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
-    use opentelemetry_sdk::trace::EvictedHashMap;
+    use opentelemetry::trace::{SpanId, SpanKind, TraceId};
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
@@ -1632,40 +1657,29 @@ mod test {
             name: Default::default(),
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
-            attributes: EvictedHashMap::new(10, 10),
+            attributes: HashMap::with_capacity(10),
             status: Default::default(),
+            droppped_attribute_count: 0,
         };
 
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_COST_RESULT,
-            Value::String("OK".into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_COST_ESTIMATED,
-            Value::F64(9.2),
-        ));
         span.attributes
-            .insert(KeyValue::new(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9)));
-        span.attributes.insert(KeyValue::new(
+            .insert(APOLLO_PRIVATE_COST_RESULT, Value::String("OK".into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_COST_ESTIMATED, Value::F64(9.2));
+        span.attributes
+            .insert(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9));
+        span.attributes.insert(
             APOLLO_PRIVATE_COST_STRATEGY,
             Value::String("static_estimated".into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_ALIASES,
-            Value::I64(0.into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_DEPTH,
-            Value::I64(5.into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_HEIGHT,
-            Value::I64(7.into()),
-        ));
-        span.attributes.insert(KeyValue::new(
-            APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
-            Value::I64(1.into()),
-        ));
+        );
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_ALIASES, Value::I64(0.into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_DEPTH, Value::I64(5.into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_HEIGHT, Value::I64(7.into()));
+        span.attributes
+            .insert(APOLLO_PRIVATE_QUERY_ROOT_FIELDS, Value::I64(1.into()));
         let limits = extract_limits(&span);
         assert_eq!(limits.result, "OK");
         assert_eq!(limits.cost_estimated, 9);

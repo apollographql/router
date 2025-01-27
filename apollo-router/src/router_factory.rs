@@ -7,12 +7,12 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
@@ -40,7 +40,6 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
-use crate::services::transport;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -71,29 +70,15 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
-    #[deprecated = "use `from_router_service` instead"]
-    #[allow(deprecated)]
-    pub fn new(path: String, handler: transport::BoxService) -> Self {
-        let router_service = ServiceBuilder::new()
-            .map_request(|request: router::Request| request.router_request)
-            .map_response(|response: transport::Response| response.into())
-            .service(handler)
-            .boxed();
-        Self {
-            path,
-            handler: Handler::new(router_service),
-        }
-    }
-
-    /// Creates an Endpoint given a path and a Boxed Service
     pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
             handler: Handler::new(handler),
         }
     }
+
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<crate::services::router::Body>| {
+        let handler = move |req: http::Request<axum::body::Body>| {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
@@ -175,13 +160,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                     .get("telemetry")
                     .cloned();
                 if let Some(plugin_config) = &mut telemetry_config {
-                    inject_schema_id(Some(&schema.schema_id), plugin_config);
+                    inject_schema_id(schema.schema_id.as_str(), plugin_config);
                     match factory
                         .create_instance(
                             PluginInit::builder()
                                 .config(plugin_config.clone())
                                 .supergraph_sdl(schema.raw_sdl.clone())
-                                .supergraph_schema_id(schema.schema_id.clone())
+                                .supergraph_schema_id(schema.schema_id.clone().into_inner())
                                 .supergraph_schema(Arc::new(schema.supergraph_schema().clone()))
                                 .notify(configuration.notify.clone())
                                 .build(),
@@ -326,11 +311,19 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
+
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
                 &schema,
-                planner.subgraph_schemas(),
+                subgraph_schemas,
                 initial_telemetry_plugin,
                 extra_plugins,
             )
@@ -343,8 +336,11 @@ impl YamlRouterFactory {
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(planner);
             builder = builder.with_configuration(configuration.clone());
+            let http_service_factory =
+                create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&plugins, &schema, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+            builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = builder.with_subgraph_service(&name, subgraph_service);
             }
@@ -360,8 +356,8 @@ impl YamlRouterFactory {
 }
 
 pub(crate) async fn create_subgraph_services(
+    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
     plugins: &Arc<Plugins>,
-    schema: &Schema,
     configuration: &Configuration,
 ) -> Result<
     IndexMap<
@@ -380,14 +376,6 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
-    let tls_root_store: RootCertStore = configuration
-        .tls
-        .subgraph
-        .all
-        .create_certificate_store()
-        .transpose()?
-        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
-
     let subscription_plugin_conf = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
@@ -401,6 +389,42 @@ pub(crate) async fn create_subgraph_services(
         .expect("traffic shaping should always be part of the plugin list");
 
     let mut subgraph_services = IndexMap::default();
+    for (name, http_service_factory) in http_service_factory.iter() {
+        let subgraph_service = shaping.subgraph_service_internal(
+            name.as_ref(),
+            SubgraphService::from_config(
+                name.clone(),
+                configuration,
+                subscription_plugin_conf.clone(),
+                http_service_factory.clone(),
+            )?,
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
+}
+
+pub(crate) async fn create_http_services(
+    plugins: &Arc<Plugins>,
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
+    let tls_root_store: RootCertStore = configuration
+        .tls
+        .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
+
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -410,20 +434,9 @@ pub(crate) async fn create_subgraph_services(
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
-
-        let subgraph_service = shaping.subgraph_service_internal(
-            name,
-            SubgraphService::from_config(
-                name,
-                configuration,
-                subscription_plugin_conf.clone(),
-                http_service_factory,
-            )?,
-        );
-        subgraph_services.insert(name.clone(), subgraph_service);
+        http_services.insert(name.clone(), http_service_factory);
     }
-
-    Ok(subgraph_services)
+    Ok(http_services)
 }
 
 impl TlsClient {
@@ -447,7 +460,7 @@ pub(crate) fn create_certificate_store(
     })?;
     for certificate in certificates {
         store
-            .add(&certificate)
+            .add(certificate)
             .map_err(|e| ConfigurationError::CertificateAuthorities {
                 error: format!("could not add certificate to root store: {e}"),
             })?;
@@ -461,17 +474,20 @@ pub(crate) fn create_certificate_store(
     }
 }
 
-fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+fn load_certs(certificates: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "failed to load certificate".to_string(),
-        )
-    })?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+    rustls_pemfile::certs(&mut certificates.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        // XXX(@goto-bus-stop): the error type here is already io::Error. Should we wrap it,
+        // instead of replacing it with this generic error message?
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::Other,
+                "failed to load certificate".to_string(),
+            )
+        })
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -539,7 +555,7 @@ pub(crate) async fn create_plugins(
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Plugins, BoxError> {
     let supergraph_schema = Arc::new(schema.supergraph_schema().clone());
-    let supergraph_schema_id = schema.schema_id.clone();
+    let supergraph_schema_id = schema.schema_id.clone().into_inner();
     let mut apollo_plugins_config = configuration.apollo_plugins.clone().plugins;
     let user_plugins_config = configuration.plugins.clone().plugins.unwrap_or_default();
     let extra = extra_plugins.unwrap_or_default();
@@ -596,10 +612,7 @@ pub(crate) async fn create_plugins(
                         // give it some. If any of the other mandatory plugins need special
                         // treatment, then we'll have to perform it here.
                         // This is *required* by the telemetry module or it will fail...
-                        inject_schema_id(
-                            Some(&Schema::schema_id(&schema.raw_sdl)),
-                            &mut plugin_config,
-                        );
+                        inject_schema_id(&supergraph_schema_id, &mut plugin_config);
                     }
                     add_plugin!(name.to_string(), factory, plugin_config);
                 }
@@ -679,6 +692,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
+    add_optional_apollo_plugin!("preview_connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
@@ -719,7 +733,11 @@ pub(crate) async fn create_plugins(
     }
 }
 
-fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
+fn inject_schema_id(
+    // Ideally we'd use &SchemaHash, but we'll need to update a bunch of tests to do so
+    schema_id: &str,
+    configuration: &mut Value,
+) {
     if configuration.get("apollo").is_none() {
         // Warning: this must be done here, otherwise studio reporting will not work
         if apollo_key().is_some() && apollo_graph_reference().is_some() {
@@ -730,7 +748,7 @@ fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
             return;
         }
     }
-    if let (Some(schema_id), Some(apollo)) = (schema_id, configuration.get_mut("apollo")) {
+    if let Some(apollo) = configuration.get_mut("apollo") {
         if let Some(apollo) = apollo.as_object_mut() {
             apollo.insert(
                 "schema_id".to_string(),
@@ -875,7 +893,7 @@ mod test {
     fn test_inject_schema_id() {
         let mut config = json!({ "apollo": {} });
         inject_schema_id(
-            Some("8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"),
+            "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8",
             &mut config,
         );
         let config =

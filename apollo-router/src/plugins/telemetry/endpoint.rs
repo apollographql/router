@@ -124,12 +124,6 @@ pub(crate) struct SocketEndpoint {
     socket: Option<SocketAddr>,
 }
 
-impl SocketEndpoint {
-    pub(crate) fn to_socket(&self) -> Option<SocketAddr> {
-        self.socket
-    }
-}
-
 impl<'de> Deserialize<'de> for SocketEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
@@ -193,6 +187,12 @@ mod test {
 
     use crate::plugins::telemetry::endpoint::SocketEndpoint;
     use crate::plugins::telemetry::endpoint::UriEndpoint;
+
+    impl SocketEndpoint {
+        fn to_socket(&self) -> Option<SocketAddr> {
+            self.socket
+        }
+    }
 
     #[test]
     fn test_parse_uri_default() {

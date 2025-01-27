@@ -97,16 +97,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "AgentConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "endpoint": {
-          "$ref": "#/definitions/SocketEndpoint",
-          "description": "#/definitions/SocketEndpoint"
-        }
-      },
-      "type": "object"
-    },
     "All": {
       "enum": [
         "all"
@@ -255,41 +245,6 @@ expression: "&schema"
         }
       ]
     },
-    "AttributesForwardConf": {
-      "additionalProperties": false,
-      "description": "Configuration to add custom attributes/labels on metrics to subgraphs",
-      "properties": {
-        "context": {
-          "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/ContextForward",
-            "description": "#/definitions/ContextForward"
-          },
-          "type": "array"
-        },
-        "errors": {
-          "$ref": "#/definitions/ErrorsForward",
-          "description": "#/definitions/ErrorsForward"
-        },
-        "request": {
-          "$ref": "#/definitions/Forward",
-          "description": "#/definitions/Forward"
-        },
-        "response": {
-          "$ref": "#/definitions/Forward",
-          "description": "#/definitions/Forward"
-        },
-        "static": {
-          "description": "Configuration to insert custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/Insert2",
-            "description": "#/definitions/Insert2"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
     "AuthConfig": {
       "oneOf": [
         {
@@ -384,30 +339,6 @@ expression: "&schema"
           "type": "string"
         }
       ]
-    },
-    "BodyForward": {
-      "additionalProperties": false,
-      "description": "Configuration to forward body values in metric attributes/labels",
-      "properties": {
-        "default": {
-          "$ref": "#/definitions/AttributeValue",
-          "description": "#/definitions/AttributeValue",
-          "nullable": true
-        },
-        "name": {
-          "description": "The name of the attribute",
-          "type": "string"
-        },
-        "path": {
-          "description": "The path in the body",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "path"
-      ],
-      "type": "object"
     },
     "CSRFConfig": {
       "additionalProperties": false,
@@ -543,28 +474,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "CollectorConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "password": {
-          "default": null,
-          "description": "The optional password",
-          "nullable": true,
-          "type": "string"
-        },
-        "username": {
-          "default": null,
-          "description": "The optional username",
-          "nullable": true,
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "CommonBatchingConfig": {
       "description": "Common options for configuring subgraph batching",
       "properties": {
@@ -605,6 +514,143 @@ expression: "&schema"
           "description": "identity",
           "enum": [
             "identity"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Condition_for_ConnectorSelector": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_ConnectorSelector",
+                "description": "#/definitions/SelectorOrValue_for_ConnectorSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/ConnectorSelector",
+              "description": "#/definitions/ConnectorSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_ConnectorSelector",
+                "description": "#/definitions/Condition_for_ConnectorSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_ConnectorSelector",
+                "description": "#/definitions/Condition_for_ConnectorSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Static true condition",
+          "enum": [
+            "true"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Static false condition",
+          "enum": [
+            "false"
           ],
           "type": "string"
         }
@@ -1175,6 +1221,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Authentication",
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/ConnectorConfiguration_for_AuthConfig",
+          "description": "#/definitions/ConnectorConfiguration_for_AuthConfig",
+          "nullable": true
+        },
         "router": {
           "$ref": "#/definitions/RouterConf",
           "description": "#/definitions/RouterConf",
@@ -1435,52 +1486,6 @@ expression: "&schema"
       "type": "object"
     },
     "Config12": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "agent": {
-              "$ref": "#/definitions/AgentConfig",
-              "description": "#/definitions/AgentConfig"
-            },
-            "batch_processor": {
-              "$ref": "#/definitions/BatchProcessorConfig",
-              "description": "#/definitions/BatchProcessorConfig"
-            },
-            "enabled": {
-              "description": "Enable Jaeger",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "batch_processor": {
-              "$ref": "#/definitions/BatchProcessorConfig",
-              "description": "#/definitions/BatchProcessorConfig"
-            },
-            "collector": {
-              "$ref": "#/definitions/CollectorConfig",
-              "description": "#/definitions/CollectorConfig"
-            },
-            "enabled": {
-              "description": "Enable Jaeger",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1501,7 +1506,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1539,6 +1544,8 @@ expression: "&schema"
             "type": "boolean"
           },
           "default": {
+            "connect": true,
+            "connect_request": true,
             "execution": true,
             "http_request": true,
             "parse_query": true,
@@ -1549,7 +1556,7 @@ expression: "&schema"
             "subgraph_request": true,
             "supergraph": true
           },
-          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.",
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
           "type": "object"
         }
       },
@@ -1558,7 +1565,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config15": {
+    "Config14": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1629,6 +1636,7 @@ expression: "&schema"
             "$ref": "#/definitions/AuthConfig",
             "description": "#/definitions/AuthConfig"
           },
+          "default": {},
           "description": "Create a configuration that will apply only to a specific subgraph.",
           "type": "object"
         }
@@ -1761,10 +1769,6 @@ expression: "&schema"
           "$ref": "#/definitions/Protocol",
           "description": "#/definitions/Protocol"
         },
-        "experimental_otlp_tracing_sampler": {
-          "$ref": "#/definitions/SamplerOption",
-          "description": "#/definitions/SamplerOption"
-        },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
           "description": "#/definitions/SamplerOption"
@@ -1772,6 +1776,10 @@ expression: "&schema"
         "metrics_reference_mode": {
           "$ref": "#/definitions/ApolloMetricsReferenceMode",
           "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
+        "otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
         },
         "send_headers": {
           "$ref": "#/definitions/ForwardHeaders",
@@ -1788,28 +1796,302 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ContextForward": {
+    "ConnectorAttributes": {
       "additionalProperties": false,
-      "description": "Configuration to forward context values in metric attributes/labels",
       "properties": {
-        "default": {
-          "$ref": "#/definitions/AttributeValue",
-          "description": "#/definitions/AttributeValue",
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
           "nullable": true
         },
-        "named": {
-          "description": "The name of the value in the context",
-          "type": "string"
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         },
-        "rename": {
-          "description": "The optional output name",
-          "nullable": true,
-          "type": "string"
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
         }
       },
-      "required": [
-        "named"
-      ],
+      "type": "object"
+    },
+    "ConnectorConfiguration_for_AuthConfig": {
+      "properties": {
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AuthConfig",
+            "description": "#/definitions/AuthConfig"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorEventsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorInstrumentsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "http.client.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "subgraph_name": {
+              "description": "The subgraph name",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_source": {
+              "$ref": "#/definitions/ConnectorSource",
+              "description": "#/definitions/ConnectorSource"
+            }
+          },
+          "required": [
+            "connector_source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_request_header": {
+              "description": "The name of a connector HTTP request header.",
+              "type": "string"
+            },
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "required": [
+            "connector_http_request_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_response_header": {
+              "description": "The name of a connector HTTP response header.",
+              "type": "string"
+            },
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          "required": [
+            "connector_http_response_header"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_response_status": {
+              "$ref": "#/definitions/ResponseStatus",
+              "description": "#/definitions/ResponseStatus"
+            }
+          },
+          "required": [
+            "connector_http_response_status"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_http_method": {
+              "description": "The connector HTTP method.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_http_method"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_url_template": {
+              "description": "The connector URL template.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "connector_url_template"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "static": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
+            }
+          },
+          "required": [
+            "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_request_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_request_mapping_problems"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_response_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_response_mapping_problems"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ConnectorSource": {
+      "oneOf": [
+        {
+          "description": "The name of the connector source.",
+          "enum": [
+            "name"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ConnectorSpans": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
+        }
+      ]
+    },
+    "ConnectorsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "debug_extensions": {
+          "default": false,
+          "description": "Enables connector debugging information on response extensions if the feature is enabled",
+          "type": "boolean"
+        },
+        "expose_sources_in_context": {
+          "default": false,
+          "description": "When enabled, adds an entry to the context for use in coprocessors ```json { \"context\": { \"entries\": { \"apollo_connectors::sources_in_query_plan\": [ { \"subgraph_name\": \"subgraph\", \"source_name\": \"source\" } ] } } } ```",
+          "type": "boolean"
+        },
+        "max_requests_per_operation_per_source": {
+          "default": null,
+          "description": "The maximum number of requests for a connector source",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphConnectorConfiguration",
+            "description": "#/definitions/SubgraphConnectorConfiguration"
+          },
+          "default": {},
+          "description": "A map of subgraph name to connectors config for that subgraph",
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "Cors": {
@@ -2083,6 +2365,29 @@ expression: "&schema"
         }
       ]
     },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
       "anyOf": [
         {
@@ -2303,26 +2608,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ErrorsForward": {
-      "additionalProperties": false,
-      "properties": {
-        "extensions": {
-          "description": "Forward extensions values as custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/BodyForward",
-            "description": "#/definitions/BodyForward"
-          },
-          "type": "array"
-        },
-        "include_messages": {
-          "default": null,
-          "description": "Will include the error message in a \"message\" attribute",
-          "nullable": true,
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "EventLevel": {
       "enum": [
         "info",
@@ -2364,6 +2649,37 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "Event_for_ConnectorAttributes_and_ConnectorSelector": {
+      "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
+        },
+        "level": {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        "message": {
+          "description": "The event message.",
+          "type": "string"
+        },
+        "on": {
+          "$ref": "#/definitions/EventOn",
+          "description": "#/definitions/EventOn"
+        }
+      },
+      "required": [
+        "level",
+        "message",
+        "on"
+      ],
+      "type": "object"
     },
     "Event_for_RouterAttributes_and_RouterSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
@@ -2494,6 +2810,10 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Events are",
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>"
+        },
         "router": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>"
@@ -2699,29 +3019,6 @@ expression: "&schema"
     "ForbidMutationsConfig": {
       "description": "Forbid mutations configuration",
       "type": "boolean"
-    },
-    "Forward": {
-      "additionalProperties": false,
-      "description": "Configuration to forward from headers/body",
-      "properties": {
-        "body": {
-          "description": "Forward body values as custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/BodyForward",
-            "description": "#/definitions/BodyForward"
-          },
-          "type": "array"
-        },
-        "header": {
-          "description": "Forward header values as custom attributes/labels in metrics",
-          "items": {
-            "$ref": "#/definitions/HeaderForward",
-            "description": "#/definitions/HeaderForward"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
     },
     "ForwardHeaders": {
       "description": "Forward headers",
@@ -3032,111 +3329,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "HeaderForward": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "description": "Match via header name",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "named": {
-              "description": "The name of the header",
-              "type": "string"
-            },
-            "rename": {
-              "description": "The optional output name",
-              "nullable": true,
-              "type": "string"
-            }
-          },
-          "required": [
-            "named"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Match via rgex",
-          "properties": {
-            "matching": {
-              "description": "Using a regex on the header name",
-              "type": "string"
-            }
-          },
-          "required": [
-            "matching"
-          ],
-          "type": "object"
-        }
-      ],
-      "description": "Configuration to forward header values in metric labels"
-    },
-    "HeaderLoggingCondition": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "description": "Match header value given a regex to display logs",
-          "properties": {
-            "body": {
-              "default": false,
-              "description": "Display request/response body (default: false)",
-              "type": "boolean"
-            },
-            "headers": {
-              "default": false,
-              "description": "Display request/response headers (default: false)",
-              "type": "boolean"
-            },
-            "match": {
-              "description": "Regex to match the header value",
-              "type": "string"
-            },
-            "name": {
-              "description": "Header name",
-              "type": "string"
-            }
-          },
-          "required": [
-            "match",
-            "name"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Match header value given a value to display logs",
-          "properties": {
-            "body": {
-              "default": false,
-              "description": "Display request/response body (default: false)",
-              "type": "boolean"
-            },
-            "headers": {
-              "default": false,
-              "description": "Display request/response headers (default: false)",
-              "type": "boolean"
-            },
-            "name": {
-              "description": "Header name",
-              "type": "string"
-            },
-            "value": {
-              "description": "Header value",
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "value"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "HeadersLocation": {
       "additionalProperties": false,
       "properties": {
@@ -3281,25 +3473,6 @@ expression: "&schema"
       ],
       "description": "Insert header"
     },
-    "Insert2": {
-      "additionalProperties": false,
-      "description": "Configuration to insert custom attributes/labels in metrics",
-      "properties": {
-        "name": {
-          "description": "The name of the attribute to insert",
-          "type": "string"
-        },
-        "value": {
-          "$ref": "#/definitions/AttributeValue",
-          "description": "#/definitions/AttributeValue"
-        }
-      },
-      "required": [
-        "name",
-        "value"
-      ],
-      "type": "object"
-    },
     "InsertFromBody": {
       "additionalProperties": false,
       "description": "Insert header with a value coming from body",
@@ -3406,6 +3579,42 @@ expression: "&schema"
         "value": {
           "$ref": "#/definitions/SubgraphValue",
           "description": "#/definitions/SubgraphValue"
+        }
+      },
+      "required": [
+        "description",
+        "type",
+        "unit",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
+        },
+        "description": {
+          "description": "The description of the instrument.",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/InstrumentType",
+          "description": "#/definitions/InstrumentType"
+        },
+        "unit": {
+          "description": "The units of the instrument, e.g. \"ms\", \"bytes\", \"requests\".",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/ConnectorValue",
+          "description": "#/definitions/ConnectorValue"
         }
       },
       "required": [
@@ -3586,6 +3795,10 @@ expression: "&schema"
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
         },
+        "connector": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>"
+        },
         "default_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
           "description": "#/definitions/DefaultAttributeRequirementLevel"
@@ -3756,14 +3969,6 @@ expression: "&schema"
           "$ref": "#/definitions/LoggingCommon",
           "description": "#/definitions/LoggingCommon"
         },
-        "experimental_when_header": {
-          "description": "Log configuration to log request and response for subgraphs and supergraph Note that this will be removed when events are implemented.",
-          "items": {
-            "$ref": "#/definitions/HeaderLoggingCondition",
-            "description": "#/definitions/HeaderLoggingCondition"
-          },
-          "type": "array"
-        },
         "stdout": {
           "$ref": "#/definitions/StdOut",
           "description": "#/definitions/StdOut"
@@ -3797,6 +4002,13 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "MappingProblems": {
+      "enum": [
+        "problems",
+        "count"
+      ],
+      "type": "string"
     },
     "MetricAggregation": {
       "oneOf": [
@@ -3913,28 +4125,9 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "MetricsAttributesConf": {
-      "additionalProperties": false,
-      "description": "Configuration to add custom attributes/labels on metrics",
-      "properties": {
-        "subgraph": {
-          "$ref": "#/definitions/SubgraphAttributesConf",
-          "description": "#/definitions/SubgraphAttributesConf"
-        },
-        "supergraph": {
-          "$ref": "#/definitions/AttributesForwardConf",
-          "description": "#/definitions/AttributesForwardConf"
-        }
-      },
-      "type": "object"
-    },
     "MetricsCommon": {
       "additionalProperties": false,
       "properties": {
-        "attributes": {
-          "$ref": "#/definitions/MetricsAttributesConf",
-          "description": "#/definitions/MetricsAttributesConf"
-        },
         "buckets": {
           "default": [
             0.001,
@@ -4048,6 +4241,10 @@ expression: "&schema"
           "type": "string"
         }
       ]
+    },
+    "MyTestPluginConfig": {
+      "description": "Config for the test plugin",
+      "type": "object"
     },
     "Operation": {
       "oneOf": [
@@ -4192,6 +4389,10 @@ expression: "&schema"
     "Plugins": {
       "additionalProperties": false,
       "properties": {
+        "apollo_testing.my_test_plugin": {
+          "$ref": "#/definitions/MyTestPluginConfig",
+          "description": "#/definitions/MyTestPluginConfig"
+        },
         "experimental.broken": {
           "$ref": "#/definitions/Config2",
           "description": "#/definitions/Config2"
@@ -5270,6 +5471,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SelectorOrValue_for_ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AttributeValue",
+          "description": "#/definitions/AttributeValue"
+        },
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
+        }
+      ]
+    },
     "SelectorOrValue_for_GraphQLSelector": {
       "anyOf": [
         {
@@ -5317,9 +5530,6 @@ expression: "&schema"
           "description": "#/definitions/SupergraphSelector"
         }
       ]
-    },
-    "SocketEndpoint": {
-      "type": "string"
     },
     "Source": {
       "oneOf": [
@@ -5370,6 +5580,28 @@ expression: "&schema"
         }
       ]
     },
+    "SourceConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for a `@source` directive",
+      "properties": {
+        "max_requests_per_operation": {
+          "default": null,
+          "description": "The maximum number of requests for this source",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "override_url": {
+          "default": null,
+          "description": "Override the `@source(http: {baseURL:})`",
+          "format": "uri",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "SpanMode": {
       "description": "Span mode to create new or deprecated spans",
       "oneOf": [
@@ -5392,6 +5624,10 @@ expression: "&schema"
     "Spans": {
       "additionalProperties": false,
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/ConnectorSpans",
+          "description": "#/definitions/ConnectorSpans"
+        },
         "default_attribute_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
           "description": "#/definitions/DefaultAttributeRequirementLevel"
@@ -5436,6 +5672,31 @@ expression: "&schema"
           },
           "required": [
             "alias"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
           ],
           "type": "object"
         }
@@ -5685,25 +5946,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "SubgraphAttributesConf": {
-      "additionalProperties": false,
-      "description": "Configuration to add custom attributes/labels on metrics to subgraphs",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/AttributesForwardConf",
-          "description": "#/definitions/AttributesForwardConf"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/AttributesForwardConf",
-            "description": "#/definitions/AttributesForwardConf"
-          },
-          "description": "Attributes per subgraph",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
     "SubgraphConfiguration_for_CommonBatchingConfig": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -5775,6 +6017,28 @@ expression: "&schema"
           },
           "default": {},
           "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphConnectorConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for a connector subgraph",
+      "properties": {
+        "$config": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Other values that can be used by connectors via `{$config.<key>}`",
+          "type": "object"
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SourceConfiguration",
+            "description": "#/definitions/SourceConfiguration"
+          },
+          "default": {},
+          "description": "A map of `@source(name:)` to configuration for that source",
           "type": "object"
         }
       },
@@ -7232,16 +7496,12 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config14",
-          "description": "#/definitions/Config14"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
-        },
-        "jaeger": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
         },
         "otlp": {
           "$ref": "#/definitions/Config10",
@@ -7252,8 +7512,8 @@ expression: "&schema"
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         }
       },
       "type": "object"
@@ -7380,6 +7640,22 @@ expression: "&schema"
         "graphql_transport_ws"
       ],
       "type": "string"
+    },
+    "conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ConnectorSelector",
+          "description": "#/definitions/ConnectorSelector"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            }
+          }
+        }
+      ]
     },
     "conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector": {
       "anyOf": [
@@ -7866,6 +8142,106 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+      },
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConnectorSelector",
+        "description": "#/definitions/ConnectorSelector"
+      },
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector",
+        "description": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector"
+      },
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue",
+        "description": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue"
+      },
+      "properties": {
+        "http.client.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
     "extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>": {
       "additionalProperties": {
         "$ref": "#/definitions/Event_for_RouterAttributes_and_RouterSelector",
@@ -8323,6 +8699,10 @@ expression: "&schema"
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
     },
+    "preview_connectors": {
+      "$ref": "#/definitions/ConnectorsConfig",
+      "description": "#/definitions/ConnectorsConfig"
+    },
     "preview_entity_cache": {
       "$ref": "#/definitions/Config7",
       "description": "#/definitions/Config7"
@@ -8360,8 +8740,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config15",
-      "description": "#/definitions/Config15"
+      "$ref": "#/definitions/Config14",
+      "description": "#/definitions/Config14"
     }
   },
   "title": "Configuration",

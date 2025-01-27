@@ -68,12 +68,11 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SubgraphEventRequest;
 use crate::plugins::telemetry::config_new::events::SubgraphEventResponse;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
-use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
+use crate::services::router;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
@@ -182,21 +181,26 @@ pub(crate) fn generate_tls_client_config(
     tls_cert_store: Option<RootCertStore>,
     client_cert_config: Option<&TlsClientAuth>,
 ) -> Result<rustls::ClientConfig, BoxError> {
-    let tls_builder = rustls::ClientConfig::builder().with_safe_defaults();
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    let tls_builder = rustls::ClientConfig::builder();
     Ok(match (tls_cert_store, client_cert_config) {
-        (None, None) => tls_builder.with_native_roots().with_no_client_auth(),
+        (None, None) => tls_builder.with_native_roots()?.with_no_client_auth(),
         (Some(store), None) => tls_builder
             .with_root_certificates(store)
             .with_no_client_auth(),
-        (None, Some(client_auth_config)) => tls_builder.with_native_roots().with_client_auth_cert(
-            client_auth_config.certificate_chain.clone(),
-            client_auth_config.key.clone(),
-        )?,
+        (None, Some(client_auth_config)) => {
+            tls_builder.with_native_roots()?.with_client_auth_cert(
+                client_auth_config.certificate_chain.clone(),
+                client_auth_config.key.clone_key(),
+            )?
+        }
         (Some(store), Some(client_auth_config)) => tls_builder
             .with_root_certificates(store)
             .with_client_auth_cert(
                 client_auth_config.certificate_chain.clone(),
-                client_auth_config.key.clone(),
+                client_auth_config.key.clone_key(),
             )?,
     })
 }
@@ -555,9 +559,6 @@ async fn call_websocket(
 
     let request = get_websocket_request(service_name.clone(), parts, subgraph_cfg)?;
 
-    let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-
     let signing_params = context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
@@ -604,14 +605,6 @@ async fn call_websocket(
         );
     }
 
-    if display_headers {
-        tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Websocket request headers to subgraph {service_name:?}");
-    }
-
-    if display_body {
-        tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Websocket request body to subgraph {service_name:?}");
-    }
-
     let uri = request.uri();
     let path = uri.path();
     let host = uri.host().unwrap_or_default();
@@ -637,7 +630,7 @@ async fn call_websocket(
         "graphql.operation.name" = %operation_name,
     );
 
-    let (ws_stream, mut resp) = match request.uri().scheme_str() {
+    let (ws_stream, resp) = match request.uri().scheme_str() {
         Some("wss") => {
             connect_async_tls_with_config(request, None, false, None)
                 .instrument(subgraph_req_span)
@@ -645,26 +638,10 @@ async fn call_websocket(
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
-    .map_err(|err| {
-        if display_body || display_headers {
-            tracing::info!(
-                http.response.error = format!("{:?}", &err), apollo.subgraph.name = %service_name, "Websocket connection error from subgraph {service_name:?} received"
-            );
-        }
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot connect websocket to subgraph: {err}"),
-        }
+    .map_err(|err| FetchError::SubrequestWsError {
+        service: service_name.clone(),
+        reason: format!("cannot connect websocket to subgraph: {err}"),
     })?;
-
-    if display_headers {
-        tracing::info!(response.headers = ?resp.headers(), apollo.subgraph.name = %service_name, "Websocket response headers to subgraph {service_name:?}");
-    }
-    if display_body {
-        tracing::info!(
-            response.body = %String::from_utf8_lossy(&resp.body_mut().take().unwrap_or_default()), apollo.subgraph.name = %service_name, "Websocket response body from subgraph {service_name:?} received"
-        );
-    }
 
     let gql_socket = GraphqlWebSocket::new(
         convert_websocket_stream(ws_stream, subscription_hash.clone()),
@@ -867,7 +844,6 @@ pub(crate) async fn process_batch(
         .expect("we have at least one context in the batch")
         .0
         .clone();
-    let display_body = batch_context.contains_key(LOGGING_DISPLAY_BODY);
     let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
@@ -891,35 +867,34 @@ pub(crate) async fn process_batch(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) =
-        match do_fetch(client, &batch_context, &service, request, display_body)
-            .instrument(subgraph_req_span)
-            .await
-        {
-            Ok(res) => res,
-            Err(err) => {
-                let resp = http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(err.to_graphql_error(None))
-                    .map_err(|err| FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service.clone(),
-                        reason: format!("cannot create the http response from error: {err:?}"),
-                    })?;
-                let (parts, body) = resp.into_parts();
-                let body =
-                    serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service.clone(),
-                        reason: format!("cannot serialize the error: {err:?}"),
-                    })?;
-                (
-                    parts,
-                    Ok(ContentType::ApplicationJson),
-                    Some(Ok(body.into())),
-                )
-            }
-        };
+    let (parts, content_type, body) = match do_fetch(client, &batch_context, &service, request)
+        .instrument(subgraph_req_span)
+        .await
+    {
+        Ok(res) => res,
+        Err(err) => {
+            let resp = http::Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(err.to_graphql_error(None))
+                .map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service.clone(),
+                    reason: format!("cannot create the http response from error: {err:?}"),
+                })?;
+            let (parts, body) = resp.into_parts();
+            let body =
+                serde_json::to_vec(&body).map_err(|err| FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service.clone(),
+                    reason: format!("cannot serialize the error: {err:?}"),
+                })?;
+            (
+                parts,
+                Ok(ContentType::ApplicationJson),
+                Some(Ok(body.into())),
+            )
+        }
+    };
 
     let subgraph_response_event = batch_context
         .extensions()
@@ -954,14 +929,6 @@ pub(crate) async fn process_batch(
             attrs,
             &format!("Raw response from subgraph {service:?} received"),
         );
-    }
-
-    if display_body {
-        if let Some(Ok(b)) = &body {
-            tracing::info!(
-            response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %&service, "Raw response body from subgraph {service:?} received"
-            );
-        }
     }
 
     tracing::debug!("parts: {parts:?}, content_type: {content_type:?}, body: {body:?}");
@@ -1266,7 +1233,7 @@ pub(crate) async fn call_single_http(
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
-    let mut request = http::Request::from_parts(parts, RouterBody::from(body));
+    let mut request = http::Request::from_parts(parts, router::body::from_bytes(body));
 
     request
         .headers_mut()
@@ -1303,8 +1270,6 @@ pub(crate) async fn call_single_http(
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-
     // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
     let request = file_uploads::http_request_wrapper(request).await;
 
@@ -1340,34 +1305,25 @@ pub(crate) async fn call_single_http(
     }
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
-    let (parts, content_type, body) =
-        match do_fetch(client, &context, service_name, request, display_body)
-            .instrument(subgraph_req_span)
-            .await
-        {
-            Ok(resp) => resp,
-            Err(err) => {
-                return Ok(SubgraphResponse::builder()
-                    .subgraph_name(service_name.to_string())
-                    .error(err.to_graphql_error(None))
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context)
-                    .extensions(Object::default())
-                    .build());
-            }
-        };
+    let (parts, content_type, body) = match do_fetch(client, &context, service_name, request)
+        .instrument(subgraph_req_span)
+        .await
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            return Ok(SubgraphResponse::builder()
+                .subgraph_name(service_name.to_string())
+                .error(err.to_graphql_error(None))
+                .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                .context(context)
+                .extensions(Object::default())
+                .build());
+        }
+    };
 
     let subgraph_response_event = context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
-
-    if display_body {
-        if let Some(Ok(b)) = &body {
-            tracing::info!(
-                response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-            );
-        }
-    }
 
     if let Some(subgraph_response_event) = subgraph_response_event {
         let mut should_log = true;
@@ -1487,7 +1443,6 @@ async fn do_fetch(
     context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
-    display_body: bool,
 ) -> Result<
     (
         Parts,
@@ -1517,8 +1472,7 @@ async fn do_fetch(
     let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
-        let body = body
-            .to_bytes()
+        let body = router::body::into_bytes(body)
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
             .map_err(|err| {
@@ -1529,34 +1483,8 @@ async fn do_fetch(
                     reason: err.to_string(),
                 }
             });
-        if let Ok(body) = &body {
-            if display_body {
-                tracing::info!(
-                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-                );
-            }
-        }
         Some(body)
     } else {
-        if display_body {
-            let body = body
-                .to_bytes()
-                .instrument(tracing::debug_span!("aggregate_response_data"))
-                .await
-                .map_err(|err| {
-                    tracing::error!(fetch_error = ?err);
-                    FetchError::SubrequestHttpError {
-                        status_code: Some(parts.status.as_u16()),
-                        service: service_name.to_string(),
-                        reason: err.to_string(),
-                    }
-                });
-            if let Ok(body) = &body {
-                tracing::info!(
-                    http.response.body = %String::from_utf8_lossy(body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-                );
-            }
-        }
         None
     };
     Ok((parts, content_type, body))
@@ -1597,7 +1525,12 @@ fn get_websocket_request(
             })?,
         None => subgraph_url,
     };
-    let mut request = subgraph_url.into_client_request().map_err(|err| {
+    // XXX During hyper upgrade, observed that we had lost the implementation for Url
+    // so I made the expedient decision to get a string representation (as_str())
+    // for the creation of the client request. This works fine, but I'm not sure
+    // why we need to do it, because into_client_request **should** be implemented
+    // for Url...
+    let mut request = subgraph_url.as_str().into_client_request().map_err(|err| {
         tracing::error!("cannot create websocket client request: {err:?}");
 
         FetchError::SubrequestWsError {
@@ -1695,28 +1628,25 @@ where
 mod tests {
     use std::convert::Infallible;
     use std::net::SocketAddr;
-    use std::net::TcpListener;
     use std::str::FromStr;
 
+    use axum::body::Body;
     use axum::extract::ws::Message;
     use axum::extract::ConnectInfo;
     use axum::extract::WebSocketUpgrade;
     use axum::response::IntoResponse;
     use axum::routing::get;
     use axum::Router;
-    use axum::Server;
     use bytes::Buf;
     use futures::StreamExt;
     use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
-    use hyper::service::make_service_fn;
-    use hyper::Body;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use tokio::net::TcpListener;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
-    use tower::service_fn;
     use tower::ServiceExt;
     use url::Url;
     use SubgraphRequest;
@@ -1733,8 +1663,41 @@ mod tests {
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router;
     use crate::Context;
+
+    async fn serve<Handler, Fut>(listener: TcpListener, handle: Handler) -> std::io::Result<()>
+    where
+        Handler: (Fn(http::Request<Body>) -> Fut) + Clone + Sync + Send + 'static,
+        Fut:
+            std::future::Future<Output = Result<http::Response<Body>, Infallible>> + Send + 'static,
+    {
+        use hyper::body::Incoming;
+        use hyper_util::rt::TokioExecutor;
+        use hyper_util::rt::TokioIo;
+
+        // Not sure this is the *right* place to do it, because it's actually clients that
+        // use crypto, not the server.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+        loop {
+            let (stream, _) = listener.accept().await?;
+            let io = TokioIo::new(stream);
+            let handle = handle.clone();
+            tokio::spawn(async move {
+                // N.B. should use hyper service_fn here, since it's required to be implemented hyper Service trait!
+                let svc = hyper::service::service_fn(|request: http::Request<Incoming>| {
+                    handle(request.map(Body::new))
+                });
+                if let Err(err) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(io, svc)
+                    .await
+                {
+                    eprintln!("server error: {}", err);
+                }
+            });
+        }
+    }
 
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(listener: TcpListener) {
@@ -1756,9 +1719,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning status code 401
@@ -1771,9 +1732,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning connection closed
@@ -1783,8 +1742,10 @@ mod tests {
             panic!("test")
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
+        let server = axum::serve(
+            listener,
+            Router::new().route("/", axum::routing::any_service(tower::service_fn(handle))),
+        );
         server.await.unwrap();
     }
 
@@ -1798,9 +1759,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1815,9 +1774,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1832,9 +1789,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1847,9 +1802,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -1862,9 +1815,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with missing content_type
@@ -1876,9 +1827,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with invalid content_type
@@ -1891,9 +1840,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning unsupported content_type
@@ -1906,9 +1853,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1916,7 +1861,7 @@ mod tests {
     async fn emulate_persisted_query_not_supported_message(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1961,9 +1906,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -1971,7 +1914,7 @@ mod tests {
     async fn emulate_persisted_query_not_supported_extension_code(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2018,9 +1961,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -2028,7 +1969,7 @@ mod tests {
     async fn emulate_persisted_query_not_found_message(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2078,9 +2019,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning response with
@@ -2088,7 +2027,7 @@ mod tests {
     async fn emulate_persisted_query_not_found_extension_code(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2138,9 +2077,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning a response to request with apq
@@ -2148,7 +2085,7 @@ mod tests {
     async fn emulate_expected_apq_enabled_configuration(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2179,9 +2116,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning a response to request without apq
@@ -2189,7 +2124,7 @@ mod tests {
     async fn emulate_expected_apq_disabled_configuration(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2222,9 +2157,7 @@ mod tests {
             }
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     async fn emulate_correct_websocket_server(listener: TcpListener) {
@@ -2234,13 +2167,13 @@ mod tests {
         ) -> Result<impl IntoResponse, Infallible> {
             // finalize the upgrade process by returning upgrade callback.
             // we can customize the callback by sending additional info such as address.
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
                 assert!(matches!(ack_msg, ClientMessage::ConnectionInit { .. }));
 
                 socket
-                    .send(Message::Text(
+                    .send(Message::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
@@ -2262,7 +2195,7 @@ mod tests {
                 };
 
                 socket
-                    .send(Message::Text(
+                    .send(Message::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id, payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
@@ -2273,9 +2206,10 @@ mod tests {
         }
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::from_tcp(listener)
-            .unwrap()
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>());
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
         server.await.unwrap();
     }
 
@@ -2288,9 +2222,10 @@ mod tests {
         }
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::from_tcp(listener)
-            .unwrap()
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>());
+        let server = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        );
         server.await.unwrap();
     }
 
@@ -2302,7 +2237,7 @@ mod tests {
                 .get_all(ACCEPT)
                 .iter()
                 .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
-            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = router::body::into_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2337,9 +2272,7 @@ mod tests {
                 .unwrap())
         }
 
-        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
-        server.await.unwrap();
+        serve(listener, handle).await.unwrap();
     }
 
     fn subscription_config() -> SubscriptionConfig {
@@ -2394,7 +2327,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_callback() {
         let _ = SUBSCRIPTION_CALLBACK_HMAC_KEY.set(String::from("TESTEST"));
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_subgraph_with_callback_data(listener));
         let subgraph_service = SubgraphService::new(
@@ -2438,7 +2371,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_content_type_application_graphql() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_graphql_response(listener));
         let subgraph_service = SubgraphService::new(
@@ -2472,7 +2405,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_content_type_application_json() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_application_json_response(listener));
         let subgraph_service = SubgraphService::new(
@@ -2507,7 +2440,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(target_os = "macos"))]
     async fn test_subgraph_service_panic() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_panic(listener));
         let subgraph_service = SubgraphService::new(
@@ -2545,7 +2478,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_invalid_response() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_ok_status_invalid_response(listener));
         let subgraph_service = SubgraphService::new(
@@ -2582,7 +2515,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_invalid_status_invalid_response_application_json() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_json(listener),
@@ -2625,7 +2558,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_invalid_status_invalid_response_application_graphql() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(
             emulate_subgraph_invalid_response_invalid_status_application_graphql(listener),
@@ -2668,7 +2601,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_websocket() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         let spawned_task = tokio::task::spawn(emulate_correct_websocket_server(listener));
         let subgraph_service = SubgraphService::new(
@@ -2721,7 +2654,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_subgraph_service_websocket_with_error() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_incorrect_websocket_server(listener));
         let subgraph_service = SubgraphService::new(
@@ -2765,7 +2698,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_bad_status_code_should_not_fail() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(listener));
         let subgraph_service = SubgraphService::new(
@@ -2806,7 +2739,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_missing_content_type() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_missing_content_type(listener));
 
@@ -2844,7 +2777,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_invalid_content_type() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_invalid_content_type(listener));
 
@@ -2882,7 +2815,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unsupported_content_type() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unsupported_content_type(listener));
 
@@ -2920,7 +2853,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_unauthorized() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(listener));
         let subgraph_service = SubgraphService::new(
@@ -2957,7 +2890,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_supported_message() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_message(listener));
         let subgraph_service = SubgraphService::new(
@@ -3001,7 +2934,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_supported_extension_code() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
             listener,
@@ -3047,7 +2980,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_found_message() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_message(listener));
         let subgraph_service = SubgraphService::new(
@@ -3088,7 +3021,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_found_extension_code() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_extension_code(listener));
         let subgraph_service = SubgraphService::new(
@@ -3129,7 +3062,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_apq_enabled_subgraph_configuration() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(listener));
         let subgraph_service = SubgraphService::new(
@@ -3170,7 +3103,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_apq_disabled_subgraph_configuration() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = listener.local_addr().unwrap();
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(listener));
         let subgraph_service = SubgraphService::new(

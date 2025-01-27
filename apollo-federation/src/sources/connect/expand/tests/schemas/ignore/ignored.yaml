@@ -1,0 +1,16 @@
+subgraphs:
+  graphql:
+    routing_url: https://graphql
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7", import: ["@key"])
+
+        type User @key(fields: "id") {
+          id: ID!
+          c: String
+        }
+
+        type Query {
+          users: [User]
+        }

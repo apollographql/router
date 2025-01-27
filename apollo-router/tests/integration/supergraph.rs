@@ -1,4 +1,3 @@
-#[cfg(feature = "hyper_header_limits")]
 use std::collections::HashMap;
 
 use serde_json::json;
@@ -7,26 +6,6 @@ use tower::BoxError;
 use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
-#[cfg(not(feature = "hyper_header_limits"))]
-#[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_error_http1_max_headers_config() -> Result<(), BoxError> {
-    let mut router = IntegrationTest::builder()
-        .config(
-            r#"
-            limits:
-              http1_max_request_headers: 100
-            "#,
-        )
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_log_contains("'limits.http1_max_request_headers' requires 'hyper_header_limits' feature: enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'").await;
-    router.assert_not_started().await;
-    Ok(())
-}
-
-#[cfg(feature = "hyper_header_limits")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
@@ -59,7 +38,6 @@ async fn test_supergraph_errors_on_http1_max_headers() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[cfg(feature = "hyper_header_limits")]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()

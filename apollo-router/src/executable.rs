@@ -63,6 +63,8 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 pub(crate) const APOLLO_TELEMETRY_DISABLED: &str = "APOLLO_TELEMETRY_DISABLED";
 
+const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
+
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
 #[cfg(feature = "dhat-heap")]
@@ -235,10 +237,6 @@ pub struct Opt {
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
-    /// The time between polls to Apollo uplink. Minimum 10s.
-    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
-    apollo_uplink_poll_interval: Duration,
-
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = APOLLO_TELEMETRY_DISABLED, value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
@@ -294,7 +292,7 @@ impl Opt {
                 .as_ref()
                 .map(|endpoints| Self::parse_endpoints(endpoints))
                 .transpose()?,
-            poll_interval: self.apollo_uplink_poll_interval,
+            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
             timeout: self.apollo_uplink_timeout,
         })
     }
@@ -404,6 +402,8 @@ impl Executable {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
+        // Enable crypto
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         copy_args_to_env();
 
@@ -473,9 +473,6 @@ impl Executable {
         license: Option<LicenseSource>,
         mut opt: Opt,
     ) -> Result<()> {
-        if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
-            return Err(anyhow!("apollo-uplink-poll-interval must be at least 10s"));
-        }
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
@@ -551,10 +548,12 @@ impl Executable {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
+                if opt.hot_reload {
+                    tracing::warn!("Schema hot reloading is disabled for --supergraph-urls / APOLLO_ROUTER_SUPERGRAPH_URLS.");
+                }
+
                 SchemaSource::URLs {
                     urls: supergraph_urls.clone(),
-                    watch: opt.hot_reload,
-                    period: opt.apollo_uplink_poll_interval
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {

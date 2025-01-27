@@ -4,6 +4,7 @@ use http::uri;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
 use opentelemetry_sdk::export::ExportError;
+use opentelemetry_sdk::Resource;
 use url::ParseError;
 
 use self::unified_tags::UnifiedTags;
@@ -150,6 +151,7 @@ impl ApiVersion {
         traces: Vec<&[trace::SpanData]>,
         mapping: &Mapping,
         unified_tags: &UnifiedTags,
+        resource: Option<&Resource>,
     ) -> Result<Vec<u8>, Error> {
         match self {
             Self::Version03 => v03::encode(
@@ -167,6 +169,7 @@ impl ApiVersion {
                     Some(f) => f(span, config),
                     None => default_resource_mapping(span, config),
                 },
+                resource,
             ),
             Self::Version05 => v05::encode(
                 model_config,
@@ -184,6 +187,7 @@ impl ApiVersion {
                     None => default_resource_mapping(span, config),
                 },
                 unified_tags,
+                resource,
             ),
         }
     }
@@ -191,7 +195,6 @@ impl ApiVersion {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::borrow::Cow;
     use std::time::Duration;
     use std::time::SystemTime;
 
@@ -204,10 +207,9 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry::KeyValue;
-    use opentelemetry_sdk::trace::EvictedHashMap;
-    use opentelemetry_sdk::trace::EvictedQueue;
+    use opentelemetry_sdk::trace::SpanEvents;
+    use opentelemetry_sdk::trace::SpanLinks;
     use opentelemetry_sdk::InstrumentationLibrary;
-    use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{self};
 
     use super::*;
@@ -228,15 +230,11 @@ pub(crate) mod tests {
         let start_time = SystemTime::UNIX_EPOCH;
         let end_time = start_time.checked_add(Duration::from_secs(1)).unwrap();
 
-        let mut attributes: EvictedHashMap = EvictedHashMap::new(1, 1);
-        attributes.insert(KeyValue::new("span.type", "web"));
-        let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
-        let instrumentation_lib = InstrumentationLibrary::new(
-            "component",
-            None::<&'static str>,
-            None::<&'static str>,
-            None,
-        );
+        let attributes = vec![
+            KeyValue::new("span.type", "web"),
+            KeyValue::new("host.name", "test"),
+        ];
+        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
 
         trace::SpanData {
             span_context,
@@ -246,11 +244,11 @@ pub(crate) mod tests {
             start_time,
             end_time,
             attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status: Status::Ok,
-            resource: Cow::Owned(resource),
             instrumentation_lib,
+            dropped_attributes_count: 0,
         }
     }
 
@@ -267,12 +265,13 @@ pub(crate) mod tests {
                 traces.iter().map(|x| &x[..]).collect(),
                 &Mapping::empty(),
                 &UnifiedTags::new(),
+                None,
             )?);
 
         assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
         50qHJlc291cmNlqHJlc291cmNlqHRyYWNlX2lkzwAAAAAAAAAHp3NwYW5faWTPAAAAAAAAAGOpcGFyZW50X2lkzwAAAA\
-        AAAAABpXN0YXJ00wAAAAAAAAAAqGR1cmF0aW9u0wAAAAA7msoApWVycm9y0gAAAACkbWV0YYKpaG9zdC5uYW1lpHRlc3\
-        Spc3Bhbi50eXBlo3dlYqdtZXRyaWNzgbVfc2FtcGxpbmdfcHJpb3JpdHlfdjHLAAAAAAAAAAA=");
+        AAAAABpXN0YXJ00wAAAAAAAAAAqGR1cmF0aW9u0wAAAAA7msoApWVycm9y0gAAAACkbWV0YYKpc3Bhbi50eXBlo3dlYq\
+        lob3N0Lm5hbWWkdGVzdKdtZXRyaWNzgbVfc2FtcGxpbmdfcHJpb3JpdHlfdjHLAAAAAAAAAAA=");
 
         Ok(())
     }
@@ -296,6 +295,7 @@ pub(crate) mod tests {
                 traces.iter().map(|x| &x[..]).collect(),
                 &Mapping::empty(),
                 &unified_tags,
+                None,
             )?);
 
         // TODO: Need someone to generate the expected result or instructions to do so.
