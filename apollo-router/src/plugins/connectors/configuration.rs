@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
+use super::incompatible::warn_incompatible_plugins;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::Configuration;
 
@@ -66,8 +67,15 @@ pub(crate) struct SourceConfiguration {
 }
 
 /// Modifies connectors with values from the configuration
-pub(crate) fn apply_config(config: &Configuration, mut connectors: Connectors) -> Connectors {
-    let Some(config) = config.apollo_plugins.plugins.get(PLUGIN_NAME) else {
+pub(crate) fn apply_config(
+    router_config: &Configuration,
+    mut connectors: Connectors,
+) -> Connectors {
+    // Enabling connectors might end up interfering with other router features, so we insert warnings
+    // into the logs for any incompatibilites found.
+    warn_incompatible_plugins(router_config, &connectors);
+
+    let Some(config) = router_config.apollo_plugins.plugins.get(PLUGIN_NAME) else {
         return connectors;
     };
     let Ok(config) = serde_json::from_value::<ConnectorsConfig>(config.clone()) else {

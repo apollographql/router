@@ -52,9 +52,10 @@ pub(crate) mod authenticated;
 pub(crate) mod policy;
 pub(crate) mod scopes;
 
-const AUTHENTICATED_KEY: &str = "apollo_authorization::authenticated::required";
-const REQUIRED_SCOPES_KEY: &str = "apollo_authorization::scopes::required";
-const REQUIRED_POLICIES_KEY: &str = "apollo_authorization::policies::required";
+pub(crate) const AUTHENTICATION_REQUIRED_KEY: &str =
+    "apollo::authorization::authentication_required";
+pub(crate) const REQUIRED_SCOPES_KEY: &str = "apollo::authorization::required_scopes";
+pub(crate) const REQUIRED_POLICIES_KEY: &str = "apollo::authorization::required_policies";
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct CacheKeyMetadata {
@@ -191,7 +192,7 @@ impl AuthorizationPlugin {
             false,
         );
         if is_authenticated {
-            context.insert(AUTHENTICATED_KEY, true).unwrap();
+            context.insert(AUTHENTICATION_REQUIRED_KEY, true).unwrap();
         }
 
         if !scopes.is_empty() {
@@ -549,6 +550,8 @@ impl Plugin for AuthorizationPlugin {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
+                    // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
+                    // authentication plugin, which manages this context value?
                     if request
                         .context
                         .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
@@ -586,7 +589,7 @@ impl Plugin for AuthorizationPlugin {
         ServiceBuilder::new()
             .map_request(|request: execution::Request| {
                 let filtered = !request.query_plan.query.unauthorized.paths.is_empty();
-                let needs_authenticated = request.context.contains_key(AUTHENTICATED_KEY);
+                let needs_authenticated = request.context.contains_key(AUTHENTICATION_REQUIRED_KEY);
                 let needs_requires_scopes = request.context.contains_key(REQUIRED_SCOPES_KEY);
 
                 if needs_authenticated || needs_requires_scopes {
