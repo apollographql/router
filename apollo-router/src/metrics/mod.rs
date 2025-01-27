@@ -508,7 +508,6 @@ pub(crate) fn meter_provider() -> AggregateMeterProvider {
         .clone()
 }
 
-#[macro_export]
 /// Get or create a `u64` monotonic counter metric and add a value to it.
 ///
 /// Each metric needs a description.
