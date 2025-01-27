@@ -12,6 +12,8 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt as TowerServiceExt;
 
+use super::connectors::query_plans::replace_connector_service_names;
+use super::connectors::query_plans::replace_connector_service_names_text;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
@@ -20,14 +22,11 @@ use crate::register_plugin;
 use crate::services::execution;
 use crate::services::supergraph;
 
-use super::connectors::query_plans::replace_connector_service_names;
-use super::connectors::query_plans::replace_connector_service_names_text;
-
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
-const QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.plan";
-const FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str = "experimental::expose_query_plan.formatted_plan";
-const ENABLED_CONTEXT_KEY: &str = "experimental::expose_query_plan.enabled";
+const QUERY_PLAN_CONTEXT_KEY: &str = "apollo::expose_query_plan::plan";
+const FORMATTED_QUERY_PLAN_CONTEXT_KEY: &str = "apollo::expose_query_plan::formatted_plan";
+const ENABLED_CONTEXT_KEY: &str = "apollo::expose_query_plan::enabled";
 
 #[derive(Debug, Clone)]
 struct ExposeQueryPlan {
