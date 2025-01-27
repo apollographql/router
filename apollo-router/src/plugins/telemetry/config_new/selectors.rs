@@ -3260,7 +3260,7 @@ mod test {
         let context = crate::Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<OperationLimits<u32>>(limits));
+            .with_lock(|lock| lock.insert::<OperationLimits<u32>>(limits));
         (selector, context)
     }
 

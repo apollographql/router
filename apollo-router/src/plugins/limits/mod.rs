@@ -164,7 +164,7 @@ impl Plugin for LimitsPlugin {
                 let control_for_context = control_for_context.clone();
                 r.context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(control_for_context));
+                    .with_lock(|lock| lock.insert(control_for_context));
                 r
             })
             .map_future_with_request_data(

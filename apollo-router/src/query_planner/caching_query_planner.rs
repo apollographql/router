@@ -514,7 +514,7 @@ where
 
                             // This will be overridden by the Rust usage reporting implementation
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                                context.extensions().with_lock(|mut lock| {
+                                context.extensions().with_lock(|lock| {
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                                 });
                             }
@@ -527,7 +527,7 @@ where
                                 entry.insert(Err(err)).await;
                             });
                             if let Some(usage_reporting) = e.usage_reporting() {
-                                context.extensions().with_lock(|mut lock| {
+                                context.extensions().with_lock(|lock| {
                                     lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
                                 });
                             }
@@ -552,7 +552,7 @@ where
             match res {
                 Ok(content) => {
                     if let QueryPlannerContent::Plan { plan, .. } = &content {
-                        context.extensions().with_lock(|mut lock| {
+                        context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
                     }
@@ -561,7 +561,7 @@ where
                 }
                 Err(error) => {
                     if let Some(usage_reporting) = error.usage_reporting() {
-                        context.extensions().with_lock(|mut lock| {
+                        context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
                         });
                     }
@@ -755,7 +755,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
 
         for _ in 0..5 {
             assert!(planner
@@ -778,7 +778,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc2));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc2));
 
         assert!(planner
             .call(query_planner::CachingRequest::new(
@@ -849,7 +849,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
         for _ in 0..5 {
             let _ = planner
@@ -931,7 +931,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
 
         assert!(planner
             .call(query_planner::CachingRequest::new(

@@ -3171,7 +3171,7 @@ mod tests {
                                 Event::Extension { map } => {
                                     for (key, value) in map {
                                         if key == APOLLO_PRIVATE_QUERY_ALIASES.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3179,7 +3179,7 @@ mod tests {
                                             });
                                         }
                                         if key == APOLLO_PRIVATE_QUERY_DEPTH.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3187,7 +3187,7 @@ mod tests {
                                             });
                                         }
                                         if key == APOLLO_PRIVATE_QUERY_HEIGHT.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3195,7 +3195,7 @@ mod tests {
                                             });
                                         }
                                         if key == APOLLO_PRIVATE_QUERY_ROOT_FIELDS.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;

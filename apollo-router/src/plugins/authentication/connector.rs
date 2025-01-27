@@ -38,7 +38,7 @@ impl ConnectorAuth {
                         {
                             req.context
                                 .extensions()
-                                .with_lock(|mut lock| lock.insert(signing_params));
+                                .with_lock(|lock| lock.insert(signing_params));
                         }
                     }
                 }

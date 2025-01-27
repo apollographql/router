@@ -402,7 +402,7 @@ pub(crate) mod test {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert(query));
+            .with_lock(|lock| lock.insert(query));
 
         context
     }

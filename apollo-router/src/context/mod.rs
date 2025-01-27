@@ -419,7 +419,7 @@ mod test {
     fn context_extensions() {
         // This is mostly tested in the extensions module.
         let c = Context::new();
-        c.extensions().with_lock(|mut lock| lock.insert(1usize));
+        c.extensions().with_lock(|lock| lock.insert(1usize));
         let v = c
             .extensions()
             .with_lock(|lock| lock.get::<usize>().cloned());
@@ -434,7 +434,7 @@ mod test {
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
         assert!(c.unsupported_executable_document().is_none());
-        c.extensions().with_lock(|mut lock| lock.insert(document));
+        c.extensions().with_lock(|lock| lock.insert(document));
         assert!(c.unsupported_executable_document().is_some());
     }
 }

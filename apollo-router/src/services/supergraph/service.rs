@@ -239,7 +239,7 @@ async fn service_call(
 
         Some(QueryPlannerContent::Plan { plan }) => {
             let query_metrics = plan.query_metrics;
-            context.extensions().with_lock(|mut lock| {
+            context.extensions().with_lock(|lock| {
                 let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
             });
 
@@ -742,7 +742,7 @@ async fn plan_query(
             &Configuration::default(),
         )
         .map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
         });
     }

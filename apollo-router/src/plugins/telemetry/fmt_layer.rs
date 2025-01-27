@@ -926,7 +926,7 @@ connector:
                     .unwrap();
                 router_events.on_request(&router_req);
                 let ctx = crate::Context::new();
-                ctx.extensions().with_lock(|mut ext| {
+                ctx.extensions().with_lock(|ext| {
                     ext.insert(RouterResponseBodyExtensionType(
                         r#"{"data": {"data": "res"}}"#.to_string(),
                     ));

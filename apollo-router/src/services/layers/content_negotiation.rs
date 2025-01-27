@@ -84,7 +84,7 @@ where
                 {
                     req.context
                         .extensions()
-                        .with_lock(|mut lock| lock.insert(accepts));
+                        .with_lock(|lock| lock.insert(accepts));
 
                     Ok(ControlFlow::Continue(req))
                 } else {

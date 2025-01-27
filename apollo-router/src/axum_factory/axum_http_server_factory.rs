@@ -715,7 +715,7 @@ impl Drop for CancelHandler<'_> {
             }
             self.context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(CanceledRequest));
+                .with_lock(|lock| lock.insert(CanceledRequest));
         }
     }
 }

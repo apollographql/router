@@ -177,7 +177,7 @@ async fn router_layer(
 
         req.context
             .extensions()
-            .with_lock(|mut lock| lock.insert(multipart));
+            .with_lock(|lock| lock.insert(multipart));
 
         let content_type = operations_stream
             .headers()
@@ -225,7 +225,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context.extensions().with_lock(|mut lock| {
+        req.context.extensions().with_lock(|lock| {
             lock.insert(SupergraphLayerResult {
                 multipart,
                 map: Arc::new(map_field),
