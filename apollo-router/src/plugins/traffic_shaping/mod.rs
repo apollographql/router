@@ -10,12 +10,12 @@ mod deduplication;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::StatusCode;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::limit::ConcurrencyLimitLayer;
@@ -315,7 +315,6 @@ impl Plugin for TrafficShaping {
                 .map(|rate_limit_conf| {
                     self.rate_limit_subgraphs
                         .lock()
-                        .unwrap()
                         .entry(name.to_string())
                         .or_insert_with(|| {
                             RateLimitLayer::new(

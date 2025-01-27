@@ -84,10 +84,9 @@ impl From<[u8; 16]> for TraceId {
 // live with...
 #[cfg(test)]
 mod test {
-    use std::sync::Mutex;
-
     use once_cell::sync::Lazy;
     use opentelemetry::trace::TracerProvider;
+    use parking_lot::Mutex;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
 
@@ -121,9 +120,7 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_trace_id() {
-        let _guard = TRACING_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
 
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
@@ -149,9 +146,7 @@ mod test {
 
     #[test]
     fn it_correctly_compares_valid_and_invalid_trace_id() {
-        let _guard = TRACING_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TRACING_LOCK.lock();
         let my_id = TraceId::maybe_new();
         assert!(my_id.is_none());
         // Create a tracing layer with the configured tracer
@@ -176,9 +171,7 @@ mod test {
 
     #[test]
     fn it_correctly_compares_valid_and_valid_trace_id() {
-        let _guard = TRACING_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())

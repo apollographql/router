@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
@@ -22,6 +21,7 @@ use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use parking_lot::Mutex;
 use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
@@ -335,11 +335,11 @@ macro_rules! gen_map_request {
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         tracing::error!("map_request callback failed: {error_details:#?}");
-                        let mut guard = shared_request.lock().unwrap();
+                        let mut guard = shared_request.lock();
                         let request_opt = guard.take();
                         return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
-                    let mut guard = shared_request.lock().unwrap();
+                    let mut guard = shared_request.lock();
                     let request_opt = guard.take();
                     Ok(ControlFlow::Continue(request_opt.unwrap()))
                 })
@@ -383,12 +383,12 @@ macro_rules! gen_map_router_deferred_request {
                     if let Err(error) = result {
                         tracing::error!("map_request callback failed: {error}");
                         let error_details = process_error(error);
-                        let mut guard = shared_request.lock().unwrap();
+                        let mut guard = shared_request.lock();
                         let request_opt = guard.take();
                         return $base::request_failure(request_opt.unwrap().context, error_details);
                     }
 
-                    let request_opt = shared_request.lock().unwrap().take();
+                    let request_opt = shared_request.lock().take();
 
                     let $base::FirstRequest { context, request } =
                     request_opt.unwrap();
@@ -438,7 +438,7 @@ macro_rules! gen_map_router_deferred_request {
                                     return Ok(serde_json::to_vec(&error_response)?.into());
                                 }
 
-                                let request_opt = shared_request.lock().unwrap().take();
+                                let request_opt = shared_request.lock().take();
                                 let $base::ChunkedRequest { request, .. } =
                                     request_opt.unwrap();
                                 Ok(request)
@@ -470,14 +470,14 @@ macro_rules! gen_map_response {
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
-                        let mut guard = shared_response.lock().unwrap();
+                        let mut guard = shared_response.lock();
                         let response_opt = guard.take();
                         return $base::response_failure(
                             response_opt.unwrap().context,
                             error_details,
                         );
                     }
-                    let mut guard = shared_response.lock().unwrap();
+                    let mut guard = shared_response.lock();
                     let response_opt = guard.take();
                     response_opt.unwrap()
                 })
@@ -516,14 +516,14 @@ macro_rules! gen_map_router_deferred_response {
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
-                        let response_opt = shared_response.lock().unwrap().take();
+                        let response_opt = shared_response.lock().take();
                         return Ok($base::response_failure(
                             response_opt.unwrap().context,
                             error_details
                         ));
                     }
 
-                    let response_opt = shared_response.lock().unwrap().take();
+                    let response_opt = shared_response.lock().take();
 
                     let $base::FirstResponse { context, response } =
                         response_opt.unwrap();
@@ -572,7 +572,7 @@ macro_rules! gen_map_router_deferred_response {
                                 return Ok(serde_json::to_vec(&error_response)?.into());
                             }
 
-                            let response_opt = shared_response.lock().unwrap().take();
+                            let response_opt = shared_response.lock().take();
                             let $base::DeferredResponse { response, .. } =
                                 response_opt.unwrap();
                             Ok(response)
@@ -633,7 +633,7 @@ macro_rules! gen_map_deferred_response {
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
                         let error_details = process_error(error);
-                        let mut guard = shared_response.lock().unwrap();
+                        let mut guard = shared_response.lock();
                         let response_opt = guard.take();
                         return Ok($base::response_failure(
                             response_opt.unwrap().context,
@@ -641,7 +641,7 @@ macro_rules! gen_map_deferred_response {
                         ));
                     }
 
-                    let mut guard = shared_response.lock().unwrap();
+                    let mut guard = shared_response.lock();
                     let response_opt = guard.take();
                     let $base::FirstResponse { context, response } =
                         response_opt.unwrap();
@@ -668,7 +668,7 @@ macro_rules! gen_map_deferred_response {
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
                                 let error_details = process_error(error);
-                                let mut guard = shared_response.lock().unwrap();
+                                let mut guard = shared_response.lock();
                                 let response_opt = guard.take();
                                 let $base::DeferredResponse { mut response, .. } = response_opt.unwrap();
                                 let error = Error {
@@ -679,7 +679,7 @@ macro_rules! gen_map_deferred_response {
                                 return Some(response);
                             }
 
-                            let mut guard = shared_response.lock().unwrap();
+                            let mut guard = shared_response.lock();
                             let response_opt = guard.take();
                             let $base::DeferredResponse { response, .. } =
                                 response_opt.unwrap();
@@ -810,7 +810,7 @@ fn execute(
     if callback.is_curried() {
         callback.call(&rhai_service.engine, &rhai_service.ast, args)
     } else {
-        let mut guard = rhai_service.scope.lock().unwrap();
+        let mut guard = rhai_service.scope.lock();
         rhai_service
             .engine
             .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)

@@ -1,4 +1,3 @@
-use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
@@ -8,6 +7,7 @@ use once_cell::sync::Lazy;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::View;
 use opentelemetry_sdk::Resource;
+use parking_lot::Mutex;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -64,12 +64,9 @@ struct PrometheusConfig {
 }
 
 pub(crate) fn commit_prometheus() {
-    if let Some(prometheus) = NEW_PROMETHEUS.lock().expect("lock poisoned").take() {
+    if let Some(prometheus) = NEW_PROMETHEUS.lock().take() {
         tracing::debug!("committing prometheus registry");
-        EXISTING_PROMETHEUS
-            .lock()
-            .expect("lock poisoned")
-            .replace(prometheus);
+        EXISTING_PROMETHEUS.lock().replace(prometheus);
     }
 }
 
@@ -97,9 +94,7 @@ impl MetricsConfigurator for Config {
         // Note that during tests the prom registry cannot be reused as we have a different meter provider for each test.
         // Prom reloading IS tested in an integration test.
         #[cfg(not(test))]
-        if let Some((last_config, last_registry)) =
-            EXISTING_PROMETHEUS.lock().expect("lock poisoned").clone()
-        {
+        if let Some((last_config, last_registry)) = EXISTING_PROMETHEUS.lock().clone() {
             if prometheus_config == last_config {
                 tracing::debug!("prometheus registry can be reused");
                 builder.custom_endpoints.insert(
@@ -155,10 +150,7 @@ impl MetricsConfigurator for Config {
         );
         builder.prometheus_meter_provider = Some(meter_provider.clone());
 
-        NEW_PROMETHEUS
-            .lock()
-            .expect("lock poisoned")
-            .replace((prometheus_config, registry));
+        NEW_PROMETHEUS.lock().replace((prometheus_config, registry));
 
         tracing::info!(
             "Prometheus endpoint exposed at {}{}",

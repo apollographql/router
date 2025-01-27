@@ -255,8 +255,6 @@ impl field::Visit for FieldsVisitor<'_, '_> {
 mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
-    use std::sync::Mutex;
-    use std::sync::MutexGuard;
 
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
@@ -268,6 +266,8 @@ mod tests {
     use apollo_federation::sources::connect::URLTemplate;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use parking_lot::Mutex;
+    use parking_lot::MutexGuard;
     use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
@@ -421,7 +421,7 @@ connector:
         type Writer = Guard<'a>;
 
         fn make_writer(&'a self) -> Self::Writer {
-            Guard(self.0.lock().unwrap())
+            Guard(self.0.lock())
         }
     }
 
@@ -438,7 +438,7 @@ connector:
 
     impl std::fmt::Display for LogBuffer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let content = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+            let content = String::from_utf8(self.0.lock().clone()).unwrap();
 
             write!(f, "{content}")
         }

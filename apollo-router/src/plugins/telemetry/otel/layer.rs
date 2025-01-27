@@ -1107,13 +1107,13 @@ mod tests {
     use std::error::Error;
     use std::fmt::Display;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::thread;
     use std::time::SystemTime;
 
     use opentelemetry::trace::noop;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::StringValue;
+    use parking_lot::Mutex;
     use tracing_subscriber::prelude::*;
 
     use super::*;
@@ -1141,7 +1141,7 @@ mod tests {
             builder: otel::SpanBuilder,
             parent_cx: &OtelContext,
         ) -> Self::Span {
-            *self.0.lock().unwrap() = Some(OtelData {
+            *self.0.lock() = Some(OtelData {
                 builder,
                 parent_cx: parent_cx.clone(),
                 event_attributes: None,
@@ -1166,7 +1166,7 @@ mod tests {
 
     impl TestTracer {
         fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
-            let lock = self.0.lock().unwrap();
+            let lock = self.0.lock();
             let data = lock.as_ref().expect("no span data has been recorded yet");
             f(data)
         }
@@ -1236,12 +1236,7 @@ mod tests {
             tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
         });
 
-        let recorded_name = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|b| b.builder.name.clone());
+        let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(dynamic_name.into()))
     }
 
@@ -1262,12 +1257,7 @@ mod tests {
             );
         });
 
-        let recorded_name = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|b| b.builder.name.clone());
+        let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(Cow::Owned(forced_dynamic_name)))
     }
 
@@ -1311,15 +1301,7 @@ mod tests {
             tracing::debug_span!("request", otel.status_message = message);
         });
 
-        let recorded_status_message = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .builder
-            .status
-            .clone();
+        let recorded_status_message = tracer.0.lock().as_ref().unwrap().builder.status.clone();
 
         assert_eq!(recorded_status_message, otel::Status::error(message))
     }
@@ -1395,7 +1377,6 @@ mod tests {
         let attributes = tracer
             .0
             .lock()
-            .unwrap()
             .as_ref()
             .unwrap()
             .builder
@@ -1532,7 +1513,6 @@ mod tests {
         let attributes = tracer
             .0
             .lock()
-            .unwrap()
             .as_ref()
             .unwrap()
             .builder
