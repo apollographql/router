@@ -32,6 +32,7 @@ use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
 use crate::sources::connect::JSONSelection;
+use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 
 pub(super) fn validate_selection(
@@ -50,10 +51,10 @@ pub(super) fn validate_selection(
     validate_selection_variables(
         &VariableResolver::new(context.clone(), schema),
         selection_arg.coordinate,
-        &json_selection,
         selection_arg.value,
         schema,
         context,
+        json_selection.external_var_paths(),
     )?;
 
     let field = coordinate.field_coordinate.field;
@@ -123,6 +124,17 @@ pub(super) fn validate_body_selection(
                 .collect(),
         });
     }
+    let var_paths = selection.external_var_paths();
+    if var_paths.is_empty() {
+        return Err(Message {
+            code: Code::InvalidJsonSelection,
+            message: format!("{coordinate} must contain at least one variable reference"),
+            locations: selection_node
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
+    }
 
     let context = VariableContext::new(
         connect_coordinate.field_coordinate.object,
@@ -133,23 +145,23 @@ pub(super) fn validate_body_selection(
     validate_selection_variables(
         &VariableResolver::new(context.clone(), schema),
         coordinate,
-        &selection,
         selection_str,
         schema,
         context,
+        var_paths,
     )
 }
 
 /// Validate variable references in a JSON Selection
-pub(super) fn validate_selection_variables(
+pub(super) fn validate_selection_variables<'a>(
     variable_resolver: &VariableResolver,
     coordinate: impl Display,
-    selection: &JSONSelection,
     selection_str: GraphQLString,
     schema: &SchemaInfo,
     context: VariableContext,
+    variable_paths: impl IntoIterator<Item = &'a PathSelection>,
 ) -> Result<(), Message> {
-    for path in selection.external_var_paths().into_iter() {
+    for path in variable_paths {
         if let Some(reference) = path.variable_reference() {
             variable_resolver
                 .resolve(&reference, selection_str)
