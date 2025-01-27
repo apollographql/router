@@ -266,6 +266,8 @@ Replace with `AsyncCheckpoint`
 
 The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilderExt` trait and ensures that you service may be cloned.
 
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+
 ### Traffic Shaping
 
 Traffic shaping has been improved significantly in Router 2.0. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
@@ -279,9 +281,13 @@ We recommend that users experiment with their configuration in order to arrive a
 
 For more information about [configuring traffic shaping](../../routing/performance/traffic-shaping.mdx).
 
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+
 ### Subgraph Request/Response
 
 If, in your Rust plugin, you were using either the subgraph::Request::subgraph_name or the subgraph::Response::subgraph_name, please note that these are no longer `Option`, but are mandatory.
+
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
 
 ### Deploy your router
 
