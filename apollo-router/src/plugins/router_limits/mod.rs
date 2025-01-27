@@ -73,7 +73,7 @@ impl PluginPrivate for RouterLimits {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
                             u64_counter!(
-                                "apollo.router_limits.tps.limit_enforced",
+                                "apollo.router.product_limits.tps.enforced",
                                 "TPS Rate Limiting triggered",
                                 1u64
                             );
