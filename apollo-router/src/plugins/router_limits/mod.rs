@@ -108,7 +108,7 @@ register_private_plugin!("apollo", "router_limits", RouterLimits);
 #[cfg(test)]
 mod test {
     use super::*;
-    //use crate::metrics::FutureMetricsExt;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -165,44 +165,43 @@ mod test {
             .is_ok_and(|resp| resp.response.status().is_success()));
     }
 
-    //#[tokio::test]
-    //async fn it_emits_metrics_when_tps_enforced() {
-    //    async {
-    //        let blah = |_req| async {
-    //            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    //            Ok(router::Response::fake_builder()
-    //                .data(serde_json::json!({"data": {"field": "value"}}))
-    //                .header("x-custom-header", "test-value")
-    //                .build()
-    //                .unwrap())
-    //        };
-    //        // GIVEN
-    //        // * a license with tps limits set to 1 req per 200ms
-    //        // * the router limits plugin
-    //        let license = LicenseState::Licensed {
-    //            limits: Some(LicenseLimits {
-    //                tps: Some(TpsLimit {
-    //                    capacity: 1,
-    //                    interval: Duration::from_millis(150),
-    //                }),
-    //            }),
-    //        };
+    #[tokio::test]
+    async fn it_emits_metrics_when_tps_enforced() {
+        async {
+            // GIVEN
+            // * a license with tps limits set to 1 req per 200ms
+            // * the router limits plugin
+            let license = LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: Some(TpsLimit {
+                        capacity: 1,
+                        interval: Duration::from_millis(150),
+                    }),
+                }),
+            };
 
-    //        let test_harness: PluginTestHarness<RouterLimits> =
-    //            PluginTestHarness::builder().license(license).build().await;
+            let test_harness: PluginTestHarness<RouterLimits> =
+                PluginTestHarness::builder().license(license).build().await;
 
-    //        let service = test_harness.router_service(blah.clone());
+            let service = test_harness.router_service(|_req| async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                Ok(router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .build()
+                    .unwrap())
+            });
 
-    //        // WHEN
-    //        // * two reqs happen
-    //        service.call_default().await;
-    //        service.call_default().await;
+            // WHEN
+            // * two reqs happen
+            service.call_default().await;
+            service.call_default().await;
 
-    //        // THEN
-    //        // * we get a metric saying the tps limit was enforced
-    //        assert_counter!("apollo.router_limits.tps.limit_enforced", 1);
-    //    }
-    //    .with_metrics()
-    //    .await;
-    //}
+            // THEN
+            // * we get a metric saying the tps limit was enforced
+            assert_counter!("apollo.router_limits.tps.limit_enforced", 1);
+        }
+        .with_metrics()
+        .await;
+    }
 }
