@@ -2,7 +2,6 @@ use std::ops::ControlFlow;
 
 use futures::future::ready;
 use futures::stream::once;
-use futures::FutureExt;
 use futures::StreamExt;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -23,6 +22,9 @@ use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::execution;
 use crate::services::supergraph;
+
+use super::connectors::query_plans::replace_connector_service_names;
+use super::connectors::query_plans::replace_connector_service_names_text;
 
 const EXPOSE_QUERY_PLAN_HEADER_NAME: &str = "Apollo-Expose-Query-Plan";
 const ENABLE_EXPOSE_QUERY_PLAN_ENV: &str = "APOLLO_EXPOSE_QUERY_PLAN";
@@ -83,27 +85,23 @@ impl Plugin for ExposeQueryPlan {
                         .unwrap();
 =======
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: execution::Request| {
-                async move {
-                    let setting = req
-                        .context
-                        .get::<_, Setting>(ENABLED_CONTEXT_KEY)
-                        .ok()
-                        .flatten()
-                        .unwrap_or(Setting::Disabled);
+            .checkpoint(|req: execution::Request| {
+                let setting = req
+                    .context
+                    .get::<_, Setting>(ENABLED_CONTEXT_KEY)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(Setting::Disabled);
 
-                    if !matches!(setting, Setting::Disabled) {
-                        req.context
-                            .insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone())
-                            .unwrap();
-                        req.context
-                            .insert(
-                                FORMATTED_QUERY_PLAN_CONTEXT_KEY,
-                                req.query_plan.formatted_query_plan.clone(),
-                            )
-                            .unwrap();
-                    }
+                if !matches!(setting, Setting::Disabled) {
+                    let plan =
+                        replace_connector_service_names(req.query_plan.root.clone(), &req.context);
+                    let text = replace_connector_service_names_text(
+                        req.query_plan.formatted_query_plan.clone(),
+                        &req.context,
+                    );
 
+<<<<<<< HEAD
                     if matches!(setting, Setting::DryRun) {
                         Ok(ControlFlow::Break(
                             execution::Response::error_builder()
@@ -115,8 +113,23 @@ impl Plugin for ExposeQueryPlan {
                         Ok(ControlFlow::Continue(req))
                     }
 >>>>>>> 0794c19c (feat: dry running query planner)
+=======
+                    req.context.insert(QUERY_PLAN_CONTEXT_KEY, plan).unwrap();
+                    req.context
+                        .insert(FORMATTED_QUERY_PLAN_CONTEXT_KEY, text)
+                        .unwrap();
                 }
-                .boxed()
+                if matches!(setting, Setting::DryRun) {
+                    Ok(ControlFlow::Break(
+                        execution::Response::error_builder()
+                            .errors(vec![])
+                            .context(req.context)
+                            .build()?,
+                    ))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+>>>>>>> eb142e26 (fixing after rebase + include connectors logic that was clobbered)
+                }
             })
             .service(service)
             .boxed()
