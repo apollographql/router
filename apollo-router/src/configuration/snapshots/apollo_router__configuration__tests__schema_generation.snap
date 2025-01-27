@@ -5380,6 +5380,13 @@ expression: "&schema"
     "RouterShaping": {
       "additionalProperties": false,
       "properties": {
+        "concurrency_limit": {
+          "description": "The global concurrency limit",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "global_rate_limit": {
           "$ref": "#/definitions/RateLimitConf",
           "description": "#/definitions/RateLimitConf",

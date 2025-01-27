@@ -1,3 +1,6 @@
+//! Implements GraphQL parsing/validation/usage counting of requests at the supergraph service
+//! stage.
+
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -36,7 +39,9 @@ use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
-/// [`Layer`] for QueryAnalysis implementation.
+/// A layer-like type that handles several aspects of query parsing and analysis.
+///
+/// The supergraph layer implementation is in [QueryAnalysisLayer::supergraph_request].
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct QueryAnalysisLayer {
@@ -75,6 +80,8 @@ impl QueryAnalysisLayer {
         }
     }
 
+    // XXX(@goto-bus-stop): This is public because query warmup uses it. I think the reason that
+    // warmup uses this instead of `Query::parse_document` directly is to use the worker pool.
     pub(crate) async fn parse_document(
         &self,
         query: &str,
@@ -107,6 +114,20 @@ impl QueryAnalysisLayer {
             .expect("Query::parse_document panicked")
     }
 
+    /// Parses the GraphQL in the supergraph request and computes Apollo usage references.
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
+    ///
+    /// # Context
+    /// This stores values in the request context:
+    /// - [`ParsedDocument`]
+    /// - [`ExtendedReferenceStats`]
+    /// - "operation_name" and "operation_kind"
+    /// - authorization details (required scopes, policies), if any
+    /// - [`Arc`]`<`[`UsageReporting`]`>` if there was an error; normally, this would be populated
+    ///   by the caching query planner, but we do not reach that code if we fail early here.
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -118,7 +139,6 @@ impl QueryAnalysisLayer {
                 .message("Must provide query string.".to_string())
                 .extension_code("MISSING_QUERY_STRING")
                 .build()];
-
             return Err(SupergraphResponse::builder()
                 .errors(errors)
                 .status_code(StatusCode::BAD_REQUEST)
