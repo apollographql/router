@@ -26,6 +26,8 @@ succeeded.
 - `apollo_router_deduplicated_subscriptions_total`. Use the
 `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated`
 attribute
+- `apollo_router_span` has been removed. Use `apollo.router.processing.time`
+instead.
 
 #### CLI
 The deprecated `--schema` command-line argument is removed. `router config schema` should be used to print the configuration supergraph instead.

@@ -212,6 +212,8 @@ telemetry:
 
 - `apollo_router_deduplicated_subscriptions_total` has been removed. Use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute
 
+- `apollo_router_span` has been removed. Use `apollo.router.processing.time` instead.
+
 ### Context Keys
 
 The router request context is used to share data across stages of the request pipeline. The keys have been renamed for consistency and to better indicate which pipeline stage or plugin populates the data. If you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
