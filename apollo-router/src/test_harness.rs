@@ -311,12 +311,6 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the supergraph service
-    #[deprecated = "use build_supergraph instead"]
-    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        self.build_supergraph().await
-    }
-
-    /// Builds the supergraph service
     pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, supergraph_creator) = self.build_common().await?;
 
