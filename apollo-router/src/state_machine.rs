@@ -565,7 +565,7 @@ where
                 "state machine transitioned"
             );
             u64_counter!(
-                "apollo_router_state_change_total",
+                "apollo.router.state.change.total",
                 "Router state changes",
                 1,
                 event = event_name,
