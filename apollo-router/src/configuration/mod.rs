@@ -108,6 +108,46 @@ pub enum ConfigurationError {
     CertificateAuthorities { error: String },
 }
 
+impl From<proteus::Error> for ConfigurationError {
+    fn from(error: proteus::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl From<proteus::parser::Error> for ConfigurationError {
+    fn from(error: proteus::parser::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl From<serde_yaml::Error> for ConfigurationError {
+    fn from(error: serde_yaml::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl From<std::fmt::Error> for ConfigurationError {
+    fn from(error: std::fmt::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl From<tracing_core::metadata::ParseLevelError> for ConfigurationError {
+    fn from(error: tracing_core::metadata::ParseLevelError) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
 /// The configuration for the router.
 ///
 /// Can be created through `serde::Deserialize` from various formats,
