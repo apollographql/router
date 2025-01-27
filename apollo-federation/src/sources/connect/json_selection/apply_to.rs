@@ -406,7 +406,6 @@ impl ApplyToInternal for NamedSelection {
                 let output_key = alias_opt
                     .as_ref()
                     .map_or(key.as_str(), |alias| alias.name());
-                // TODO: This label should probably include the parent name somehow?
                 let field_shape = dollar_shape.field(
                     key.as_str(),
                     key.shape_location(source_id, Some(&input_shape), key),
