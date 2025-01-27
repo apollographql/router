@@ -49,6 +49,14 @@ Source code generated using Scaffold will continue to compile; so existing Rust 
 
 The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
 
+### Hot reloading `--supergraph-urls`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+
+<!-- PR: https://github.com/apollographql/router/pull/6567 -->
+
+The `--supergraph-urls` command-line argument or the `APOLLO_ROUTER_SUPERGRAPH_URLS` environment variable no longer support hot reloading. In v1.x, if hot reloading was enabled, the router would repeatedly fetch the URLs on the interval specified by `--apollo-uplink-poll-interval`.
+
+If hot reloading from a remote URL is desired, consider running a script to download the supergraph URL on an interval, and point the router to the downloaded file on the filesystem.
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
@@ -161,6 +169,10 @@ telemetry:
               - my_client
 ```
 
+### Traces
+
+- `telemetry.instrumentation.spans.mode` becomes `spec_compliant` by default instead of `deprecated`.
+
 ### Metrics
 
 - `apollo_router_http_request_retry_total` has been removed and will be supported now by `http.client.request.duration` metrics
@@ -175,6 +187,50 @@ telemetry:
 - `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
 
 - `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+
+### Context Keys
+
+The router request context is used to share data across stages of the request pipeline. The keys have been renamed for consistency and to better indicate which pipeline stage or plugin populates the data. If you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
+
+- `apollo_authentication::JWT::claims` -> `apollo::authentication::jwt_claims`
+- `apollo_authorization::authenticated::required` -> `apollo::authorization::authentication_required`
+- `apollo_authorization::scopes::required` -> `apollo::authorization::required_scopes`
+- `apollo_authorization::policies::required` -> `apollo::authorization::required_policies`
+- `apollo_operation_id` -> `apollo::supergraph::operation_id`
+- `apollo_override::unresolved_labels` -> `apollo::progressive_override::unresolved_labels`
+- `apollo_override::labels_to_override` -> `apollo::progressive_override::labels_to_override`
+- `apollo_router::supergraph::first_event` -> `apollo::supergraph::first_event`
+- `apollo_telemetry::client_name` -> `apollo::telemetry::client_name`
+- `apollo_telemetry::client_version` -> `apollo::telemetry::client_version`
+- `apollo_telemetry::studio::exclude` -> `apollo::telemetry::studio_exclude`
+- `apollo_telemetry::subgraph_ftv1` -> `apollo::telemetry::subgraph_ftv1`
+- `cost.actual` -> `apollo::demand_control::actual_cost`
+- `cost.estimated` -> `apollo::demand_control::estimated_cost`
+- `cost.result` -> `apollo::demand_control::result`
+- `cost.strategy` -> `apollo::demand_control::strategy`
+- `experimental::expose_query_plan.enabled` -> `apollo::expose_query_plan::enabled`
+- `experimental::expose_query_plan.formatted_plan` -> `apollo::expose_query_plan::formatted_plan`
+- `experimental::expose_query_plan.plan` -> `apollo::expose_query_plan::plan`
+- `operation_kind` -> `apollo::supergraph::operation_kind`
+- `operation_name` -> `apollo::supergraph::operation_name`
+- `persisted_query_hit` -> `apollo::apq::cache_hit`
+- `persisted_query_register` -> `apollo::apq::registered`
+
+### Tracing
+
+`jaeger` exporter has been removed as Jaeger fully supports to OTLP format. To use the `otlp` exporter change your router config:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        jaeger: true
+      otlp:
+        enabled: true
+```
+
+And ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and or `4318` for gRPC and HTTP respectively.
 
 ### Check CORS configuration
 

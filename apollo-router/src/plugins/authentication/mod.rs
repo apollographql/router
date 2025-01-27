@@ -67,7 +67,7 @@ pub(crate) mod subgraph;
 mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
-pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
+pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo::authentication::jwt_claims";
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
@@ -564,13 +564,12 @@ impl PluginPrivate for AuthenticationPlugin {
         }
     }
 
-    fn http_client_service(
+    fn connector_request_service(
         &self,
-        subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
         if let Some(auth) = &self.connector {
-            auth.http_client_service(subgraph_name, service)
+            auth.connector_request_service(service)
         } else {
             service
         }

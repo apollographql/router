@@ -27,7 +27,7 @@ traces_per_query:
         unexecuted_operation_name: ""
         details:
           variables_json: {}
-          operation_name: one
+          operation_name: ""
         client_name: ""
         client_version: ""
         operation_type: query
@@ -630,7 +630,7 @@ traces_per_query:
         unexecuted_operation_name: ""
         details:
           variables_json: {}
-          operation_name: two
+          operation_name: ""
         client_name: ""
         client_version: ""
         operation_type: query

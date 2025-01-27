@@ -25,8 +25,8 @@ use http::Request;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::json;
@@ -738,7 +738,7 @@ mod tests {
             Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
                 .unwrap();
         let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::Deprecated);
+        assert_eq!(mode, SpanMode::SpecCompliant);
     }
 
     #[test]

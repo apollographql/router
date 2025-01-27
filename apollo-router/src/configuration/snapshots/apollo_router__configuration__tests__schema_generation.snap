@@ -97,16 +97,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "AgentConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "endpoint": {
-          "$ref": "#/definitions/SocketEndpoint",
-          "description": "#/definitions/SocketEndpoint"
-        }
-      },
-      "type": "object"
-    },
     "All": {
       "enum": [
         "all"
@@ -480,28 +470,6 @@ expression: "&schema"
           "$ref": "#/definitions/Http2Config",
           "description": "#/definitions/Http2Config",
           "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "CollectorConfig": {
-      "additionalProperties": false,
-      "properties": {
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "password": {
-          "default": null,
-          "description": "The optional password",
-          "nullable": true,
-          "type": "string"
-        },
-        "username": {
-          "default": null,
-          "description": "The optional username",
-          "nullable": true,
-          "type": "string"
         }
       },
       "type": "object"
@@ -1518,52 +1486,6 @@ expression: "&schema"
       "type": "object"
     },
     "Config12": {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "agent": {
-              "$ref": "#/definitions/AgentConfig",
-              "description": "#/definitions/AgentConfig"
-            },
-            "batch_processor": {
-              "$ref": "#/definitions/BatchProcessorConfig",
-              "description": "#/definitions/BatchProcessorConfig"
-            },
-            "enabled": {
-              "description": "Enable Jaeger",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "batch_processor": {
-              "$ref": "#/definitions/BatchProcessorConfig",
-              "description": "#/definitions/BatchProcessorConfig"
-            },
-            "collector": {
-              "$ref": "#/definitions/CollectorConfig",
-              "description": "#/definitions/CollectorConfig"
-            },
-            "enabled": {
-              "description": "Enable Jaeger",
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "enabled"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1584,7 +1506,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config13": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1622,6 +1544,8 @@ expression: "&schema"
             "type": "boolean"
           },
           "default": {
+            "connect": true,
+            "connect_request": true,
             "execution": true,
             "http_request": true,
             "parse_query": true,
@@ -1632,7 +1556,7 @@ expression: "&schema"
             "subgraph_request": true,
             "supergraph": true
           },
-          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.",
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
           "type": "object"
         }
       },
@@ -1641,7 +1565,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config15": {
+    "Config14": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -2073,6 +1997,32 @@ expression: "&schema"
           },
           "required": [
             "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_request_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_request_mapping_problems"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_response_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_response_mapping_problems"
           ],
           "type": "object"
         }
@@ -4053,6 +4003,13 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "MappingProblems": {
+      "enum": [
+        "problems",
+        "count"
+      ],
+      "type": "string"
+    },
     "MetricAggregation": {
       "oneOf": [
         {
@@ -4285,6 +4242,10 @@ expression: "&schema"
         }
       ]
     },
+    "MyTestPluginConfig": {
+      "description": "Config for the test plugin",
+      "type": "object"
+    },
     "Operation": {
       "oneOf": [
         {
@@ -4428,6 +4389,10 @@ expression: "&schema"
     "Plugins": {
       "additionalProperties": false,
       "properties": {
+        "apollo_testing.my_test_plugin": {
+          "$ref": "#/definitions/MyTestPluginConfig",
+          "description": "#/definitions/MyTestPluginConfig"
+        },
         "experimental.broken": {
           "$ref": "#/definitions/Config2",
           "description": "#/definitions/Config2"
@@ -5565,9 +5530,6 @@ expression: "&schema"
           "description": "#/definitions/SupergraphSelector"
         }
       ]
-    },
-    "SocketEndpoint": {
-      "type": "string"
     },
     "Source": {
       "oneOf": [
@@ -7534,16 +7496,12 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config14",
-          "description": "#/definitions/Config14"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
-        },
-        "jaeger": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
         },
         "otlp": {
           "$ref": "#/definitions/Config10",
@@ -7554,8 +7512,8 @@ expression: "&schema"
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         }
       },
       "type": "object"
@@ -8782,8 +8740,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config15",
-      "description": "#/definitions/Config15"
+      "$ref": "#/definitions/Config14",
+      "description": "#/definitions/Config14"
     }
   },
   "title": "Configuration",
