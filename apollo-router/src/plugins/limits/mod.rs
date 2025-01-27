@@ -17,7 +17,6 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::limits::layer::BodyLimitControl;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::services::router;
@@ -157,16 +156,7 @@ impl Plugin for LimitsPlugin {
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
-        let control = BodyLimitControl::new(self.config.http_max_request_bytes);
-        let control_for_context = control.clone();
         ServiceBuilder::new()
-            .map_request(move |r: router::Request| {
-                let control_for_context = control_for_context.clone();
-                r.context
-                    .extensions()
-                    .with_lock(|mut lock| lock.insert(control_for_context));
-                r
-            })
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -174,7 +164,9 @@ impl Plugin for LimitsPlugin {
             // Here we need to convert to and from the underlying http request types so that we can use existing middleware.
             .map_request(Into::into)
             .map_response(Into::into)
-            .layer(RequestBodyLimitLayer::new(control))
+            .layer(RequestBodyLimitLayer::new(
+                self.config.http_max_request_bytes,
+            ))
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
