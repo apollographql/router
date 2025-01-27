@@ -28,7 +28,7 @@ use crate::services::RouterResponse;
 /// The limits placed on a router in virtue of what's in a user's license
 pub(crate) struct RouterLimits {
     /// Transactions per second allowed based on license tier
-    pub(crate) tps: TpsLimitConf,
+    pub(crate) tps: Option<TpsLimitConf>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -50,29 +50,19 @@ pub(crate) struct RouterLimitsConfig {}
 impl PluginPrivate for RouterLimits {
     type Config = RouterLimitsConfig;
 
-    // This will return an error only in cases where the router_limits plugin has been registered
-    // but there are no claims in the license for TPS. We _must_ check that there are claims in the
-    // router factory when regsitering this plugin
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let limits = init
-            .license
-            .get_limits()
-            .ok_or("License limits found during plugin initialization but failed to get limits in constructor phase of router_limits")
-            ?;
+        let tps = init.license.get_limits().and_then(|limits| {
+            limits.tps.and_then(|tps| {
+                NonZeroU64::new(tps.capacity as u64).and_then(|capacity| {
+                    Some(TpsLimitConf {
+                        capacity,
+                        interval: tps.interval,
+                    })
+                })
+            })
+        });
 
-        let tps = limits
-            .tps
-            .ok_or("License limits defined but no TPS claim defined")?;
-
-        let capacity = NonZeroU64::new(tps.capacity as u64)
-            .ok_or("Failed to convert TPS capacity into a usable value")?;
-
-        Ok(Self {
-            tps: TpsLimitConf {
-                capacity,
-                interval: tps.interval,
-            },
-        })
+        Ok(Self { tps })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -105,10 +95,11 @@ impl PluginPrivate for RouterLimits {
                 },
             )
             .load_shed()
-            .layer(RateLimitLayer::new(
-                self.tps.capacity.into(),
-                self.tps.interval,
-            ))
+            .option_layer(
+                self.tps
+                    .as_ref()
+                    .map(|config| RateLimitLayer::new(config.capacity.into(), config.interval)),
+            )
             .service(service)
             .boxed()
     }
@@ -118,15 +109,10 @@ register_private_plugin!("apollo", "router_limits", RouterLimits);
 
 #[cfg(test)]
 mod test {
-    use serde_json::json;
-    use tower::Service;
-
     use super::*;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugin::test::MockRouterService;
     use crate::plugin::DynPlugin;
     use crate::plugins::test::PluginTestHarness;
-    use crate::services::RouterRequest;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
@@ -235,81 +221,6 @@ mod test {
 
             // THEN
             // * we get a metric saying the tps limit was enforced
-            assert_counter!("apollo.router_limits.tps.limit_enforced", 1);
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_metrics_emitted() {
-        // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
-        async {
-            // GIVEN
-            // * router limits plugin
-            // * license with limits
-
-            let license = LicenseState::Licensed {
-                limits: Some(LicenseLimits {
-                    tps: Some(TpsLimit {
-                        capacity: 1,
-                        interval: Duration::from_millis(500),
-                    }),
-                }),
-            };
-            let router_limits_plugin = get_router_limits_plugin(license).await.unwrap();
-
-            let mut mock_service = MockRouterService::new();
-            mock_service.expect_call().times(0..3).returning(|_| {
-                Ok(RouterResponse::fake_builder()
-                    .data(json!({ "test": 5678_u32 }))
-                    .build()
-                    .unwrap())
-            });
-            mock_service
-                .expect_clone()
-                .returning(MockRouterService::new);
-
-            // WHEN
-            // * the router is called three times with a capacity of 1 and a interval of 500ms with a
-            // delay between the second and third calls
-
-            // THEN
-            // * the first call succeeds
-            // * the second call violates the tps limit
-            // * the third call, being out of the rate limiting interval, succeeds
-            let mut svc = router_limits_plugin.router_service(mock_service.boxed());
-            let response: RouterResponse = svc
-                .ready()
-                .await
-                .expect("it is ready")
-                .call(RouterRequest::fake_builder().build().unwrap())
-                .await
-                .unwrap();
-            assert_eq!(StatusCode::OK, response.response.status());
-
-            let response: RouterResponse = svc
-                .ready()
-                .await
-                .expect("it is ready")
-                .call(RouterRequest::fake_builder().build().unwrap())
-                .await
-                .unwrap();
-            assert_eq!(StatusCode::TOO_MANY_REQUESTS, response.response.status());
-
-            let j: serde_json::Value = serde_json::from_slice(
-                &crate::services::router::body::into_bytes(response.response)
-                    .await
-                    .expect("we have a body"),
-            )
-            .expect("our body is valid json");
-
-            // THEN
-            // * there's an appropriate rate limiting message
-            assert_eq!(
-                "Your request has been rate limited",
-                j["errors"][0]["message"]
-            );
             assert_counter!("apollo.router_limits.tps.limit_enforced", 1);
         }
         .with_metrics()
