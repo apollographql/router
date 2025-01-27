@@ -373,7 +373,8 @@ impl<S> HeadersService<S> {
                                             .insert(&from_body.name, header_value);
                                     }
                                     Err(err) => {
-                                        tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                                        let header_name = &from_body.name;
+                                        tracing::error!(?header_name, ?err, "cannot convert from the body into a header value for header name");
                                     }
                                 }
                             }
