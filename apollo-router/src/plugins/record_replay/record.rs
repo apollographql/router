@@ -304,17 +304,14 @@ async fn write_file(dir: Arc<Path>, path: &PathBuf, contents: &[u8]) -> Result<(
 }
 
 fn is_introspection(request: &supergraph::Request) -> bool {
-    request
-        .context
-        .unsupported_executable_document()
-        .is_some_and(|doc| {
-            doc.operations
-                .get(request.supergraph_request.body().operation_name.as_deref())
-                .ok()
-                .is_some_and(|op| {
-                    op.root_fields(&doc).all(|field| {
-                        matches!(field.name.as_str(), "__typename" | "__schema" | "__type")
-                    })
+    request.context.executable_document().is_some_and(|doc| {
+        doc.operations
+            .get(request.supergraph_request.body().operation_name.as_deref())
+            .ok()
+            .is_some_and(|op| {
+                op.root_fields(&doc).all(|field| {
+                    matches!(field.name.as_str(), "__typename" | "__schema" | "__type")
                 })
-        })
+            })
+    })
 }

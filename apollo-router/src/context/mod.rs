@@ -266,10 +266,8 @@ impl Context {
         }
     }
 
-    /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
-    /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
+    /// Read only access to the executable document for internal router plugins.
+    pub(crate) fn executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
     }
@@ -433,8 +431,8 @@ mod test {
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
-        assert!(c.unsupported_executable_document().is_none());
+        assert!(c.executable_document().is_none());
         c.extensions().with_lock(|mut lock| lock.insert(document));
-        assert!(c.unsupported_executable_document().is_some());
+        assert!(c.executable_document().is_some());
     }
 }

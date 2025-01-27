@@ -358,7 +358,7 @@ impl Plugin for DemandControl {
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
                         .context
-                        .unsupported_executable_document()
+                        .executable_document()
                         .expect("must have document");
                     let strategy = resp
                         .context
