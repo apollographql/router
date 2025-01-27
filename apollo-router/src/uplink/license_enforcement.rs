@@ -81,6 +81,7 @@ pub(crate) struct Claims {
     /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
     /// TPS limits may not exist in a Licnese; if not, no limits apply
+    #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
 }
 
@@ -608,6 +609,7 @@ pub struct License {
 #[derive(Builder, Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct TpsLimit {
     pub(crate) capacity: usize,
+    #[serde(rename = "durationMs")]
     pub(crate) interval: Duration,
 }
 
