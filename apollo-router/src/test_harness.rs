@@ -281,11 +281,13 @@ impl<'a> TestHarness<'a> {
         let builder = if builder.subgraph_network_requests {
             builder
         } else {
-            builder.subgraph_hook(|_name, _default| {
-                tower::service_fn(|request: subgraph::Request| {
+            builder.subgraph_hook(|name, _default| {
+                let my_name = name.to_string();
+                tower::service_fn(move |request: subgraph::Request| {
                     let empty_response = subgraph::Response::builder()
                         .extensions(crate::json_ext::Object::new())
                         .context(request.context)
+                        .subgraph_name(my_name.clone())
                         .id(request.id)
                         .build();
                     std::future::ready(Ok(empty_response))
