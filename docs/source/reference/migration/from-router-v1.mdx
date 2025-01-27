@@ -225,6 +225,52 @@ And ensure that you have enabled OTLP support in your Jaeger instance using `COL
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
 With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
 
+### OneShotAsyncCheckpoint
+
+This has been removed because it is incompatible with the architectural optimizations we've made in Router 2.0. If you were using this in a Rust Plugin, you can replace it easily with `AsyncCheckpoint` as follows:
+
+Plugin code using `OneShotAsyncCheckpoint`
+
+```
+            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+                let request_config = request_config.clone();
+                <etc...>
+            }
+            .service(service)
+            .boxed()
+```
+
+Replace with `AsyncCheckpoint`
+
+```
+            AsyncCheckpointLayer::new(move |request: execution::Request| {
+                let request_config = request_config.clone();
+                <etc...>
+            }
+            .buffered()
+            .service(service)
+            .boxed()
+```
+
+The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilderExt` trait and ensures that you service may be cloned.
+
+### Traffic Shaping
+
+Traffic shaping has been improved significantly in Router 2.0. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
+
+ - [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
+ - [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
+
+errors as traffic shaping constraints are enforced.
+
+We recommend that users experiment with their configuration in order to arrive at the right combination of timeout, concurrency and rate limit controls for their particular use case.
+
+For more information about [configuring traffic shaping](../../routing/performance/traffic-shaping.mdx).
+
+### Subgraph Request/Response
+
+If, in your Rust plugin, you were using either the subgraph::Request::subgraph_name or the subgraph::Response::subgraph_name, please note that these are no longer `Option`, but are mandatory.
+
 ### Deploy your router
 
 Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
