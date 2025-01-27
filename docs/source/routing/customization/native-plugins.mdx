@@ -86,7 +86,7 @@ impl Plugin for HelloWorld {
 
     // This is invoked once after the router starts and compiled-in
     // plugins are registered
-    fn builder (init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    fn new (init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(HelloWorld { configuration: init.config })
     }
 
