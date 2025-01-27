@@ -449,7 +449,6 @@ mod test {
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
     use crate::spec::Schema;
-    use crate::uplink::license_enforcement::LicenseState;
     use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {

@@ -761,16 +761,13 @@ fn inject_schema_id(
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::sync::Arc;
-    use std::time::Duration;
 
     use schemars::JsonSchema;
     use serde::Deserialize;
     use serde_json::json;
     use tower_http::BoxError;
 
-    use super::*;
     use crate::configuration::Configuration;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
@@ -779,9 +776,7 @@ mod test {
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::spec::Schema;
-    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
-    use crate::uplink::license_enforcement::TpsLimit;
 
     // Always starts and stops plugin
 
