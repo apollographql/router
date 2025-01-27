@@ -16,7 +16,6 @@ use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelect
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
-use crate::plugins::telemetry::config_new::connector::HttpRequest;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
@@ -339,7 +338,7 @@ impl Instrumented for ConnectorInstruments {
 }
 
 pub(crate) type ConnectorCustomInstruments = CustomInstruments<
-    HttpRequest,
+    ConnectorRequest,
     ConnectorResponse,
     (),
     ConnectorAttributes,

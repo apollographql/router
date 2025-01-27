@@ -1,11 +1,11 @@
 ---
 source: apollo-federation/src/sources/connect/json_selection/parser.rs
-expression: "JSONSelection::parse(\"$bogus\")"
+expression: "JSONSelection::parse(\"id $.object\")"
 ---
 Err(
     JSONSelectionParseError {
-        message: "Unknown variable",
-        fragment: "$bogus",
-        offset: 0,
+        message: "Named path selection must either begin with alias or ..., or end with subselection",
+        fragment: "$.object",
+        offset: 3,
     },
 )

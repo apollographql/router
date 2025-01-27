@@ -10,10 +10,8 @@ use resolver::NamespaceResolver;
 
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::Namespace;
-use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
 use crate::sources::connect::variable::VariableReference;
 
@@ -49,7 +47,7 @@ impl<'a> VariableResolver<'a> {
             .contains(&reference.namespace.namespace)
         {
             return Err(Message {
-                code: self.error_code(),
+                code: self.context.error_code(),
                 message: format!(
                     "variable `{namespace}` is not valid at this location, must be one of {available}",
                     namespace = reference.namespace.namespace.as_str(),
@@ -65,13 +63,5 @@ impl<'a> VariableResolver<'a> {
             resolver.check(reference, expression, self.schema)?;
         }
         Ok(())
-    }
-
-    fn error_code(&self) -> Code {
-        match self.context.target {
-            Target::Url => Code::InvalidUrl,
-            Target::Header => Code::InvalidHeader,
-            Target::Body => Code::InvalidJsonSelection,
-        }
     }
 }

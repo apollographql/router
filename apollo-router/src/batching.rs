@@ -23,7 +23,6 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
-use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
 use crate::services::router;
@@ -31,6 +30,7 @@ use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::spec::QueryHash;
 use crate::Context;
 
 /// A query that is part of a batch.
@@ -281,7 +281,7 @@ impl Batch {
                                 request, sender, ..
                             } in cancelled_requests
                             {
-                                let subgraph_name = request.subgraph_name.ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                                let subgraph_name = request.subgraph_name;
                                 if let Err(log_error) = sender.send(Err(Box::new(FetchError::SubrequestBatchingError {
                                         service: subgraph_name.clone(),
                                         reason: format!("request cancelled: {reason}"),
@@ -365,7 +365,7 @@ impl Batch {
                 sender: tx,
             } in all_in_one
             {
-                let subgraph_name = sg_request.subgraph_name.clone().ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                let subgraph_name = sg_request.subgraph_name.clone();
                 let value = svc_map
                     .entry(
                         subgraph_name,
@@ -493,7 +493,6 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
     use crate::services::router::body;
@@ -501,6 +500,7 @@ mod tests {
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::spec::QueryHash;
     use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
@@ -583,7 +583,7 @@ mod tests {
                     .body(graphql::Response::builder().data(data.clone()).build())
                     .unwrap(),
                 context: Context::new(),
-                subgraph_name: None,
+                subgraph_name: String::default(),
                 id: SubgraphRequestId(String::new()),
             };
 

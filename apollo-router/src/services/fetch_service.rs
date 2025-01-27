@@ -350,7 +350,7 @@ impl FetchService {
         };
 
         let service = subgraph_service_factory
-            .create(&service_name.clone())
+            .create(&service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         let uri = schema
