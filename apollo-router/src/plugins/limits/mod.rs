@@ -118,7 +118,7 @@ pub(crate) struct Config {
 
     /// Limit the depth of nested list fields in introspection queries
     /// to protect avoid generating huge responses. Returns a GraphQL
-    /// error with `{ message: "Maximum introspection depth exceeded" }` 
+    /// error with `{ message: "Maximum introspection depth exceeded" }`
     /// when nested fields exceed the limit.
     /// Default: true
     pub(crate) introspection_max_depth: bool,
