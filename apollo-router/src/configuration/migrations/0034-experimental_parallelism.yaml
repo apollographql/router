@@ -1,0 +1,4 @@
+description: Along with the removal of the legacy, JavaScript, query planner, supergraph.query_planning.experimental_parallelism is also removed.
+actions:
+  - type: delete
+    path: supergraph.query_planning.experimental_parallelism

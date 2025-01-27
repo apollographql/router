@@ -1,0 +1,4 @@
+description: the legacy query planner was removed, together with relevant configuration key - experimental_query_planner_mode
+actions:
+  - type: delete
+    path: experimental_query_planner_mode
