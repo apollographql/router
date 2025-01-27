@@ -98,9 +98,6 @@ mod test {
     // If we set test-threads=1, then this avoids the problem but means all our tests will run slowly.
     // So: to avoid this problem, we have a mutex lock which just exists to serialize access to the
     // global resources.
-    // Note: If a test fails, then it will poison the lock, so when locking we attempt to recover
-    // from poisoned mutex and continue anyway. This is safe to do, since the lock is effectively
-    // "read-only" and not protecting shared state but synchronising code access to global state.
     static TRACING_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]

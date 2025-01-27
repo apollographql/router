@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -17,6 +16,7 @@ use aws_types::region::Region;
 use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
+use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -264,9 +264,7 @@ async fn refresh_credentials(
 ) -> Option<Duration> {
     match credentials_provider.provide_credentials().await {
         Ok(new_credentials) => {
-            let mut credentials = credentials
-                .write()
-                .expect("authentication: credentials RwLock poisoned");
+            let mut credentials = credentials.write();
             *credentials = new_credentials;
             next_refresh_timer(&credentials)
         }
@@ -297,7 +295,6 @@ impl ProvideCredentials for CredentialsProvider {
         aws_credential_types::provider::future::ProvideCredentials::ready(Ok(self
             .credentials
             .read()
-            .expect("authentication: credentials RwLock poisoned")
             .clone()))
     }
 }

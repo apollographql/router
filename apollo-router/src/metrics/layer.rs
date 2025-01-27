@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
@@ -12,6 +11,7 @@ use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use parking_lot::RwLock;
 use tracing::field::Visit;
 use tracing::Subscriber;
 use tracing_core::Field;
@@ -73,7 +73,7 @@ impl Instruments {
             update: impl FnOnce(&T),
         ) {
             {
-                let lock = map.read().unwrap();
+                let lock = map.read();
                 if let Some(metric) = lock.get(name) {
                     update(metric);
                     return;
@@ -82,7 +82,7 @@ impl Instruments {
 
             // that metric did not already exist, so we have to acquire a write lock to
             // create it.
-            let mut lock = map.write().unwrap();
+            let mut lock = map.write();
 
             // handle the case where the entry was created while we were waiting to
             // acquire the write lock
@@ -453,7 +453,7 @@ impl MetricsLayer {
     }
     /// Remove all the instruments from the metrics layer. These will be obtained again from the meter provider upon next use.
     pub(crate) fn clear(&self) {
-        let mut inner = self.inner.write().expect("lock poisoned");
+        let mut inner = self.inner.write();
         *inner = Self::new_inner(&self.meter_provider);
     }
 }
@@ -463,7 +463,7 @@ where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
-        let inner = self.inner.read().expect("lock poisoned");
+        let inner = self.inner.read();
         let mut metric_visitor = MetricVisitor {
             meter: &inner.meter,
             instruments: &inner.instruments,
