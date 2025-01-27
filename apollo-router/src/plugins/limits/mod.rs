@@ -378,27 +378,24 @@ mod test {
     async fn test_limits_dynamic_update() {
         let plugin = plugin().await;
         let resp = plugin
-            .router_service(|r| async move {
+            .router_service(|mut r: router::Request| async move {
                 // Before we go for the body, we'll update the limit
-                r.context.extensions().with_lock(|lock| {
-                    let control: &BodyLimitControl =
-                        lock.get().expect("mut have body limit control");
-                    assert_eq!(control.remaining(), 10);
-                    assert_eq!(control.limit(), 10);
-                    control.update_limit(100);
-                });
+                let control = r
+                    .router_request
+                    .extensions_mut()
+                    .get::<BodyLimitControl>()
+                    .expect("body limit control must have been set")
+                    .clone();
+
+                assert_eq!(control.remaining(), 10);
+                assert_eq!(control.limit(), 10);
+                control.update_limit(100);
+
                 let body = r.router_request.into_body();
                 let _ = router::body::into_bytes(body).await?;
 
-                // TODO: It would be nice to re-instate the progress check in the future.
-                // For now, we can't since the way the BodyLimitControl stuff works is not well
-                // designed for working with back-pressure. The current compromise allows
-                // things to "work", but we can't make the progress check here that we used to.
-                // r.context.extensions().with_lock(|lock| {
-                // let control: &BodyLimitControl =
-                // lock.get().expect("mut have body limit control");
-                // assert_eq!(control.remaining(), 86);
-                // });
+                // Now let's check progress
+                assert_eq!(control.remaining(), 86);
                 Ok(router::Response::fake_builder().build().unwrap())
             })
             .call(
