@@ -178,6 +178,16 @@ impl CacheControl {
         let mut s = String::new();
         let mut prev = false;
         let now = now_epoch_seconds();
+        if self.no_store {
+            write!(&mut s, "no-store")?;
+            // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+            return Ok(s);
+        }
+        if self.no_cache {
+            write!(&mut s, "no_cache")?;
+            // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+            return Ok(s);
+        }
         if let Some(max_age) = self.max_age {
             //FIXME: write no-store if max_age = 0?
             write!(
@@ -206,20 +216,12 @@ impl CacheControl {
             )?;
             prev = true;
         }
-        if self.no_cache {
-            write!(&mut s, "{}no_cache", if prev { "," } else { "" },)?;
-            prev = true;
-        }
         if self.must_revalidate {
             write!(&mut s, "{}must-revalidate", if prev { "," } else { "" },)?;
             prev = true;
         }
         if self.proxy_revalidate {
             write!(&mut s, "{}proxy-revalidate", if prev { "," } else { "" },)?;
-            prev = true;
-        }
-        if self.no_store {
-            write!(&mut s, "{}no-store", if prev { "," } else { "" },)?;
             prev = true;
         }
         if self.private {
