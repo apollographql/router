@@ -68,14 +68,10 @@ The following deprecated methods are removed from rust plugins' API:
 - `services::router::Response::map()`
 - `router::event::schema::SchemaSource::File.delay` field
 - `router::event::configuration::Configuration::File.delay` field
-- `context::extensions::sync::ExtensionsMutex::lock()`
-  - use `ExtensionsMutex::with_lock()` instead
-- `test_harness::TestHarness::build()`
-  - use `TestHarness::build_supergraph()` instead
-- `PluginInit::new()`
-  - use `PluginInit::builder()` instead
-- `PluginInit::try_new()`
-  - use `PluginInit::try_builder()` instead
+- `context::extensions::sync::ExtensionsMutex::lock()`. Use `ExtensionsMutex::with_lock()` instead.
+- `test_harness::TestHarness::build()`. Use `TestHarness::build_supergraph()` instead.
+- `PluginInit::new()`. Use `PluginInit::builder()` instead.
+- `PluginInit::try_new()`. Use `PluginInit::try_builder()` instead.
 
 ## Upgrading to GraphOS Router v2.x
 
@@ -208,7 +204,7 @@ telemetry:
 
 - `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
 
-- `apollo_require_authentication_failure_count` has been removed. use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
+- `apollo_require_authentication_failure_count` has been removed. Use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
 
 - `apollo_authentication_failure_count` has been removed. Use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
 
