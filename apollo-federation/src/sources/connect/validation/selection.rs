@@ -41,19 +41,19 @@ pub(super) fn validate_selection(
 ) -> Result<(), Message> {
     let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
 
+    let context = VariableContext::new(
+        coordinate.field_coordinate.object,
+        coordinate.field_coordinate.field,
+        Phase::Response,
+        Target::Body,
+    );
     validate_selection_variables(
-        &VariableResolver::new(
-            VariableContext::new(
-                coordinate.field_coordinate.object,
-                coordinate.field_coordinate.field,
-                Phase::Response,
-                Target::Body,
-            ),
-            schema,
-        ),
+        &VariableResolver::new(context.clone(), schema),
         selection_arg.coordinate,
         &json_selection,
         selection_arg.value,
+        schema,
+        context,
     )?;
 
     let field = coordinate.field_coordinate.field;
@@ -124,19 +124,19 @@ pub(super) fn validate_body_selection(
         });
     }
 
+    let context = VariableContext::new(
+        connect_coordinate.field_coordinate.object,
+        connect_coordinate.field_coordinate.field,
+        Phase::Request,
+        Target::Body,
+    );
     validate_selection_variables(
-        &VariableResolver::new(
-            VariableContext::new(
-                connect_coordinate.field_coordinate.object,
-                connect_coordinate.field_coordinate.field,
-                Phase::Request,
-                Target::Body,
-            ),
-            schema,
-        ),
+        &VariableResolver::new(context.clone(), schema),
         coordinate,
         &selection,
         selection_str,
+        schema,
+        context,
     )
 }
 
@@ -146,18 +146,34 @@ pub(super) fn validate_selection_variables(
     coordinate: impl Display,
     selection: &JSONSelection,
     selection_str: GraphQLString,
+    schema: &SchemaInfo,
+    context: VariableContext,
 ) -> Result<(), Message> {
-    for reference in selection
-        .external_var_paths()
-        .into_iter()
-        .flat_map(|var_path| var_path.variable_reference())
-    {
-        variable_resolver
-            .resolve(&reference, selection_str)
-            .map_err(|mut err| {
-                err.message = format!("In {coordinate}: {message}", message = err.message);
-                err
-            })?;
+    for path in selection.external_var_paths().into_iter() {
+        if let Some(reference) = path.variable_reference() {
+            variable_resolver
+                .resolve(&reference, selection_str)
+                .map_err(|mut err| {
+                    err.message = format!("In {coordinate}: {message}", message = err.message);
+                    err
+                })?;
+        } else if let Some(reference) = path.variable_reference::<String>() {
+            return Err(Message {
+                code: context.error_code(),
+                message: format!(
+                    "In {coordinate}: unknown variable `{namespace}`, must be one of {available}",
+                    namespace = reference.namespace.namespace.as_str(),
+                    available = context.namespaces_joined(),
+                ),
+                locations: selection_str
+                    .line_col_for_subslice(
+                        reference.namespace.location.start..reference.namespace.location.end,
+                        schema,
+                    )
+                    .into_iter()
+                    .collect(),
+            });
+        }
     }
     Ok(())
 }

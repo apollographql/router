@@ -1544,6 +1544,8 @@ expression: "&schema"
             "type": "boolean"
           },
           "default": {
+            "connect": true,
+            "connect_request": true,
             "execution": true,
             "http_request": true,
             "parse_query": true,
@@ -1554,7 +1556,7 @@ expression: "&schema"
             "subgraph_request": true,
             "supergraph": true
           },
-          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.",
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
           "type": "object"
         }
       },
@@ -1995,6 +1997,32 @@ expression: "&schema"
           },
           "required": [
             "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_request_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_request_mapping_problems"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_response_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_response_mapping_problems"
           ],
           "type": "object"
         }
@@ -3974,6 +4002,13 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "MappingProblems": {
+      "enum": [
+        "problems",
+        "count"
+      ],
+      "type": "string"
     },
     "MetricAggregation": {
       "oneOf": [

@@ -55,6 +55,7 @@ use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution;
 use crate::services::execution::QueryPlan;
@@ -621,11 +622,14 @@ async fn subscription_task(
                                     Arc::new(ConnectorServiceFactory::new(
                                         execution_service_factory.schema.clone(),
                                         execution_service_factory.subgraph_schemas.clone(),
-                                        Arc::new(http_service_factory),
                                         subscription_plugin_conf,
                                         execution_service_factory.schema
                                             .connectors.as_ref().map(|c| c.by_service_name.clone())
                                             .unwrap_or_default(),
+                                        Arc::new(ConnectorRequestServiceFactory::new(
+                                            Arc::new(http_service_factory),
+                                            execution_service_factory.plugins.clone(),
+                                        )),
                                     )),
                                  ),
 
@@ -908,13 +912,16 @@ impl PluggableSupergraphServiceBuilder {
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
                 subgraph_schemas,
-                Arc::new(self.http_service_factory),
                 subscription_plugin_conf,
                 schema
                     .connectors
                     .as_ref()
                     .map(|c| c.by_service_name.clone())
                     .unwrap_or_default(),
+                Arc::new(ConnectorRequestServiceFactory::new(
+                    Arc::new(self.http_service_factory),
+                    self.plugins.clone(),
+                )),
             )),
         ));
 
