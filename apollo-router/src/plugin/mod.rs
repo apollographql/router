@@ -143,21 +143,6 @@ where
             .notify(Notify::for_tests())
             .build()
     }
-
-    /// Returns the parsed Schema. This is unstable and may be changed or removed in future router releases.
-    /// In addition, Schema is not stable, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_supergraph_schema(&self) -> Arc<Valid<Schema>> {
-        self.supergraph_schema.clone()
-    }
-
-    /// Returns a mapping of subgraph to parsed schema. This is unstable and may be changed or removed in
-    /// future router releases. In addition, Schema is not stable, and may be changed or removed in future
-    /// apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Arc<Valid<Schema>>>> {
-        self.subgraph_schemas.clone()
-    }
 }
 
 #[buildstructor::buildstructor]
