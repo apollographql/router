@@ -285,7 +285,7 @@ mod forbid_http_get_mutations_tests {
         let (_schema, executable) = ast.to_mixed_validate().unwrap();
 
         let context = Context::new();
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert::<ParsedDocument>(
                 ParsedDocumentInner::new(ast, Arc::new(executable), None, Default::default())
                     .unwrap(),

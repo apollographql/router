@@ -149,7 +149,7 @@ impl PersistedQueryLayer {
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(UsedQueryIdFromManifest));
+                    .with_lock(|lock| lock.insert(UsedQueryIdFromManifest));
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",

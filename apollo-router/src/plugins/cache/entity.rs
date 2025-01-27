@@ -48,11 +48,11 @@ use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
+use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 use crate::Context;
 use crate::Endpoint;
@@ -872,7 +872,7 @@ async fn cache_lookup_root(
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(control));
+                    .with_lock(|lock| lock.insert(control));
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
@@ -1048,7 +1048,7 @@ async fn cache_lookup_entities(
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
@@ -1220,9 +1220,11 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
+// XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
+// This function can be removed outright later at the cost of invalidating all entity caches.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
-    digest.update(&query_hash.0);
+    digest.update(query_hash.as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);

@@ -18,6 +18,8 @@ use crate::services::SupergraphResponse;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 static DONT_CACHE_HEADER_VALUE: HeaderValue = HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE);
+pub(crate) const PERSISTED_QUERY_CACHE_HIT: &str = "apollo::apq::cache_hit";
+pub(crate) const PERSISTED_QUERY_REGISTERED: &str = "apollo::apq::registered";
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -95,7 +97,7 @@ async fn apq_request(
         (Some((query_hash, query_hash_bytes)), Some(query)) => {
             if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
-                let _ = request.context.insert("persisted_query_register", true);
+                let _ = request.context.insert(PERSISTED_QUERY_REGISTERED, true);
                 let query = query.to_owned();
                 let cache = cache.clone();
                 tokio::spawn(async move {
@@ -130,12 +132,12 @@ async fn apq_request(
                 .get()
                 .await
             {
-                let _ = request.context.insert("persisted_query_hit", true);
+                let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, true);
                 tracing::trace!("apq: cache hit");
                 request.supergraph_request.body_mut().query = Some(cached_query);
                 Ok(request)
             } else {
-                let _ = request.context.insert("persisted_query_hit", false);
+                let _ = request.context.insert(PERSISTED_QUERY_CACHE_HIT, false);
                 tracing::trace!("apq: cache miss");
                 let errors = vec![crate::error::Error {
                     message: "PersistedQueryNotFound".to_string(),
@@ -557,7 +559,7 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(ClientRequestAccepts {
                 json: true,
                 ..Default::default()

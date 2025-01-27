@@ -43,11 +43,10 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-pub(crate) static COST_ESTIMATED_KEY: &str = "cost.estimated";
-pub(crate) static COST_ACTUAL_KEY: &str = "cost.actual";
-pub(crate) static COST_DELTA_KEY: &str = "cost.delta";
-pub(crate) static COST_RESULT_KEY: &str = "cost.result";
-pub(crate) static COST_STRATEGY_KEY: &str = "cost.strategy";
+pub(crate) static COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
+pub(crate) static COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
+pub(crate) static COST_RESULT_KEY: &str = "apollo::demand_control::result";
+pub(crate) static COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -273,7 +272,7 @@ impl Context {
     }
 
     pub(crate) fn insert_demand_control_context(&self, ctx: DemandControlContext) {
-        self.extensions().with_lock(|mut lock| lock.insert(ctx));
+        self.extensions().with_lock(|lock| lock.insert(ctx));
     }
 
     pub(crate) fn get_demand_control_context(&self) -> Option<DemandControlContext> {
@@ -622,19 +621,15 @@ mod test {
             .config(config)
             .build()
             .await;
-
         let ctx = context();
-
         let resp = plugin
-            .call_execution(
-                execution::Request::fake_builder().context(ctx).build(),
-                |req| {
-                    execution::Response::fake_builder()
-                        .context(req.context)
-                        .build()
-                        .unwrap()
-                },
-            )
+            .execution_service(|req| async {
+                Ok(execution::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .call(execution::Request::fake_builder().context(ctx).build())
             .await
             .unwrap();
 
@@ -662,11 +657,12 @@ mod test {
             .build();
         req.executable_document = Some(Arc::new(Valid::assume_valid(ExecutableDocument::new())));
         let resp = plugin
-            .call_subgraph(req, |req| {
-                subgraph::Response::fake_builder()
+            .subgraph_service("test", |req| async {
+                Ok(subgraph::Response::fake_builder()
                     .context(req.context)
-                    .build()
+                    .build())
             })
+            .call(req)
             .await
             .unwrap();
 
@@ -681,7 +677,7 @@ mod test {
             ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_document));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_document));
         ctx
     }
 

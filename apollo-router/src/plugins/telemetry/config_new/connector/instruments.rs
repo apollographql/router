@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Unit;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -17,7 +16,6 @@ use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelect
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
-use crate::plugins::telemetry::config_new::connector::HttpRequest;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
@@ -253,7 +251,7 @@ impl ConnectorInstruments {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
-                        .with_unit(Unit::new("s"))
+                        .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
                         .init(),
                 ),
@@ -266,7 +264,7 @@ impl ConnectorInstruments {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
                         .init(),
                 ),
@@ -283,7 +281,7 @@ impl ConnectorInstruments {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
                         .init(),
                 ),
@@ -340,7 +338,7 @@ impl Instrumented for ConnectorInstruments {
 }
 
 pub(crate) type ConnectorCustomInstruments = CustomInstruments<
-    HttpRequest,
+    ConnectorRequest,
     ConnectorResponse,
     (),
     ConnectorAttributes,

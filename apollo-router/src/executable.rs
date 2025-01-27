@@ -546,10 +546,12 @@ impl Executable {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
+                if opt.hot_reload {
+                    tracing::warn!("Schema hot reloading is disabled for --supergraph-urls / APOLLO_ROUTER_SUPERGRAPH_URLS.");
+                }
+
                 SchemaSource::URLs {
                     urls: supergraph_urls.clone(),
-                    watch: opt.hot_reload,
-                    period: INITIAL_UPLINK_POLL_INTERVAL,
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {

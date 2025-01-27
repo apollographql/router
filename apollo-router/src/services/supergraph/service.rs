@@ -54,6 +54,7 @@ use crate::query_planner::QueryPlannerService;
 use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
@@ -82,7 +83,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
-pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo_router::supergraph::first_event";
+pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -239,7 +240,7 @@ async fn service_call(
 
         Some(QueryPlannerContent::Plan { plan }) => {
             let query_metrics = plan.query_metrics;
-            context.extensions().with_lock(|mut lock| {
+            context.extensions().with_lock(|lock| {
                 let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
             });
 
@@ -608,11 +609,14 @@ async fn subscription_task(
                                     Arc::new(ConnectorServiceFactory::new(
                                         execution_service_factory.schema.clone(),
                                         execution_service_factory.subgraph_schemas.clone(),
-                                        Arc::new(http_service_factory),
                                         subscription_plugin_conf,
                                         execution_service_factory.schema
                                             .connectors.as_ref().map(|c| c.by_service_name.clone())
                                             .unwrap_or_default(),
+                                        Arc::new(ConnectorRequestServiceFactory::new(
+                                            Arc::new(http_service_factory),
+                                            execution_service_factory.plugins.clone(),
+                                        )),
                                     )),
                                  ),
 
@@ -742,7 +746,7 @@ async fn plan_query(
             &Configuration::default(),
         )
         .map_err(crate::error::QueryPlannerError::from)?;
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
         });
     }
@@ -897,13 +901,16 @@ impl PluggableSupergraphServiceBuilder {
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
                 subgraph_schemas,
-                Arc::new(self.http_service_factory),
                 subscription_plugin_conf,
                 schema
                     .connectors
                     .as_ref()
                     .map(|c| c.by_service_name.clone())
                     .unwrap_or_default(),
+                Arc::new(ConnectorRequestServiceFactory::new(
+                    Arc::new(self.http_service_factory),
+                    self.plugins.clone(),
+                )),
             )),
         ));
 

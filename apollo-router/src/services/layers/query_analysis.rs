@@ -26,11 +26,11 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -208,7 +208,7 @@ impl QueryAnalysisLayer {
                     None
                 };
 
-                request.context.extensions().with_lock(|mut lock| {
+                request.context.extensions().with_lock(|lock| {
                     lock.insert::<ParsedDocument>(doc.clone());
                     if let Some(stats) = extended_ref_stats {
                         lock.insert::<ExtendedReferenceStats>(stats);
@@ -221,7 +221,7 @@ impl QueryAnalysisLayer {
                 })
             }
             Err(errors) => {
-                request.context.extensions().with_lock(|mut lock| {
+                request.context.extensions().with_lock(|lock| {
                     lock.insert(Arc::new(UsageReporting {
                         stats_report_key: errors.get_error_key().to_string(),
                         referenced_fields_by_type: HashMap::new(),
@@ -313,7 +313,7 @@ impl Display for ParsedDocumentInner {
 
 impl Hash for ParsedDocumentInner {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash.0.hash(state);
+        self.hash.hash(state);
     }
 }
 

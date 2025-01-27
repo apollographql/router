@@ -95,7 +95,7 @@ where
                 Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
                     .expect("failed to parse supergraph schema"),
             ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -119,7 +119,7 @@ where
                         BoxError::from(e.errors.to_string())
                     })?,
             ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .notify(Notify::builder().build())
             .build()
@@ -136,7 +136,7 @@ where
 
         PluginInit::fake_builder()
             .config(config)
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
@@ -610,6 +610,14 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -720,6 +728,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService;
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -766,6 +780,13 @@ where
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         self.http_client_service(name, service)
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.connector_request_service(service)
     }
 
     fn name(&self) -> &'static str {
