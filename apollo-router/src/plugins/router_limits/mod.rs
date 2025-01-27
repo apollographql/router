@@ -78,8 +78,8 @@ impl PluginPrivate for RouterLimits {
                                 1u64
                             );
                             let error = graphql::Error::builder()
-                                .message("Your request has been rate limited")
-                                .extension_code("ROUTER_TPS_LIMIT_REACHED")
+                                .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
+                                .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
                                 .build();
                             Ok(RouterResponse::error_builder()
                                 .status_code(StatusCode::TOO_MANY_REQUESTS)
