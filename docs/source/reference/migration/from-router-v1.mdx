@@ -57,6 +57,26 @@ The `--supergraph-urls` command-line argument or the `APOLLO_ROUTER_SUPERGRAPH_U
 
 If hot reloading from a remote URL is desired, consider running a script to download the supergraph URL on an interval, and point the router to the downloaded file on the filesystem.
 
+### `--schema`
+
+The deprecated `--schema` command-line argument is removed. `router config schema` should be used to print the configuration supergraph instead.
+
+### Deprecated methods in rust plugins
+
+The following deprecated methods are removed from rust plugins' API:
+
+- `services::router::Response::map()`
+- `router::event::schema::SchemaSource::File.delay` field
+- `router::event::configuration::Configuration::File.delay` field
+- `context::extensions::sync::ExtensionsMutex::lock()`
+  - use `ExtensionsMutex::with_lock()` instead
+- `test_harness::TestHarness::build()`
+  - use `TestHarness::build_supergraph()` instead
+- `PluginInit::new()`
+  - use `PluginInit::builder()` instead
+- `PluginInit::try_new()`
+  - use `PluginInit::try_builder()` instead
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
@@ -187,6 +207,14 @@ telemetry:
 - `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
 
 - `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+
+- `apollo_require_authentication_failure_count` has been removed. use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
+
+- `apollo_authentication_failure_count` has been removed. Use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
+
+- `apollo_authentication_success_count` has been removed. Use the `apollo.router.operations.authentication.jwt` metric instead. If the `authentication.jwt.failed` attribute is _absent_ or `false`, the authentication succeeded.
+
+- `apollo_router_deduplicated_subscriptions_total` has been removed. Use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute
 
 ### Context Keys
 
