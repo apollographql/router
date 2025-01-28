@@ -364,16 +364,13 @@ impl FragmentGenerator {
 
     /// Recursively iterate over all selections to capture counts of how many times given selection
     /// occurs within the operation.
-    fn collect_selection_usages(
-        &mut self,
-        selection_set: &SelectionSet,
-    ) {
+    fn collect_selection_usages(&mut self, selection_set: &SelectionSet) {
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field) => {
-                    if let Some(selection_set) = &field.selection_set {
-                        self.increment_selection_count(selection_set);
-                        self.collect_selection_usages(selection_set);
+                    if let Some(field_selection_set) = &field.selection_set {
+                        self.increment_selection_count(field_selection_set);
+                        self.collect_selection_usages(field_selection_set);
                     }
                 }
                 Selection::InlineFragment(frag) => {
@@ -834,6 +831,61 @@ mod tests {
                     a
                     b
                     c
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments_v2()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on T {
+              a
+              b
+              c
+            }
+
+            {
+              t1 {
+                ...a
+              }
+              t2 {
+                ...a
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn extracts_common_order_independent_selections() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    c
+                  }
+                  t2 {
+                    c
+                    b
+                    a
                   }
                 }
                 "#,
