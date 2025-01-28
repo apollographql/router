@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use apollo_federation::sources::connect::expand::Connectors;
+use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
 use headers::HeadersIncompatPlugin;
@@ -8,6 +9,7 @@ use url_override::UrlOverrideIncompatPlugin;
 
 use crate::Configuration;
 
+mod apq;
 mod authentication;
 mod batching;
 mod headers;
@@ -73,6 +75,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         };
     }
     let incompatible_plugins: Vec<Box<dyn IncompatiblePlugin>> = vec![
+        APQIncompatPlugin::from_config(config).map(boxify!()),
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
