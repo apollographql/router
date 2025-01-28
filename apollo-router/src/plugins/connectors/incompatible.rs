@@ -2,14 +2,17 @@ use std::collections::HashSet;
 
 use apollo_federation::sources::connect::expand::Connectors;
 use authentication::AuthIncompatPlugin;
+use batching::BatchingIncompatPlugin;
 use headers::HeadersIncompatPlugin;
 
 use crate::Configuration;
 
 mod authentication;
+mod batching;
 mod headers;
 
 /// Pair of explicitly configured subgraphs for a plugin
+#[derive(Default)]
 struct ConfiguredSubgraphs<'a> {
     /// Subgraphs which are explicitly enabled
     enabled: HashSet<&'a String>,
@@ -28,9 +31,6 @@ struct ConfiguredSubgraphs<'a> {
 /// Note: Care should be taken to not spam the end-user with warnings that
 /// either cannot be resolved or are not applicable in all circumstances.
 trait IncompatiblePlugin {
-    /// Whether or not this plugin is currently enabled
-    fn is_enabled(&self) -> bool;
-
     /// Whether the plugin is currently configured to apply to all subgraphs
     fn is_applied_to_all(&self) -> bool;
 
@@ -72,6 +72,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
     }
     let incompatible_plugins: Vec<Box<dyn IncompatiblePlugin>> = vec![
         AuthIncompatPlugin::from_config(config).map(boxify!()),
+        BatchingIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
     ]
     .into_iter()
@@ -79,11 +80,6 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
     .collect();
 
     for plugin in incompatible_plugins {
-        // If the plugin is not enabled, no need to process it
-        if !plugin.is_enabled() {
-            continue;
-        }
-
         // Grab all of the configured subgraphs for this plugin
         let ConfiguredSubgraphs { enabled, disabled } = plugin.configured_subgraphs();
 

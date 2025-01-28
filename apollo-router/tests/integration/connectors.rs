@@ -274,3 +274,123 @@ async fn test_headers_incompatible_warnings_on_subgraph() -> Result<(), BoxError
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_batching_incompatible_warnings_on_all() -> Result<(), BoxError> {
+    // Ensure that we have the test keys before running
+    // Note: The [IntegrationTest] ensures that these test credentials get
+    // set before running the router.
+    if std::env::var("TEST_APOLLO_KEY").is_err() || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+    {
+        return Ok(());
+    };
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            batching:
+              enabled: true
+              mode: batch_http_link
+              subgraph:
+                all:
+                  enabled: true
+        "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `batching` indirectly targets a connector-enabled subgraph, which is not supported"#)
+        .await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_batching_incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
+    // Ensure that we have the test keys before running
+    // Note: The [IntegrationTest] ensures that these test credentials get
+    // set before running the router.
+    if std::env::var("TEST_APOLLO_KEY").is_err() || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+    {
+        return Ok(());
+    };
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            batching:
+              enabled: true
+              mode: batch_http_link
+              subgraph:
+                all:
+                  enabled: false
+                subgraphs:
+                  connectors:
+                    enabled: true
+        "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `batching` is explicitly configured for connector-enabled subgraph"#)
+        .await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_batching_no_incompatible_warnings_with_overrides() -> Result<(), BoxError> {
+    // Ensure that we have the test keys before running
+    // Note: The [IntegrationTest] ensures that these test credentials get
+    // set before running the router.
+    if std::env::var("TEST_APOLLO_KEY").is_err() || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+    {
+        return Ok(());
+    };
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            r#"
+            batching:
+              enabled: true
+              mode: batch_http_link
+              subgraph:
+                all:
+                  enabled: true
+                subgraphs:
+                  connectors:
+                    enabled: false
+        "#,
+        )
+        .supergraph(PathBuf::from_iter([
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .build()
+        .await;
+
+    router.start().await;
+    router
+        .assert_log_not_contains(r#""subgraph":"connectors","message":"plugin `batching`"#)
+        .await;
+
+    Ok(())
+}
