@@ -870,11 +870,15 @@ impl RouterService {
         let mut map = HashMap::new();
         for error in errors {
             let code = error.extensions.get("code").and_then(|c| c.as_str());
-            let service = error.extensions.get("service").and_then(|s| s.as_str())
-                .unwrap_or_default().to_string();
+            let service = error
+                .extensions
+                .get("service")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .to_string();
             let path = match &error.path {
                 None => "".into(),
-                Some(path) => path.to_string()
+                Some(path) => path.to_string(),
             };
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
