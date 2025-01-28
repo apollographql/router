@@ -204,6 +204,37 @@ limits:
 
 - `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
 
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+- If you used the `subgraph_response_body` selector for telemetry like this:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            http.response.status_code:
+              subgraph_response_status: code
+            my_data_value:
+              subgraph_response_body: .data.test
+```
+
+You'll have to migrate the `subgraph_response_body` to `subgraph_response_data` selector (or `subgraph_response_errors` if you want to target errors):
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            http.response.status_code:
+              subgraph_response_status: code
+            my_data_value:
+              subgraph_response_data: $.test # Heads up, we removed the .data prefix as it's directly targeting data and we added $
+```
+
 ### Context Keys
 
 The router request context is used to share data across stages of the request pipeline. The keys have been renamed for consistency and to better indicate which pipeline stage or plugin populates the data. If you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
@@ -252,6 +283,33 @@ And ensure that you have enabled OTLP support in your Jaeger instance using `COL
 
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
 With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
+
+### Headers propagation
+
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+
+If you use the ability to get data from request body and insert this data in a subgraph request header, we updated the `path` field type to be [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) compliant
+So if you had this configuration for example:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: .extensions.metadata[0].app_name
+```
+
+You'll have to migrate the `path` field to be JSONPath compliant and just add `$` at the beginning of the `path`, example:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: $.extensions.metadata[0].app_name
+```
 
 ### OneShotAsyncCheckpoint
 
