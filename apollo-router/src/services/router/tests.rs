@@ -14,7 +14,6 @@ use serde_json_bytes::json;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use crate::Configuration;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
@@ -33,6 +32,7 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::make_fake_batch;
+use crate::Configuration;
 use crate::Context;
 
 // Test Vary processing
