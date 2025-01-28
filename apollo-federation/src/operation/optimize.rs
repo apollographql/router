@@ -39,11 +39,9 @@ use std::hash::BuildHasher;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::{HashMap, IndexMap};
 use apollo_compiler::executable;
 use apollo_compiler::Name;
-use hashbrown::DefaultHashBuilder;
-use hashbrown::HashMap;
 
 use super::Fragment;
 use super::FragmentSpreadSelection;
@@ -148,7 +146,7 @@ impl Operation {
     /// occur multiple times in the operation.
     pub(crate) fn generate_fragments_v2(&mut self) -> Result<(), FederationError> {
         let mut generator = FragmentGenerator::default();
-        generator.collect_selection_usages(&self.selection_set)?;
+        generator.collect_selection_usages(&self.selection_set);
         generator.minify(&mut self.selection_set)?;
         self.named_fragments = generator.into_minimized();
         Ok(())
@@ -163,7 +161,6 @@ struct FragmentGenerator {
     // TODO v2 stuff below - remove v1 after analysis
     selection_counts: HashMap<u64, usize>,
     minimized_fragments: IndexMap<u64, Fragment>,
-    hash_builder: DefaultHashBuilder,
 }
 
 /// Returns a consistent GraphQL name for the given index.
@@ -373,7 +370,7 @@ impl FragmentGenerator {
             parent_type: &parent_type,
             selection_set: &selection_set,
         };
-        self.hash_builder.hash_one(key)
+        self.minimized_fragments.hasher().hash_one(key)
     }
 
     fn increment_selection_count(
@@ -390,7 +387,7 @@ impl FragmentGenerator {
     fn collect_selection_usages(
         &mut self,
         selection_set: &SelectionSet,
-    ) -> Result<(), FederationError> {
+    ) {
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field) => {
@@ -399,7 +396,7 @@ impl FragmentGenerator {
                             &field.field.parent_type_position(),
                             &selection_set,
                         );
-                        self.collect_selection_usages(selection_set)?;
+                        self.collect_selection_usages(selection_set);
                     }
                 }
                 Selection::InlineFragment(frag) => {
@@ -407,7 +404,7 @@ impl FragmentGenerator {
                         &frag.inline_fragment.casted_type(),
                         &frag.selection_set,
                     );
-                    self.collect_selection_usages(&frag.selection_set)?;
+                    self.collect_selection_usages(&frag.selection_set);
                 }
                 Selection::FragmentSpread(_) => {
                     // nothing to here as it is already a fragment spread
@@ -416,7 +413,6 @@ impl FragmentGenerator {
                 }
             }
         }
-        Ok(())
     }
 
     /// Recursively iterates over all selections to check if their selection sets are used multiple
@@ -526,17 +522,10 @@ impl FragmentGenerator {
                         };
 
                         let directives = &inline_fragment.get().inline_fragment.directives;
-                        let skip_include = directives
-                            .iter()
-                            .map(|directive| match directive.name.as_str() {
-                                "skip" | "include" => Ok(directive.clone()),
-                                _ => Err(()),
-                            })
-                            .collect::<Result<executable::DirectiveList, _>>();
+                        let skip_include_only = directives.iter()
+                            .all(|d| d.name.as_str() == "skip" || d.name.as_str() == "include");
 
-                        if inline_fragment.get().inline_fragment.directives.is_empty()
-                            || skip_include.is_ok()
-                        {
+                        if skip_include_only {
                             // convert inline fragment selection to fragment spread
                             let fragment_spread_selection =
                                 Selection::from(FragmentSpreadSelection {
