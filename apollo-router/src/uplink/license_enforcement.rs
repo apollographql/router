@@ -93,7 +93,7 @@ where
     Ok(UNIX_EPOCH + Duration::from_secs(seconds as u64))
 }
 
-fn deserialize_instant<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+fn deserialize_ms_into_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -618,7 +618,10 @@ pub struct License {
 pub(crate) struct TpsLimit {
     pub(crate) capacity: usize,
 
-    #[serde(deserialize_with = "deserialize_instant", rename = "durationMs")]
+    #[serde(
+        deserialize_with = "deserialize_ms_into_duration",
+        rename = "durationMs"
+    )]
     pub(crate) interval: Duration,
 }
 
