@@ -44,10 +44,10 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::json_ext::Object;
-use crate::json_ext::Value;
 use crate::graphql;
 use crate::http_ext;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 #[cfg(test)]
@@ -409,7 +409,11 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    Self::count_error_codes(vec!["INVALID_ACCEPT_HEADER"], &context, &oltp_error_metrics_mode);
+                    Self::count_error_codes(
+                        vec!["INVALID_ACCEPT_HEADER"],
+                        &context,
+                        &oltp_error_metrics_mode,
+                    );
 
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
@@ -839,7 +843,11 @@ impl RouterService {
         Ok(graphql_requests)
     }
 
-    fn count_errors(errors: &Vec<graphql::Error>, context: &Context, oltp_error_metrics_mode: &OtlpErrorMetricsMode) {
+    fn count_errors(
+        errors: &Vec<graphql::Error>,
+        context: &Context,
+        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
+    ) {
         let unwrap_context_string = |context_key: &str| -> String {
             context
                 .get::<_, String>(context_key)
@@ -896,7 +904,11 @@ impl RouterService {
         }
     }
 
-    fn count_error_codes(codes: Vec<&str>, context: &Context, oltp_error_metrics_mode: &OtlpErrorMetricsMode) {
+    fn count_error_codes(
+        codes: Vec<&str>,
+        context: &Context,
+        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
+    ) {
         let errors = codes
             .iter()
             .map(|c| {
@@ -986,15 +998,16 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
-        let oltp_error_metrics_mode: OtlpErrorMetricsMode = match configuration.apollo_plugins.plugins.get("telemetry") {
-            Some(telemetry_config) => {
-                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                    Ok(conf) => conf.apollo.errors.experimental_otlp_error_metrics,
-                    _ => OtlpErrorMetricsMode::default(),
+        let oltp_error_metrics_mode: OtlpErrorMetricsMode =
+            match configuration.apollo_plugins.plugins.get("telemetry") {
+                Some(telemetry_config) => {
+                    match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                        Ok(conf) => conf.apollo.errors.experimental_otlp_error_metrics,
+                        _ => OtlpErrorMetricsMode::default(),
+                    }
                 }
-            }
-            _ => OtlpErrorMetricsMode::default(),
-        };
+                _ => OtlpErrorMetricsMode::default(),
+            };
 
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             supergraph_creator.create(),
