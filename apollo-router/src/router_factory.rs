@@ -653,6 +653,7 @@ pub(crate) async fn create_plugins(
         }
     }
     add_mandatory_apollo_plugin!("limits");
+    add_mandatory_apollo_plugin!("healthcheck");
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_mandatory_apollo_plugin!("fleet_detector");
     add_optional_apollo_plugin!("forbid_mutations");

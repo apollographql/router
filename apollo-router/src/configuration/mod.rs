@@ -46,6 +46,9 @@ use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+#[cfg(test)]
+use crate::plugins::healthcheck::test_listen;
+use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::limits;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -257,15 +260,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
 }
 
 pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
-
-fn default_graphql_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
-}
-
-#[cfg(test)]
-fn test_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
-}
 
 #[cfg(test)]
 #[buildstructor::buildstructor]
@@ -1222,6 +1216,10 @@ impl Default for Sandbox {
     }
 }
 
+fn default_graphql_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+}
+
 /// Configuration options pertaining to the home page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1264,84 +1262,6 @@ impl Homepage {
 impl Default for Homepage {
     fn default() -> Self {
         Self::builder().enabled(default_homepage()).build()
-    }
-}
-
-/// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct HealthCheck {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:8088
-    pub(crate) listen: ListenAddr,
-
-    /// Set to false to disable the health check
-    pub(crate) enabled: bool,
-
-    /// Optionally set a custom healthcheck path
-    /// Defaults to /health
-    pub(crate) path: String,
-}
-
-fn default_health_check_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
-}
-
-fn default_health_check_enabled() -> bool {
-    true
-}
-
-fn default_health_check_path() -> String {
-    "/health".to_string()
-}
-
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}").to_string();
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-        }
-    }
-}
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-        }
-    }
-}
-
-impl Default for HealthCheck {
-    fn default() -> Self {
-        Self::builder().build()
     }
 }
 

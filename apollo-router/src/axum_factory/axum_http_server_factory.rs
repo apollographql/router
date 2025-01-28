@@ -1,7 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::fmt::Display;
 use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -28,15 +27,12 @@ use once_cell::sync::Lazy;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use regex::Regex;
-use serde::Serialize;
 use serde_json::json;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::layer::layer_fn;
-use tower::service_fn;
-use tower::BoxError;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 use tracing::instrument::WithSubscriber;
@@ -103,35 +99,15 @@ impl Drop for ActiveSessionCountGuard {
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
-pub(crate) struct AxumHttpServerFactory {
-    live: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
-}
+pub(crate) struct AxumHttpServerFactory {}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Self {}
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[allow(dead_code)]
-enum HealthStatus {
-    Up,
-    Down,
-}
-
-#[derive(Debug, Serialize)]
-struct Health {
-    status: HealthStatus,
-}
-
 pub(crate) fn make_axum_router<RF>(
-    live: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -141,70 +117,6 @@ where
     RF: RouterFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-
-    if configuration.health_check.enabled {
-        tracing::info!(
-            "Health check exposed at {}{}",
-            configuration.health_check.listen,
-            configuration.health_check.path
-        );
-        endpoints.insert(
-            configuration.health_check.listen.clone(),
-            Endpoint::from_router_service(
-                configuration.health_check.path.clone(),
-                service_fn(move |req: router::Request| {
-                    let mut status_code = StatusCode::OK;
-                    let health = if let Some(query) = req.router_request.uri().query() {
-                        let query_upper = query.to_ascii_uppercase();
-                        // Could be more precise, but sloppy match is fine for this use case
-                        if query_upper.starts_with("READY") {
-                            let status = if ready.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else if query_upper.starts_with("LIVE") {
-                            let status = if live.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else {
-                            Health {
-                                status: HealthStatus::Up,
-                            }
-                        }
-                    } else {
-                        Health {
-                            status: HealthStatus::Up,
-                        }
-                    };
-                    tracing::trace!(?health, request = ?req.router_request, "health check");
-                    async move {
-                        Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body(
-                                router::body::from_bytes(
-                                    serde_json::to_vec(&health).map_err(BoxError::from)?,
-                                ),
-                            )?,
-                            context: req.context,
-                        })
-                    }
-                })
-                .boxed(),
-            ),
-        );
-    }
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
@@ -247,17 +159,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RF: RouterFactory,
     {
-        let live = self.live.clone();
-        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers = make_axum_router(
-                live.clone(),
-                ready.clone(),
-                service_factory,
-                &configuration,
-                extra_endpoints,
-                license,
-            )?;
+            let all_routers =
+                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
 
             // serve main router
 
@@ -416,14 +320,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 all_connections_stopped_sender,
             ))
         })
-    }
-
-    fn live(&self, live: bool) {
-        self.live.store(live, Ordering::SeqCst);
-    }
-
-    fn ready(&self, ready: bool) {
-        self.ready.store(ready, Ordering::SeqCst);
     }
 }
 
