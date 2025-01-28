@@ -64,8 +64,8 @@ fn can_use_a_key_on_an_interface_object_type() {
                 {
                   iFromS1 {
                     __typename
-                    id
                     x
+                    id
                   }
                 }
               },
@@ -781,31 +781,15 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
               {
                 i {
                   __typename
-                  i1
                   i2 {
                     __typename
                     t1
                   }
+                  i1
                 }
               }
             },
             Parallel {
-              Flatten(path: "i.i2") {
-                Fetch(service: "S3") {
-                  {
-                    ... on T {
-                      __typename
-                      t1
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      __typename
-                      t2
-                    }
-                  }
-                },
-              },
               Flatten(path: "i") {
                 Fetch(service: "S2") {
                   {
@@ -817,6 +801,22 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
                   {
                     ... on I {
                       i3
+                    }
+                  }
+                },
+              },
+              Flatten(path: "i.i2") {
+                Fetch(service: "S4") {
+                  {
+                    ... on T {
+                      __typename
+                      t1
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      __typename
+                      t2
                     }
                   }
                 },
