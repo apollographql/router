@@ -120,13 +120,19 @@ fn validate_shape(
     match shape.case() {
         ShapeCase::Array { .. } => Err(Message {
             code: context.code,
-            message: "array values aren't valid here".to_string(),
             locations: transform_locations(&shape.locations, context, expression_offset),
+            message: format!(
+                "{} is an array, which isn't valid here",
+                expression_label(shape)
+            ),
         }),
         ShapeCase::Object { .. } => Err(Message {
             code: context.code,
-            message: "object values aren't valid here".to_string(),
             locations: transform_locations(&shape.locations, context, expression_offset),
+            message: format!(
+                "{} is an object, which isn't valid here",
+                expression_label(shape)
+            ),
         }),
         ShapeCase::One(shapes) => {
             for inner in shapes {
@@ -204,12 +210,7 @@ fn validate_shape(
             for key in key {
                 let child = resolved.child(key.clone());
                 if child.is_none() {
-                    let path = resolved
-                        .locations
-                        .into_iter()
-                        .find(|location| matches!(location.source_id, SourceId::Other(_)))
-                        .map(|location| location.label)
-                        .unwrap_or_default();
+                    let path = expression_label(&resolved);
                     let message = match key.value {
                         NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
                             format!("`{path}` is not an array or string")
@@ -242,6 +243,15 @@ fn validate_shape(
         | ShapeCase::Null
         | ShapeCase::Unknown => Ok(()),
     }
+}
+
+fn expression_label(resolved: &Shape) -> String {
+    resolved
+        .locations
+        .iter()
+        .find(|location| matches!(location.source_id, SourceId::Other(_)))
+        .map(|location| location.label.clone())
+        .unwrap_or_default()
 }
 
 fn transform_locations<'a>(
@@ -490,7 +500,7 @@ mod tests {
             .err()
             .expect("missing property is unknown");
         assert!(
-            err.message.contains("`MultiLevel`"),
+            err.message.contains("`$args.multiLevel.inner`"),
             "{} didn't reference type",
             err.message
         );
