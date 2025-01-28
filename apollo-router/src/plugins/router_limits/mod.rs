@@ -18,6 +18,7 @@ use tower::ServiceExt;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::metrics::count_graphql_error;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::services::router;
@@ -72,9 +73,12 @@ impl PluginPrivate for RouterLimits {
                     match response {
                         Ok(ok) => Ok(ok),
                         Err(err) if err.is::<Overloaded>() => {
+                            let extension_code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED";
+                            count_graphql_error(1u64, Some(extension_code));
+
                             let error = graphql::Error::builder()
                                 .message("Your request has been rate limited. You've reached the limits for the Free plan. Consider upgrading to a higher plan for increased limits.")
-                                .extension_code("ROUTER_FREE_PLAN_RATE_LIMIT_REACHED")
+                                .extension_code(extension_code)
                                 .build();
                             Ok(RouterResponse::error_builder()
                                 .status_code(StatusCode::TOO_MANY_REQUESTS)
@@ -103,6 +107,7 @@ register_private_plugin!("apollo", "router_limits", RouterLimits);
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::test::PluginTestHarness;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
@@ -157,5 +162,49 @@ mod test {
         assert!(r3
             .await
             .is_ok_and(|resp| resp.response.status().is_success()));
+    }
+
+    #[tokio::test]
+    async fn it_emits_metrics_when_tps_enforced() {
+        async {
+            // GIVEN
+            // * a license with tps limits set to 1 req per 200ms
+            // * the router limits plugin
+            let license = LicenseState::Licensed {
+                limits: Some(LicenseLimits {
+                    tps: Some(TpsLimit {
+                        capacity: 1,
+                        interval: Duration::from_millis(150),
+                    }),
+                }),
+            };
+
+            let test_harness: PluginTestHarness<RouterLimits> =
+                PluginTestHarness::builder().license(license).build().await;
+
+            let service = test_harness.router_service(|_req| async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                Ok(router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .build()
+                    .unwrap())
+            });
+
+            // WHEN
+            // * two reqs happen
+            let _ = service.call_default().await;
+            let _ = service.call_default().await;
+
+            // THEN
+            // * we get a metric saying the tps limit was enforced
+            assert_counter!(
+                "apollo.router.graphql_error",
+                1,
+                code = "ROUTER_FREE_PLAN_RATE_LIMIT_REACHED"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 }

@@ -821,10 +821,7 @@ mod test {
 
     register_plugin!("test", "always_fails_to_start", AlwaysFailsToStartPlugin);
 
-    async fn create_service(
-        config: Configuration,
-        license: Option<LicenseState>,
-    ) -> Result<(), BoxError> {
+    async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
         let schema = Schema::parse(schema, &config)?;
 
@@ -836,7 +833,7 @@ mod test {
                 Arc::new(schema),
                 None,
                 None,
-                license.unwrap_or_default(),
+                LicenseState::default(),
             )
             .await;
         service.map(|_| ())
@@ -845,7 +842,7 @@ mod test {
     #[tokio::test]
     async fn test_yaml_no_extras() {
         let config = Configuration::builder().build().unwrap();
-        let service = create_service(config, None).await;
+        let service = create_service(config).await;
         assert!(service.is_ok())
     }
 
@@ -859,7 +856,7 @@ mod test {
         "#,
         )
         .unwrap();
-        let service = create_service(config, None).await;
+        let service = create_service(config).await;
         assert!(service.is_ok())
     }
 
@@ -873,7 +870,7 @@ mod test {
         "#,
         )
         .unwrap();
-        let service = create_service(config, None).await;
+        let service = create_service(config).await;
         assert!(service.is_err())
     }
 
@@ -889,7 +886,7 @@ mod test {
         "#,
         )
         .unwrap();
-        let service = create_service(config, None).await;
+        let service = create_service(config).await;
         assert!(service.is_err())
     }
 
