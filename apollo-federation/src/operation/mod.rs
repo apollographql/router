@@ -13,6 +13,7 @@
 //! [`Field`], and the selection type is [`FieldSelection`].
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
@@ -544,6 +545,73 @@ impl HasSelectionKey for Selection {
             Selection::FragmentSpread(fragment_spread_selection) => fragment_spread_selection.key(),
             Selection::InlineFragment(inline_fragment_selection) => inline_fragment_selection.key(),
         }
+    }
+}
+
+impl Ord for Selection {
+    fn cmp(&self, other: &Self) -> Ordering {
+        fn compare_directives(d1: &DirectiveList, d2: &DirectiveList) -> Ordering {
+            if d1 == d2 {
+                Ordering::Equal
+            } else if d1.is_empty() {
+                Ordering::Less
+            } else if d2.is_empty() {
+                Ordering::Greater
+            } else {
+                d1.to_string().cmp(&d2.to_string())
+            }
+        }
+
+        match (self, other) {
+            (Selection::Field(f1), Selection::Field(f2)) => {
+                // cannot have two fields with the same response name so no need to check args or directives
+                f1.field.response_name().cmp(f2.field.response_name())
+            }
+            (Selection::Field(_), _) => Ordering::Less,
+            (Selection::InlineFragment(_), Selection::Field(_)) => Ordering::Greater,
+            (Selection::InlineFragment(i1), Selection::InlineFragment(i2)) => {
+                // compare type conditions and then directives
+                let first_type_position = &i1.inline_fragment.type_condition_position;
+                let second_type_position = &i2.inline_fragment.type_condition_position;
+                match (first_type_position, second_type_position) {
+                    (Some(t1), Some(t2)) => {
+                        let compare_type_conditions = t1.type_name().cmp(t2.type_name());
+                        if compare_type_conditions == Ordering::Equal {
+                            // compare directive lists
+                            compare_directives(
+                                &i1.inline_fragment.directives,
+                                &i2.inline_fragment.directives,
+                            )
+                        } else {
+                            compare_type_conditions
+                        }
+                    }
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => {
+                        // compare directive lists
+                        compare_directives(
+                            &i1.inline_fragment.directives,
+                            &i2.inline_fragment.directives,
+                        )
+                    }
+                }
+            }
+            (Selection::InlineFragment(_), Selection::FragmentSpread(_)) => Ordering::Less,
+            (Selection::FragmentSpread(f1), Selection::FragmentSpread(f2)) => {
+                // compare fragment names
+                // no need to compare directives as it doesn't make sense to have same
+                // fragment multiple times but with different directives
+                f1.spread.fragment_name.cmp(&f2.spread.fragment_name)
+            }
+            (Selection::FragmentSpread(_), _) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for Selection {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

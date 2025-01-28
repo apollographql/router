@@ -7,6 +7,7 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use hashbrown::DefaultHashBuilder;
 use hashbrown::HashTable;
+use itertools::Itertools;
 use serde::ser::SerializeSeq;
 use serde::Serialize;
 
@@ -200,10 +201,9 @@ impl Eq for SelectionMap {}
 
 impl Hash for SelectionMap {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // NOTE: this is order dependent so { a b c } != { c b a }
-        for selection in &self.selections {
-            selection.hash(state);
-        }
+        self.values()
+            .sorted()
+            .for_each(|hash_key| hash_key.hash(state));
     }
 }
 
