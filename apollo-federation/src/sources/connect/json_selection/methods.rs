@@ -4,6 +4,8 @@ use shape::Shape;
 
 use super::immutable::InputPath;
 use super::location::WithRange;
+use super::shape::ResolvedShape;
+use super::shape::Resolver;
 use super::ApplyToError;
 use super::MethodArgs;
 use super::PathList;
@@ -76,16 +78,16 @@ macro_rules! impl_arrow_method {
                 &self,
                 method_name: &WithRange<String>,
                 method_args: Option<&MethodArgs>,
-                input_shape: Shape,
-                dollar_shape: Shape,
-                named_shapes: &IndexMap<String, Shape>,
-            ) -> Shape {
+                input_shape: ResolvedShape,
+                dollar_shape: ResolvedShape,
+                resolver: Resolver,
+            ) -> ResolvedShape {
                 $shape_fn_name(
                     method_name,
                     method_args,
                     input_shape,
                     dollar_shape,
-                    named_shapes,
+                    resolver,
                 )
             }
         }
@@ -116,15 +118,15 @@ pub(super) trait ArrowMethodImpl {
         method_args: Option<&MethodArgs>,
         // The input_shape is the shape of the @ variable, or the value from the
         // left hand side of the -> token.
-        input_shape: Shape,
+        input_shape: ResolvedShape,
         // The dollar_shape is the shape of the $ variable, or the input object
         // associated with the closest enclosing subselection.
-        dollar_shape: Shape,
+        dollar_shape: ResolvedShape,
         // Other variable shapes may also be provided here, though in general
         // variables and their subproperties can be represented abstractly using
         // $var.nested.property ShapeCase::Name shapes.
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape;
+        resolver: Resolver,
+    ) -> ResolvedShape;
 }
 
 // This Deref implementation allows us to call .apply(...) directly on the
