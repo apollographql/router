@@ -16,6 +16,7 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -52,10 +53,10 @@ fn echo_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        return first_arg.compute_output_shape(input_shape, dollar_shape, named_var_shapes);
+        return first_arg.compute_output_shape(input_shape, dollar_shape, named_shapes);
     }
     Shape::error_with_range(
         format!("Method ->{} requires one argument", method_name.as_ref()),
@@ -130,7 +131,7 @@ fn map_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
         match input_shape.case() {
@@ -141,21 +142,21 @@ fn map_shape(
                         first_arg.compute_output_shape(
                             shape.clone(),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            named_shapes,
                         )
                     })
                     .collect::<Vec<_>>();
                 let new_tail = first_arg.compute_output_shape(
                     tail.clone(),
                     dollar_shape.clone(),
-                    named_var_shapes,
+                    named_shapes,
                 );
                 Shape::array(new_prefix, new_tail)
             }
             _ => Shape::list(first_arg.compute_output_shape(
                 input_shape.any_item(),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
             )),
         }
     } else {
@@ -227,7 +228,7 @@ pub(super) fn match_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         let mut result_union = Vec::new();
@@ -247,7 +248,7 @@ pub(super) fn match_shape(
                     let value_shape = pair[1].compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        named_shapes,
                     );
                     result_union.push(value_shape);
                 }
@@ -331,7 +332,7 @@ fn first_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
@@ -410,7 +411,7 @@ fn last_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
@@ -546,7 +547,7 @@ fn slice_shape(
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     // There are more clever shapes we could compute here (when start and end
     // are statically known integers and input_shape is an array or string with
@@ -630,7 +631,7 @@ fn size_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
@@ -725,7 +726,7 @@ fn entries_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if method_args.is_some() {
         return Shape::error_with_range(
@@ -822,7 +823,7 @@ fn json_stringify_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     Shape::string()
 }

@@ -823,6 +823,10 @@ impl PathList {
         }
     }
 
+    pub(super) fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
     fn variable_path_parts(&self) -> Vec<VariablePathPart> {
         match self {
             Self::Key(key, rest) => {

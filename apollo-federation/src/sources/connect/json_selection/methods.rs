@@ -78,14 +78,14 @@ macro_rules! impl_arrow_method {
                 method_args: Option<&MethodArgs>,
                 input_shape: Shape,
                 dollar_shape: Shape,
-                named_var_shapes: &IndexMap<&str, Shape>,
+                named_shapes: &IndexMap<String, Shape>,
             ) -> Shape {
                 $shape_fn_name(
                     method_name,
                     method_args,
                     input_shape,
                     dollar_shape,
-                    named_var_shapes,
+                    named_shapes,
                 )
             }
         }
@@ -120,10 +120,10 @@ pub(super) trait ArrowMethodImpl {
         // The dollar_shape is the shape of the $ variable, or the input object
         // associated with the closest enclosing subselection.
         dollar_shape: Shape,
-        // Other variable shapes may also be provided here, though in general
-        // variables and their subproperties can be represented abstractly using
-        // $var.nested.property ShapeCase::Name shapes.
-        named_var_shapes: &IndexMap<&str, Shape>,
+        // Other named shapes may also be provided here, though these shapes are
+        // often already present in input_shape or dollar_shape (if defined),
+        // and thus should not need to be looked up by method.shape functions.
+        named_shapes: &IndexMap<String, Shape>,
     ) -> Shape;
 }
 
