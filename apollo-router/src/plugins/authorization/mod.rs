@@ -550,6 +550,8 @@ impl Plugin for AuthorizationPlugin {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
+                    // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
+                    // authentication plugin, which manages this context value?
                     if request
                         .context
                         .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)

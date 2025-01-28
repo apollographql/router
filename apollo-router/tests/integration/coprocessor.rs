@@ -27,7 +27,7 @@ async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 500);
     assert_yaml_snapshot!(response.text().await?);
-    router.wait_for_log_message("INTERNAL_SERVER_ERROR").await;
+    router.wait_for_log_message("Internal Server Error").await;
     router.graceful_shutdown().await;
     Ok(())
 }

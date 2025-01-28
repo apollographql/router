@@ -17,7 +17,6 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::plugins::limits::layer::BodyLimitControl;
 use crate::plugins::limits::layer::BodyLimitError;
 use crate::plugins::limits::layer::RequestBodyLimitLayer;
 use crate::services::router;
@@ -115,6 +114,13 @@ pub(crate) struct Config {
     /// Default is ~400kib.
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
+
+    /// Limit the depth of nested list fields in introspection queries
+    /// to protect avoid generating huge responses. Returns a GraphQL
+    /// error with `{ message: "Maximum introspection depth exceeded" }`
+    /// when nested fields exceed the limit.
+    /// Default: true
+    pub(crate) introspection_max_depth: bool,
 }
 
 impl Default for Config {
@@ -135,6 +141,8 @@ impl Default for Config {
             // but is still very high for "reasonable" queries.
             // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
             parser_max_recursion: 500,
+
+            introspection_max_depth: true,
         }
     }
 }
@@ -157,16 +165,7 @@ impl Plugin for LimitsPlugin {
     }
 
     fn router_service(&self, service: BoxService) -> BoxService {
-        let control = BodyLimitControl::new(self.config.http_max_request_bytes);
-        let control_for_context = control.clone();
         ServiceBuilder::new()
-            .map_request(move |r: router::Request| {
-                let control_for_context = control_for_context.clone();
-                r.context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(control_for_context));
-                r
-            })
             .map_future_with_request_data(
                 |r: &router::Request| r.context.clone(),
                 |ctx, f| async { Self::map_error_to_graphql(f.await, ctx) },
@@ -174,7 +173,9 @@ impl Plugin for LimitsPlugin {
             // Here we need to convert to and from the underlying http request types so that we can use existing middleware.
             .map_request(Into::into)
             .map_response(Into::into)
-            .layer(RequestBodyLimitLayer::new(control))
+            .layer(RequestBodyLimitLayer::new(
+                self.config.http_max_request_bytes,
+            ))
             .map_request(Into::into)
             .map_response(Into::into)
             .service(service)
@@ -386,24 +387,24 @@ mod test {
     async fn test_limits_dynamic_update() {
         let plugin = plugin().await;
         let resp = plugin
-            .router_service(|r| async move {
+            .router_service(|mut r: router::Request| async move {
                 // Before we go for the body, we'll update the limit
-                r.context.extensions().with_lock(|lock| {
-                    let control: &BodyLimitControl =
-                        lock.get().expect("mut have body limit control");
-                    assert_eq!(control.remaining(), 10);
-                    assert_eq!(control.limit(), 10);
-                    control.update_limit(100);
-                });
+                let control = r
+                    .router_request
+                    .extensions_mut()
+                    .get::<BodyLimitControl>()
+                    .expect("body limit control must have been set")
+                    .clone();
+
+                assert_eq!(control.remaining(), 10);
+                assert_eq!(control.limit(), 10);
+                control.update_limit(100);
+
                 let body = r.router_request.into_body();
                 let _ = router::body::into_bytes(body).await?;
 
                 // Now let's check progress
-                r.context.extensions().with_lock(|lock| {
-                    let control: &BodyLimitControl =
-                        lock.get().expect("mut have body limit control");
-                    assert_eq!(control.remaining(), 86);
-                });
+                assert_eq!(control.remaining(), 86);
                 Ok(router::Response::fake_builder().build().unwrap())
             })
             .call(

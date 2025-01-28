@@ -252,27 +252,26 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     .await?;
 
     if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-        ---
+        assert_yaml_snapshot!(responses, @r"
         - data:
             entryA:
               index: 0
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - data:
             entryA:
               index: 1
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
-        "###);
+        ");
     }
 
     Ok(())
@@ -323,8 +322,7 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
     // verify the output
     let responses = [results_a, results_b].concat();
     if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-        ---
+        assert_yaml_snapshot!(responses, @r"
         - data:
             entryA:
               index: 0
@@ -335,24 +333,24 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
             entryA:
               index: 2
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
-        "###);
+        ");
     }
 
     Ok(())
