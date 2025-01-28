@@ -144,7 +144,7 @@ impl Operation {
     /// occur multiple times in the operation.
     pub(crate) fn generate_fragments_v2(&mut self) -> Result<(), FederationError> {
         let mut generator = FragmentGenerator::default();
-        generator.collect_selection_usages(&self.selection_set)?;
+        generator.collect_selection_usages(&self.selection_set);
         generator.minify(&mut self.selection_set)?;
         self.named_fragments = generator.into_minimized();
         Ok(())
@@ -367,18 +367,18 @@ impl FragmentGenerator {
     fn collect_selection_usages(
         &mut self,
         selection_set: &SelectionSet,
-    ) -> Result<(), FederationError> {
+    ) {
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field) => {
                     if let Some(selection_set) = &field.selection_set {
                         self.increment_selection_count(selection_set);
-                        self.collect_selection_usages(selection_set)?;
+                        self.collect_selection_usages(selection_set);
                     }
                 }
                 Selection::InlineFragment(frag) => {
                     self.increment_selection_count(&frag.selection_set);
-                    self.collect_selection_usages(&frag.selection_set)?;
+                    self.collect_selection_usages(&frag.selection_set);
                 }
                 Selection::FragmentSpread(_) => {
                     // nothing to here as it is already a fragment spread
@@ -387,7 +387,6 @@ impl FragmentGenerator {
                 }
             }
         }
-        Ok(())
     }
 
     /// Recursively iterates over all selections to check if their selection sets are used multiple
