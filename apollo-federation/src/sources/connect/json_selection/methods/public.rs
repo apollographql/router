@@ -569,6 +569,7 @@ fn slice_shape(
             Shape::array([], Shape::one(one_shapes))
         }
         ShapeCase::String(_) => Shape::string(),
+        ShapeCase::Unknown => Shape::unknown(),
         _ => Shape::error_with_range(
             format!(
                 "Method ->{} requires an array or string input",
