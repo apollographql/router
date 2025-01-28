@@ -267,6 +267,8 @@ impl RouterService {
             request_res = self.apq_layer.supergraph_request(supergraph_request).await;
         }
 
+        let oltp_error_metrics_mode = self.oltp_error_metrics_mode.clone();
+
         let SupergraphResponse { response, context } = match request_res {
             Err(response) => response,
             Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
@@ -343,7 +345,7 @@ impl RouterService {
                     && (accepts_json || accepts_wildcard)
                 {
                     if !response.errors.is_empty() {
-                        // self.count_errors(&response.errors, &context);
+                        Self::count_errors(&response.errors, &context, &oltp_error_metrics_mode);
                     }
 
                     parts
@@ -380,7 +382,7 @@ impl RouterService {
                     }
 
                     if !response.errors.is_empty() {
-                        self.count_errors(&response.errors, &context);
+                        Self::count_errors(&response.errors, &context, &oltp_error_metrics_mode);
                     }
 
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
@@ -407,7 +409,7 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    self.count_error_codes(vec!["INVALID_ACCEPT_HEADER"], &context);
+                    Self::count_error_codes(vec!["INVALID_ACCEPT_HEADER"], &context, &oltp_error_metrics_mode);
 
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
@@ -837,7 +839,7 @@ impl RouterService {
         Ok(graphql_requests)
     }
 
-    fn count_errors(&self, errors: &Vec<graphql::Error>, context: &Context) {
+    fn count_errors(errors: &Vec<graphql::Error>, context: &Context, oltp_error_metrics_mode: &OtlpErrorMetricsMode) {
         let unwrap_context_string = |context_key: &str| -> String {
             context
                 .get::<_, String>(context_key)
@@ -857,7 +859,7 @@ impl RouterService {
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
 
-            if matches!(self.oltp_error_metrics_mode, OtlpErrorMetricsMode::Enabled) {
+            if matches!(oltp_error_metrics_mode, OtlpErrorMetricsMode::Enabled) {
                 let code_str = code.unwrap_or_default().to_string();
                 u64_counter!(
                     "apollo.router.operations.error",
@@ -894,7 +896,7 @@ impl RouterService {
         }
     }
 
-    fn count_error_codes(&self, codes: Vec<&str>, context: &Context) {
+    fn count_error_codes(codes: Vec<&str>, context: &Context, oltp_error_metrics_mode: &OtlpErrorMetricsMode) {
         let errors = codes
             .iter()
             .map(|c| {
@@ -909,7 +911,7 @@ impl RouterService {
             })
             .collect();
 
-        self.count_errors(&errors, context);
+        Self::count_errors(&errors, context, oltp_error_metrics_mode);
     }
 }
 
@@ -984,7 +986,7 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
-        let oltp_error_metrics_mode = match configuration.apollo_plugins.plugins.get("telemetry") {
+        let oltp_error_metrics_mode: OtlpErrorMetricsMode = match configuration.apollo_plugins.plugins.get("telemetry") {
             Some(telemetry_config) => {
                 match serde_json::from_value::<Conf>(telemetry_config.clone()) {
                     Ok(conf) => conf.apollo.errors.experimental_otlp_error_metrics,
