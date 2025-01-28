@@ -45,7 +45,7 @@ impl IncompatiblePlugin for UrlOverrideIncompatPlugin {
             tracing::warn!(
                 subgraph = subgraph,
                 message =
-                    "overriding a subgraph URL for a connectors-enabled subgraph will not work",
+                    "overriding a subgraph URL for a connectors-enabled subgraph is not supported",
                 see = "https://go.apollo.dev/connectors/incompat",
             );
         }

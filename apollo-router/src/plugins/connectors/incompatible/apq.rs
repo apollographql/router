@@ -52,13 +52,13 @@ impl IncompatiblePlugin for APQIncompatPlugin {
             if self.config.subgraph.subgraphs.contains_key(subgraph) {
                 tracing::warn!(
                     subgraph = subgraph,
-                    message = "plugin `apq` is explicitly configured for connector-enabled subgraph, which is not supported. Queries will not be persisted",
+                    message = "plugin `apq` is explicitly configured for connector-enabled subgraph, which is not supported.",
                     see = "https://go.apollo.dev/connectors/incompat",
                 );
             } else {
                 tracing::info!(
                     subgraph = subgraph,
-                    message = "plugin `apq` indirectly targets a connector-enabled subgraph, which is not supported. Queries will not be persisted",
+                    message = "plugin `apq` indirectly targets a connector-enabled subgraph, which is not supported.",
                     see = "https://go.apollo.dev/connectors/incompat",
                 );
             }

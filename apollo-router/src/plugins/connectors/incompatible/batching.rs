@@ -64,13 +64,13 @@ impl IncompatiblePlugin for BatchingIncompatPlugin {
             {
                 tracing::warn!(
                     subgraph = subgraph,
-                    message = "plugin `batching` is explicitly configured for connector-enabled subgraph, which is not supported. Requests will not be batched",
+                    message = "plugin `batching` is explicitly configured for connector-enabled subgraph, which is not supported.",
                     see = "https://go.apollo.dev/connectors/incompat",
                 );
             } else {
                 tracing::info!(
                     subgraph = subgraph,
-                    message = "plugin `batching` indirectly targets a connector-enabled subgraph, which is not supported. Requests will not be batched",
+                    message = "plugin `batching` indirectly targets a connector-enabled subgraph, which is not supported.",
                     see = "https://go.apollo.dev/connectors/incompat",
                 );
             }
