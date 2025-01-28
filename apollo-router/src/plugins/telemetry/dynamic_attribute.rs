@@ -252,10 +252,16 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(event_attributes) => {
-                                        event_attributes.extend(attributes);
+                                        event_attributes.extend(
+                                            attributes.map(|KeyValue { key, value }| (key, value)),
+                                        );
                                     }
                                     None => {
-                                        otel_data.event_attributes = Some(attributes.collect());
+                                        otel_data.event_attributes = Some(
+                                            attributes
+                                                .map(|KeyValue { key, value }| (key, value))
+                                                .collect(),
+                                        );
                                     }
                                 },
                                 None => {
