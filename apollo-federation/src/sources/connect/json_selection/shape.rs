@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use apollo_compiler::collections::IndexMap;
 use shape::Shape;
 use shape::ShapeCase;
@@ -14,14 +16,14 @@ use super::Ranged;
 use super::SubSelection;
 
 impl JSONSelection {
-    /// Returns a [`ShapedSelection`] wrapping the JSONSelection, the currently
-    /// known input shapes, and the computed output shape. This is typically
-    /// only a starting point, meaning you will probably need to refine this
-    /// [`ShapedSelection`] with [`ShapedSelection::refine`] or
-    /// [`ShapedSelection::replace`] later.
-    pub(crate) fn shaped_selection(&self) -> ShapedSelection {
-        ShapedSelection::new(self.clone())
-    }
+    // /// Returns a [`ShapedSelection`] wrapping the JSONSelection, the currently
+    // /// known input shapes, and the computed output shape. This is typically
+    // /// only a starting point, meaning you will probably need to refine this
+    // /// [`ShapedSelection`] with [`ShapedSelection::refine`] or
+    // /// [`ShapedSelection::replace`] later.
+    // pub(crate) fn shaped_selection(&self) -> ShapedSelection {
+    //     ShapedSelection::new(self.clone())
+    // }
 
     /// A quick way to get the most generic possible [`Shape`] for this
     /// [`JSONSelection`], without any additional named shapes specified.
@@ -33,11 +35,14 @@ impl JSONSelection {
     /// Called internally by [`ShapedSelection::compute`] to do the actual shape
     /// processing work. The root JSON input shape can be specified by defining
     /// the `$root` key in the `named_shapes` map.
-    pub(crate) fn output_shape(&self, named_shapes: &IndexMap<String, Shape>) -> Shape {
+    pub(crate) fn output_shape(&self, named_shapes: &IndexMap<&str, Shape>) -> Shape {
+        let resolver = Resolver {
+            resolver: named_shapes,
+        };
         let input_shape = if let Some(root_shape) = named_shapes.get("$root") {
-            root_shape.clone()
+            resolver.resolve(root_shape.clone())
         } else {
-            Shape::name("$root")
+            ResolvedShape(Shape::none())
         };
 
         // At this level, $ and @ have the same value and shape.
@@ -45,12 +50,66 @@ impl JSONSelection {
 
         match self {
             Self::Named(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape, resolver)
             }
             Self::Path(path_selection) => {
-                path_selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
+                path_selection.compute_output_shape(input_shape, dollar_shape, resolver)
             }
         }
+        .0
+    }
+}
+
+/// Shapes of other named variables, with the variable name `String`
+/// including the initial `$` character. This map typically does not
+/// change during the compute_output_shape recursion, and so can be
+/// passed down by immutable reference.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Resolver<'a> {
+    resolver: &'a IndexMap<&'a str, Shape>,
+}
+
+impl Resolver<'_> {
+    pub(super) fn resolve(&self, shape: Shape) -> ResolvedShape {
+        ResolvedShape::resolve(shape, self.resolver)
+    }
+}
+
+/// A [`Shape`] that's guaranteed to not be a [`ShapeCase::Name`] if we have a lookup for that name.
+///
+/// So all names left at the end are unresolvable (and therefore errors).
+#[derive(Clone, Debug)]
+pub(super) struct ResolvedShape(Shape);
+
+impl ResolvedShape {
+    fn resolve(shape: Shape, resolver: &IndexMap<&str, Shape>) -> Self {
+        if let ShapeCase::Name(key, path) = shape.case() {
+            if let Some(named_shape) = resolver.get(key.as_str()) {
+                let mut shape = named_shape.clone();
+                for part in path {
+                    shape = shape.child(part);
+                    if shape.is_none() {
+                        return Self(Shape::error(format!("field `{part}` not found")));
+                    }
+                }
+                return Self(shape);
+            }
+        }
+        Self(shape)
+    }
+}
+
+impl Deref for ResolvedShape {
+    type Target = Shape;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Into<Shape> for ResolvedShape {
+    fn into(self) -> Shape {
+        self.0
     }
 }
 
@@ -62,44 +121,40 @@ pub(crate) trait ComputeOutputShape {
         &self,
         // Shape of the `@` variable, which typically changes with each
         // recursive call to compute_output_shape.
-        input_shape: Shape,
+        input_shape: ResolvedShape,
         // Shape of the `$` variable, which is bound to the closest enclosing
         // subselection object, or the root data object if there is no enclosing
         // subselection.
-        dollar_shape: Shape,
-        // Shapes of other named variables, with the variable name `String`
-        // including the initial `$` character. This map typically does not
-        // change during the compute_output_shape recursion, and so can be
-        // passed down by immutable reference.
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape;
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape;
 }
 
 impl<T: ComputeOutputShape> ComputeOutputShape for WithRange<T> {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
         self.as_ref()
-            .compute_output_shape(input_shape, dollar_shape, named_shapes)
+            .compute_output_shape(input_shape, dollar_shape, resolver)
     }
 }
 
 impl ComputeOutputShape for JSONSelection {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
         match self {
             Self::Named(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape, resolver)
             }
             Self::Path(path_selection) => {
-                path_selection.compute_output_shape(input_shape, dollar_shape, named_shapes)
+                path_selection.compute_output_shape(input_shape, dollar_shape, resolver)
             }
         }
     }
@@ -108,10 +163,10 @@ impl ComputeOutputShape for JSONSelection {
 impl ComputeOutputShape for NamedSelection {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
         let mut output = Shape::empty_map();
 
         match self {
@@ -120,19 +175,31 @@ impl ComputeOutputShape for NamedSelection {
                     .as_ref()
                     .map_or(key.as_str(), |alias| alias.name());
                 let field_shape = dollar_shape.field(key.as_str());
+                if field_shape.is_none() {
+                    return resolver.resolve(Shape::error(format!(
+                        "field `{field}` not found",
+                        field = key.as_str()
+                    )));
+                }
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
-                        selection.compute_output_shape(field_shape, dollar_shape, named_shapes)
+                        selection
+                            .compute_output_shape(
+                                resolver.resolve(field_shape),
+                                dollar_shape,
+                                resolver,
+                            )
+                            .0
                     } else {
                         field_shape
                     },
                 );
             }
             Self::Path { alias, path, .. } => {
-                let path_shape = path.compute_output_shape(input_shape, dollar_shape, named_shapes);
+                let path_shape = path.compute_output_shape(input_shape, dollar_shape, resolver);
                 if let Some(alias) = alias {
-                    output.insert(alias.name().to_string(), path_shape);
+                    output.insert(alias.name().to_string(), path_shape.0);
                 } else {
                     return path_shape;
                 }
@@ -140,38 +207,37 @@ impl ComputeOutputShape for NamedSelection {
             Self::Group(alias, sub_selection) => {
                 output.insert(
                     alias.name().to_string(),
-                    sub_selection.compute_output_shape(input_shape, dollar_shape, named_shapes),
+                    sub_selection
+                        .compute_output_shape(input_shape, dollar_shape, resolver)
+                        .0,
                 );
             }
         };
 
-        Shape::object(output, Shape::none())
+        resolver.resolve(Shape::object(output, Shape::none()))
     }
 }
 
 impl ComputeOutputShape for PathSelection {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
         match self.path.as_ref() {
             PathList::Key(_, _) => {
                 // If this is a KeyPath, we need to evaluate the path starting
                 // from the current $ shape, so we pass dollar_shape as the data
                 // *and* dollar_shape to self.path.compute_output_shape.
-                self.path.compute_output_shape(
-                    dollar_shape.clone(),
-                    dollar_shape.clone(),
-                    named_shapes,
-                )
+                self.path
+                    .compute_output_shape(dollar_shape.clone(), dollar_shape.clone(), resolver)
             }
             // If this is not a KeyPath, keep evaluating against input_shape.
             // This logic parallels PathSelection::apply_to_path (above).
             _ => self
                 .path
-                .compute_output_shape(input_shape, dollar_shape, named_shapes),
+                .compute_output_shape(input_shape, dollar_shape, resolver),
         }
     }
 }
@@ -179,10 +245,10 @@ impl ComputeOutputShape for PathSelection {
 impl ComputeOutputShape for PathList {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
         let current_shape = match self {
             Self::Var(ranged_var_name, _) => {
                 let var_name = ranged_var_name.as_ref();
@@ -190,10 +256,8 @@ impl ComputeOutputShape for PathList {
                     input_shape
                 } else if var_name == &KnownVariable::Dollar {
                     dollar_shape.clone()
-                } else if let Some(shape) = named_shapes.get(var_name.as_str()) {
-                    shape.clone()
                 } else {
-                    Shape::name(var_name.as_str())
+                    resolver.resolve(Shape::name(var_name.as_str()))
                 }
             }
 
@@ -201,10 +265,18 @@ impl ComputeOutputShape for PathList {
             // will have set our input_shape equal to its dollar_shape, thereby
             // ensuring that some.nested.path is equivalent to
             // $.some.nested.path.
-            Self::Key(key, _) => input_shape.field(key.as_str()),
+            Self::Key(key, _) => {
+                let field_shape = input_shape.field(key.as_str());
+                let shape = if field_shape.is_none() {
+                    Shape::error(format!("field `{key}` not found", key = key.as_str()))
+                } else {
+                    field_shape
+                };
+                resolver.resolve(shape)
+            }
 
             Self::Expr(expr, _) => {
-                expr.compute_output_shape(input_shape, dollar_shape.clone(), named_shapes)
+                expr.compute_output_shape(input_shape, dollar_shape.clone(), resolver)
             }
 
             Self::Method(method_name, method_args, _) => {
@@ -214,47 +286,70 @@ impl ComputeOutputShape for PathList {
                         method_args.as_ref(),
                         input_shape,
                         dollar_shape.clone(),
-                        named_shapes,
+                        resolver,
                     )
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
-                    return Shape::error_with_range(message.as_str(), method_name.range());
+                    return ResolvedShape(Shape::error_with_range(
+                        message.as_str(),
+                        method_name.range(),
+                    ));
                 }
             }
 
             Self::Selection(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape.clone(), named_shapes)
+                selection.compute_output_shape(input_shape, dollar_shape.clone(), resolver)
             }
 
             Self::Empty => input_shape,
         };
 
-        compute_tail_shape(self, current_shape, dollar_shape.clone(), named_shapes)
+        compute_tail_shape(self, current_shape, dollar_shape.clone(), resolver)
     }
 }
 
 fn compute_tail_shape(
     path: &PathList,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_shapes: &IndexMap<String, Shape>,
-) -> Shape {
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     match input_shape.case() {
-        ShapeCase::None => input_shape,
-        ShapeCase::One(shapes) => Shape::one(shapes.iter().map(|shape| {
-            compute_tail_shape(path, shape.clone(), dollar_shape.clone(), named_shapes)
-        })),
-        ShapeCase::All(shapes) => Shape::all(shapes.iter().map(|shape| {
-            compute_tail_shape(path, shape.clone(), dollar_shape.clone(), named_shapes)
-        })),
-        ShapeCase::Error(error) => ShapeCase::Error(shape::Error {
-            message: error.message.clone(),
-            range: error.range.clone(),
-            partial: error.partial.as_ref().map(|shape| {
-                compute_tail_shape(path, shape.clone(), dollar_shape.clone(), named_shapes)
-            }),
-        })
-        .simplify(),
+        ShapeCase::None | ShapeCase::Unknown => input_shape,
+        ShapeCase::One(shapes) => resolver.resolve(Shape::one(shapes.iter().map(|shape| {
+            compute_tail_shape(
+                path,
+                resolver.resolve(shape.clone()),
+                dollar_shape.clone(),
+                resolver,
+            )
+            .0
+        }))),
+        ShapeCase::All(shapes) => resolver.resolve(Shape::all(shapes.iter().map(|shape| {
+            compute_tail_shape(
+                path,
+                resolver.resolve(shape.clone()),
+                dollar_shape.clone(),
+                resolver,
+            )
+            .0
+        }))),
+        ShapeCase::Error(error) => ResolvedShape(
+            ShapeCase::Error(shape::Error {
+                message: error.message.clone(),
+                range: error.range.clone(),
+                partial: error.partial.as_ref().map(|shape| {
+                    compute_tail_shape(
+                        path,
+                        resolver.resolve(shape.clone()),
+                        dollar_shape.clone(),
+                        resolver,
+                    )
+                    .into()
+                }),
+            })
+            .simplify(),
+        ),
         _ => match path {
             PathList::Var(_, tail)
             | PathList::Key(_, tail)
@@ -264,10 +359,13 @@ fn compute_tail_shape(
                     if tail.is_empty() {
                         input_shape
                     } else {
-                        Shape::error_with_range("Path applied to nothing", tail.range())
+                        ResolvedShape(Shape::error_with_range(
+                            "Path applied to nothing",
+                            tail.range(),
+                        ))
                     }
                 }
-                _ => tail.compute_output_shape(input_shape, dollar_shape, named_shapes),
+                _ => tail.compute_output_shape(input_shape, dollar_shape, resolver),
             },
             PathList::Selection(_) => input_shape,
             PathList::Empty => input_shape,
@@ -278,11 +376,11 @@ fn compute_tail_shape(
 impl ComputeOutputShape for LitExpr {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
-        match self {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
+        let shape = match self {
             Self::Null => Shape::null(),
             Self::Bool(value) => Shape::bool_value(*value),
             Self::String(value) => Shape::string_value(value.as_str()),
@@ -302,11 +400,13 @@ impl ComputeOutputShape for LitExpr {
                 for (key, value) in map {
                     fields.insert(
                         key.as_string(),
-                        value.compute_output_shape(
-                            input_shape.clone(),
-                            dollar_shape.clone(),
-                            named_shapes,
-                        ),
+                        value
+                            .compute_output_shape(
+                                input_shape.clone(),
+                                dollar_shape.clone(),
+                                resolver,
+                            )
+                            .0,
                     );
                 }
                 Shape::object(fields, Shape::none())
@@ -315,52 +415,74 @@ impl ComputeOutputShape for LitExpr {
             Self::Array(vec) => {
                 let mut shapes = Vec::with_capacity(vec.len());
                 for value in vec {
-                    shapes.push(value.compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_shapes,
-                    ));
+                    shapes.push(
+                        value
+                            .compute_output_shape(
+                                input_shape.clone(),
+                                dollar_shape.clone(),
+                                resolver,
+                            )
+                            .into(),
+                    );
                 }
                 Shape::array(shapes, Shape::none())
             }
 
-            Self::Path(path) => path.compute_output_shape(input_shape, dollar_shape, named_shapes),
-        }
+            Self::Path(path) => {
+                return path.compute_output_shape(input_shape, dollar_shape, resolver)
+            }
+        };
+        resolver.resolve(shape)
     }
 }
 
 impl ComputeOutputShape for SubSelection {
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_shapes: &IndexMap<String, Shape>,
-    ) -> Shape {
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
+    ) -> ResolvedShape {
         match input_shape.case() {
             ShapeCase::None => {
                 return input_shape;
             }
             ShapeCase::One(cases) => {
-                return Shape::one(cases.iter().map(|case| {
+                return resolver.resolve(Shape::one(cases.iter().map(|case| {
                     if case.is_none() {
                         case.clone()
                     } else {
-                        self.compute_output_shape(case.clone(), dollar_shape.clone(), named_shapes)
+                        self.compute_output_shape(
+                            resolver.resolve(case.clone()),
+                            dollar_shape.clone(),
+                            resolver,
+                        )
+                        .0
                     }
-                }));
+                })));
             }
             ShapeCase::Array { prefix, tail } => {
                 let new_prefix = prefix.iter().map(|shape| {
-                    self.compute_output_shape(shape.clone(), dollar_shape.clone(), named_shapes)
+                    self.compute_output_shape(
+                        resolver.resolve(shape.clone()),
+                        dollar_shape.clone(),
+                        resolver,
+                    )
+                    .into()
                 });
 
                 let new_tail = if tail.is_none() {
                     tail.clone()
                 } else {
-                    self.compute_output_shape(tail.clone(), dollar_shape.clone(), named_shapes)
+                    self.compute_output_shape(
+                        resolver.resolve(tail.clone()),
+                        dollar_shape.clone(),
+                        resolver,
+                    )
+                    .0
                 };
 
-                return Shape::array(new_prefix, new_tail);
+                return ResolvedShape(Shape::array(new_prefix, new_tail));
             }
             _ => {}
         };
@@ -368,7 +490,7 @@ impl ComputeOutputShape for SubSelection {
         // If input_shape is a named shape, it might end up being an array, so
         // for accuracy we apply the .* wildcard to indicate mapping over
         // possible array elements.
-        let input_shape = input_shape.any_item();
+        let input_shape = resolver.resolve(input_shape.any_item());
 
         // The SubSelection rebinds the $ variable to the selected input object,
         // so we can ignore the previously received dollar_shape.
@@ -385,11 +507,9 @@ impl ComputeOutputShape for SubSelection {
             // together into one object.
             all_shape = Shape::all([
                 all_shape,
-                named_selection.compute_output_shape(
-                    input_shape.clone(),
-                    dollar_shape.clone(),
-                    named_shapes,
-                ),
+                named_selection
+                    .compute_output_shape(input_shape.clone(), dollar_shape.clone(), resolver)
+                    .0,
             ]);
 
             // If any named_selection item returns null instead of an object,
@@ -400,73 +520,73 @@ impl ComputeOutputShape for SubSelection {
             }
         }
 
-        all_shape
+        ResolvedShape(all_shape)
     }
 }
 
 type Ref<T> = std::sync::Arc<T>;
-
-#[derive(Debug, Clone)]
-pub(crate) struct ShapedSelection {
-    selection: Ref<JSONSelection>,
-    named_shapes: IndexMap<String, Shape>,
-    output_shape: Shape,
-}
-
-impl ShapedSelection {
-    /// Takes ownership of the given [`JSONSelection`] and computes the output
-    /// shape without any named shapes.
-    pub(crate) fn new(selection: JSONSelection) -> Self {
-        Self::compute(Ref::new(selection), IndexMap::default())
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn selection(&self) -> &JSONSelection {
-        self.selection.as_ref()
-    }
-
-    pub(crate) fn output_shape(&self) -> &Shape {
-        &self.output_shape
-    }
-
-    /// Add new named shapes to this [`ShapedSelection`], using [`Shape::all`]
-    /// to combine shapes wherever there are collisions with existing shapes.
-    #[allow(dead_code)]
-    pub(crate) fn refine(&self, new_named_shapes: IndexMap<String, Shape>) -> Self {
-        let mut named_shapes = self.named_shapes.clone();
-        for (new_name, new_shape) in new_named_shapes {
-            if let Some(old_shape) = named_shapes.get_mut(&new_name) {
-                *old_shape = Shape::all([old_shape.clone(), new_shape]);
-            } else {
-                named_shapes.insert(new_name, new_shape);
-            }
-        }
-        Self::compute(self.selection.clone(), named_shapes)
-    }
-
-    /// Add new named shapes to this [`ShapedSelection`], replacing any existing
-    /// shapes with the same name.
-    #[allow(dead_code)]
-    pub(crate) fn replace(&self, new_named_shapes: IndexMap<String, Shape>) -> Self {
-        let mut named_shapes = self.named_shapes.clone();
-        named_shapes.extend(new_named_shapes);
-        Self::compute(self.selection.clone(), named_shapes)
-    }
-
-    fn compute(selection: Ref<JSONSelection>, named_shapes: IndexMap<String, Shape>) -> Self {
-        let output_shape = selection.output_shape(&named_shapes);
-        Self {
-            selection,
-            named_shapes,
-            output_shape,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn pretty_print(&self) -> String {
-        self.output_shape.pretty_print()
-    }
-}
+//
+// #[derive(Debug, Clone)]
+// pub(crate) struct ShapedSelection {
+//     selection: Ref<JSONSelection>,
+//     resolver: IndexMap<String, Shape>,
+//     output_shape: Shape,
+// }
+//
+// impl ShapedSelection {
+//     /// Takes ownership of the given [`JSONSelection`] and computes the output
+//     /// shape without any named shapes.
+//     pub(crate) fn new(selection: JSONSelection) -> Self {
+//         Self::compute(Ref::new(selection), IndexMap::default())
+//     }
+//
+//     #[allow(dead_code)]
+//     pub(crate) fn selection(&self) -> &JSONSelection {
+//         self.selection.as_ref()
+//     }
+//
+//     pub(crate) fn output_shape(&self) -> &Shape {
+//         &self.output_shape
+//     }
+//
+//     /// Add new named shapes to this [`ShapedSelection`], using [`Shape::all`]
+//     /// to combine shapes wherever there are collisions with existing shapes.
+//     #[allow(dead_code)]
+//     pub(crate) fn refine(&self, new_resolver: IndexMap<String, Shape>) -> Self {
+//         let mut resolver = self.resolver.clone();
+//         for (new_name, new_shape) in new_resolver {
+//             if let Some(old_shape) = resolver.get_mut(&new_name) {
+//                 *old_shape = Shape::all([old_shape.clone(), new_shape]);
+//             } else {
+//                 resolver.insert(new_name, new_shape);
+//             }
+//         }
+//         Self::compute(self.selection.clone(), resolver)
+//     }
+//
+//     /// Add new named shapes to this [`ShapedSelection`], replacing any existing
+//     /// shapes with the same name.
+//     #[allow(dead_code)]
+//     pub(crate) fn replace(&self, new_resolver: IndexMap<String, Shape>) -> Self {
+//         let mut resolver = self.resolver.clone();
+//         resolver.extend(new_resolver);
+//         Self::compute(self.selection.clone(), resolver)
+//     }
+//
+//     fn compute(selection: Ref<JSONSelection>, resolver: IndexMap<&str, Shape>) -> Self {
+//         let output_shape = selection.output_shape(&resolver);
+//         Self {
+//             selection,
+//             resolver,
+//             output_shape,
+//         }
+//     }
+//
+//     #[allow(dead_code)]
+//     pub(crate) fn pretty_print(&self) -> String {
+//         self.output_shape.pretty_print()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -475,51 +595,51 @@ mod tests {
 
     use crate::selection;
 
-    #[test]
-    fn test_shaped_selection() {
-        let selection = selection!("id name");
-        let shaped_selection = selection.shaped_selection();
-        assert_eq!(
-            shaped_selection.pretty_print(),
-            "{ id: $root.*.id, name: $root.*.name }"
-        );
-        assert_eq!(shaped_selection.selection(), &selection);
-        assert_eq!(
-            shaped_selection.output_shape().pretty_print(),
-            "{ id: $root.*.id, name: $root.*.name }"
-        );
-        assert_eq!(&selection.shape(), shaped_selection.output_shape());
-        {
-            let refined_shaped_selection = shaped_selection.refine({
-                let mut shapes = IndexMap::default();
-                shapes.insert("$root".to_string(), Shape::empty_object());
-                shapes
-            });
-            assert_eq!(
-                refined_shaped_selection.pretty_print(),
-                "{ id: None, name: None }"
-            );
-        }
-        {
-            let replaced_shaped_selection = shaped_selection.replace({
-                let mut shapes = IndexMap::default();
-                shapes.insert(
-                    "$root".to_string(),
-                    Shape::record({
-                        let mut fields = Shape::empty_map();
-                        fields.insert("id".to_string(), Shape::name("ID"));
-                        fields.insert("name".to_string(), Shape::string());
-                        fields
-                    }),
-                );
-                shapes
-            });
-            assert_eq!(
-                replaced_shaped_selection.pretty_print(),
-                "{ id: ID, name: String }"
-            );
-        }
-    }
+    // #[test]
+    // fn test_shaped_selection() {
+    //     let selection = selection!("id name");
+    //     let shaped_selection = selection.shaped_selection();
+    //     assert_eq!(
+    //         shaped_selection.pretty_print(),
+    //         "{ id: $root.*.id, name: $root.*.name }"
+    //     );
+    //     assert_eq!(shaped_selection.selection(), &selection);
+    //     assert_eq!(
+    //         shaped_selection.output_shape().pretty_print(),
+    //         "{ id: $root.*.id, name: $root.*.name }"
+    //     );
+    //     assert_eq!(&selection.shape(), shaped_selection.output_shape());
+    //     {
+    //         let refined_shaped_selection = shaped_selection.refine({
+    //             let mut shapes = IndexMap::default();
+    //             shapes.insert("$root".to_string(), Shape::empty_object());
+    //             shapes
+    //         });
+    //         assert_eq!(
+    //             refined_shaped_selection.pretty_print(),
+    //             "{ id: None, name: None }"
+    //         );
+    //     }
+    //     {
+    //         let replaced_shaped_selection = shaped_selection.replace({
+    //             let mut shapes = IndexMap::default();
+    //             shapes.insert(
+    //                 "$root".to_string(),
+    //                 Shape::record({
+    //                     let mut fields = Shape::empty_map();
+    //                     fields.insert("id".to_string(), Shape::name("ID"));
+    //                     fields.insert("name".to_string(), Shape::string());
+    //                     fields
+    //                 }),
+    //             );
+    //             shapes
+    //         });
+    //         assert_eq!(
+    //             replaced_shaped_selection.pretty_print(),
+    //             "{ id: ID, name: String }"
+    //         );
+    //     }
+    // }
 
     #[test]
     fn test_compute_output_shape() {

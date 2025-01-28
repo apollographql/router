@@ -1,8 +1,6 @@
 //! This module is all about validating [`Expression`]s for a given context. This isn't done at
 //! runtime, _only_ during composition because it could be expensive.
 
-use std::str::FromStr;
-
 use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
 use shape::Shape;
@@ -85,23 +83,20 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
         location,
     } = expression;
 
-    // let var_shapes: IndexMap<String, Shape> = context
-    //     .var_lookup
-    //     .iter()
-    //     .map(|(name, shape)| (name.to_string(), shape.clone()))
-    //     .collect();
+    let shape_lookup: IndexMap<&str, Shape> = context
+        .var_lookup
+        .iter()
+        .map(|(name, shape)| (name.as_str(), shape.clone()))
+        .chain(
+            context
+                .schema
+                .shape_lookup
+                .iter()
+                .map(|(name, shape)| (*name, shape.clone())),
+        )
+        .collect();
 
-    let shaped_selection = expression.shaped_selection();
-    // Refine shaped_selection with additional named shapes derived from
-    // context.schema, which typically helps eliminate errors and unknown
-    // shapes from the computed output shape.
-    //
-    // TODO Reenable this when we can deal with the consequences better,
-    // using (for example) tools for mapping GraphQL null values to None
-    // when appropriate.
-    // .refine(var_shapes);
-
-    let shape = shaped_selection.output_shape();
+    let shape = expression.output_shape(&shape_lookup);
 
     let errors: Vec<Error> = shape
         .errors()
@@ -129,58 +124,21 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
 /// Validate that the shape is an acceptable output shape for an Expression.
 ///
 /// TODO: Some day, whether objects or arrays are allowed will be dependent on &self (i.e., is the * modifier used)
-fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
+fn validate_shape(shape: Shape, context: &Context) -> Result<(), String> {
     match shape.case() {
         ShapeCase::Array { .. } => Err("array values aren't valid here".to_string()),
         ShapeCase::Object { .. } => Err("object values aren't valid here".to_string()),
         ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
             for shape in shapes {
-                validate_shape(shape, context)?;
+                validate_shape(shape.clone(), context)?;
             }
             Ok(())
         }
-        ShapeCase::Name(name, key) => {
-            let mut shape = if name == "$root" {
-                return Err(format!(
-                    "`{key}` must start with an argument name, like `$this` or `$args`",
-                    key = key.iter().map(|key| key.to_string()).join(".")
-                ));
-            } else if name.starts_with('$') {
-                let namespace = Namespace::from_str(name).map_err(|_| {
-                    format!(
-                        "unknown variable `{name}`, must be one of {namespaces}",
-                        namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
-                    )
-                })?;
-                context
-                    .var_lookup
-                    .get(&namespace)
-                    .ok_or_else(|| {
-                        format!(
-                            "{namespace} is not valid here, must be one of {namespaces}",
-                            namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
-                        )
-                    })?
-                    .clone()
-            } else {
-                context
-                    .schema
-                    .shape_lookup
-                    .get(name.as_str())
-                    .cloned()
-                    .ok_or_else(|| format!("unknown type `{name}`"))?
-            };
-            let mut path = name.clone();
-            for key in key {
-                let child = shape.child(key);
-                if child.is_none() {
-                    return Err(format!("`{path}` doesn't have a field named `{key}`"));
-                }
-                shape = child;
-                path = format!("{path}.{key}");
-            }
-            validate_shape(&shape, context)
-        }
+        ShapeCase::Name(name, _key) => Err(format!(
+            // Any unresolved name at this point is a problem
+            "invalid variable `{name}`, must be one of {namespaces}",
+            namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+        )),
         ShapeCase::Error(shape::Error { message, .. }) => Err(message.clone()),
         ShapeCase::None
         | ShapeCase::Bool(_)
