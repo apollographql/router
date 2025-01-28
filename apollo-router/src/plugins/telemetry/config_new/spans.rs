@@ -440,6 +440,7 @@ mod test {
             },
         );
         let context = Context::new();
+        context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")
