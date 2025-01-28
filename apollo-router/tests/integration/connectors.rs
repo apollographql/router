@@ -664,7 +664,7 @@ mod url_override {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"overriding a subgraph URL for a connectors-enabled subgraph will not work"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"overriding a subgraph URL for a connectors-enabled subgraph is not supported"#)
         .await;
 
         Ok(())
