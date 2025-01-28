@@ -82,7 +82,7 @@ pub struct PluginInit<T> {
 
     pub(crate) notify: Notify<String, graphql::Response>,
 
-    /// User's license's state, including any limits for use
+    /// User's license's state, including any limits of use
     pub(crate) license: LicenseState,
 }
 

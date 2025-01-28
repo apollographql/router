@@ -350,7 +350,7 @@ impl YamlRouterFactory {
                 create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
-                builder = builder.with_subgraph_service(&name, subgraph_service)
+                builder = builder.with_subgraph_service(&name, subgraph_service);
             }
 
             // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
@@ -606,13 +606,11 @@ pub(crate) async fn create_plugins(
                     .unwrap_or_else(|| panic!("Apollo plugin not registered: {name}"));
                 if let Some(mut plugin_config) = $opt_plugin_config {
                     if name == "apollo.telemetry" {
-                        // If any of the mandatory plugins need special treatment, then we'll
-                        // perform it here. The apollo.telemetry" plugin isn't happy with empty
-                        // config, so we give it some.
-                        // This is *required* by the telemetry module or it will fail...
+                        // The apollo.telemetry" plugin isn't happy with empty config, so we
+                        // give it some. If any of the other mandatory plugins need special
+                        // treatment, then we'll have to perform it here
                         inject_schema_id(&supergraph_schema_id, &mut plugin_config);
                     }
-
                     add_plugin!(name.to_string(), factory, plugin_config);
                 }
             }

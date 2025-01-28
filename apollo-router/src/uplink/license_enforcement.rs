@@ -80,7 +80,7 @@ pub(crate) struct Claims {
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
     /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
-    /// TPS limits may not exist in a Licnese; if not, no limits apply
+    /// TPS limits. These may not exist in a Licnese; if not, no limits apply
     #[serde(rename = "throughputLimit")]
     pub(crate) tps: Option<TpsLimit>,
 }
@@ -605,7 +605,7 @@ impl Display for LicenseEnforcementReport {
     }
 }
 
-/// These are claims extracted from the License and represent ways Apollo limits the router's usage It must be constructed from a base64 encoded JWT
+/// Claims extracted from the License, including ways Apollo limits the router's usage. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
 #[derive(Debug, Clone, Default)]
 pub struct License {
