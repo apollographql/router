@@ -285,7 +285,7 @@ fn cmd_plan(
         .into_iter()
         .map(|(name, subgraph)| (name, subgraph.schema))
         .collect();
-    let result = apollo_federation::query_plan::correctness::check_plan(
+    let result = apollo_federation::correctness::check_plan(
         &supergraph.schema,
         &subgraphs_by_name,
         &query_doc,
