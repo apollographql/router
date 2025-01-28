@@ -286,7 +286,9 @@ mod tests {
 
     #[rstest]
     #[case::echo_invalid_constants("$->echo([])")]
+    #[case::map_scalar("$(1)->map(@)")]
     #[case::map_array("$([])->map(@)")]
+    #[case::last("$([1, 2])")]
     #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
     #[case::slice_of_array("$([])->slice(0, 2)")]
     #[case::entries("$config.something->entries")]
