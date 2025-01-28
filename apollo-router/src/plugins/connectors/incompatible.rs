@@ -4,12 +4,14 @@ use apollo_federation::sources::connect::expand::Connectors;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
 use headers::HeadersIncompatPlugin;
+use url_override::UrlOverrideIncompatPlugin;
 
 use crate::Configuration;
 
 mod authentication;
 mod batching;
 mod headers;
+mod url_override;
 
 /// Pair of explicitly configured subgraphs for a plugin
 #[derive(Default)]
@@ -74,6 +76,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
+        UrlOverrideIncompatPlugin::from_config(config).map(boxify!()),
     ]
     .into_iter()
     .flatten()
