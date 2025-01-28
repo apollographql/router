@@ -817,7 +817,6 @@ mod test {
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
-    use crate::uplink::license_enforcement::TpsLimit;
     use crate::Configuration;
 
     #[track_caller]
