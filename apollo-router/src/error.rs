@@ -630,8 +630,6 @@ impl std::fmt::Display for ValidationErrors {
 pub(crate) enum SubgraphBatchingError {
     /// Sender unavailable
     SenderUnavailable,
-    /// Request does not have a subgraph name
-    MissingSubgraphName,
     /// Requests is empty
     RequestsIsEmpty,
     /// Batch processing failed: {0}

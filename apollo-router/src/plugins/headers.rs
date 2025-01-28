@@ -943,7 +943,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),
-            subgraph_name: String::from("test").into(),
+            subgraph_name: String::from("test"),
             subscription_stream: None,
             connection_closed_signal: None,
             query_hash: Default::default(),
@@ -1016,7 +1016,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),
-            subgraph_name: String::from("test").into(),
+            subgraph_name: String::from("test"),
             subscription_stream: None,
             connection_closed_signal: None,
             query_hash: Default::default(),
@@ -1043,7 +1043,7 @@ mod test {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
-            req.subgraph_name.unwrap_or_default(),
+            req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
     }
@@ -1081,7 +1081,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: ctx,
-            subgraph_name: String::from("test").into(),
+            subgraph_name: String::from("test"),
             subscription_stream: None,
             connection_closed_signal: None,
             query_hash: Default::default(),

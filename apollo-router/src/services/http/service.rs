@@ -248,11 +248,23 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
-            Some("unix") => Either::Right(self.unix_client.clone()),
-            _ => Either::Left(self.http_client.clone()),
+            Some("unix") => {
+                // Because we clone our inner service, we'd better swap the readied one
+                let clone = self.unix_client.clone();
+                Either::Right(std::mem::replace(&mut self.unix_client, clone))
+            }
+            _ => {
+                // Because we clone our inner service, we'd better swap the readied one
+                let clone = self.http_client.clone();
+                Either::Left(std::mem::replace(&mut self.http_client, clone))
+            }
         };
         #[cfg(not(unix))]
-        let client = self.http_client.clone();
+        let client = {
+            // Because we clone our inner service, we'd better swap the readied one
+            let clone = self.http_client.clone();
+            std::mem::replace(&mut self.http_client, clone)
+        };
 
         let service_name = self.service.clone();
 

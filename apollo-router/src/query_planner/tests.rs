@@ -77,12 +77,11 @@ fn service_usage() {
 /// The query planner reports the failed subgraph fetch as an error with a reason of "service
 /// closed", which is what this test expects.
 #[tokio::test]
-#[should_panic(expected = "this panic should be propagated to the test harness")]
 async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -93,9 +92,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    mock_products_service.expect_call().times(1).withf(|_| {
-        panic!("this panic should be propagated to the test harness");
-    });
+    // This clone happens in the `MakeSubgraphService` impl for MockSubgraphService.
     mock_products_service.expect_clone().return_once(|| {
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
@@ -107,16 +104,17 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
+            "product".into(),
+            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        )],
+        Default::default(),
+    );
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
-        Arc::new(SubgraphServiceFactory {
-            services: Arc::new(HashMap::from([(
-                "product".into(),
-                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-            )])),
-            plugins: Default::default(),
-        }),
+        Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
     ));
@@ -138,7 +136,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let reason: String =
         serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
             .unwrap();
-    assert_eq!(reason, "service closed".to_string());
+    assert_eq!(reason, "buffer's worker closed unexpectedly".to_string());
 }
 
 #[tokio::test]
@@ -151,7 +149,7 @@ async fn fetch_includes_operation_name() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -178,16 +176,17 @@ async fn fetch_includes_operation_name() {
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
+            "product".into(),
+            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        )],
+        Default::default(),
+    );
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
-        Arc::new(SubgraphServiceFactory {
-            services: Arc::new(HashMap::from([(
-                "product".into(),
-                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-            )])),
-            plugins: Default::default(),
-        }),
+        Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
     ));
@@ -219,7 +218,7 @@ async fn fetch_makes_post_requests() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -246,16 +245,17 @@ async fn fetch_makes_post_requests() {
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
     let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
+            "product".into(),
+            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+        )],
+        Default::default(),
+    );
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
-        Arc::new(SubgraphServiceFactory {
-            services: Arc::new(HashMap::from([(
-                "product".into(),
-                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-            )])),
-            plugins: Default::default(),
-        }),
+        Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
     ));
@@ -355,7 +355,7 @@ async fn defer() {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             }.into(),
-            query: Arc::new(Query::empty()),
+            query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
         };
@@ -401,22 +401,23 @@ async fn defer() {
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![
+            (
+                "X".into(),
+                Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
+            ),
+            (
+                "Y".into(),
+                Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
+            ),
+        ],
+        Default::default(),
+    );
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
-        Arc::new(SubgraphServiceFactory {
-            services: Arc::new(HashMap::from([
-                (
-                    "X".into(),
-                    Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-                ),
-                (
-                    "Y".into(),
-                    Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-                ),
-            ])),
-            plugins: Default::default(),
-        }),
+        Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
     ));
@@ -516,16 +517,17 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
+            "accounts".into(),
+            Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
+        )],
+        Default::default(),
+    );
     let service_factory = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
-        Arc::new(SubgraphServiceFactory {
-            services: Arc::new(HashMap::from([(
-                "accounts".into(),
-                Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-            )])),
-            plugins: Default::default(),
-        }),
+        Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
     ));
@@ -655,7 +657,7 @@ async fn dependent_mutations() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -673,25 +675,29 @@ async fn dependent_mutations() {
 
     // the first fetch returned null, so there should never be a call to B
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
+    mock_b_service
+        .expect_clone()
+        .returning(plugin::test::MockSubgraphService::new);
     mock_b_service.expect_call().never();
 
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![
+            (
+                "A".into(),
+                Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
+            ),
+            (
+                "B".into(),
+                Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
+            ),
+        ],
+        Default::default(),
+    );
     let sf = Arc::new(FetchServiceFactory::new(
         schema.clone(),
         Default::default(),
-        Arc::new(SubgraphServiceFactory {
-            services: Arc::new(HashMap::from([
-                (
-                    "A".into(),
-                    Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
-                ),
-                (
-                    "B".into(),
-                    Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
-                ),
-            ])),
-            plugins: Default::default(),
-        }),
+        Arc::new(ssf),
         None,
         Arc::new(ConnectorServiceFactory::empty(schema.clone())),
     ));
@@ -1877,7 +1883,7 @@ fn broken_plan_does_not_panic() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -1885,13 +1891,11 @@ fn broken_plan_does_not_panic() {
     let mut subgraph_schemas = HashMap::default();
     subgraph_schemas.insert(
         "X".to_owned(),
-        query_planner::fetch::SubgraphSchema {
-            implementers_map: subgraph_schema.implementers_map(),
-            schema: Arc::new(subgraph_schema),
-        },
+        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
     );
-    let result = Arc::make_mut(&mut plan.root)
-        .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
+    // Run the plan initialization code to make sure it doesn't panic.
+    let result =
+        Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#

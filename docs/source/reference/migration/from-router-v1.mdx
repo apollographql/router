@@ -49,6 +49,14 @@ Source code generated using Scaffold will continue to compile; so existing Rust 
 
 The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
 
+### Hot reloading `--supergraph-urls`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+
+<!-- PR: https://github.com/apollographql/router/pull/6567 -->
+
+The `--supergraph-urls` command-line argument or the `APOLLO_ROUTER_SUPERGRAPH_URLS` environment variable no longer support hot reloading. In v1.x, if hot reloading was enabled, the router would repeatedly fetch the URLs on the interval specified by `--apollo-uplink-poll-interval`.
+
+If hot reloading from a remote URL is desired, consider running a script to download the supergraph URL on an interval, and point the router to the downloaded file on the filesystem.
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
@@ -160,6 +168,26 @@ telemetry:
               - supergraph_request_header: apollo-router-log-request
               - my_client
 ```
+
+### Introspection depth limit
+
+The [schema-intropsection schema](https://spec.graphql.org/draft/#sec-Schema-Introspection.Schema-Introspection-Schema) is recursive: a client can query the fields of the types of some other fields, and so on arbitrarily deep. This can produce responses that grow much faster than the size of the request.
+
+To protect against abusive requests Router now refuses to execute introspection queries that nest list fields too deep and returns an error instead. The criteria matches `MaxIntrospectionDepthRule` in graphql-js, but may change in future versions.
+
+In case it rejects legitimate queries, this check can be disabled in Router configuration:
+
+```yaml
+# Do not enable introspection in production!
+supergraph:
+  introspection: true  # Without this, schema introspection is entirely disabled by default
+limits:
+  introspection_max_depth: false  # Defaults to true
+```
+
+### Traces
+
+- `telemetry.instrumentation.spans.mode` becomes `spec_compliant` by default instead of `deprecated`.
 
 ### Metrics
 
@@ -282,6 +310,58 @@ headers:
           name: from_app_name
           path: $.extensions.metadata[0].app_name
 ```
+
+### OneShotAsyncCheckpoint
+
+This has been removed because it is incompatible with the architectural optimizations we've made in Router 2.0. If you were using this in a Rust Plugin, you can replace it easily with `AsyncCheckpoint` as follows:
+
+Plugin code using `OneShotAsyncCheckpoint`
+
+```
+            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+                let request_config = request_config.clone();
+                <etc...>
+            }
+            .service(service)
+            .boxed()
+```
+
+Replace with `AsyncCheckpoint`
+
+```
+            AsyncCheckpointLayer::new(move |request: execution::Request| {
+                let request_config = request_config.clone();
+                <etc...>
+            }
+            .buffered()
+            .service(service)
+            .boxed()
+```
+
+The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilderExt` trait and ensures that you service may be cloned.
+
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+
+### Traffic Shaping
+
+Traffic shaping has been improved significantly in Router 2.0. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
+
+ - [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
+ - [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
+
+errors as traffic shaping constraints are enforced.
+
+We recommend that users experiment with their configuration in order to arrive at the right combination of timeout, concurrency and rate limit controls for their particular use case.
+
+For more information about [configuring traffic shaping](../../routing/performance/traffic-shaping.mdx).
+
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+
+### Subgraph Request/Response
+
+If, in your Rust plugin, you were using either the subgraph::Request::subgraph_name or the subgraph::Response::subgraph_name, please note that these are no longer `Option`, but are mandatory.
+
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
 
 ### Deploy your router
 
