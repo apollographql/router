@@ -891,7 +891,7 @@ impl RouterService {
         }
 
         for (code, count) in map {
-            //count_graphql_error(count, code);
+            count_graphql_error(count, code);
         }
     }
 
