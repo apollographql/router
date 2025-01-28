@@ -267,8 +267,6 @@ impl RouterService {
             request_res = self.apq_layer.supergraph_request(supergraph_request).await;
         }
 
-        let oltp_error_metrics_mode = self.oltp_error_metrics_mode.clone();
-
         let SupergraphResponse { response, context } = match request_res {
             Err(response) => response,
             Ok(request) => match self.query_analysis_layer.supergraph_request(request).await {
@@ -345,7 +343,11 @@ impl RouterService {
                     && (accepts_json || accepts_wildcard)
                 {
                     if !response.errors.is_empty() {
-                        Self::count_errors(&response.errors, &context, &oltp_error_metrics_mode);
+                        Self::count_errors(
+                            &response.errors,
+                            &context,
+                            &self.oltp_error_metrics_mode,
+                        );
                     }
 
                     parts
@@ -382,7 +384,11 @@ impl RouterService {
                     }
 
                     if !response.errors.is_empty() {
-                        Self::count_errors(&response.errors, &context, &oltp_error_metrics_mode);
+                        Self::count_errors(
+                            &response.errors,
+                            &context,
+                            &self.oltp_error_metrics_mode,
+                        );
                     }
 
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
@@ -412,7 +418,7 @@ impl RouterService {
                     Self::count_error_codes(
                         vec!["INVALID_ACCEPT_HEADER"],
                         &context,
-                        &oltp_error_metrics_mode,
+                        &self.oltp_error_metrics_mode,
                     );
 
                     // this should be unreachable due to a previous check, but just to be sure...
