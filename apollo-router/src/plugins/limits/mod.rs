@@ -114,6 +114,13 @@ pub(crate) struct Config {
     /// Default is ~400kib.
     #[schemars(with = "Option<String>", default)]
     pub(crate) http1_max_request_buf_size: Option<ByteSize>,
+
+    /// Limit the depth of nested list fields in introspection queries
+    /// to protect avoid generating huge responses. Returns a GraphQL
+    /// error with `{ message: "Maximum introspection depth exceeded" }`
+    /// when nested fields exceed the limit.
+    /// Default: true
+    pub(crate) introspection_max_depth: bool,
 }
 
 impl Default for Config {
@@ -134,6 +141,8 @@ impl Default for Config {
             // but is still very high for "reasonable" queries.
             // https://github.com/apollographql/apollo-rs/blob/apollo-parser%400.7.3/crates/apollo-parser/src/parser/mod.rs#L93-L104
             parser_max_recursion: 500,
+
+            introspection_max_depth: true,
         }
     }
 }

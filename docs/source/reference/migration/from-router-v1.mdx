@@ -169,6 +169,22 @@ telemetry:
               - my_client
 ```
 
+### Introspection depth limit
+
+The [schema-intropsection schema](https://spec.graphql.org/draft/#sec-Schema-Introspection.Schema-Introspection-Schema) is recursive: a client can query the fields of the types of some other fields, and so on arbitrarily deep. This can produce responses that grow much faster than the size of the request.
+
+To protect against abusive requests Router now refuses to execute introspection queries that nest list fields too deep and returns an error instead. The criteria matches `MaxIntrospectionDepthRule` in graphql-js, but may change in future versions.
+
+In case it rejects legitimate queries, this check can be disabled in Router configuration:
+
+```yaml
+# Do not enable introspection in production!
+supergraph:
+  introspection: true  # Without this, schema introspection is entirely disabled by default
+limits:
+  introspection_max_depth: false  # Defaults to true
+```
+
 ### Traces
 
 - `telemetry.instrumentation.spans.mode` becomes `spec_compliant` by default instead of `deprecated`.
@@ -187,6 +203,37 @@ telemetry:
 - `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
 
 - `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+- If you used the `subgraph_response_body` selector for telemetry like this:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            http.response.status_code:
+              subgraph_response_status: code
+            my_data_value:
+              subgraph_response_body: .data.test
+```
+
+You'll have to migrate the `subgraph_response_body` to `subgraph_response_data` selector (or `subgraph_response_errors` if you want to target errors):
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            http.response.status_code:
+              subgraph_response_status: code
+            my_data_value:
+              subgraph_response_data: $.test # Heads up, we removed the .data prefix as it's directly targeting data and we added $
+```
 
 ### Context Keys
 
@@ -236,6 +283,33 @@ And ensure that you have enabled OTLP support in your Jaeger instance using `COL
 
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
 With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
+
+### Headers propagation
+
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+
+If you use the ability to get data from request body and insert this data in a subgraph request header, we updated the `path` field type to be [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) compliant
+So if you had this configuration for example:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: .extensions.metadata[0].app_name
+```
+
+You'll have to migrate the `path` field to be JSONPath compliant and just add `$` at the beginning of the `path`, example:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: $.extensions.metadata[0].app_name
+```
 
 ### OneShotAsyncCheckpoint
 

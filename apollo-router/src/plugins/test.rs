@@ -388,6 +388,7 @@ mod test_for_harness {
     use tokio::join;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
     use crate::services::router::body;
@@ -580,5 +581,27 @@ mod test_for_harness {
             response.http_response.headers().get("x-custom-header"),
             Some(&HeaderValue::from_static("test-value"))
         );
+    }
+
+    #[tokio::test]
+    async fn test_router_service_metrics() {
+        async {
+            let test_harness: PluginTestHarness<MyTestPlugin> =
+                PluginTestHarness::builder().build().await;
+
+            let service = test_harness.router_service(|_req| async {
+                u64_counter!("test", "test", 1u64);
+                Ok(router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .build()
+                    .unwrap())
+            });
+
+            let _ = service.call_default().await;
+            assert_counter!("test", 1u64);
+        }
+        .with_metrics()
+        .await;
     }
 }

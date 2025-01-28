@@ -111,6 +111,11 @@ impl QueryAnalysisLayer {
         let job = std::panic::AssertUnwindSafe(job);
         compute_job::execute(priority, job)
             .await
+            // `expect()` propagates any panic that potentially happens in the closure, but:
+            //
+            // * We try to avoid such panics in the first place and consider them bugs
+            // * The panic handler in `apollo-router/src/executable.rs` exits the process
+            //   so this error case should never be reached.
             .expect("Query::parse_document panicked")
     }
 

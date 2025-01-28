@@ -1373,6 +1373,11 @@ expression: "&schema"
           "minimum": 0.0,
           "type": "integer"
         },
+        "introspection_max_depth": {
+          "default": true,
+          "description": "Limit the depth of nested list fields in introspection queries to protect avoid generating huge responses. Returns a GraphQL error with `{ message: \"Maximum introspection depth exceeded\" }` when nested fields exceed the limit. Default: true",
+          "type": "boolean"
+        },
         "max_aliases": {
           "default": null,
           "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
@@ -2601,6 +2606,10 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
+        "experimental_otlp_error_metrics": {
+          "$ref": "#/definitions/OtlpErrorMetricsMode",
+          "description": "#/definitions/OtlpErrorMetricsMode"
+        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphErrorConfig",
           "description": "#/definitions/SubgraphErrorConfig"
@@ -4313,6 +4322,25 @@ expression: "&schema"
           "description": "A hash of the operation name.",
           "enum": [
             "hash"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "OtlpErrorMetricsMode": {
+      "description": "Open Telemetry error metrics mode",
+      "oneOf": [
+        {
+          "description": "Do not store OTLP error metrics",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send OTLP error metrics to Apollo Studio",
+          "enum": [
+            "enabled"
           ],
           "type": "string"
         }
@@ -6323,25 +6351,6 @@ expression: "&schema"
           },
           "required": [
             "subgraph_query_variable"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "subgraph_response_body": {
-              "description": "The subgraph response body json path.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "subgraph_response_body"
           ],
           "type": "object"
         },
