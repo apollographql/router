@@ -5,6 +5,7 @@ use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
 use headers::HeadersIncompatPlugin;
+use traffic_shaping::TrafficShapingIncompatPlugin;
 use url_override::UrlOverrideIncompatPlugin;
 
 use crate::Configuration;
@@ -13,6 +14,7 @@ mod apq;
 mod authentication;
 mod batching;
 mod headers;
+mod traffic_shaping;
 mod url_override;
 
 /// Pair of explicitly configured subgraphs for a plugin
@@ -79,6 +81,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
+        TrafficShapingIncompatPlugin::from_config(config).map(boxify!()),
         UrlOverrideIncompatPlugin::from_config(config).map(boxify!()),
     ]
     .into_iter()
