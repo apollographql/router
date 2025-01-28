@@ -159,7 +159,7 @@ fn compare_possible_definitions<'a, T: PathConstraint<'a>>(
         let ground_set_iter = this_cond.ground_set().iter();
         let mut ground_set_iter = ground_set_iter.filter(|ty| path_constraint.allows(ty));
         ground_set_iter.try_for_each(|ground_ty| {
-            let filter_cond = NormalizedTypeCondition::from_ground_type(ground_ty);
+            let filter_cond = NormalizedTypeCondition::from_object_type(ground_ty);
             let other_def =
                 merge_definitions_for_type_condition(other, &filter_cond).map_err(|e| {
                     e.add_description(&format!(

@@ -341,6 +341,7 @@ fn interpret_fetch_node(
     fetch: &FetchNode,
 ) -> Result<ResponseShape, String> {
     let mut result = if let Some(_requires) = &fetch.requires {
+        // TODO: check requires
         // for required_selection in requires {
         //     let Selection::InlineFragment(inline) = required_selection else {
         //         return Err(internal_error!(
@@ -489,13 +490,6 @@ fn interpret_plan_node_at_path(
                                         .join(".")
                                 )));
                             };
-                            // TODO: pass the `type_cond`
-                            // println!("here: interpret_plan_node_at_path");
-                            // println!(
-                            //     "type_cond {type_cond} vs sub-state type {}",
-                            //     sub_state.default_type_condition()
-                            // );
-                            // println!("state: {state}\npath: {path:?}\nnode: {node}");
                             let updated_sub_state = interpret_plan_node_at_path(
                                 schema,
                                 sub_state,
@@ -548,10 +542,6 @@ fn interpret_flatten_node(
     conditions: &[Literal],
     flatten: &FlattenNode,
 ) -> Result<ResponseShape, String> {
-    // println!(
-    //     "interpret_flatten_node: path: {:?}\nstate: {state}\n",
-    //     flatten.path
-    // );
     let result = interpret_plan_node_at_path(
         schema,
         state,
@@ -563,10 +553,7 @@ fn interpret_flatten_node(
     let Some(result) = result else {
         // `flatten.path` is addressing a non-existing response object.
         // Ideally, this should not happen, but QP may try to fetch infeasible selections.
-        // println!(
-        //     "warning: Response shape does not have a matching path: {:?}\nstate: {state}",
-        //     flatten.path,
-        // );
+        // TODO: Report this as a over-fetching later.
         return Ok(state.clone());
     };
     Ok(result.simplify_boolean_conditions())

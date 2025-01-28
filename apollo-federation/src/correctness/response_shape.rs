@@ -52,7 +52,7 @@ fn get_interface_implementers<'a>(
 }
 
 /// Does `x` implies `y`? (`x`'s possible types is a subset of `y`'s possible types)
-/// - All type-definition positions are in the API schema.
+/// - All type-definition positions are in the given schema.
 // Note: Similar to `runtime_types_intersect` (avoids using `possible_runtime_types`)
 fn runtime_types_implies(
     x: &CompositeTypeDefinitionPosition,
@@ -132,15 +132,15 @@ fn get_ground_types(
 //   That can happen when a more specific type condition is computed
 //   than the one that was explicitly provided.
 #[derive(Debug, Clone)]
-struct AppliedTypeCondition(Vec<CompositeTypeDefinitionPosition>);
+struct DisplayTypeCondition(Vec<CompositeTypeDefinitionPosition>);
 
-impl AppliedTypeCondition {
+impl DisplayTypeCondition {
     fn new(ty: CompositeTypeDefinitionPosition) -> Self {
-        AppliedTypeCondition(vec![ty])
+        DisplayTypeCondition(vec![ty])
     }
 
     fn deduced() -> Self {
-        AppliedTypeCondition(Vec::new())
+        DisplayTypeCondition(Vec::new())
     }
 
     /// Construct a new type condition with a named type condition added.
@@ -166,10 +166,11 @@ impl AppliedTypeCondition {
         }
         buf.push(ty);
         buf.sort_by(|a, b| a.type_name().cmp(b.type_name()));
-        Ok(AppliedTypeCondition(buf))
+        Ok(DisplayTypeCondition(buf))
     }
 }
 
+/// Aggregated type conditions that are normalized for comparison
 #[derive(Debug, Clone)]
 pub struct NormalizedTypeCondition {
     // The set of object types that are used for comparison.
@@ -179,7 +180,7 @@ pub struct NormalizedTypeCondition {
     ground_set: Vec<ObjectTypeDefinitionPosition>,
 
     // Simplified type condition for display.
-    for_display: AppliedTypeCondition,
+    for_display: DisplayTypeCondition,
 }
 
 impl PartialEq for NormalizedTypeCondition {
@@ -196,25 +197,52 @@ impl std::hash::Hash for NormalizedTypeCondition {
     }
 }
 
-// Public accessors
+// Public constructors & accessors
 impl NormalizedTypeCondition {
-    /// precondition: `self` and `other` are not empty.
-    pub fn implies(&self, other: &Self) -> bool {
-        self.ground_set.iter().all(|t| other.ground_set.contains(t))
+    /// Construct a new type condition with a single named type condition.
+    pub(crate) fn from_type_name(
+        name: Name,
+        schema: &ValidFederationSchema,
+    ) -> Result<Self, FederationError> {
+        let ty: CompositeTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
+        Ok(NormalizedTypeCondition {
+            ground_set: get_ground_types(&ty, schema)?,
+            for_display: DisplayTypeCondition::new(ty),
+        })
+    }
+
+    pub(crate) fn from_object_type(ty: &ObjectTypeDefinitionPosition) -> Self {
+        NormalizedTypeCondition {
+            ground_set: vec![ty.clone()],
+            for_display: DisplayTypeCondition::new(ty.clone().into()),
+        }
+    }
+
+    pub(crate) fn from_object_types(
+        types: impl Iterator<Item = ObjectTypeDefinitionPosition>,
+    ) -> Result<Self, FederationError> {
+        let mut ground_set: Vec<_> = types.collect();
+        ground_set.sort_by(|a, b| a.type_name.cmp(&b.type_name));
+        Ok(NormalizedTypeCondition {
+            ground_set,
+            for_display: DisplayTypeCondition::deduced(),
+        })
+    }
+
+    /// Special constructor with empty conditions (logically contains *all* types).
+    /// - Used for the `_Entity` type.
+    pub(crate) fn unconstrained() -> Self {
+        NormalizedTypeCondition {
+            ground_set: Vec::new(),
+            for_display: DisplayTypeCondition::deduced(),
+        }
     }
 
     pub(crate) fn ground_set(&self) -> &[ObjectTypeDefinitionPosition] {
         &self.ground_set
     }
 
-    pub(crate) fn from_ground_type(ty: &ObjectTypeDefinitionPosition) -> Self {
-        NormalizedTypeCondition {
-            ground_set: vec![ty.clone()],
-            for_display: AppliedTypeCondition::new(ty.clone().into()),
-        }
-    }
-
-    /// is this type condition represented by a single named type?
+    /// Is this type condition represented by a single named type?
     pub fn is_named_type(&self, type_name: &Name) -> bool {
         // Check the display type first.
         let Some((first, rest)) = self.for_display.0.split_first() else {
@@ -230,32 +258,14 @@ impl NormalizedTypeCondition {
         };
         rest.is_empty() && first.type_name == *type_name
     }
+
+    /// precondition: `self` and `other` are not empty.
+    pub fn implies(&self, other: &Self) -> bool {
+        self.ground_set.iter().all(|t| other.ground_set.contains(t))
+    }
 }
 
 impl NormalizedTypeCondition {
-    /// Construct a new type condition with a single named type condition.
-    pub(crate) fn from_type_name(
-        name: Name,
-        schema: &ValidFederationSchema,
-    ) -> Result<Self, FederationError> {
-        let ty: CompositeTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
-        Ok(NormalizedTypeCondition {
-            ground_set: get_ground_types(&ty, schema)?,
-            for_display: AppliedTypeCondition::new(ty),
-        })
-    }
-
-    pub(crate) fn from_object_types(
-        types: impl Iterator<Item = ObjectTypeDefinitionPosition>,
-    ) -> Result<Self, FederationError> {
-        let mut ground_set: Vec<_> = types.collect();
-        ground_set.sort_by(|a, b| a.type_name.cmp(&b.type_name));
-        Ok(NormalizedTypeCondition {
-            ground_set,
-            for_display: AppliedTypeCondition::deduced(),
-        })
-    }
-
     /// Construct a new type condition with a named type condition added.
     fn add_type_name(
         &self,
@@ -270,7 +280,7 @@ impl NormalizedTypeCondition {
             // - Just returns `other`, since _Entity ∩ other = other.
             return Ok(Some(NormalizedTypeCondition {
                 ground_set: other_types,
-                for_display: AppliedTypeCondition::new(other_ty),
+                for_display: DisplayTypeCondition::new(other_ty),
             }));
         }
         let ground_set: Vec<ObjectTypeDefinitionPosition> = self
@@ -293,15 +303,6 @@ impl NormalizedTypeCondition {
                 ground_set,
                 for_display,
             }))
-        }
-    }
-
-    /// Special constructor with empty conditions (logically contains *all* types).
-    /// - Used for the `_Entity` type.
-    pub(crate) fn unconstrained() -> Self {
-        NormalizedTypeCondition {
-            ground_set: Vec::new(),
-            for_display: AppliedTypeCondition::deduced(),
         }
     }
 
@@ -618,7 +619,6 @@ pub struct DefinitionVariant {
     sub_selection_response_shape: Option<ResponseShape>,
 }
 
-// Public accessors & constructors
 impl DefinitionVariant {
     pub fn boolean_clause(&self) -> &Clause {
         &self.boolean_clause
@@ -665,7 +665,6 @@ pub struct PossibleDefinitionsPerTypeCondition {
     // - Note: The Boolean conditions between variants may not be mutually exclusive.
 }
 
-// Public accessors & constructors
 impl PossibleDefinitionsPerTypeCondition {
     pub fn field_selection_key(&self) -> &FieldSelectionKey {
         &self.field_selection_key
@@ -681,9 +680,7 @@ impl PossibleDefinitionsPerTypeCondition {
             conditional_variants: new_variants,
         }
     }
-}
 
-impl PossibleDefinitionsPerTypeCondition {
     pub(crate) fn insert_variant(
         &mut self,
         variant: DefinitionVariant,
@@ -807,7 +804,6 @@ pub struct ResponseShape {
     definitions_per_response_key: IndexMap</*response_key*/ Name, PossibleDefinitions>,
 }
 
-// Public accessors
 impl ResponseShape {
     pub fn default_type_condition(&self) -> &Name {
         &self.default_type_condition
@@ -834,9 +830,7 @@ impl ResponseShape {
             .insert(response_key, value)
             .is_some()
     }
-}
 
-impl ResponseShape {
     pub fn new(default_type_condition: Name) -> Self {
         ResponseShape {
             default_type_condition,
@@ -1173,7 +1167,7 @@ pub fn compute_response_shape_for_inline_fragment(
 // ResponseShape display
 // - This section is only for display and thus untrusted.
 
-impl fmt::Display for AppliedTypeCondition {
+impl fmt::Display for DisplayTypeCondition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.0.is_empty() {
             return write!(f, "<deduced>");

@@ -29,6 +29,7 @@ pub(crate) struct SubgraphConstraint<'a> {
     subgraph_types: IndexSet<ObjectTypeDefinitionPosition>,
 }
 
+/// Is the object type resolvable in the subgraph schema?
 fn is_resolvable(
     ty_pos: &ObjectTypeDefinitionPosition,
     schema: &ValidFederationSchema,
@@ -52,9 +53,10 @@ impl<'a> SubgraphConstraint<'a> {
     pub(crate) fn at_root(
         subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
     ) -> Self {
+        let all_subgraphs = subgraphs_by_name.keys().cloned().collect();
         SubgraphConstraint {
             subgraphs_by_name,
-            possible_subgraphs: subgraphs_by_name.keys().cloned().collect(),
+            possible_subgraphs: all_subgraphs,
             subgraph_types: Default::default(),
         }
     }
@@ -78,9 +80,9 @@ impl<'a> SubgraphConstraint<'a> {
         Ok(result)
     }
 
-    // (Parent type & field type consistency in subgraphs) Considering the parent types in
-    // `self.subgraph_types` and their possible subgraphs, find all object types that the field
-    // can resolve to.
+    // (Parent type & field type consistency in subgraphs) Considering the field's possible parent
+    // types ( `self.subgraph_types`) and their possible entity subgraphs, find all object types
+    // that the field can resolve to.
     fn subgraph_types_for_field(&self, field_name: &str) -> Result<Self, FederationError> {
         let mut possible_subgraphs = IndexSet::default();
         let mut subgraph_types = IndexSet::default();
@@ -117,24 +119,6 @@ impl<'a> SubgraphConstraint<'a> {
 }
 
 impl<'a> PathConstraint<'a> for SubgraphConstraint<'a> {
-    /// Is `ty` allowed under the subgraph constraint?
-    fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
-        self.subgraph_types.is_empty() || self.subgraph_types.contains(ty)
-    }
-
-    /// Is `defs` feasible under the subgraph constraint?
-    fn allows_any(&self, defs: &PossibleDefinitions) -> bool {
-        if self.subgraph_types.is_empty() {
-            return true;
-        }
-        let intersects = |ground_set: &[ObjectTypeDefinitionPosition]| {
-            // See if `self.subgraph_types` and `ground_set` have any intersection.
-            ground_set.iter().any(|ty| self.subgraph_types.contains(ty))
-        };
-        defs.iter()
-            .any(|(type_cond, _)| intersects(type_cond.ground_set()))
-    }
-
     fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
         SubgraphConstraint {
             subgraphs_by_name: self.subgraphs_by_name,
@@ -151,5 +135,21 @@ impl<'a> PathConstraint<'a> for SubgraphConstraint<'a> {
                     representative_field.name, self.subgraph_types,
                 ))
             })
+    }
+
+    fn allows(&self, ty: &ObjectTypeDefinitionPosition) -> bool {
+        self.subgraph_types.is_empty() || self.subgraph_types.contains(ty)
+    }
+
+    fn allows_any(&self, defs: &PossibleDefinitions) -> bool {
+        if self.subgraph_types.is_empty() {
+            return true;
+        }
+        let intersects = |ground_set: &[ObjectTypeDefinitionPosition]| {
+            // See if `self.subgraph_types` and `ground_set` have any intersection.
+            ground_set.iter().any(|ty| self.subgraph_types.contains(ty))
+        };
+        defs.iter()
+            .any(|(type_cond, _)| intersects(type_cond.ground_set()))
     }
 }
