@@ -47,8 +47,37 @@ where
     fn allows_any(&self, _defs: &PossibleDefinitions) -> bool;
 }
 
+struct DummyPathConstraint;
+
+impl PathConstraint<'_> for DummyPathConstraint {
+    fn under_type_condition(&self, _type_cond: &NormalizedTypeCondition) -> Self {
+        DummyPathConstraint
+    }
+
+    fn for_field(&self, _representative_field: &Field) -> Result<Self, CheckFailure> {
+        Ok(DummyPathConstraint)
+    }
+
+    fn allows(&self, _ty: &ObjectTypeDefinitionPosition) -> bool {
+        true
+    }
+
+    fn allows_any(&self, _defs: &PossibleDefinitions) -> bool {
+        true
+    }
+}
+
 // Check if `this` is a subset of `other`.
-pub(crate) fn compare_response_shapes<'a, T: PathConstraint<'a>>(
+pub fn compare_response_shapes(
+    this: &ResponseShape,
+    other: &ResponseShape,
+) -> Result<(), CheckFailure> {
+    compare_response_shapes_with_constraint(&DummyPathConstraint, this, other)
+}
+
+// Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
+// type conditions in `other`.
+pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint<'a>>(
     path_constraint: &T,
     this: &ResponseShape,
     other: &ResponseShape,
@@ -207,13 +236,15 @@ fn compare_definition_variant<'a, T: PathConstraint<'a>>(
         (None, None) => Ok(()),
         (Some(this_sub), Some(other_sub)) => {
             let field_constraint = path_constraint.for_field(this.representative_field())?;
-            compare_response_shapes(&field_constraint, this_sub, other_sub).map_err(|e| {
-                e.add_description(&format!(
-                    "mismatch in response shape under definition variant: ---> {} if {}",
-                    this.representative_field(),
-                    this.boolean_clause()
-                ))
-            })
+            compare_response_shapes_with_constraint(&field_constraint, this_sub, other_sub).map_err(
+                |e| {
+                    e.add_description(&format!(
+                        "mismatch in response shape under definition variant: ---> {} if {}",
+                        this.representative_field(),
+                        this.boolean_clause()
+                    ))
+                },
+            )
         }
         _ => Err(CheckFailure::new(
             "mismatch in compare_definition_variant".to_string(),

@@ -13,6 +13,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 
+use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::query_plan::QueryPlan;
 use crate::schema::ValidFederationSchema;
 use crate::FederationError;
@@ -43,6 +44,20 @@ impl CheckFailure {
 //==================================================================================================
 // check_plan
 
+// Check if `this`'s response shape is a subset of `other`'s response shape.
+pub fn compare_operations(
+    schema: &ValidFederationSchema,
+    this: &Valid<ExecutableDocument>,
+    other: &Valid<ExecutableDocument>,
+) -> Result<Option<CheckFailure>, FederationError> {
+    let this_rs = response_shape::compute_response_shape_for_operation(this, schema)?;
+    let other_rs = response_shape::compute_response_shape_for_operation(other, schema)?;
+    match response_shape_compare::compare_response_shapes(&this_rs, &other_rs) {
+        Ok(_) => Ok(None),
+        Err(e) => Ok(Some(e)),
+    }
+}
+
 pub fn check_plan(
     schema: &ValidFederationSchema,
     subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
@@ -61,8 +76,8 @@ pub fn check_plan(
         }
     };
 
-    let root_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
-    match response_shape_compare::compare_response_shapes(&root_constraint, &op_rs, &plan_rs) {
+    let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
+    match compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs) {
         Ok(_) => Ok(None),
         Err(e) => Ok(Some(e)),
     }

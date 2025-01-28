@@ -96,9 +96,7 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
         .map(|(name, subgraph)| (name, subgraph.schema))
         .collect();
     let root_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
-    assert!(
-        response_shape_compare::compare_response_shapes(&root_constraint, &op_rs, &plan_rs).is_ok()
-    );
+    assert!(compare_response_shapes_with_constraint(&root_constraint, &op_rs, &plan_rs).is_ok());
 
     plan_rs
 }
