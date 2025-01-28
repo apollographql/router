@@ -131,6 +131,8 @@ When using the macro in a test you will need a different pattern depending on if
 Make sure to use `.with_metrics()` method on the async block to ensure that the metrics are stored in a task local.
 *Tests will silently fail to record metrics if this is not done.*
 ```rust
+    use crate::metrics::FutureMetricsExt;
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_async_multi() {
         // Multi-threaded runtime needs to use a tokio task local to avoid tests interfering with each other
