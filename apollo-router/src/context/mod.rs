@@ -25,9 +25,9 @@ use crate::services::layers::query_analysis::ParsedDocument;
 pub(crate) mod extensions;
 
 /// The key of the resolved operation name. This is subject to change and should not be relied on.
-pub(crate) const OPERATION_NAME: &str = "operation_name";
+pub(crate) const OPERATION_NAME: &str = "apollo::supergraph::operation_name";
 /// The key of the resolved operation kind. This is subject to change and should not be relied on.
-pub(crate) const OPERATION_KIND: &str = "operation_kind";
+pub(crate) const OPERATION_KIND: &str = "apollo::supergraph::operation_kind";
 /// The key to know if the response body contains at least 1 GraphQL error
 pub(crate) const CONTAINS_GRAPHQL_ERROR: &str = "apollo::telemetry::contains_graphql_error";
 
@@ -266,10 +266,8 @@ impl Context {
         }
     }
 
-    /// Read only access to the executable document. This is UNSTABLE and may be changed or removed in future router releases.
-    /// In addition, ExecutableDocument is UNSTABLE, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
+    /// Read only access to the executable document for internal router plugins.
+    pub(crate) fn executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
             .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
     }
@@ -419,7 +417,7 @@ mod test {
     fn context_extensions() {
         // This is mostly tested in the extensions module.
         let c = Context::new();
-        c.extensions().with_lock(|mut lock| lock.insert(1usize));
+        c.extensions().with_lock(|lock| lock.insert(1usize));
         let v = c
             .extensions()
             .with_lock(|lock| lock.get::<usize>().cloned());
@@ -433,8 +431,8 @@ mod test {
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
-        assert!(c.unsupported_executable_document().is_none());
-        c.extensions().with_lock(|mut lock| lock.insert(document));
-        assert!(c.unsupported_executable_document().is_some());
+        assert!(c.executable_document().is_none());
+        c.extensions().with_lock(|lock| lock.insert(document));
+        assert!(c.executable_document().is_some());
     }
 }

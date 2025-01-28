@@ -21,6 +21,7 @@ pub mod test;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Context;
@@ -45,7 +46,6 @@ use tower::ServiceBuilder;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -75,7 +75,7 @@ pub struct PluginInit<T> {
     pub(crate) supergraph_schema: Arc<Valid<Schema>>,
 
     /// The parsed subgraph schemas from the query planner, keyed by subgraph name
-    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<Schema>>>>,
 
     /// Launch ID
     pub(crate) launch_id: Option<Arc<String>>,
@@ -87,45 +87,6 @@ impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    #[deprecated = "use PluginInit::builder() instead"]
-    /// Create a new PluginInit for the supplied config and SDL.
-    pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
-        Self::builder()
-            .config(config)
-            .supergraph_schema(Arc::new(
-                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                    .expect("failed to parse supergraph schema"),
-            ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
-            .supergraph_sdl(supergraph_sdl)
-            .notify(Notify::builder().build())
-            .build()
-    }
-
-    /// Try to create a new PluginInit for the supplied JSON and SDL.
-    ///
-    /// This will fail if the supplied JSON cannot be deserialized into the configuration
-    /// struct.
-    #[deprecated = "use PluginInit::try_builder() instead"]
-    pub fn try_new(
-        config: serde_json::Value,
-        supergraph_sdl: Arc<String>,
-    ) -> Result<Self, BoxError> {
-        Self::try_builder()
-            .config(config)
-            .supergraph_schema(Arc::new(
-                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                    .map_err(|e| {
-                        // This method is deprecated so we're not going to do anything fancy with the error
-                        BoxError::from(e.errors.to_string())
-                    })?,
-            ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
-            .supergraph_sdl(supergraph_sdl)
-            .notify(Notify::builder().build())
-            .build()
-    }
-
     #[cfg(test)]
     pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
@@ -137,27 +98,12 @@ where
 
         PluginInit::fake_builder()
             .config(config)
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into())
+            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
             .supergraph_sdl(supergraph_sdl)
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
-    }
-
-    /// Returns the parsed Schema. This is unstable and may be changed or removed in future router releases.
-    /// In addition, Schema is not stable, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_supergraph_schema(&self) -> Arc<Valid<Schema>> {
-        self.supergraph_schema.clone()
-    }
-
-    /// Returns a mapping of subgraph to parsed schema. This is unstable and may be changed or removed in
-    /// future router releases. In addition, Schema is not stable, and may be changed or removed in future
-    /// apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Arc<Valid<Schema>>>> {
-        self.subgraph_schemas.clone()
     }
 }
 
@@ -176,7 +122,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
     ) -> Self {
@@ -201,7 +147,7 @@ where
         supergraph_sdl: Arc<String>,
         supergraph_schema_id: Arc<String>,
         supergraph_schema: Arc<Valid<Schema>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
     ) -> Result<Self, BoxError> {
@@ -224,7 +170,7 @@ where
         supergraph_sdl: Option<Arc<String>>,
         supergraph_schema_id: Option<Arc<String>>,
         supergraph_schema: Option<Arc<Valid<Schema>>>,
-        subgraph_schemas: Option<Arc<SubgraphSchemas>>,
+        subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
     ) -> Self {
@@ -626,6 +572,14 @@ pub(crate) trait PluginPrivate: Send + Sync + 'static {
         service
     }
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -736,6 +690,12 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService;
 
+    /// This service handles individual requests to Apollo Connectors
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -782,6 +742,13 @@ where
         service: crate::services::http::BoxService,
     ) -> crate::services::http::BoxService {
         self.http_client_service(name, service)
+    }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        self.connector_request_service(service)
     }
 
     fn name(&self) -> &'static str {
@@ -836,7 +803,7 @@ macro_rules! register_plugin {
         };
     };
 
-    ($group: literal, $name: literal, $plugin_type: ident) => {
+    ($group: literal, $name: expr, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
             use $crate::_private::once_cell::sync::Lazy;
@@ -890,7 +857,7 @@ macro_rules! register_private_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<router::BoxService, router::Request>,
+    service: Buffer<router::Request, <router::BoxService as Service<router::Request>>::Future>,
 }
 
 impl Handler {

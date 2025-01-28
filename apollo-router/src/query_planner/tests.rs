@@ -26,6 +26,8 @@ use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
+use crate::services::connector_service::ConnectorServiceFactory;
+use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;
@@ -75,12 +77,11 @@ fn service_usage() {
 /// The query planner reports the failed subgraph fetch as an error with a reason of "service
 /// closed", which is what this test expects.
 #[tokio::test]
-#[should_panic(expected = "this panic should be propagated to the test harness")]
 async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -91,9 +92,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     };
 
     let mut mock_products_service = plugin::test::MockSubgraphService::new();
-    mock_products_service.expect_call().times(1).withf(|_| {
-        panic!("this panic should be propagated to the test harness");
-    });
+    // This clone happens in the `MakeSubgraphService` impl for MockSubgraphService.
     mock_products_service.expect_clone().return_once(|| {
         let mut mock_products_service = plugin::test::MockSubgraphService::new();
         mock_products_service.expect_call().times(1).withf(|_| {
@@ -103,20 +102,29 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
+
+    let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+        )],
+        Default::default(),
+    );
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+    ));
 
     let result = query_plan
         .execute(
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
+            &schema,
             &Default::default(),
             sender,
             None,
@@ -128,7 +136,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let reason: String =
         serde_json_bytes::from_value(result.errors[0].extensions.get("reason").unwrap().clone())
             .unwrap();
-    assert_eq!(reason, "service closed".to_string());
+    assert_eq!(reason, "buffer's worker closed unexpectedly".to_string());
 }
 
 #[tokio::test]
@@ -141,7 +149,7 @@ async fn fetch_includes_operation_name() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -167,20 +175,28 @@ async fn fetch_includes_operation_name() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
+    let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+        )],
+        Default::default(),
+    );
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+    ));
 
     let _response = query_plan
         .execute(
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
+            &schema,
             &Default::default(),
             sender,
             None,
@@ -202,7 +218,7 @@ async fn fetch_makes_post_requests() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -228,20 +244,28 @@ async fn fetch_makes_post_requests() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
+    let schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+        )],
+        Default::default(),
+    );
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+    ));
 
     let _response = query_plan
         .execute(
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
+            &schema,
             &Default::default(),
             sender,
             None,
@@ -331,7 +355,7 @@ async fn defer() {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             }.into(),
-            query: Arc::new(Query::empty()),
+            query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
         };
@@ -377,8 +401,8 @@ async fn defer() {
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([
+    let ssf = SubgraphServiceFactory::new(
+        vec![
             (
                 "X".into(),
                 Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
@@ -387,9 +411,16 @@ async fn defer() {
                 "Y".into(),
                 Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
             ),
-        ])),
-        plugins: Default::default(),
-    });
+        ],
+        Default::default(),
+    );
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+    ));
 
     let response = query_plan
         .execute(
@@ -486,13 +517,21 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
-    let service_factory = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
+    let ssf = SubgraphServiceFactory::new(
+        vec![(
             "accounts".into(),
             Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+        )],
+        Default::default(),
+    );
+    let service_factory = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+    ));
+
     let defer_primary_response = query_plan
         .execute(
             &Context::new(),
@@ -618,7 +657,7 @@ async fn dependent_mutations() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
@@ -636,10 +675,14 @@ async fn dependent_mutations() {
 
     // the first fetch returned null, so there should never be a call to B
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
+    mock_b_service
+        .expect_clone()
+        .returning(plugin::test::MockSubgraphService::new);
     mock_b_service.expect_call().never();
 
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let ssf = SubgraphServiceFactory::new(
+        vec![
             (
                 "A".into(),
                 Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
@@ -648,9 +691,16 @@ async fn dependent_mutations() {
                 "B".into(),
                 Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
             ),
-        ])),
-        plugins: Default::default(),
-    });
+        ],
+        Default::default(),
+    );
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(ssf),
+        None,
+        Arc::new(ConnectorServiceFactory::empty(schema.clone())),
+    ));
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan
@@ -658,7 +708,7 @@ async fn dependent_mutations() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(schema, &Default::default()).unwrap()),
+            &schema,
             &Default::default(),
             sender,
             None,
@@ -676,56 +726,56 @@ async fn alias_renaming() {
     {
       query: Query
     }
-    
+
     directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-    
+
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-    
+
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    
+
     directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-    
+
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    
+
     directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    
+
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    
+
     interface I
       @join__type(graph: S1)
       @join__type(graph: S2)
     {
       id: String!
     }
-    
+
     scalar join__FieldSet
-    
+
     enum join__Graph {
       S1 @join__graph(name: "S1", url: "http://localhost/s1")
       S2 @join__graph(name: "S2", url: "http://localhost/s2")
     }
-    
+
     scalar link__Import
-    
+
     enum link__Purpose {
       """
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
       SECURITY
-    
+
       """
       `EXECUTION` features provide metadata necessary for operation execution.
       """
       EXECUTION
     }
-    
+
     type Query
       @join__type(graph: S1)
       @join__type(graph: S2)
     {
       testQuery(id: String!): I @join__field(graph: S1)
     }
-    
+
     type T1 implements I
       @join__implements(graph: S1, interface: "I")
       @join__implements(graph: S2, interface: "I")
@@ -735,7 +785,7 @@ async fn alias_renaming() {
       id: String!
       foo: Test @join__field(graph: S2)
     }
-    
+
     type T2 implements I
       @join__implements(graph: S1, interface: "I")
       @join__implements(graph: S2, interface: "I")
@@ -745,7 +795,7 @@ async fn alias_renaming() {
       id: String!
       bar: Test @join__field(graph: S2)
     }
-    
+
     type Test
       @join__type(graph: S2)
     {
@@ -876,56 +926,56 @@ async fn missing_fields_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   type Details
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     enabled: Boolean
   }
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1019,49 +1069,49 @@ async fn missing_typename_and_fragments_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1070,7 +1120,7 @@ async fn missing_typename_and_fragments_in_requires() {
     thing: Thing
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing { text } }")
   }
-  
+
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
@@ -1155,58 +1205,58 @@ async fn missing_typename_and_fragments_in_requires2() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
   {
     id: ID
-    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true) 
+    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing1 { __typename text1 } ... on Thing2 { __typename text2 } }")
   }
-  
+
   union PossibleThing @join__type(graph: SUB1) @join__type(graph: SUB2)
   @join__unionMember(graph: SUB1, member: "Thing1") @join__unionMember(graph: SUB1, member: "Thing2")
   @join__unionMember(graph: SUB2, member: "Thing1") @join__unionMember(graph: SUB2, member: "Thing2")
@@ -1309,49 +1359,49 @@ async fn null_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1360,7 +1410,7 @@ async fn null_in_requires() {
     thing: Thing
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { a text }")
   }
-  
+
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
@@ -1833,15 +1883,19 @@ fn broken_plan_does_not_panic() {
             referenced_fields_by_type: Default::default(),
         }
         .into(),
-        query: Arc::new(Query::empty()),
+        query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
-    let mut subgraph_schemas = HashMap::new();
-    subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
-    let result = Arc::make_mut(&mut plan.root)
-        .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
+    let mut subgraph_schemas = HashMap::default();
+    subgraph_schemas.insert(
+        "X".to_owned(),
+        query_planner::fetch::SubgraphSchema::new(subgraph_schema),
+    );
+    // Run the plan initialization code to make sure it doesn't panic.
+    let result =
+        Arc::make_mut(&mut plan.root).init_parsed_operations_and_hash_subqueries(&subgraph_schemas);
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#

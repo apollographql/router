@@ -19,19 +19,20 @@ use http::HeaderMap;
 use http::Request;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use crate::services::router::body::get_body_bytes;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct AWSSigV4HardcodedConfig {
     /// The ID for this access key.
@@ -64,7 +65,7 @@ impl ProvideCredentials for AWSSigV4HardcodedConfig {
 }
 
 /// Configuration of the DefaultChainProvider
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct DefaultChainConfig {
     /// The AWS region this chain applies to.
@@ -78,7 +79,7 @@ pub(crate) struct DefaultChainConfig {
 }
 
 /// Specify assumed role configuration.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AssumeRoleProvider {
     /// Amazon Resource Name (ARN)
@@ -91,7 +92,7 @@ pub(crate) struct AssumeRoleProvider {
 }
 
 /// Configure AWS sigv4 auth.
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Deserialize, Serialize, Debug)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum AWSSigV4Config {
     Hardcoded(AWSSigV4HardcodedConfig),
@@ -170,7 +171,7 @@ impl AWSSigV4Config {
     }
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) enum AuthConfig {
     #[serde(rename = "aws_sig_v4")]
@@ -314,7 +315,7 @@ impl SigningParamsConfig {
         // We'll go with default signed headers
         let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
-        let body_bytes = get_body_bytes(body).await?.to_vec();
+        let body_bytes = router::body::into_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
             parts.method.as_str(),
             parts.uri.to_string(),
@@ -335,8 +336,8 @@ impl SigningParamsConfig {
                 error
             })?
             .into_parts();
-        req = Request::<RouterBody>::from_parts(parts, body_bytes.into());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        req = Request::<RouterBody>::from_parts(parts, router::body::from_bytes(body_bytes));
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -375,7 +376,7 @@ impl SigningParamsConfig {
             })?
             .into_parts();
         req = Request::<()>::from_parts(parts, ());
-        signing_instructions.apply_to_request_http0x(&mut req);
+        signing_instructions.apply_to_request_http1x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
     }
@@ -475,7 +476,7 @@ impl SubgraphAuth {
                     let signing_params = signing_params.clone();
                     req.context
                         .extensions()
-                        .with_lock(|mut lock| lock.insert(signing_params));
+                        .with_lock(|lock| lock.insert(signing_params));
                     req
                 })
                 .service(service)
@@ -810,7 +811,7 @@ mod test {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
-            req.subgraph_name.unwrap_or_else(|| String::from("test")),
+            req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
     }
@@ -841,6 +842,7 @@ mod test {
             )
             .operation_kind(OperationKind::Query)
             .context(Context::new())
+            .subgraph_name(String::default())
             .build()
     }
 
@@ -857,7 +859,7 @@ mod test {
         let http_request = request
             .clone()
             .subgraph_request
-            .map(|body| RouterBody::from(serde_json::to_string(&body).unwrap()));
+            .map(|body| router::body::from_bytes(serde_json::to_string(&body).unwrap()));
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

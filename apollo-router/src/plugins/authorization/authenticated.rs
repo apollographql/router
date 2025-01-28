@@ -534,6 +534,7 @@ mod tests {
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
+    use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
@@ -1502,10 +1503,7 @@ mod tests {
 
         let context = Context::new();
         context
-            .insert(
-                "apollo_authentication::JWT::claims",
-                "placeholder".to_string(),
-            )
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
             .unwrap();
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
@@ -1584,7 +1582,7 @@ mod tests {
         let context = Context::new();
         /*context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             "placeholder".to_string(),
         )
         .unwrap();*/
@@ -1659,13 +1657,13 @@ mod tests {
         let context = Context::new();
         /*context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             "placeholder".to_string(),
         )
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(ClientRequestAccepts {
                 multipart_defer: true,
                 multipart_subscription: true,

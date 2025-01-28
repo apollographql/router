@@ -23,14 +23,14 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
-use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::spec::QueryHash;
 use crate::Context;
 
 /// A query that is part of a batch.
@@ -281,7 +281,7 @@ impl Batch {
                                 request, sender, ..
                             } in cancelled_requests
                             {
-                                let subgraph_name = request.subgraph_name.ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                                let subgraph_name = request.subgraph_name;
                                 if let Err(log_error) = sender.send(Err(Box::new(FetchError::SubrequestBatchingError {
                                         service: subgraph_name.clone(),
                                         reason: format!("request cancelled: {reason}"),
@@ -365,7 +365,7 @@ impl Batch {
                 sender: tx,
             } in all_in_one
             {
-                let subgraph_name = sg_request.subgraph_name.clone().ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                let subgraph_name = sg_request.subgraph_name.clone();
                 let value = svc_map
                     .entry(
                         subgraph_name,
@@ -449,7 +449,7 @@ pub(crate) async fn assemble_batch(
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
     // Construct the actual byte body of the batched request
-    let bytes = get_body_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Retain the various contexts for later use
     let contexts = requests
@@ -470,7 +470,7 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, RouterBody::from(bytes));
+    let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 
@@ -493,13 +493,14 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
+    use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::spec::QueryHash;
     use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
@@ -553,7 +554,8 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&request.into_body().to_bytes().await.unwrap()).unwrap(),
+            std::str::from_utf8(&router::body::into_bytes(request.into_body()).await.unwrap())
+                .unwrap(),
         )
         .unwrap();
 
@@ -581,7 +583,7 @@ mod tests {
                     .body(graphql::Response::builder().data(data.clone()).build())
                     .unwrap(),
                 context: Context::new(),
-                subgraph_name: None,
+                subgraph_name: String::default(),
                 id: SubgraphRequestId(String::new()),
             };
 
@@ -853,7 +855,7 @@ mod tests {
                 .method("POST")
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json")
-                .body(serde_json::to_vec(&request).unwrap().into())
+                .body(body::from_bytes(serde_json::to_vec(&request).unwrap()))
                 .unwrap(),
         };
 

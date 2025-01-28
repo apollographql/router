@@ -162,7 +162,7 @@ async fn empty_posts_should_not_work() {
             HeaderValue::from_static(APPLICATION_JSON.essence_str()),
         )
         .method(Method::POST)
-        .body(hyper::Body::empty())
+        .body(axum::body::Body::empty())
         .unwrap();
 
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
@@ -399,6 +399,142 @@ async fn automated_persisted_queries() {
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn persisted_queries() {
+    use hyper::header::HeaderValue;
+    use serde_json::json;
+
+    /// Construct a persisted query request from an ID.
+    fn pq_request(persisted_query_id: &str) -> router::Request {
+        supergraph::Request::fake_builder()
+            .extension(
+                "persistedQuery",
+                json!({
+                    "version": 1,
+                    "sha256Hash": persisted_query_id
+                }),
+            )
+            .build()
+            .expect("expecting valid request")
+            .try_into()
+            .expect("could not convert supergraph::Request to router::Request")
+    }
+
+    // set up a PQM with one query
+    const PERSISTED_QUERY_ID: &str = "GetMyNameID";
+    const PERSISTED_QUERY_BODY: &str = "query GetMyName { me { name } }";
+    let expected_data = serde_json_bytes::json!({
+      "me": {
+        "name": "Ada Lovelace"
+      }
+    });
+    let map = [(
+        FullPersistedQueryOperationId {
+            operation_id: PERSISTED_QUERY_ID.to_string(),
+            client_name: None,
+        },
+        PERSISTED_QUERY_BODY.to_string(),
+    )]
+    .into_iter()
+    .collect();
+    let (_mock_guard, uplink_config) = mock_pq_uplink(&map).await;
+
+    let config = serde_json::json!({
+        "persisted_queries": {
+            "enabled": true
+        },
+        "apq": {
+            "enabled": false
+        }
+    });
+
+    let mut config: Configuration = serde_json::from_value(config).unwrap();
+    config.uplink = Some(uplink_config);
+    let (router, registry) = setup_router_and_registry_with_config(config).await.unwrap();
+
+    // Successfully run a persisted query.
+    let actual = query_with_router(router.clone(), pq_request(PERSISTED_QUERY_ID)).await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data));
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
+
+    // Error on unpersisted query.
+    const UNKNOWN_QUERY_ID: &str = "unknown_query";
+    const UNPERSISTED_QUERY_BODY: &str = "query GetYourName { you: me { name } }";
+    let expected_data = serde_json_bytes::json!({
+      "you": {
+        "name": "Ada Lovelace"
+      }
+    });
+    let actual = query_with_router(router.clone(), pq_request(UNKNOWN_QUERY_ID)).await;
+    assert_eq!(
+        actual.errors,
+        vec![apollo_router::graphql::Error::builder()
+            .message(format!(
+                "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
+            ))
+            .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
+            .build()]
+    );
+    assert_eq!(actual.data, None);
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
+
+    // We didn't break normal GETs.
+    let actual = query_with_router(
+        router.clone(),
+        supergraph::Request::fake_builder()
+            .query(UNPERSISTED_QUERY_BODY)
+            .method(Method::GET)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data.as_ref(), Some(&expected_data));
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 2});
+
+    // We didn't break normal POSTs.
+    let actual = query_with_router(
+        router.clone(),
+        supergraph::Request::fake_builder()
+            .query(UNPERSISTED_QUERY_BODY)
+            .method(Method::POST)
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    )
+    .await;
+    assert!(actual.errors.is_empty());
+    assert_eq!(actual.data, Some(expected_data));
+    assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 3});
+
+    // Proper error when sending malformed request body
+    let actual = query_with_router(
+        router.clone(),
+        http::Request::builder()
+            .uri("http://default")
+            .method(Method::POST)
+            .header(
+                CONTENT_TYPE,
+                HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+            )
+            .body(axum::body::Body::empty())
+            .unwrap()
+            .into(),
+    )
+    .await;
+    assert_eq!(actual.errors.len(), 1);
+
+    assert_eq!(actual.errors[0].message, "Invalid GraphQL request");
+    assert_eq!(
+        actual.errors[0].extensions["code"],
+        "INVALID_GRAPHQL_REQUEST"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -903,7 +1039,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -929,7 +1065,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -949,7 +1085,7 @@ async fn query_operation_id() {
         // "## GraphQLParseFailure\n"
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .is_none()
     );
@@ -973,7 +1109,7 @@ async fn query_operation_id() {
     // "## GraphQLUnknownOperationName\n"
     assert!(response
         .context
-        .get::<_, String>("apollo_operation_id".to_string())
+        .get::<_, String>("apollo::supergraph::operation_id")
         .unwrap()
         .is_none());
 
@@ -996,7 +1132,7 @@ async fn query_operation_id() {
     // "## GraphQLValidationFailure\n"
     assert!(response
         .context
-        .get::<_, String>("apollo_operation_id".to_string())
+        .get::<_, String>("apollo::supergraph::operation_id")
         .unwrap()
         .is_none());
 }

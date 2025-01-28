@@ -495,6 +495,10 @@ pub(crate) enum SchemaError {
     /// Api error(s): {0}
     #[from(ignore)]
     Api(String),
+
+    /// Connector error(s): {0}
+    #[from(ignore)]
+    Connector(FederationError),
 }
 
 /// Collection of schema validation errors.
@@ -626,8 +630,6 @@ impl std::fmt::Display for ValidationErrors {
 pub(crate) enum SubgraphBatchingError {
     /// Sender unavailable
     SenderUnavailable,
-    /// Request does not have a subgraph name
-    MissingSubgraphName,
     /// Requests is empty
     RequestsIsEmpty,
     /// Batch processing failed: {0}

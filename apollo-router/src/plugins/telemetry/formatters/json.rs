@@ -3,11 +3,11 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
-use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::Key;
-use opentelemetry::OrderMap;
+use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use opentelemetry_sdk::Resource;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -20,6 +20,7 @@ use tracing_subscriber::registry::SpanRef;
 
 use super::get_trace_and_span_id;
 use super::EventFormatter;
+use super::APOLLO_CONNECTOR_PREFIX;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -126,11 +127,13 @@ where
                 .get::<OtelData>()
                 .and_then(|otel_data| otel_data.builder.attributes.as_ref());
             if let Some(otel_attributes) = otel_attributes {
-                for (key, value) in otel_attributes.iter().filter(|(key, _)| {
-                    let key_name = key.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
+                for kv in otel_attributes.iter().filter(|kv| {
+                    let key_name = kv.key.as_str();
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
+                        && !self.1.contains(&key_name)
                 }) {
-                    serializer.serialize_entry(key.as_str(), &value.as_str())?;
+                    serializer.serialize_entry(kv.key.as_str(), &kv.value.as_str())?;
                 }
             }
         }
@@ -147,7 +150,9 @@ where
                 };
                 for kv in custom_attributes.iter().filter(|kv| {
                     let key_name = kv.key.as_str();
-                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
+                    !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                        && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
+                        && !self.1.contains(&key_name)
                 }) {
                     match &kv.value {
                         Value::Bool(value) => {
@@ -268,12 +273,11 @@ where
                         None => {
                             let event_attributes = extensions.get_mut::<EventAttributes>();
                             event_attributes.map(|event_attributes| {
-                                OrderMap::from_iter(
-                                    event_attributes
-                                        .take()
-                                        .into_iter()
-                                        .map(|kv| (kv.key, kv.value)),
-                                )
+                                event_attributes
+                                    .take()
+                                    .into_iter()
+                                    .map(|KeyValue { key, value }| (key, value))
+                                    .collect()
                             })
                         }
                     }
@@ -355,11 +359,11 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
         // Extract dd_trace_id, this could be in otel data or log attributes
         if let Some(otel_data) = root_span.extensions().get::<OtelData>() {
             if let Some(attributes) = otel_data.builder.attributes.as_ref() {
-                if let Some((_k, v)) = attributes
+                if let Some(kv) = attributes
                     .iter()
-                    .find(|(k, _v)| k.as_str() == "dd.trace_id")
+                    .find(|kv| kv.key.as_str() == "dd.trace_id")
                 {
-                    dd_trace_id = Some(v.to_string());
+                    dd_trace_id = Some(kv.value.to_string());
                 }
             }
         };
@@ -400,12 +404,13 @@ where
                     attributes.extend(
                         otel_attributes
                             .iter()
-                            .filter(|(key, _)| {
-                                let key_name = key.as_str();
+                            .filter(|kv| {
+                                let key_name = kv.key.as_str();
                                 !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                                     && include_attributes.contains(key_name)
                             })
-                            .map(|(key, val)| (key.clone(), val.clone())),
+                            .map(|kv| (kv.key.clone(), kv.value.clone())),
                     );
                 }
             }
@@ -427,6 +432,7 @@ where
                             .filter(|kv| {
                                 let key_name = kv.key.as_str();
                                 !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
+                                    && !key_name.starts_with(APOLLO_CONNECTOR_PREFIX)
                                     && include_attributes.contains(key_name)
                             })
                             .map(|kv| (kv.key.clone(), kv.value.clone())),

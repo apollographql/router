@@ -104,7 +104,7 @@ This reference lists and describes the options supported by the `router` binary.
 </td>
 <td>
 
-The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`--supergraph-urls <urls>`, or `APOLLO_ROUTER_SUPERGRAPH_URLS`).
 
 > &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages.
 
@@ -237,22 +237,6 @@ For default behavior and possible values, see [Apollo Uplink](/federation/manage
 
 </td>
 </tr>
-<tr>
-<td style="min-width: 150px;">
-
-##### `--apollo-uplink-poll-interval`
-
-`APOLLO_UPLINK_POLL_INTERVAL`
-
-</td>
-<td>
-
-The amount of time between polls to Apollo Uplink.
-
-The default value is `10s` (ten seconds), which is also the minimum allowed value.
-
-</td>
-</tr>
 
 <tr>
 <td style="min-width: 150px;">
@@ -316,21 +300,6 @@ If set, the router prints its version number, then exits.
 
 <tr>
 <td style="min-width: 150px;">
-
-##### `--schema`
-
-</td>
-<td>
-
-**Deprecated**—use [`./router config schema`](#configuration-awareness-in-your-text-editor) instead.
-
-If set, the router prints a JSON schema representation of its full supported configuration format, then exits.
-
-</td>
-</tr>
-
-</tbody>
-</table>
 
 ### Dev mode defaults
 
@@ -478,17 +447,18 @@ The path must start with `/`.
 
 A path can contain parameters and wildcards:
 
-- `/:parameter` matches a single segment. For example:
-    - `/abc/:wildcard/def` matches `/abc/1/def` and `/abc/whatever/def`, but it doesn't match `/abc/1/2/def` or `/abc/def`
+- `/{parameter}` matches a single segment. For example:
 
-- `/*parameter` matches all segments in the rest of a path. For example:
-    -  `/abc/*wildcard` matches `/abc/1/def` and `/abc/w/h/a/t/e/v/e/r`, but it doesn't match `/abc/` or `/not_abc_at_all`
+  - `/abc/{my_param}/def` matches `/abc/1/def` and `/abc/whatever/def`, but it doesn't match `/abc/1/2/def` or `/abc/def`
+
+- `/{*parameter}` matches all segments in the rest of a path. For example:
+  - `/abc/{*wildcard}` matches `/abc/1/def` and `/abc/w/h/a/t/e/v/e/r`, but it doesn't match `/abc/` or `/not_abc_at_all`
 
 <Note>
 
-- Both `:` and `*` syntaxes require a name, even though you can’t use those names anywhere.
+- Both parameters and wildcards require a name, even though you can’t use those names anywhere.
 
-- The router doesn't support wildcards in the _middle_ of a path (e.g., `/*/graphql`). Instead, use a path parameter (e.g., `/:parameter/graphql`).
+- The router doesn't support wildcards in the _middle_ of a path (e.g., `/{*wild}/graphql`). Instead, use a path parameter (e.g., `/{parameter}/graphql`).
 
 </Note>
 
@@ -500,6 +470,20 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 # Do not enable introspection in production!
 supergraph:
   introspection: true
+```
+
+The [schema-intropsection schema](https://spec.graphql.org/draft/#sec-Schema-Introspection.Schema-Introspection-Schema) is recursive: a client can query the fields of the types of some other fields, and so on arbitrarily deep. This can produce responses that grow much faster than the size of the request.
+
+To protect against abusive Router now refuses to execute introspection queries that nest list fields too deep and returns an error instead. The criteria matches `MaxIntrospectionDepthRule` in graphql-js, but may change in future versions.
+
+In case it rejects legitimate queries, this check can be disabled in Router configuration:
+
+```yaml title="router.yaml"
+# Do not enable introspection in production!
+supergraph:
+  introspection: true
+limits:
+  introspection_max_depth: false
 ```
 
 ### Debugging
@@ -1110,14 +1094,6 @@ If router receives more headers than the buffer size, it responds to the client 
 ##### `http1_max_request_buf_size`
 
 Limit the maximum buffer size for the HTTP1 connection. Default is ~400kib.
-
-Note for Rust Crate Users: If you are using the Router as a Rust crate, the `http1_request_max_buf_size` option requires the `hyper_header_limits` feature and also necessitates using Apollo's fork of the Hyper crate until the [changes are merged upstream](https://github.com/hyperium/hyper/pull/3523).
-You can include this fork by adding the following patch to your Cargo.toml file:
-
-```toml
-[patch.crates-io]
-"hyper" = { git = "https://github.com/apollographql/hyper.git", tag = "header-customizations-20241108" }
-```
 
 #### Parser-based limits
 

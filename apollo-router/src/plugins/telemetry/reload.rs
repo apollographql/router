@@ -3,14 +3,14 @@ use std::io::IsTerminal;
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
-use opentelemetry::sdk::trace::Tracer;
+use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceFlags;
-use opentelemetry_api::trace::TraceState;
-use opentelemetry_api::Context;
+use opentelemetry::Context;
+use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
@@ -25,7 +25,6 @@ use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
-use super::metrics::span_metrics_exporter::SpanMetricsLayer;
 use crate::metrics::layer::MetricsLayer;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
@@ -37,7 +36,7 @@ use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
+pub(crate) type LayeredRegistry = Layered<DynAttributeLayer, Registry>;
 
 pub(super) type LayeredTracer =
     Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>;
@@ -45,7 +44,7 @@ pub(super) type LayeredTracer =
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry_sdk::trace::Tracer>,
 > = OnceCell::new();
 
 static FMT_LAYER_HANDLE: OnceCell<
@@ -59,12 +58,9 @@ pub(crate) fn metrics_layer() -> &'static MetricsLayer {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer(
-            "noop",
-            None::<String>,
-            None::<String>,
-            None,
-        ),
+        opentelemetry_sdk::trace::TracerProvider::default()
+            .tracer_builder("noop")
+            .build(),
     );
     let opentelemetry_layer = otel::layer().with_tracer(hot_tracer.clone());
 
@@ -97,7 +93,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // the tracing registry is only created once
             tracing_subscriber::registry()
                 .with(DynAttributeLayer::new())
-                .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(metrics_layer.clone())
