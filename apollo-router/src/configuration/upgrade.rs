@@ -65,7 +65,11 @@ pub(crate) fn upgrade_configuration(
     let mut migrations: Vec<Migration> = Vec::new();
     for filename in Asset::iter().sorted().filter(|f| f.ends_with(".yaml")) {
         if let Some(migration) = Asset::get(&filename) {
-            let parsed_migration = serde_yaml::from_slice(&migration.data)?;
+            let parsed_migration = serde_yaml::from_slice(&migration.data).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: format!("Failed to parse migration {}: {}", filename, error),
+                }
+            })?;
             migrations.push(parsed_migration);
         }
     }
@@ -176,9 +180,16 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
 }
 
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
-    let parsed_config = serde_yaml::from_str(config)?;
+    let parsed_config =
+        serde_yaml::from_str(config).map_err(|error| ConfigurationError::MigrationFailure {
+            error: format!("Failed to parse config: {}", error),
+        })?;
     let upgraded_config = upgrade_configuration(&parsed_config, true)?;
-    let upgraded_config = serde_yaml::to_string(&upgraded_config)?;
+    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|error| {
+        ConfigurationError::MigrationFailure {
+            error: format!("Failed to serialize upgraded config: {}", error),
+        }
+    })?;
     generate_upgrade_output(config, &upgraded_config, diff)
 }
 

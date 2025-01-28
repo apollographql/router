@@ -124,14 +124,6 @@ impl From<proteus::parser::Error> for ConfigurationError {
     }
 }
 
-impl From<serde_yaml::Error> for ConfigurationError {
-    fn from(error: serde_yaml::Error) -> Self {
-        Self::MigrationFailure {
-            error: error.to_string(),
-        }
-    }
-}
-
 impl From<std::fmt::Error> for ConfigurationError {
     fn from(error: std::fmt::Error) -> Self {
         Self::MigrationFailure {
