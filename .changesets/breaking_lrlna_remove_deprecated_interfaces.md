@@ -31,7 +31,6 @@ attribute
   the following two misleading metrics and recommending that you instead test your
   workloads with the router to if the latency meets your requirements:
   - `apollo_router_span`
-  - `apollo.router.processing.time`
 
 #### CLI
 The deprecated `--schema` command-line argument is removed. `router config schema` should be used to print the configuration supergraph instead.

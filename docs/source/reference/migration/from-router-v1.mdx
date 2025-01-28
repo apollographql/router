@@ -196,46 +196,65 @@ In case it rejects legitimate queries, this check can be disabled in Router conf
 ```yaml
 # Do not enable introspection in production!
 supergraph:
-  introspection: true  # Without this, schema introspection is entirely disabled by default
+  introspection: true # Without this, schema introspection is entirely disabled by default
 limits:
-  introspection_max_depth: false  # Defaults to true
+  introspection_max_depth: false # Defaults to true
 ```
 
 ### Traces
 
 - `telemetry.instrumentation.spans.mode` becomes `spec_compliant` by default instead of `deprecated`.
 
-### Metrics
+### Removed metrics
 
-- `apollo_router_http_request_retry_total` has been removed and will be supported now by `http.client.request.duration` metrics
+The following metrics have been removed:
+
+- `apollo_router_http_request_retry_total`. This will be supported now by `http.client.request.duration` metrics
   with the `http.request.resend_count` attribute which is automatically set when `default_requirement_level` is set to `recommended`.
 
-- `apollo_router_timeout` has been removed. This metric conflated timed-out requests from client to the router, and requests from the router to subgraphs.
-  Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests,
-  and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
+- `apollo_router_timeout`. This metric conflated timed-out requests from client
+  to the router, and requests from the router to subgraphs. Timed-out requests
+  have HTTP status code 504. Use the `http.response.status_code` attribute on the
+  `http.server.request.duration` metric to identify timed-out router requests, and
+  the same attribute on the `http.client.request.duration` metric to identify
+  timed-out subgraph requests.
 
-- `apollo_router_http_requests_total` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+- `apollo_router_http_requests_total`. This is replaced by
+  `http.server.request.duration` metric for requests from clients to router and
+  `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+- `apollo_router_http_request_duration_seconds_bucket`. This is replaced by
+  `http.server.request.duration` metric for requests from clients to router and
+  `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+- `apollo_router_session_count_total`. This is replaced by
+  `http.server.active_requests`.
 
-- `apollo_require_authentication_failure_count` has been removed. Use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
+- `apollo_require_authentication_failure_count`. Use the
+  `http.server.request.duration` metric's `http.response.status_code` attribute.
+  Requests with authentication failures have HTTP status code 401.
 
-- `apollo_authentication_failure_count` has been removed. Use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
+- `apollo_authentication_failure_count`. Use the
+  `apollo.router.operations.authentication.jwt` metric's
+  `authentication.jwt.failed` attribute.
 
-- `apollo_authentication_success_count` has been removed. Use the `apollo.router.operations.authentication.jwt` metric instead. If the `authentication.jwt.failed` attribute is _absent_ or `false`, the authentication succeeded.
+- `apollo_authentication_success_count`. Use the
+  `apollo.router.operations.authentication.jwt` metric instead. If the
+  `authentication.jwt.failed` attribute is _absent_ or `false`, the authentication
+  succeeded.
 
-- `apollo_router_deduplicated_subscriptions_total` has been removed. Use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute
+- `apollo_router_deduplicated_subscriptions_total`. Use the
+  `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated`
+  attribute
 
 - Calculating the overhead of injecting the router into your service stack when
   making multiple downstream calls is a complex task. With that, we are removing
   the following two misleading metrics and recommending that you instead test your
   workloads with the router to if the latency meets your requirements:
   - `apollo_router_span`
-  - `apollo.router.processing.time`
-  - 
+
 <!-- PR: https://github.com/apollographql/router/pull/6621 -->
+
 - If you used the `subgraph_response_body` selector for telemetry like this:
 
 ```yaml
@@ -377,8 +396,8 @@ The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilde
 
 Traffic shaping has been improved significantly in Router 2.0. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
 
- - [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
- - [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
+- [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
+- [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
 
 errors as traffic shaping constraints are enforced.
 
