@@ -272,10 +272,10 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
     use crate::sources::connect::json_selection::PathList;
-    use crate::sources::connect::variable::Namespace;
 
     fn check_parse(input: &str, expected: LitExpr) {
         match LitExpr::parse(new_span(input)) {
@@ -524,7 +524,7 @@ mod tests {
                     Key::field("a").into_with_range(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            KnownVariable::from(Namespace::Args).into_with_range(),
+                            KnownVariable::External(Namespace::Args.to_string()).into_with_range(),
                             PathList::Key(
                                 Key::field("a").into_with_range(),
                                 PathList::Empty.into_with_range(),
@@ -539,7 +539,7 @@ mod tests {
                     Key::field("b").into_with_range(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            KnownVariable::from(Namespace::This).into_with_range(),
+                            KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                             PathList::Key(
                                 Key::field("b").into_with_range(),
                                 PathList::Empty.into_with_range(),

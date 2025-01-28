@@ -39,7 +39,6 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::service::RouterCreator;
-use crate::services::subgraph;
 use crate::services::HasConfig;
 use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
@@ -359,46 +358,21 @@ pub(crate) async fn create_subgraph_services(
     http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
     plugins: &Arc<Plugins>,
     configuration: &Configuration,
-) -> Result<
-    IndexMap<
-        String,
-        impl Service<
-                subgraph::Request,
-                Response = subgraph::Response,
-                Error = BoxError,
-                Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<
-                    SubgraphService,
-                >,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
-    >,
-    BoxError,
-> {
+) -> Result<IndexMap<String, SubgraphService>, BoxError> {
     let subscription_plugin_conf = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
         .map(|p| p.config.clone());
 
-    let shaping = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
-        .expect("traffic shaping should always be part of the plugin list");
-
     let mut subgraph_services = IndexMap::default();
     for (name, http_service_factory) in http_service_factory.iter() {
-        let subgraph_service = shaping.subgraph_service_internal(
-            name.as_ref(),
-            SubgraphService::from_config(
-                name.clone(),
-                configuration,
-                subscription_plugin_conf.clone(),
-                http_service_factory.clone(),
-            )?,
-        );
+        let subgraph_service = SubgraphService::from_config(
+            name.clone(),
+            configuration,
+            subscription_plugin_conf.clone(),
+            http_service_factory.clone(),
+        )?;
         subgraph_services.insert(name.clone(), subgraph_service);
     }
 

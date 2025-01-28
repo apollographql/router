@@ -117,7 +117,13 @@ async fn it_extracts_query_and_operation_name() {
         .try_into()
         .unwrap();
 
-    router_service.call(get_request).await.unwrap();
+    router_service
+        .ready()
+        .await
+        .expect("readied")
+        .call(get_request)
+        .await
+        .unwrap();
 
     // post request
     let post_request = supergraph::Request::builder()
@@ -131,6 +137,9 @@ async fn it_extracts_query_and_operation_name() {
         .unwrap();
 
     router_service
+        .ready()
+        .await
+        .expect("readied")
         .call(post_request.try_into().unwrap())
         .await
         .unwrap();
