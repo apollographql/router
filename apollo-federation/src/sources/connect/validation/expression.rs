@@ -3,6 +3,7 @@
 
 use apollo_compiler::collections::IndexMap;
 use itertools::Itertools;
+use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -134,11 +135,22 @@ fn validate_shape(shape: Shape, context: &Context) -> Result<(), String> {
             }
             Ok(())
         }
-        ShapeCase::Name(name, _key) => Err(format!(
-            // Any unresolved name at this point is a problem
-            "invalid variable `{name}`, must be one of {namespaces}",
-            namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
-        )),
+        ShapeCase::Name(name, key) => {
+            if name == "$root" {
+                Err(format!(
+                    // Any unresolved name at this point is a problem
+                    "`{key}`, must start with one of {namespaces}",
+                    key = NamedShapePathKey::path_to_string(key).as_str(),
+                    namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                ))
+            } else {
+                Err(format!(
+                    // Any unresolved name at this point is a problem
+                    "invalid variable `{name}`, must be one of {namespaces}",
+                    namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                ))
+            }
+        }
         ShapeCase::Error(shape::Error { message, .. }) => Err(message.clone()),
         ShapeCase::None
         | ShapeCase::Bool(_)

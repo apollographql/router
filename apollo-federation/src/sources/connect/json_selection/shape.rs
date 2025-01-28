@@ -42,7 +42,8 @@ impl JSONSelection {
         let input_shape = if let Some(root_shape) = named_shapes.get("$root") {
             resolver.resolve(root_shape.clone())
         } else {
-            ResolvedShape(Shape::none())
+            // There is no input, so the validator will have to deal with this
+            ResolvedShape(Shape::name("$root"))
         };
 
         // At this level, $ and @ have the same value and shape.
@@ -83,19 +84,47 @@ pub(super) struct ResolvedShape(Shape);
 
 impl ResolvedShape {
     fn resolve(shape: Shape, resolver: &IndexMap<&str, Shape>) -> Self {
-        if let ShapeCase::Name(key, path) = shape.case() {
-            if let Some(named_shape) = resolver.get(key.as_str()) {
-                let mut shape = named_shape.clone();
-                for part in path {
-                    shape = shape.child(part);
-                    if shape.is_none() {
-                        return Self(Shape::error(format!("field `{part}` not found")));
+        match shape.case() {
+            ShapeCase::Name(key, path) => {
+                if let Some(named_shape) = resolver.get(key.as_str()) {
+                    let mut shape = named_shape.clone();
+                    for part in path {
+                        shape = shape.child(part);
+                        if shape.is_none() {
+                            return Self(Shape::error(format!("field `{part}` not found")));
+                        }
                     }
+                    Self(shape)
+                } else {
+                    // This shape can't be looked up, the validator will have to deal with this.
+                    ResolvedShape(shape)
                 }
-                return Self(shape);
             }
+            ShapeCase::One(inner) => {
+                let mut shapes = Vec::with_capacity(inner.len());
+                for shape in inner {
+                    shapes.push(Self::resolve(shape.clone(), resolver).into());
+                }
+                Self(Shape::one(shapes))
+            }
+            ShapeCase::All(inner) => {
+                let mut shapes = Vec::with_capacity(inner.len());
+                for shape in inner {
+                    shapes.push(Self::resolve(shape.clone(), resolver).into());
+                }
+                Self(Shape::all(shapes))
+            }
+            ShapeCase::Bool(_)
+            | ShapeCase::String(_)
+            | ShapeCase::Int(_)
+            | ShapeCase::Float
+            | ShapeCase::Null
+            | ShapeCase::Array { .. }
+            | ShapeCase::Object { .. }
+            | ShapeCase::Unknown
+            | ShapeCase::None
+            | ShapeCase::Error(_) => Self(shape),
         }
-        Self(shape)
     }
 }
 
@@ -315,7 +344,7 @@ fn compute_tail_shape(
     resolver: Resolver,
 ) -> ResolvedShape {
     match input_shape.case() {
-        ShapeCase::None | ShapeCase::Unknown => input_shape,
+        ShapeCase::None => input_shape,
         ShapeCase::One(shapes) => resolver.resolve(Shape::one(shapes.iter().map(|shape| {
             compute_tail_shape(
                 path,
