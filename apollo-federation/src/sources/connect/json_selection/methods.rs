@@ -120,9 +120,9 @@ pub(super) trait ArrowMethodImpl {
         // The dollar_shape is the shape of the $ variable, or the input object
         // associated with the closest enclosing subselection.
         dollar_shape: Shape,
-        // Other variable shapes may also be provided here, though in general
-        // variables and their subproperties can be represented abstractly using
-        // $var.nested.property ShapeCase::Name shapes.
+        // Other named shapes may also be provided here, though these shapes are
+        // often already present in input_shape or dollar_shape (if defined),
+        // and thus should not need to be looked up by method.shape functions.
         named_shapes: &IndexMap<String, Shape>,
     ) -> Shape;
 }

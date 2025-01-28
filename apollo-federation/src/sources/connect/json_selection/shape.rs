@@ -59,10 +59,10 @@ pub(crate) trait ComputeOutputShape {
         // subselection object, or the root data object if there is no enclosing
         // subselection.
         dollar_shape: Shape,
-        // Shapes of other named variables, with the variable name `String`
-        // including the initial `$` character. This map typically does not
-        // change during the compute_output_shape recursion, and so can be
-        // passed down by immutable reference.
+        // Other named shapes, including both named types and variable shapes
+        // (with the variable name including the initial $ character). This map
+        // typically does not change during the compute_output_shape recursion,
+        // and so can be passed down by immutable reference.
         named_shapes: &IndexMap<String, Shape>,
     ) -> Shape;
 }
