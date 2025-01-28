@@ -476,7 +476,7 @@ impl SubgraphAuth {
                     let signing_params = signing_params.clone();
                     req.context
                         .extensions()
-                        .with_lock(|mut lock| lock.insert(signing_params));
+                        .with_lock(|lock| lock.insert(signing_params));
                     req
                 })
                 .service(service)

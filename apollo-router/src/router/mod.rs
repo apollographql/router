@@ -1,6 +1,4 @@
 #![allow(missing_docs)] // FIXME
-#![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
-
 mod error;
 mod event;
 

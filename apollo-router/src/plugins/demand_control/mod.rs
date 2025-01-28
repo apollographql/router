@@ -272,7 +272,7 @@ impl Context {
     }
 
     pub(crate) fn insert_demand_control_context(&self, ctx: DemandControlContext) {
-        self.extensions().with_lock(|mut lock| lock.insert(ctx));
+        self.extensions().with_lock(|lock| lock.insert(ctx));
     }
 
     pub(crate) fn get_demand_control_context(&self) -> Option<DemandControlContext> {
@@ -357,7 +357,7 @@ impl Plugin for DemandControl {
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
                         .context
-                        .unsupported_executable_document()
+                        .executable_document()
                         .expect("must have document");
                     let strategy = resp
                         .context
@@ -677,7 +677,7 @@ mod test {
             ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_document));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_document));
         ctx
     }
 
