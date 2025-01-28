@@ -1,12 +1,12 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/headers/invalid_namespace_in_header_variables.graphql
 ---
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)` Unknown variable",
+        message: "In `@source(http.headers:)`: unknown variable `$foo`, must be one of $config, $context",
         locations: [
             11:49..11:57,
         ],
@@ -27,7 +27,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar` Unknown variable",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: unknown variable `$foo`, must be one of $args, $config, $context",
         locations: [
             24:49..24:57,
         ],

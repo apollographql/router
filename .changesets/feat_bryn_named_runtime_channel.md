@@ -3,7 +3,7 @@
 A new metric has been introduced to allow observation of how many spans are being dropped by an telemetry batch processor.
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
-    - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`. 
+    - `name`: One of `apollo-tracing`, `datadog-tracing`, `otlp-tracing`, `zipkin-tracing`. 
     - `error` = One of `channel closed`, `channel full`.
 
 By observing the number of spans dropped it is possible to estimate what batch processor settings will work for you.

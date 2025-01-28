@@ -393,6 +393,7 @@ mod tests {
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
                     .id(req.id)
+                    .subgraph_name(String::default())
                     .build())
             });
 
@@ -510,6 +511,7 @@ mod tests {
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .subgraph_name(String::default())
                     .build())
             });
 
@@ -707,6 +709,7 @@ mod tests {
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
                     .id(req.id)
+                    .subgraph_name(String::default())
                     .build())
             });
 
@@ -834,6 +837,7 @@ mod tests {
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .subgraph_name(String::default())
                     .build())
             });
 

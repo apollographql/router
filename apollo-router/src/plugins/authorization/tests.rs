@@ -8,6 +8,7 @@ use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::test::MockSubgraphService;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::services::router;
 use crate::services::router::body;
 use crate::services::subgraph;
@@ -64,10 +65,7 @@ async fn authenticated_request() {
 
     let context = Context::new();
     context
-        .insert(
-            "apollo_authentication::JWT::claims",
-            "placeholder".to_string(),
-        )
+        .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
         .unwrap();
     let request = supergraph::Request::fake_builder()
         .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
@@ -304,7 +302,7 @@ async fn authenticated_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "user:read" }},
         )
         .unwrap();
@@ -648,7 +646,7 @@ async fn scopes_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "user:read" }},
         )
         .unwrap();
@@ -679,7 +677,7 @@ async fn scopes_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "user:read pii" }},
         )
         .unwrap();
@@ -710,7 +708,7 @@ async fn scopes_directive() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "admin" }},
         )
         .unwrap();
@@ -1099,7 +1097,7 @@ async fn cache_key_metadata() {
     let context = Context::new();
     context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json! {{ "scope": "id test" }},
         )
         .unwrap();
