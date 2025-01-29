@@ -177,7 +177,8 @@ struct WarnLegacyMetricsLayer;
 // We can't use the tracing macros inside our `on_event` callback, instead we have to manually
 // produce an event, which requires a significant amount of ceremony.
 // This metadata mimicks what `tracing::error!()` does.
-static WARN_LEGACY_METRIC_CALLSITE: tracing_core::callsite::DefaultCallsite = tracing_core::callsite::DefaultCallsite::new(&WARN_LEGACY_METRIC_METADATA);
+static WARN_LEGACY_METRIC_CALLSITE: tracing_core::callsite::DefaultCallsite =
+    tracing_core::callsite::DefaultCallsite::new(&WARN_LEGACY_METRIC_METADATA);
 static WARN_LEGACY_METRIC_METADATA: tracing_core::Metadata = tracing_core::metadata! {
     name: "warn_legacy_metric",
     target: module_path!(),
@@ -188,11 +189,7 @@ static WARN_LEGACY_METRIC_METADATA: tracing_core::Metadata = tracing_core::metad
 };
 
 impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
-    fn on_event(
-        &self,
-        event: &tracing::Event<'_>,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
+    fn on_event(&self, event: &tracing::Event<'_>, ctx: tracing_subscriber::layer::Context<'_, S>) {
         if let Some(field) = event.fields().find(|field| {
             field
                 .name()
@@ -206,7 +203,9 @@ impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
             // code path that we want people to upgrade from.
             let fields = WARN_LEGACY_METRIC_METADATA.fields();
             let message_field = fields.field("message").unwrap();
-            let message = "Detected unsupported legacy metrics reporting, remove or migrate to opentelemetry".to_string();
+            let message =
+                "Detected unsupported legacy metrics reporting, remove or migrate to opentelemetry"
+                    .to_string();
             let name_field = fields.field("metric_name").unwrap();
             let metric_name = field.name().to_string();
             let value_set = &[
@@ -214,7 +213,10 @@ impl<S: tracing::Subscriber> Layer<S> for WarnLegacyMetricsLayer {
                 (&name_field, Some(&metric_name as &dyn tracing::Value)),
             ];
             let value_set = fields.value_set(value_set);
-            ctx.event(&tracing_core::Event::new(&WARN_LEGACY_METRIC_METADATA, &value_set));
+            ctx.event(&tracing_core::Event::new(
+                &WARN_LEGACY_METRIC_METADATA,
+                &value_set,
+            ));
         }
     }
 }
