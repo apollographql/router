@@ -55,7 +55,7 @@ impl<'schema> Context<'schema> {
         let mut var_lookup: IndexMap<Namespace, Shape> = [
             (
                 Namespace::Args,
-                shape_for_arguments(&coordinate.field_coordinate.field),
+                shape_for_arguments(coordinate.field_coordinate.field),
             ),
             (Namespace::Config, Shape::unknown(Vec::new())),
             (Namespace::Context, Shape::unknown(Vec::new())),
