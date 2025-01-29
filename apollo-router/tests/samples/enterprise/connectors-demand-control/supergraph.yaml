@@ -1,0 +1,21 @@
+# rover supergraph compose --config apollo-router/tests/samples/enterprise/connectors-demand-control/supergraph.yaml > apollo-router/tests/samples/enterprise/connectors-demand-control/supergraph.graphql
+federation_version: =2.10.0-preview.4
+subgraphs:
+  connectors: # required for snapshot overrides
+    routing_url: http://none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key", "@cost", "@listSize"])
+          @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
+          @source(name: "test", http: {baseURL: "http://localhost:4007/"})
+
+        type Query {
+          f: [T] @listSize(assumedSize: 10)
+            @connect(source: "test", http: { GET: "/" }, selection: "id f")
+        }
+
+        type T {
+          id: ID!
+          f: String @cost(weight: 10)
+        }

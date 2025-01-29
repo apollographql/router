@@ -13,18 +13,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "access-json"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ed51fb0cfa6f88331d4424a7aca87146b315a3b5bd2bbad298ec855718ef9df"
-dependencies = [
- "erased-serde",
- "serde",
- "serde_derive",
- "serde_json",
-]
-
-[[package]]
 name = "add-timestamp-header"
 version = "0.1.0"
 dependencies = [
@@ -266,7 +254,6 @@ dependencies = [
 name = "apollo-router"
 version = "2.0.0-preview.4"
 dependencies = [
- "access-json",
  "ahash",
  "anyhow",
  "apollo-compiler",

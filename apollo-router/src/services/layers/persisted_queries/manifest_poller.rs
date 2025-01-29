@@ -3,10 +3,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use apollo_compiler::ast;
 use futures::prelude::*;
+use parking_lot::RwLock;
 use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
@@ -219,7 +219,7 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(manifest_files) = config.persisted_queries.experimental_local_manifests {
+        if let Some(manifest_files) = config.persisted_queries.local_manifests {
             if manifest_files.is_empty() {
                 return Err("no local persisted query list files specified".into());
             }
@@ -365,10 +365,7 @@ impl PersistedQueryManifestPoller {
         persisted_query_id: &str,
         client_name: Option<String>,
     ) -> Option<String> {
-        let state = self
-            .state
-            .read()
-            .expect("could not acquire read lock on persisted query manifest state");
+        let state = self.state.read();
         if let Some(body) = state
             .persisted_query_manifest
             .get(&FullPersistedQueryOperationId {
@@ -392,10 +389,7 @@ impl PersistedQueryManifestPoller {
     }
 
     pub(crate) fn get_all_operations(&self) -> Vec<String> {
-        let state = self
-            .state
-            .read()
-            .expect("could not acquire read lock on persisted query manifest state");
+        let state = self.state.read();
         state.persisted_query_manifest.values().cloned().collect()
     }
 
@@ -403,10 +397,7 @@ impl PersistedQueryManifestPoller {
         &self,
         ast: Result<&ast::Document, &str>,
     ) -> FreeformGraphQLAction {
-        let state = self
-            .state
-            .read()
-            .expect("could not acquire read lock on persisted query state");
+        let state = self.state.read();
         state
             .freeform_graphql_behavior
             .action_for_freeform_graphql(ast)
@@ -415,10 +406,7 @@ impl PersistedQueryManifestPoller {
     // Some(bool) means "never allows freeform GraphQL, bool is whether or not to log"
     // None means "sometimes allows freeform GraphQL"
     pub(crate) fn never_allows_freeform_graphql(&self) -> Option<bool> {
-        let state = self
-            .state
-            .read()
-            .expect("could not acquire read lock on persisted query state");
+        let state = self.state.read();
         if let FreeformGraphQLBehavior::DenyAll { log_unknown } = state.freeform_graphql_behavior {
             Some(log_unknown)
         } else {
@@ -432,10 +420,7 @@ impl PersistedQueryManifestPoller {
     // in a safelisting mode; this function ensures that by only ever returning
     // true from non-safelisting modes.
     pub(crate) fn augmenting_apq_with_pre_registration_and_no_safelisting(&self) -> bool {
-        let state = self
-            .state
-            .read()
-            .expect("could not acquire read lock on persisted query state");
+        let state = self.state.read();
         match state.freeform_graphql_behavior {
             FreeformGraphQLBehavior::AllowAll { apq_enabled, .. }
             | FreeformGraphQLBehavior::LogUnlessInSafelist { apq_enabled, .. } => apq_enabled,
@@ -530,12 +515,7 @@ async fn poll_uplink(
                     freeform_graphql_behavior,
                 };
 
-                state
-                    .write()
-                    .map(|mut locked_state| {
-                        *locked_state = new_state;
-                    })
-                    .expect("could not acquire write lock on persisted query manifest state");
+                *state.write() = new_state;
 
                 send_startup_event_or_log_error(
                     &mut ready_sender_once,
@@ -838,8 +818,8 @@ mod tests {
                 .persisted_query(
                     PersistedQueries::builder()
                         .enabled(true)
-                        .experimental_local_manifests(vec![
-                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        .local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string()
                         ])
                         .build(),
                 )

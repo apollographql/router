@@ -170,7 +170,7 @@ impl PersistedQueryLayer {
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(UsedQueryIdFromManifest));
+                    .with_lock(|lock| lock.insert(UsedQueryIdFromManifest));
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
@@ -749,7 +749,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowIfInSafelist { .. }
         ))
@@ -1105,7 +1104,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowIfInSafelist { .. }
         ))
@@ -1216,7 +1214,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowAll { apq_enabled: false }
         ))
@@ -1246,7 +1243,6 @@ mod tests {
                 .unwrap()
                 .state
                 .read()
-                .unwrap()
                 .freeform_graphql_behavior,
             FreeformGraphQLBehavior::AllowAll { apq_enabled: true }
         ))

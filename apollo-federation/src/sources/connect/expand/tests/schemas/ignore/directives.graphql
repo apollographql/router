@@ -6,6 +6,7 @@ schema
   @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+  @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@listSize"])
   @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom1", "@custom2", {name: "@originalName", as: "@custom3"}])
   @link(url: "http://bugfix/weird/v1.0", import: ["@weird"])
 {
@@ -13,6 +14,8 @@ schema
 }
 
 directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
 
 directive @custom1 on OBJECT | FIELD_DEFINITION
 
@@ -37,6 +40,8 @@ directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boole
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
 
 directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
@@ -91,7 +96,7 @@ type Query
   requiresScopes: String @join__field(graph: ONE) @requiresScopes(scopes: ["scope"])
   policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO, overrideLabel: "label")
-  weird: String @join__field(graph: ONE) @weird
+  weird: [String] @join__field(graph: ONE) @weird @listSize(assumedSize: 99)
   customAgain: String @join__field(graph: TWO) @custom1
 }
 
@@ -101,5 +106,5 @@ type T
   @join__type(graph: ONE)
   @custom2
 {
-  field: String @custom3
+  field: String @custom3 @cost(weight: 5)
 }
