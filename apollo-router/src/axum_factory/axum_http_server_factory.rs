@@ -629,15 +629,6 @@ async fn handle_graphql<RF: RouterFactory>(
         res
     };
 
-    let dur = context.busy_time();
-    let processing_seconds = dur.as_secs_f64();
-
-    f64_histogram!(
-        "apollo.router.processing.time",
-        "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
-        processing_seconds
-    );
-
     match res {
         Err(err) => internal_server_error(err),
         Ok(response) => {

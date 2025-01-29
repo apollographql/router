@@ -4,7 +4,6 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
@@ -14,7 +13,6 @@ use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
 use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
-use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
@@ -60,10 +58,6 @@ pub struct Context {
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
-    #[derivative(Debug = "ignore")]
-    busy_timer: Arc<Mutex<BusyTimer>>,
-
-    #[serde(skip)]
     pub(crate) id: String,
 }
 
@@ -78,7 +72,6 @@ impl Context {
             entries: Default::default(),
             extensions: ExtensionsMutex::default(),
             created_at: Instant::now(),
-            busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
             id,
         }
     }
@@ -234,32 +227,6 @@ impl Context {
         self.entries.iter_mut()
     }
 
-    /// Notify the busy timer that we're waiting on a network request
-    ///
-    /// When a plugin makes a network call that would block request handling, this
-    /// indicates to the processing time counter that it should stop measuring while
-    /// we wait for the call to finish. When the value returned by this method is
-    /// dropped, the router will start measuring again, unless we are still covered
-    /// by another active request (ex: parallel subgraph calls)
-    pub fn enter_active_request(&self) -> BusyTimerGuard {
-        self.busy_timer.lock().increment_active_requests();
-        BusyTimerGuard {
-            busy_timer: self.busy_timer.clone(),
-        }
-    }
-
-    /// Time actually spent working on this request
-    ///
-    /// This is the request duration without the time spent waiting for external calls
-    /// (coprocessor and subgraph requests). This metric is an approximation of
-    /// the time spent, because in the case of parallel subgraph calls, some
-    /// router processing time could happen during a network call (and so would
-    /// not be accounted for) and make another task late.
-    /// This is reported under the `apollo_router_processing_time` metric
-    pub fn busy_time(&self) -> Duration {
-        self.busy_timer.lock().current()
-    }
-
     pub(crate) fn extend(&self, other: &Context) {
         for kv in other.entries.iter() {
             self.entries.insert(kv.key().clone(), kv.value().clone());
@@ -273,74 +240,9 @@ impl Context {
     }
 }
 
-pub struct BusyTimerGuard {
-    busy_timer: Arc<Mutex<BusyTimer>>,
-}
-
-impl Drop for BusyTimerGuard {
-    fn drop(&mut self) {
-        self.busy_timer.lock().decrement_active_requests()
-    }
-}
-
 impl Default for Context {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-/// Measures the total overhead of the router
-///
-/// This works by measuring the time spent executing when there is no active subgraph request.
-/// This is still not a perfect solution, there are cases where preprocessing a subgraph request
-/// happens while another one is running and still shifts the end of the span, but for now this
-/// should serve as a reasonable solution without complex post processing of spans
-pub(crate) struct BusyTimer {
-    active_requests: u32,
-    busy_ns: Duration,
-    start: Option<Instant>,
-}
-
-impl BusyTimer {
-    fn new() -> Self {
-        BusyTimer::default()
-    }
-
-    fn increment_active_requests(&mut self) {
-        if self.active_requests == 0 {
-            if let Some(start) = self.start.take() {
-                self.busy_ns += start.elapsed();
-            }
-            self.start = None;
-        }
-
-        self.active_requests += 1;
-    }
-
-    fn decrement_active_requests(&mut self) {
-        self.active_requests -= 1;
-
-        if self.active_requests == 0 {
-            self.start = Some(Instant::now());
-        }
-    }
-
-    fn current(&mut self) -> Duration {
-        if let Some(start) = self.start {
-            self.busy_ns + start.elapsed()
-        } else {
-            self.busy_ns
-        }
-    }
-}
-
-impl Default for BusyTimer {
-    fn default() -> Self {
-        Self {
-            active_requests: 0,
-            busy_ns: Duration::new(0, 0),
-            start: Some(Instant::now()),
-        }
     }
 }
 

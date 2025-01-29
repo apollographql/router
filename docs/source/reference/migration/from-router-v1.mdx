@@ -61,6 +61,16 @@ If hot reloading from a remote URL is desired, consider running a script to down
 
 The deprecated `--schema` command-line argument is removed. `router config schema` should be used to print the configuration supergraph instead.
 
+### Busy timer for request processing duration
+Request processing duration is already included as part of the spans sent by the
+router, and there is no need for rust plugin, coprocessor and rhai plugin users
+to track this information manually. As a result, the following methods and structs were removed from `context::Context`:
+
+- `context::Context::busy_time()`
+- `context::Context::enter_active_request()`
+- `context::BusyTimer` struct
+- `context::BusyTimerGuard` struct
+
 ### Deprecated methods in rust plugins
 
 The following deprecated methods are removed from rust plugins' API:
@@ -274,6 +284,7 @@ The following metrics have been removed:
   the following two misleading metrics and recommending that you instead test your
   workloads with the router to if the latency meets your requirements:
   - `apollo_router_span`
+  - `apollo_router_processing_time`
 
 <!-- PR: https://github.com/apollographql/router/pull/6621 -->
 
