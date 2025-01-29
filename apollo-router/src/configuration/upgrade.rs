@@ -153,7 +153,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Log { path, level, log } => {
-                let level = Level::from_str(level)?;
+                let level = Level::from_str(level).map_err(migration_failure_error)?;
 
                 if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
@@ -211,28 +211,28 @@ pub(crate) fn generate_upgrade_output(
                 let trimmed = l.trim();
                 if !trimmed.starts_with('#') && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "-{l}")?;
+                        writeln!(output, "-{l}").map_err(migration_failure_error)?;
                     }
                 } else if diff {
-                    writeln!(output, " {l}")?;
+                    writeln!(output, " {l}").map_err(migration_failure_error)?;
                 } else {
-                    writeln!(output, "{l}")?;
+                    writeln!(output, "{l}").map_err(migration_failure_error)?;
                 }
             }
             diff::Result::Both(l, _) => {
                 if diff {
-                    writeln!(output, " {l}")?;
+                    writeln!(output, " {l}").map_err(migration_failure_error)?;
                 } else {
-                    writeln!(output, "{l}")?;
+                    writeln!(output, "{l}").map_err(migration_failure_error)?;
                 }
             }
             diff::Result::Right(r) => {
                 let trimmed = r.trim();
                 if trimmed != "---" && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "+{r}")?;
+                        writeln!(output, "+{r}").map_err(migration_failure_error)?;
                     } else {
-                        writeln!(output, "{r}")?;
+                        writeln!(output, "{r}").map_err(migration_failure_error)?;
                     }
                 }
             }
@@ -259,6 +259,12 @@ fn cleanup(value: &mut Value) {
                 cleanup(value);
             }
         }
+    }
+}
+
+fn migration_failure_error<T: std::fmt::Display>(error: T) -> ConfigurationError {
+    ConfigurationError::MigrationFailure {
+        error: error.to_string(),
     }
 }
 

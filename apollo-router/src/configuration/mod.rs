@@ -124,22 +124,6 @@ impl From<proteus::parser::Error> for ConfigurationError {
     }
 }
 
-impl From<std::fmt::Error> for ConfigurationError {
-    fn from(error: std::fmt::Error) -> Self {
-        Self::MigrationFailure {
-            error: error.to_string(),
-        }
-    }
-}
-
-impl From<tracing_core::metadata::ParseLevelError> for ConfigurationError {
-    fn from(error: tracing_core::metadata::ParseLevelError) -> Self {
-        Self::MigrationFailure {
-            error: error.to_string(),
-        }
-    }
-}
-
 /// The configuration for the router.
 ///
 /// Can be created through `serde::Deserialize` from various formats,
