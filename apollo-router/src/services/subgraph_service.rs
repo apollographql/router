@@ -1441,7 +1441,6 @@ async fn do_fetch(
     ),
     FetchError,
 > {
-    let _active_request_guard = context.enter_active_request();
     let response = client
         .call(HttpRequest {
             http_request: request,

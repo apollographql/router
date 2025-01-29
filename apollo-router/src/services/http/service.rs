@@ -44,7 +44,6 @@ use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::Configuration;
-use crate::Context;
 
 type HTTPClient = Decompression<
     hyper_util::client::legacy::Client<
@@ -317,7 +316,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let http_response = do_fetch(client, &context, &service_name, http_request)
+            let http_response = do_fetch(client, &service_name, http_request)
                 .instrument(http_req_span)
                 .await?;
 
@@ -359,11 +358,9 @@ fn report_hyper_client_error(err: hyper_util::client::legacy::Error) -> String {
 
 async fn do_fetch(
     mut client: MixedClient,
-    context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
 ) -> Result<http::Response<RouterBody>, FetchError> {
-    let _active_request_guard = context.enter_active_request();
     let (parts, body) = client
         .call(request)
         .await

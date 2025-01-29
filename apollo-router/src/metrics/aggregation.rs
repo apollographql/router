@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::DerefMut;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
@@ -24,6 +23,7 @@ use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -118,7 +118,7 @@ impl AggregateMeterProvider {
         meter_provider_type: MeterProviderType,
         meter_provider: Option<FilterMeterProvider>,
     ) -> Option<FilterMeterProvider> {
-        let mut inner = self.inner.lock().expect("lock poisoned");
+        let mut inner = self.inner.lock();
         // As we are changing a meter provider we need to invalidate any registered instruments.
         // Clearing these allows any weak references at callsites to be invalidated.
         inner.registered_instruments.clear();
@@ -139,7 +139,7 @@ impl AggregateMeterProvider {
 
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown(&self) {
-        let inner = self.inner.lock().expect("lock poisoned");
+        let inner = self.inner.lock();
         for (meter_provider_type, (meter_provider, _)) in &inner.providers {
             if let Err(e) = meter_provider.shutdown() {
                 ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
@@ -155,7 +155,7 @@ impl AggregateMeterProvider {
     where
         Arc<T>: Into<InstrumentWrapper>,
     {
-        let mut guard = self.inner.lock().expect("lock poisoned");
+        let mut guard = self.inner.lock();
         let instrument = Arc::new((create_fn)(guard.deref_mut()));
         guard.registered_instruments.push(instrument.clone().into());
         instrument
@@ -163,11 +163,7 @@ impl AggregateMeterProvider {
 
     #[cfg(test)]
     pub(crate) fn registered_instruments(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("lock poisoned")
-            .registered_instruments
-            .len()
+        self.inner.lock().registered_instruments.len()
     }
 }
 
@@ -224,7 +220,7 @@ impl MeterProvider for AggregateMeterProvider {
         schema_url: Option<impl Into<Cow<'static, str>>>,
         attributes: Option<Vec<KeyValue>>,
     ) -> Meter {
-        let mut inner = self.inner.lock().expect("lock poisoned");
+        let mut inner = self.inner.lock();
         inner.versioned_meter(name, version, schema_url, attributes)
     }
 }

@@ -77,7 +77,7 @@ static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
 fn session_count_instrument() -> ObservableGauge<u64> {
     let meter = meter_provider().meter("apollo/router");
     meter
-        .u64_observable_gauge("apollo_router_session_count_active")
+        .u64_observable_gauge("apollo.router.session.count.active")
         .with_description("Amount of in-flight sessions")
         .with_callback(|gauge| {
             gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
@@ -518,7 +518,7 @@ async fn license_handler(
 ) -> Response {
     if matches!(
         license,
-        LicenseState::LicensedHalt | LicenseState::LicensedWarn
+        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
     ) {
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
@@ -543,7 +543,7 @@ async fn license_handler(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt) {
+    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::default())
@@ -628,15 +628,6 @@ async fn handle_graphql<RF: RouterFactory>(
         cancel_handler.on_response();
         res
     };
-
-    let dur = context.busy_time();
-    let processing_seconds = dur.as_secs_f64();
-
-    f64_histogram!(
-        "apollo.router.processing.time",
-        "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
-        processing_seconds
-    );
 
     match res {
         Err(err) => internal_server_error(err),
