@@ -93,14 +93,14 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(ConnectorEventRequest(self.request.clone())));
+                .with_lock(|lock| lock.insert(ConnectorEventRequest(self.request.clone())));
         }
 
         if self.response.level() != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(ConnectorEventResponse(self.response.clone())));
+                .with_lock(|lock| lock.insert(ConnectorEventResponse(self.response.clone())));
         }
 
         for custom_event in &self.custom {

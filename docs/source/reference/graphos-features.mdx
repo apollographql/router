@@ -68,7 +68,13 @@ Offline Enterprise license support is available on an as-needed basis. Send a re
 
 Running your GraphOS Router fleet while fully connected to GraphOS is the best choice for  most Apollo users. However, some scenarios can prevent your routers from connecting to GraphOS for an extended period, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet, but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
 
-To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much like being fully connected to GraphOS, including the GraphOS [schema delivery pipeline](/graphos/platform/schema-management#schema-delivery) for supergraph CI (schema checks, linting, contracts, etc.).
+To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. Instead of fetching its supergraph schema from Apollo Uplink, an offline router gets its supergraph schema from a local supergraph schema file.
+
+<Note>
+
+You can use the GraphOS [schema delivery pipeline](/graphos/platform/schema-management#schema-delivery) for supergraph CI (schema checks, linting, contracts, etc.) in an online environment to manage the local supergraph schema file provided to your offline router.
+
+</Note>
 
 An offline license can be retrieved from GraphOS with the [`rover license fetch`](/rover/commands/license) command.
 
