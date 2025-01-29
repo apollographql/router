@@ -55,6 +55,7 @@ use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
 use crate::operation::SelectionValue;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 //=============================================================================
 // Selection/SelectionSet minus operation
 
@@ -354,7 +355,16 @@ impl FragmentGenerator {
     }
 
     fn hash_key(&self, selection_set: &SelectionSet) -> u64 {
-        self.minimized_fragments.hasher().hash_one(selection_set)
+        #[derive(PartialEq, Eq, Hash)]
+        struct NamedFragmentCandidateKey<'a> {
+            type_position: &'a CompositeTypeDefinitionPosition,
+            selection_set: &'a SelectionSet,
+        }
+        let key = NamedFragmentCandidateKey {
+            type_position: &selection_set.type_position,
+            selection_set
+        };
+        self.minimized_fragments.hasher().hash_one(key)
     }
 
     fn increment_selection_count(&mut self, selection_set: &SelectionSet) {

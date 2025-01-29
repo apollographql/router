@@ -255,7 +255,7 @@ pub(crate) struct SelectionSet {
 
 impl PartialEq for SelectionSet {
     fn eq(&self, other: &Self) -> bool {
-        self.type_position == other.type_position && self.selections == other.selections
+        self.selections == other.selections
     }
 }
 
@@ -263,7 +263,6 @@ impl Eq for SelectionSet {}
 
 impl Hash for SelectionSet {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.type_position.hash(state);
         self.selections.hash(state);
     }
 }
