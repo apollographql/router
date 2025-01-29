@@ -199,8 +199,24 @@ fn test_map_method() {
         selection!("singleValue->map(@->mul(10))").apply_to(&json!({
             "singleValue": 123,
         })),
-        (Some(json!(1230)), vec![]),
+        (Some(json!([1230])), vec![]),
     );
+
+    {
+        let single_value_data = json!({
+            "singleValue": 123,
+        });
+        let json_selection = selection!("singleValue->map(@->jsonStringify)");
+        assert_eq!(
+            json_selection.apply_to(&single_value_data),
+            (Some(json!(["123"])), vec![]),
+        );
+        let output_shape = json_selection.compute_output_shape(
+            Shape::from_json_bytes(&single_value_data),
+            &IndexMap::default(),
+        );
+        assert_eq!(output_shape.pretty_print(), "List<String>");
+    }
 }
 
 #[test]
