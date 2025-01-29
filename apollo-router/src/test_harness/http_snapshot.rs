@@ -47,7 +47,6 @@ use std::net::TcpListener;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use axum::extract::Path as AxumPath;
 use axum::extract::State;
@@ -62,6 +61,7 @@ use http::Uri;
 use hyper::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use indexmap::IndexMap;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -195,7 +195,7 @@ async fn handle(
                     },
                 };
                 {
-                    let mut snapshots = state.snapshots.lock().unwrap();
+                    let mut snapshots = state.snapshots.lock();
                     snapshots.insert(key, snapshot.clone());
                     if let Err(e) = save(state.snapshot_file, &mut snapshots) {
                         error!(
@@ -226,7 +226,7 @@ fn response_from_snapshot(
     method: &Method,
     key: &String,
 ) -> Option<http::Response<RouterBody>> {
-    let mut snapshots = state.snapshots.lock().unwrap();
+    let mut snapshots = state.snapshots.lock();
     if state.update {
         snapshots.remove(key);
         None

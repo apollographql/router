@@ -23,10 +23,9 @@ use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -40,12 +39,9 @@ pub(crate) fn create_fmt_layer(
             tty_format,
             rate_limit,
         } if *enabled => {
-            let format = if std::io::stdout().is_terminal() && tty_format.is_some() {
-                tty_format
-                    .as_ref()
-                    .expect("checked previously in the if; qed")
-            } else {
-                format
+            let format = match tty_format {
+                Some(tty) if std::io::stdout().is_terminal() => tty,
+                _ => format,
             };
             match format {
                 Format::Json(format_config) => {
@@ -53,11 +49,8 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(
-                        FilteringFormatter::new(format, filter_metric_events, rate_limit),
-                        std::io::stdout,
-                    )
-                    .boxed()
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
 
                 Format::Text(format_config) => {
@@ -65,11 +58,8 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(
-                        FilteringFormatter::new(format, filter_metric_events, rate_limit),
-                        std::io::stdout,
-                    )
-                    .boxed()
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
             }
         }
@@ -123,24 +113,20 @@ where
             attrs.record(&mut visitor);
         }
         let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<LogAttributes>().is_none() {
+        if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+            log_attrs.extend(
+                visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }),
+            );
+        } else {
             let mut fields = LogAttributes::default();
             fields.extend(
                 visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
                 }),
             );
-
             extensions.insert(fields);
-        } else if !visitor.values.is_empty() {
-            let log_attrs = extensions
-                .get_mut::<LogAttributes>()
-                .expect("LogAttributes exists, we checked just before");
-            log_attrs.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
         }
     }
 
@@ -262,8 +248,6 @@ impl field::Visit for FieldsVisitor<'_, '_> {
 mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
-    use std::sync::Mutex;
-    use std::sync::MutexGuard;
 
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
@@ -275,6 +259,8 @@ mod tests {
     use apollo_federation::sources::connect::URLTemplate;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use parking_lot::Mutex;
+    use parking_lot::MutexGuard;
     use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
@@ -428,7 +414,7 @@ connector:
         type Writer = Guard<'a>;
 
         fn make_writer(&'a self) -> Self::Writer {
-            Guard(self.0.lock().unwrap())
+            Guard(self.0.lock())
         }
     }
 
@@ -445,7 +431,7 @@ connector:
 
     impl std::fmt::Display for LogBuffer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let content = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+            let content = String::from_utf8(self.0.lock().clone()).unwrap();
 
             write!(f, "{content}")
         }
@@ -494,11 +480,7 @@ connector:
     async fn test_text_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Text::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -511,11 +493,7 @@ connector:
     async fn test_text_logging_attributes_nested_spans() {
         let buff = LogBuffer::default();
         let format = Text::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -529,11 +507,7 @@ connector:
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Json::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -546,11 +520,7 @@ connector:
     async fn test_json_logging_attributes_nested_spans() {
         let buff = LogBuffer::default();
         let format = Json::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -570,11 +540,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Default::default(), json_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -595,11 +561,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -617,11 +579,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -670,11 +628,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -723,11 +677,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
@@ -967,7 +917,7 @@ connector:
         };
         let format = Json::new(Default::default(), text_format);
         let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
+            RateLimitFormatter::new(format, &RateLimit::default()),
             buff.clone(),
         )
         .boxed();
@@ -1072,11 +1022,7 @@ subgraph:
             ..Default::default()
         };
         let format = Text::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
@@ -1122,7 +1068,7 @@ subgraph:
                     .unwrap();
                 router_events.on_request(&router_req);
                 let ctx = crate::Context::new();
-                ctx.extensions().with_lock(|mut ext| {
+                ctx.extensions().with_lock(|ext| {
                     ext.insert(RouterResponseBodyExtensionType(
                         r#"{"data": {"data": "res"}}"#.to_string(),
                     ));

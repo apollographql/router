@@ -4359,7 +4359,11 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
-        "experimental_local_manifests": {
+        "experimental_prewarm_query_plan_cache": {
+          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
+          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
+        },
+        "local_manifests": {
           "default": null,
           "description": "Enables using a local copy of the persisted query manifest to safelist operations",
           "items": {
@@ -4367,10 +4371,6 @@ expression: "&schema"
           },
           "nullable": true,
           "type": "array"
-        },
-        "experimental_prewarm_query_plan_cache": {
-          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
-          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
         },
         "log_unknown": {
           "default": false,
@@ -5118,6 +5118,9 @@ expression: "&schema"
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
         }
       },
+      "type": "object"
+    },
+    "RouterLimitsConfig": {
       "type": "object"
     },
     "RouterRequestConf": {
@@ -8764,6 +8767,10 @@ expression: "&schema"
     "rhai": {
       "$ref": "#/definitions/Conf7",
       "description": "#/definitions/Conf7"
+    },
+    "router_limits": {
+      "$ref": "#/definitions/RouterLimitsConfig",
+      "description": "#/definitions/RouterLimitsConfig"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
