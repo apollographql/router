@@ -48,6 +48,7 @@ struct Health {
 #[serde(default)]
 pub(crate) struct ReadinessConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>", default)]
     /// The sampling duration (default: 5s)
     pub(crate) duration: Duration,

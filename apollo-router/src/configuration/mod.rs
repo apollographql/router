@@ -231,6 +231,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             "limits".to_string(),
             serde_json::to_value(&ad_hoc.limits).unwrap(),
         );
+        ad_hoc.apollo_plugins.plugins.insert(
+            "healthcheck".to_string(),
+            serde_json::to_value(&ad_hoc.health_check).unwrap(),
+        );
 
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
