@@ -362,7 +362,7 @@ impl FragmentGenerator {
         }
         let key = NamedFragmentCandidateKey {
             type_position: &selection_set.type_position,
-            selection_set
+            selection_set,
         };
         self.minimized_fragments.hasher().hash_one(key)
     }
