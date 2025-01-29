@@ -2,6 +2,9 @@
 //!
 //! Provides liveness and readiness checks for the router.
 //!
+//! This module needs to be executed prior to traffic shaping so that it can capture the responses
+//! of requests which have been load shed.
+//!
 
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -50,8 +53,14 @@ pub(crate) struct ReadinessConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>", default)]
-    /// The sampling duration (default: 5s)
-    pub(crate) duration: Duration,
+    /// The sampling period (default: 5s)
+    pub(crate) sampling_period: Duration,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[serde(serialize_with = "humantime_serde::serialize")]
+    #[schemars(with = "Option<String>")]
+    /// The recovery period (default: Sampling Period)
+    pub(crate) recovery_period: Option<Duration>,
 
     /// How many errors/interval are allowed until unready (default: 100)
     pub(crate) allowed: usize,
@@ -60,7 +69,8 @@ pub(crate) struct ReadinessConfig {
 impl Default for ReadinessConfig {
     fn default() -> Self {
         Self {
-            duration: Duration::from_secs(5),
+            sampling_period: Duration::from_secs(5),
+            recovery_period: None,
             allowed: 100,
         }
     }
@@ -103,7 +113,6 @@ fn default_health_check_path() -> String {
     "/health".to_string()
 }
 
-/*
 #[buildstructor::buildstructor]
 impl Config {
     #[builder]
@@ -113,7 +122,6 @@ impl Config {
         path: Option<String>,
         readiness: Option<ReadinessConfig>,
     ) -> Self {
-        println!("readiness: {readiness:?}");
         let mut path = path.unwrap_or_else(default_health_check_path);
         if !path.starts_with('/') {
             path = format!("/{path}");
@@ -123,44 +131,14 @@ impl Config {
             listen: listen.unwrap_or_else(default_health_check_listen),
             enabled: enabled.unwrap_or_else(default_health_check_enabled),
             path,
-            readiness: readiness.unwrap_or_else(Default::default),
+            readiness: readiness.unwrap_or_default(),
         }
     }
 }
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl Config {
-    #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-        readiness: Option<ReadinessConfig>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-            readiness: readiness.unwrap_or_else(Default::default),
-        }
-    }
-}
-*/
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            listen: default_health_check_listen(),
-            enabled: default_health_check_enabled(),
-            path: default_health_check_path(),
-            readiness: Default::default(),
-        }
+        Self::builder().build()
     }
 }
 
@@ -177,7 +155,6 @@ impl PluginPrivate for HealthCheck {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        tracing::info!(config = ?init.config, "healthcheck config");
         tracing::info!(
             "Health check exposed at {}{}",
             init.config.listen,
@@ -188,24 +165,27 @@ impl PluginPrivate for HealthCheck {
         let rejected = Arc::new(AtomicUsize::new(0));
 
         let allowed = init.config.readiness.allowed;
-        let my_duration = init.config.readiness.duration;
+        let my_sampling_period = init.config.readiness.sampling_period;
+        let my_recovery_period = init
+            .config
+            .readiness
+            .recovery_period
+            .unwrap_or(my_sampling_period);
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
         let ticker = tokio::spawn(async move {
-            'outer: loop {
-                let start = Instant::now() + my_duration;
-                let mut interval = tokio::time::interval_at(start, my_duration);
+            loop {
+                let start = Instant::now() + my_sampling_period;
+                let mut interval = tokio::time::interval_at(start, my_sampling_period);
                 loop {
                     my_rejected.store(0, Ordering::Relaxed);
                     interval.tick().await;
-                    tracing::info!("TICKED AND CHECKING");
-                    tracing::info!(%allowed, rejected = %my_rejected.load(Ordering::Relaxed));
                     if my_rejected.load(Ordering::Relaxed) > allowed {
                         my_ready.store(false, Ordering::SeqCst);
-                        tokio::time::sleep(my_duration).await;
+                        tokio::time::sleep(my_recovery_period).await;
                         my_ready.store(true, Ordering::SeqCst);
-                        break 'outer;
+                        break;
                     }
                 }
             }
@@ -219,6 +199,7 @@ impl PluginPrivate for HealthCheck {
         })
     }
 
+    // Track rejected requests due to traffic shaping.
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let my_rejected = self.rejected.clone();
 
@@ -235,6 +216,7 @@ impl PluginPrivate for HealthCheck {
             .boxed()
     }
 
+    // Support the health-check endpoint for the router, incorporating both live and ready.
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
 
@@ -307,13 +289,82 @@ impl PluginPrivate for HealthCheck {
     }
 }
 
+// When a new configuration is made available we need to drop our old ticker.
 impl Drop for HealthCheck {
     fn drop(&mut self) {
         self.ticker.abort();
     }
 }
 
-register_private_plugin!("apollo", "healthcheck", HealthCheck);
+register_private_plugin!("apollo", "health_check", HealthCheck);
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::*;
+
+    use crate::plugins::test::PluginTestHarness;
+    use serde_json::json;
+
+    use tower::Service;
+    use tower::ServiceExt;
+
+    async fn get_axum_router(listen_addr: ListenAddr, config: &'static str) -> axum::Router {
+        let test_harness: PluginTestHarness<HealthCheck> =
+            PluginTestHarness::builder().config(config).build().await;
+
+        let endpoints = test_harness.web_endpoints();
+
+        let endpoint = endpoints.get(&listen_addr).expect("it better be there");
+
+        endpoint.clone().into_router()
+    }
+
+    async fn base_test_health_check(router_addr: &str, config: &'static str) {
+        let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
+
+        let mut axum_router = get_axum_router(listen_addr, config).await;
+
+        let request = http::Request::builder()
+            .uri(format!("http://{}/health", router_addr))
+            .body(http_body_util::Empty::new())
+            .expect("valid request");
+
+        let mut svc = axum_router.as_service();
+        let response = svc
+            .ready()
+            .await
+            .expect("readied")
+            .call(request)
+            .await
+            .expect("called it");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let j: serde_json::Value = serde_json::from_slice(
+            &crate::services::router::body::into_bytes(response)
+                .await
+                .expect("we have a body"),
+        )
+        .expect("some json");
+        assert_eq!(json!({"status": "UP" }), j)
+    }
+
+    #[tokio::test]
+    async fn test_health_check() {
+        let router_addr = "127.0.0.1:8088";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/default_listener.router.yaml"),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_health_check_custom_listener() {
+        let router_addr = "127.0.0.1:4012";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/custom_listener.router.yaml"),
+        )
+        .await;
+    }
+}

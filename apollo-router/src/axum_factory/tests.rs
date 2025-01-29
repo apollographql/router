@@ -72,7 +72,6 @@ use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::supergraph;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -83,7 +82,6 @@ use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::ApolloRouterError;
 use crate::Configuration;
-use crate::Context;
 use crate::ListenAddr;
 use crate::TestHarness;
 
@@ -2265,65 +2263,10 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
 }
 
 #[tokio::test]
-async fn test_health_check() {
-    let router_service = router::service::from_supergraph_mock_callback(|_| {
-        Ok(supergraph::Response::builder()
-            .data(json!({ "__typename": "Query"}))
-            .context(Context::new())
-            .build()
-            .unwrap())
-    })
-    .await;
-
-    let (server, client) = init(router_service).await;
-    let url = format!(
-        "{}/health",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
-
-    let response = client.get(url).send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json!({"status": "UP" }),
-        response.json::<serde_json::Value>().await.unwrap()
-    )
-}
-
-#[tokio::test]
-async fn test_health_check_custom_listener() {
-    let conf = Configuration::fake_builder()
-        .health_check(
-            HealthCheck::fake_builder()
-                .listen(ListenAddr::SocketAddr("127.0.0.1:4012".parse().unwrap()))
-                .enabled(true)
-                .build(),
-        )
-        .build()
-        .unwrap();
-
-    // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(
-        router::service::empty().await,
-        Arc::new(conf),
-        MultiMap::new(),
-    )
-    .await
-    .unwrap();
-    let url = "http://localhost:4012/health";
-
-    let response = client.get(url).send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json!({"status": "UP" }),
-        response.json::<serde_json::Value>().await.unwrap()
-    )
-}
-
-#[tokio::test]
 async fn test_sneaky_supergraph_and_health_check_configuration() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
                 .enabled(true)
                 .build(),
@@ -2331,10 +2274,33 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
         .build()
         .unwrap();
+
+    // Manually add the endpoints, since they are only created if the health-check plugin is
+    // enabled and that won't happ in init_with_config()
+    let endpoint = service_fn(|req: router::Request| async move {
+        Ok::<_, BoxError>(
+            http::Response::builder()
+                .status(StatusCode::OK)
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
+                .unwrap()
+                .into(),
+        )
+    })
+    .boxed_clone();
+    let mut web_endpoints = MultiMap::new();
+    web_endpoints.insert(
+        ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+        Endpoint::from_router_service("/health".to_string(), endpoint.boxed()),
+    );
+
     let error = init_with_config(
         router::service::empty().await,
         Arc::new(conf),
-        MultiMap::new(),
+        web_endpoints,
     )
     .await
     .unwrap_err();
@@ -2349,7 +2315,7 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
 async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
                 .enabled(false)
                 .build(),
@@ -2370,7 +2336,7 @@ async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
 async fn test_supergraph_and_health_check_same_port_different_listener() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:4013".parse().unwrap()))
                 .enabled(true)
                 .build(),

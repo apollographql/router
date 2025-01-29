@@ -232,7 +232,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             serde_json::to_value(&ad_hoc.limits).unwrap(),
         );
         ad_hoc.apollo_plugins.plugins.insert(
-            "healthcheck".to_string(),
+            "health_check".to_string(),
             serde_json::to_value(&ad_hoc.health_check).unwrap(),
         );
 
@@ -264,6 +264,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
 }
 
 pub(crate) const APOLLO_PLUGIN_PREFIX: &str = "apollo.";
+
+fn default_graphql_listen() -> ListenAddr {
+    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
+}
 
 #[cfg(test)]
 #[buildstructor::buildstructor]
@@ -414,7 +418,7 @@ impl Configuration {
         let configuration = Self {
             validated_yaml: Default::default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
@@ -1218,10 +1222,6 @@ impl Default for Sandbox {
     fn default() -> Self {
         Self::builder().build()
     }
-}
-
-fn default_graphql_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:4000").unwrap().into()
 }
 
 /// Configuration options pertaining to the home page.

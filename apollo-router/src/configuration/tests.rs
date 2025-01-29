@@ -918,7 +918,12 @@ fn it_defaults_health_check_configuration() {
 #[test]
 fn it_sets_custom_health_check_path() {
     let conf = Configuration::builder()
-        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("/healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -929,7 +934,12 @@ fn it_sets_custom_health_check_path() {
 fn it_adds_slash_to_custom_health_check_path_if_missing() {
     let conf = Configuration::builder()
         // NB the missing `/`
-        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
