@@ -32,7 +32,7 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tower::util::BoxService;
+use tower::buffer::Buffer;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
@@ -56,6 +56,7 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::json_ext::Object;
+use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::create_verifier;
@@ -73,6 +74,7 @@ use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
 use crate::services::router;
+use crate::services::subgraph;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
@@ -313,12 +315,6 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             subgraph.service.name = service_name.clone()
                         );
                         if !created {
-                            u64_counter!(
-                                "apollo_router_deduplicated_subscriptions_total",
-                                "Total deduplicated subscription requests (deprecated)",
-                                1,
-                                mode = "callback"
-                            );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
                                 .subgraph_name(service_name.clone())
@@ -527,12 +523,6 @@ async fn call_websocket(
         subscription_stream_tx
             .send(Box::pin(handle.into_stream()))
             .await?;
-        u64_counter!(
-            "apollo_router_deduplicated_subscriptions_total",
-            "Total deduplicated subscription requests (deprecated)",
-            1,
-            mode = "passthrough"
-        );
 
         // Dedup happens here
         return Ok(SubgraphResponse::builder()
@@ -1574,8 +1564,9 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
-    pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
-    pub(crate) plugins: Arc<Plugins>,
+    pub(crate) services: Arc<
+        HashMap<String, Buffer<subgraph::Request, BoxFuture<'static, subgraph::ServiceResult>>>,
+    >,
 }
 
 impl SubgraphServiceFactory {
@@ -1583,23 +1574,27 @@ impl SubgraphServiceFactory {
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
     ) -> Self {
+        let mut map = HashMap::with_capacity(services.len());
+        for (name, maker) in services.into_iter() {
+            let service = Buffer::new(
+                plugins
+                    .iter()
+                    .rev()
+                    .fold(maker.make(), |acc, (_, e)| e.subgraph_service(&name, acc))
+                    .boxed(),
+                DEFAULT_BUFFER_SIZE,
+            );
+            map.insert(name, service);
+        }
+
         SubgraphServiceFactory {
-            services: Arc::new(services.into_iter().collect()),
-            plugins,
+            services: Arc::new(map),
         }
     }
 
-    pub(crate) fn create(
-        &self,
-        name: &str,
-    ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
-        self.services.get(name).map(|service| {
-            let service = service.make();
-            self.plugins
-                .iter()
-                .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
-        })
+    pub(crate) fn create(&self, name: &str) -> Option<subgraph::BoxService> {
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.services.get(name).map(|svc| svc.clone().boxed())
     }
 }
 
@@ -1607,7 +1602,7 @@ impl SubgraphServiceFactory {
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+    fn make(&self) -> subgraph::BoxService;
 }
 
 impl<S> MakeSubgraphService for S
@@ -1619,7 +1614,7 @@ where
         + 'static,
     <S as Service<SubgraphRequest>>::Future: Send,
 {
-    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+    fn make(&self) -> subgraph::BoxService {
         self.clone().boxed()
     }
 }

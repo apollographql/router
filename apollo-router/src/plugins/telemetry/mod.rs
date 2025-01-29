@@ -170,7 +170,7 @@ pub(crate) mod utils;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
-const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
@@ -1185,7 +1185,7 @@ impl Telemetry {
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
+                .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
         }
     }
 
@@ -1255,7 +1255,7 @@ impl Telemetry {
                             if !matches!(sender, Sender::Noop) {
                                 if let (true, Some(query)) = (
                                     config.apollo.experimental_local_field_metrics,
-                                    ctx.unsupported_executable_document(),
+                                    ctx.executable_document(),
                                 ) {
                                     local_stat_recorder.visit(
                                         &query,
@@ -1391,7 +1391,7 @@ impl Telemetry {
                 // values for deferred responses and subscriptions.
                 let enum_response_references = context
                     .extensions()
-                    .with_lock(|mut lock| lock.remove::<ReferencedEnums>())
+                    .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
                 SingleStatsReport {
@@ -2086,7 +2086,7 @@ mod tests {
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
             .split('\n')
-            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
+            .filter(|l| l.contains("bucket"))
             .sorted()
             .join("\n")
     }
@@ -3131,7 +3131,7 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: SupergraphRequest| {
-                req.context.extensions().with_lock(|mut lock| {
+                req.context.extensions().with_lock(|lock| {
                     lock.insert(cost_details.clone());
                 });
                 req.context

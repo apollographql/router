@@ -956,7 +956,11 @@ where
                 let event_attributes = otel_data.as_ref().and_then(|o| o.event_attributes.clone());
 
                 if let Some(event_attributes) = event_attributes {
-                    otel_event.attributes.extend(event_attributes)
+                    otel_event.attributes.extend(
+                        event_attributes
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    )
                 }
             }
 

@@ -715,7 +715,7 @@ impl Drop for CancelHandler<'_> {
             }
             self.context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(CanceledRequest));
+                .with_lock(|lock| lock.insert(CanceledRequest));
         }
     }
 }
@@ -738,7 +738,7 @@ mod tests {
             Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
                 .unwrap();
         let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::Deprecated);
+        assert_eq!(mode, SpanMode::SpecCompliant);
     }
 
     #[test]

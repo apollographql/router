@@ -1,3 +1,5 @@
+//! Implements support for persisted queries and safelisting at the supergraph service stage.
+
 mod id_extractor;
 mod manifest_poller;
 
@@ -25,8 +27,21 @@ const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_querie
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
+/// Marker type for request context to identify requests that were expanded from a persisted query
+/// ID.
 struct UsedQueryIdFromManifest;
 
+/// Implements persisted query support, namely expanding requests using persisted query IDs and
+/// filtering free-form GraphQL requests based on router configuration.
+///
+/// Despite the name, this is not really in any way a layer today.
+///
+/// This type actually consists of two conceptual layers that must both be applied at the supergraph
+/// service stage, at different points:
+/// - [PersistedQueryLayer::supergraph_request] must be done *before* the GraphQL request is parsed
+///    and validated.
+/// - [PersistedQueryLayer::supergraph_request_with_analyzed_query] must be done *after* the
+///    GraphQL request is parsed and validated.
 #[derive(Debug)]
 pub(crate) struct PersistedQueryLayer {
     /// Manages polling uplink for persisted queries and caches the current
@@ -62,11 +77,17 @@ impl PersistedQueryLayer {
         }
     }
 
-    /// Run a request through the layer.
+    /// Handles pre-parsing work for requests using persisted queries.
+    ///
     /// Takes care of:
     /// 1) resolving a persisted query ID to a query body
-    /// 2) matching a freeform GraphQL request against persisted queries, optionally rejecting it based on configuration
-    /// 3) continuing to the next stage of the router
+    /// 2) rejecting free-form GraphQL requests if they are never allowed by configuration.
+    ///    Matching against safelists is done later in
+    ///    [`PersistedQueryLayer::supergraph_request_with_analyzed_query`].
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
     pub(crate) fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -149,7 +170,7 @@ impl PersistedQueryLayer {
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(UsedQueryIdFromManifest));
+                    .with_lock(|lock| lock.insert(UsedQueryIdFromManifest));
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
@@ -178,6 +199,16 @@ impl PersistedQueryLayer {
         }
     }
 
+    /// Handles post-GraphQL-parsing work for requests using the persisted queries feature,
+    /// in particular safelisting.
+    ///
+    /// Any request that was expanded by the [`PersistedQueryLayer::supergraph_request`] call is
+    /// passed through immediately. Free-form GraphQL is matched against safelists and rejected or
+    /// passed through based on router configuration.
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
     pub(crate) async fn supergraph_request_with_analyzed_query(
         &self,
         request: SupergraphRequest,
@@ -500,9 +531,8 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        let request = result
-            .ok()
-            .expect("pq layer returned response instead of putting the query on the request");
+        let request =
+            result.expect("pq layer returned response instead of putting the query on the request");
         assert_eq!(request.supergraph_request.body().query, Some(body));
     }
 
@@ -556,7 +586,6 @@ mod tests {
 
             pq_layer
                 .supergraph_request(incoming_request)
-                .ok()
                 .expect("pq layer returned response instead of putting the query on the request")
                 .supergraph_request
                 .body()
@@ -611,9 +640,8 @@ mod tests {
         assert!(incoming_request.supergraph_request.body().query.is_none());
 
         let result = pq_layer.supergraph_request(incoming_request);
-        let request = result
-            .ok()
-            .expect("pq layer returned response instead of continuing to APQ layer");
+        let request =
+            result.expect("pq layer returned response instead of continuing to APQ layer");
         assert!(request.supergraph_request.body().query.is_none());
     }
 
@@ -755,12 +783,10 @@ mod tests {
         // the operation.
         let updated_request = pq_layer
             .supergraph_request(incoming_request)
-            .ok()
             .expect("pq layer returned error response instead of returning a request");
         query_analysis_layer
             .supergraph_request(updated_request)
             .await
-            .ok()
             .expect("QA layer returned error response instead of returning a request")
     }
 
@@ -820,7 +846,6 @@ mod tests {
         pq_layer
             .supergraph_request_with_analyzed_query(request_with_analyzed_query)
             .await
-            .ok()
             .expect("pq layer second hook returned error response instead of returning a request");
 
         let mut metric_attributes = vec![];

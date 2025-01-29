@@ -24,7 +24,6 @@ use tracing_subscriber::Registry;
 use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
-use super::metrics::span_metrics_exporter::SpanMetricsLayer;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
@@ -32,7 +31,7 @@ use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::tracer::TraceId;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
+pub(crate) type LayeredRegistry = Layered<DynAttributeLayer, Registry>;
 
 pub(super) type LayeredTracer =
     Layered<OpenTelemetryLayer<LayeredRegistry, ReloadTracer<Tracer>>, LayeredRegistry>;
@@ -74,7 +73,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // the tracing registry is only created once
             tracing_subscriber::registry()
                 .with(DynAttributeLayer::new())
-                .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(WarnLegacyMetricsLayer)

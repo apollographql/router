@@ -1212,7 +1212,7 @@ macro_rules! assert_non_zero_metrics_snapshot {
 }
 
 #[cfg(test)]
-pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output> + Send>>;
+pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output>>>;
 
 #[cfg(test)]
 pub(crate) trait FutureMetricsExt<T> {
@@ -1223,8 +1223,8 @@ pub(crate) trait FutureMetricsExt<T> {
         MetricFuture<Self>,
     >
     where
-        Self: Sized + Future + Send + 'static,
-        <Self as Future>::Output: Send + 'static,
+        Self: Sized + Future + 'static,
+        <Self as Future>::Output: 'static,
     {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
@@ -1236,7 +1236,7 @@ pub(crate) trait FutureMetricsExt<T> {
                 .await;
                 result
             }
-            .boxed(),
+            .boxed_local(),
         )
     }
 }

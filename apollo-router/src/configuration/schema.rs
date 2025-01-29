@@ -139,7 +139,7 @@ pub(crate) fn validate_yaml_configuration(
         if schema.validate(&expanded_yaml).is_ok() {
             yaml = upgraded;
         } else {
-            tracing::warn!("configuration could not be upgraded automatically as it had errors")
+            tracing::warn!("Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1")
         }
     }
 
