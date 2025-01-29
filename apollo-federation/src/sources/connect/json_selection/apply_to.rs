@@ -185,7 +185,7 @@ impl ResolvedShape {
         }
     }
 
-    fn into_inner(self) -> Shape {
+    pub(crate) fn into_inner(self) -> Shape {
         self.0
     }
 
@@ -795,13 +795,16 @@ impl ApplyToInternal for WithRange<PathList> {
                     let method_result_shape = if let ShapeCase::One(cases) = input_shape.case() {
                         resolver.resolve(Shape::one(
                             cases.iter().map(|case| {
-                                self.compute_output_shape(
-                                    resolver.resolve(case.clone()),
-                                    dollar_shape.clone(),
-                                    resolver,
-                                    source_id,
-                                )
-                                .into()
+                                method
+                                    .shape(
+                                        method_name,
+                                        method_args.as_ref(),
+                                        resolver.resolve(case.clone()),
+                                        dollar_shape.clone(),
+                                        resolver,
+                                        source_id,
+                                    )
+                                    .into_inner()
                             }),
                             input_shape.locations.clone(),
                         ))
@@ -1093,6 +1096,17 @@ fn field(
     resolver: Resolver,
     source_id: &SourceId,
 ) -> ResolvedShape {
+    let _shape = format!("{shape}");
+    if let ShapeCase::One(inner) = shape.case() {
+        let mut new_fields = Vec::new();
+        for inner_field in inner {
+            new_fields.push(field(&inner_field, key, resolver, source_id).into());
+        }
+        return resolver.resolve(Shape::one(new_fields, shape.locations.clone()));
+    }
+    if shape.is_none() || shape.is_null() {
+        return resolver.resolve(Shape::none());
+    }
     let field_shape = shape.field(key.as_str(), key.shape_location(source_id));
     if field_shape.is_none() {
         return resolver.resolve(Shape::error(

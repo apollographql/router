@@ -366,26 +366,7 @@ fn first_shape(
         ));
     }
 
-    // Location is not solely based on the method, but also the type the method is being applied to
-    let locations = input_shape.locations.iter().cloned().chain(location);
-
-    let shape = match input_shape.case() {
-        ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
-        ShapeCase::String(None) => Shape::string(locations),
-        ShapeCase::Array { prefix, tail } => {
-            if let Some(first) = prefix.first() {
-                first.clone()
-            } else if tail.is_none() {
-                Shape::none()
-            } else {
-                Shape::one([tail.clone(), Shape::none()], locations)
-            }
-        }
-        // When there is no obvious first element, ->first gives us the input
-        // value itself, which has input_shape.
-        _ => input_shape.into(),
-    };
-    resolver.resolve(shape)
+    resolver.resolve(input_shape.into_inner().item(0, location))
 }
 
 impl_arrow_method!(LastMethod, last_method, last_shape);
@@ -489,7 +470,7 @@ fn last_shape(
         ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
         // When there is no obvious last element, ->last gives us the input
         // value itself, which has input_shape.
-        _ => input_shape.into(),
+        _ => input_shape.any_item(method_name.shape_location(source_id)),
     };
     resolver.resolve(shape)
 }
@@ -607,6 +588,7 @@ fn slice_shape(
         }
         ShapeCase::String(_) => Shape::string(input_shape.into_locations()),
         ShapeCase::Unknown => input_shape.into(),
+        ShapeCase::None | ShapeCase::Null => Shape::none(),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array or string input",
@@ -711,6 +693,7 @@ fn size_shape(
             }
         }
         ShapeCase::Unknown => input_shape.into(),
+        ShapeCase::Null | ShapeCase::None => Shape::none(),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array, string, or object input",

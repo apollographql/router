@@ -379,7 +379,6 @@ mod tests {
     #[case("$args.object.bool")]
     #[case("$args.array->echo(1)")]
     #[case("$args.int->map(@)->last")]
-    #[case::chained_methods("$args.array->map(@)->slice(0,2)->first.bool")]
     #[case::match_scalars("$args.string->match([\"hello\", \"world\"], [@, null])")]
     #[case::slice("$args.string->slice(0, 2)")]
     #[case::size("$args.array->size")]
@@ -388,6 +387,11 @@ mod tests {
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
     fn valid_expressions(#[case] selection: &str) {
         validate_with_context(selection, scalars()).unwrap();
+    }
+
+    #[test]
+    fn valid_chained_methods() {
+        validate_with_context("$args.array->map(@)->slice(0,2)->first.bool", scalars()).unwrap();
     }
 
     #[rstest]
