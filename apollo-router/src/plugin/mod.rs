@@ -21,6 +21,7 @@ pub mod test;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Context;
@@ -86,45 +87,6 @@ impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    #[deprecated = "use PluginInit::builder() instead"]
-    /// Create a new PluginInit for the supplied config and SDL.
-    pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
-        Self::builder()
-            .config(config)
-            .supergraph_schema(Arc::new(
-                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                    .expect("failed to parse supergraph schema"),
-            ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
-            .supergraph_sdl(supergraph_sdl)
-            .notify(Notify::builder().build())
-            .build()
-    }
-
-    /// Try to create a new PluginInit for the supplied JSON and SDL.
-    ///
-    /// This will fail if the supplied JSON cannot be deserialized into the configuration
-    /// struct.
-    #[deprecated = "use PluginInit::try_builder() instead"]
-    pub fn try_new(
-        config: serde_json::Value,
-        supergraph_sdl: Arc<String>,
-    ) -> Result<Self, BoxError> {
-        Self::try_builder()
-            .config(config)
-            .supergraph_schema(Arc::new(
-                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                    .map_err(|e| {
-                        // This method is deprecated so we're not going to do anything fancy with the error
-                        BoxError::from(e.errors.to_string())
-                    })?,
-            ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
-            .supergraph_sdl(supergraph_sdl)
-            .notify(Notify::builder().build())
-            .build()
-    }
-
     #[cfg(test)]
     pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
@@ -142,21 +104,6 @@ where
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
             .build()
-    }
-
-    /// Returns the parsed Schema. This is unstable and may be changed or removed in future router releases.
-    /// In addition, Schema is not stable, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_supergraph_schema(&self) -> Arc<Valid<Schema>> {
-        self.supergraph_schema.clone()
-    }
-
-    /// Returns a mapping of subgraph to parsed schema. This is unstable and may be changed or removed in
-    /// future router releases. In addition, Schema is not stable, and may be changed or removed in future
-    /// apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Arc<Valid<Schema>>>> {
-        self.subgraph_schemas.clone()
     }
 }
 

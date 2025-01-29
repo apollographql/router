@@ -203,10 +203,6 @@ pub struct Opt {
     #[clap(env = "APOLLO_ROUTER_SUPERGRAPH_URLS", value_delimiter = ',')]
     supergraph_urls: Option<Vec<Url>>,
 
-    /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue), hide(true))]
-    schema: bool,
-
     /// Subcommands
     #[clap(subcommand)]
     command: Option<Commands>,
@@ -417,13 +413,6 @@ impl Executable {
 
         setup_panic_handler();
 
-        if opt.schema {
-            eprintln!("`router --schema` is deprecated. Use `router config schema`");
-            let schema = generate_config_schema();
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-            return Ok(());
-        }
-
         let result = match opt.command.as_ref() {
             Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
@@ -498,7 +487,6 @@ impl Executable {
                     ConfigurationSource::File {
                         path,
                         watch: opt.hot_reload,
-                        delay: None,
                     }
                 })
                 .unwrap_or_default(),
@@ -541,7 +529,6 @@ impl Executable {
                 SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
-                    delay: None,
                 }
             }
             (_, _, Some(supergraph_urls), _, _) => {

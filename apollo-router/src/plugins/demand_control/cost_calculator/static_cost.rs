@@ -721,7 +721,7 @@ mod tests {
 
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query.clone()));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(query.clone()));
 
         let planner_res = planner
             .call(QueryPlannerRequest::new(

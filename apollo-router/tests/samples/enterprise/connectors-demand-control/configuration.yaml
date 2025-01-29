@@ -1,0 +1,23 @@
+include_subgraph_errors:
+  all: true
+
+demand_control:
+  enabled: true
+  mode: enforce
+  strategy:
+    static_estimated:
+      list_size: 1
+      max: 100
+
+preview_connectors:
+  subgraphs:
+    connectors:
+      sources:
+        jsonPlaceholder:
+          override_url: http://localhost:4008
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
