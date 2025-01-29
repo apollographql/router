@@ -2021,6 +2021,8 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 Adds experimental support for passing [persisted query manifests](https://www.apollographql.com/docs/graphos/operations/persisted-queries/#31-generate-persisted-query-manifests) to use instead of the hosted Uplink version.
 
+> Note: this feature is no longer experimental as of `v1.61.0`. As such, the `experimental_` prefix has been removed. 
+
 For example:
 
 ```router.yaml
