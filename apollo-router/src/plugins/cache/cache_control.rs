@@ -184,9 +184,8 @@ impl CacheControl {
             return Ok(s);
         }
         if self.no_cache {
-            write!(&mut s, "no-cache")?;
-            // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
-            return Ok(s);
+            write!(&mut s, "{}no-cache", if prev { "," } else { "" },)?;
+            prev = true;
         }
         if let Some(max_age) = self.max_age {
             //FIXME: write no-store if max_age = 0?
@@ -268,6 +267,12 @@ impl CacheControl {
     }
 
     fn merge_inner(&self, other: &CacheControl, now: u64) -> CacheControl {
+        if self.no_store || other.no_store {
+            return CacheControl {
+                no_store: true,
+                ..Default::default()
+            };
+        }
         CacheControl {
             created: now,
             max_age: match (self.ttl(), other.ttl()) {
@@ -431,7 +436,7 @@ mod tests {
 
         let merged = first.merge_inner(&second, now);
         assert!(merged.no_store);
-        assert!(merged.public);
+        assert!(!merged.public);
         assert!(!merged.can_use());
     }
 
