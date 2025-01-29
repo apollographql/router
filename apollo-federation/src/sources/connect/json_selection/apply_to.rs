@@ -1,12 +1,14 @@
 /// ApplyTo is a trait for applying a JSONSelection to a JSON value, collecting
 /// any/all errors encountered in the process.
 use std::hash::Hash;
+use std::ops::Deref;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::json;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
+use shape::location::Location;
 use shape::location::SourceId;
 use shape::Shape;
 use shape::ShapeCase;
@@ -66,46 +68,143 @@ impl JSONSelection {
         (value, errors.into_iter().collect())
     }
 
-    pub fn shape(&self) -> Shape {
-        self.compute_output_shape(
-            // If we don't know anything about the shape of the input data, we
-            // can represent the data symbolically using the $root variable
-            // shape. Subproperties needed from this shape will show up as
-            // subpaths like $root.books.4.isbn in the output shape.
-            //
-            // While we do not currently have a $root variable available as a
-            // KnownVariable during apply_to_path execution, we might consider
-            // adding it, since it would align with the way we process other
-            // variable shapes. For now, $root exists only as a shape name that
-            // we are inventing right here.
-            Shape::name("$root", Vec::new()),
-            // If we wanted to specify anything about the shape of the $root
-            // variable, we could define a shape for "$root" in this map.
-            &IndexMap::default(),
-            &SourceId::Other("JSONSelection".into()),
-        )
+    #[cfg(test)]
+    pub(crate) fn shape(&self) -> Shape {
+        self.output_shape(&IndexMap::default())
     }
 
-    pub fn compute_output_shape(
-        &self,
-        input_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
-        source_id: &SourceId,
-    ) -> Shape {
+    /// Create a [`Shape`] representing the output produced by running this
+    /// `JSONSelection`.
+    ///
+    /// All variables that are defined in this context, as well as all GraphQL types should be
+    /// provided in `named_shapes`.
+    ///
+    /// The root JSON input shape can be specified by defining
+    /// the `$root` key in the `named_shapes` map.
+    pub(crate) fn output_shape(&self, named_shapes: &IndexMap<&str, Shape>) -> Shape {
+        let resolver = Resolver {
+            resolver: named_shapes,
+        };
+        let input_shape = if let Some(root_shape) = named_shapes.get("$root") {
+            resolver.resolve(root_shape.clone())
+        } else {
+            // There is no input, so the validator will have to deal with this
+            ResolvedShape(Shape::name("$root", []))
+        };
+
+        // At this level, $ and @ have the same value and shape.
+        let dollar_shape = input_shape.clone();
+        let source_id = SourceId::new("JSONSelection");
+
         match self {
-            Self::Named(selection) => selection.compute_output_shape(
-                input_shape.clone(),
-                input_shape.clone(),
-                named_var_shapes,
-                source_id,
-            ),
-            Self::Path(path_selection) => path_selection.compute_output_shape(
-                input_shape.clone(),
-                input_shape.clone(),
-                named_var_shapes,
-                source_id,
-            ),
+            Self::Named(selection) => {
+                selection.compute_output_shape(input_shape, dollar_shape, resolver, &source_id)
+            }
+            Self::Path(path_selection) => {
+                path_selection.compute_output_shape(input_shape, dollar_shape, resolver, &source_id)
+            }
         }
+        .0
+    }
+}
+
+/// Shapes of other named variables, with the variable name `String`
+/// including the initial `$` character. This map typically does not
+/// change during the compute_output_shape recursion, and so can be
+/// passed down by immutable reference.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Resolver<'a> {
+    resolver: &'a IndexMap<&'a str, Shape>,
+}
+
+impl Resolver<'_> {
+    pub(super) fn resolve(&self, shape: Shape) -> ResolvedShape {
+        ResolvedShape::resolve(shape, self.resolver)
+    }
+}
+
+/// A [`Shape`] that's guaranteed to not be a [`ShapeCase::Name`] if we have a lookup for that name.
+///
+/// So all names left at the end are unresolvable (and therefore errors).
+#[derive(Clone, Debug)]
+pub(super) struct ResolvedShape(Shape);
+
+impl ResolvedShape {
+    fn resolve(shape: Shape, resolver: &IndexMap<&str, Shape>) -> Self {
+        match shape.case() {
+            ShapeCase::Name(key, path) => {
+                if let Some(named_shape) = resolver.get(key.value.as_str()) {
+                    let mut shape = named_shape.with_locations(shape.locations.iter().cloned());
+                    for part in path {
+                        shape = shape.child(part.clone());
+                        if shape.is_none() {
+                            return Self(Shape::error(
+                                format!("field `{part}` not found"),
+                                part.locations.clone(),
+                            ));
+                        }
+                    }
+                    Self(shape)
+                } else {
+                    // This shape can't be looked up, the validator will have to deal with this.
+                    ResolvedShape(shape)
+                }
+            }
+            ShapeCase::One(inner) => {
+                let mut shapes = Vec::new();
+                for inner_shape in inner {
+                    shapes.push(
+                        Self::resolve(inner_shape.clone(), resolver)
+                            .into_inner()
+                            .with_locations(shape.locations.clone()),
+                    );
+                }
+                Self(Shape::one(shapes, shape.locations))
+            }
+            ShapeCase::All(inner) => {
+                let mut shapes = Vec::new();
+                for shape in inner {
+                    shapes.push(
+                        Self::resolve(shape.clone(), resolver)
+                            .into_inner()
+                            .with_locations(shape.locations.clone()),
+                    );
+                }
+                Self(Shape::all(shapes, shape.locations))
+            }
+            ShapeCase::Bool(_)
+            | ShapeCase::String(_)
+            | ShapeCase::Int(_)
+            | ShapeCase::Float
+            | ShapeCase::Null
+            | ShapeCase::Array { .. }
+            | ShapeCase::Object { .. }
+            | ShapeCase::Unknown
+            | ShapeCase::None
+            | ShapeCase::Error(_) => Self(shape),
+        }
+    }
+
+    fn into_inner(self) -> Shape {
+        self.0
+    }
+
+    pub(super) fn into_locations(self) -> Vec<Location> {
+        self.0.locations
+    }
+}
+
+impl Deref for ResolvedShape {
+    type Target = Shape;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<ResolvedShape> for Shape {
+    fn from(resolved: ResolvedShape) -> Shape {
+        resolved.0
     }
 }
 
@@ -150,19 +249,14 @@ pub(super) trait ApplyToInternal {
         &self,
         // Shape of the `@` variable, which typically changes with each
         // recursive call to compute_output_shape.
-        input_shape: Shape,
+        input_shape: ResolvedShape,
         // Shape of the `$` variable, which is bound to the closest enclosing
         // subselection object, or the root data object if there is no enclosing
         // subselection.
-        dollar_shape: Shape,
-        // Shapes of other named variables, with the variable name `String`
-        // including the initial `$` character. This map typically does not
-        // change during the compute_output_shape recursion, and so can be
-        // passed down by immutable reference.
-        named_var_shapes: &IndexMap<&str, Shape>,
-        // A shared source name to use for all locations originating from this `JSONSelection`
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape;
+    ) -> ResolvedShape;
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
@@ -276,24 +370,18 @@ impl ApplyToInternal for JSONSelection {
 
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> ResolvedShape {
         match self {
-            Self::Named(selection) => selection.compute_output_shape(
-                input_shape,
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            ),
-            Self::Path(path_selection) => path_selection.compute_output_shape(
-                input_shape,
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            ),
+            Self::Named(selection) => {
+                selection.compute_output_shape(input_shape, dollar_shape, resolver, source_id)
+            }
+            Self::Path(path_selection) => {
+                path_selection.compute_output_shape(input_shape, dollar_shape, resolver, source_id)
+            }
         }
     }
 }
@@ -394,11 +482,11 @@ impl ApplyToInternal for NamedSelection {
 
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> ResolvedShape {
         let mut output = Shape::empty_map();
 
         match self {
@@ -406,30 +494,23 @@ impl ApplyToInternal for NamedSelection {
                 let output_key = alias_opt
                     .as_ref()
                     .map_or(key.as_str(), |alias| alias.name());
-                let field_shape = dollar_shape.field(key.as_str(), key.shape_location(source_id));
+                let field_shape = field(&dollar_shape, key, resolver, source_id);
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
-                        selection.compute_output_shape(
-                            field_shape,
-                            dollar_shape,
-                            named_var_shapes,
-                            source_id,
-                        )
+                        selection
+                            .compute_output_shape(field_shape, dollar_shape, resolver, source_id)
+                            .0
                     } else {
-                        field_shape
+                        field_shape.0
                     },
                 );
             }
             Self::Path { alias, path, .. } => {
-                let path_shape = path.compute_output_shape(
-                    input_shape,
-                    dollar_shape,
-                    named_var_shapes,
-                    source_id,
-                );
+                let path_shape =
+                    path.compute_output_shape(input_shape, dollar_shape, resolver, source_id);
                 if let Some(alias) = alias {
-                    output.insert(alias.name().to_string(), path_shape);
+                    output.insert(alias.name().to_string(), path_shape.0);
                 } else {
                     return path_shape;
                 }
@@ -437,17 +518,18 @@ impl ApplyToInternal for NamedSelection {
             Self::Group(alias, sub_selection) => {
                 output.insert(
                     alias.name().to_string(),
-                    sub_selection.compute_output_shape(
-                        input_shape,
-                        dollar_shape,
-                        named_var_shapes,
-                        source_id,
-                    ),
+                    sub_selection
+                        .compute_output_shape(input_shape, dollar_shape, resolver, source_id)
+                        .0,
                 );
             }
         };
 
-        Shape::object(output, Shape::none(), self.shape_location(source_id))
+        resolver.resolve(Shape::object(
+            output,
+            Shape::none(),
+            self.shape_location(source_id),
+        ))
     }
 }
 
@@ -478,11 +560,11 @@ impl ApplyToInternal for PathSelection {
 
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> ResolvedShape {
         match self.path.as_ref() {
             PathList::Key(_, _) => {
                 // If this is a KeyPath, we need to evaluate the path starting
@@ -491,18 +573,15 @@ impl ApplyToInternal for PathSelection {
                 self.path.compute_output_shape(
                     dollar_shape.clone(),
                     dollar_shape.clone(),
-                    named_var_shapes,
+                    resolver,
                     source_id,
                 )
             }
             // If this is not a KeyPath, keep evaluating against input_shape.
             // This logic parallels PathSelection::apply_to_path (above).
-            _ => self.path.compute_output_shape(
-                input_shape,
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            ),
+            _ => self
+                .path
+                .compute_output_shape(input_shape, dollar_shape, resolver, source_id),
         }
     }
 }
@@ -616,11 +695,11 @@ impl ApplyToInternal for WithRange<PathList> {
 
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> ResolvedShape {
         match self.as_ref() {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
@@ -628,12 +707,13 @@ impl ApplyToInternal for WithRange<PathList> {
                     input_shape
                 } else if var_name == &KnownVariable::Dollar {
                     dollar_shape.clone()
-                } else if let Some(shape) = named_var_shapes.get(var_name.as_str()) {
-                    shape.clone()
                 } else {
-                    Shape::name(var_name.as_str(), ranged_var_name.shape_location(source_id))
+                    resolver.resolve(Shape::name(
+                        var_name.as_str(),
+                        ranged_var_name.shape_location(source_id),
+                    ))
                 };
-                tail.compute_output_shape(var_shape, dollar_shape, named_var_shapes, source_id)
+                tail.compute_output_shape(var_shape, dollar_shape, resolver, source_id)
             }
 
             PathList::Key(key, rest) => {
@@ -660,11 +740,12 @@ impl ApplyToInternal for WithRange<PathList> {
                                 shape.clone()
                             } else {
                                 rest.compute_output_shape(
-                                    shape.field(key.as_str(), key.shape_location(source_id)),
+                                    field(shape, key, resolver, source_id),
                                     dollar_shape.clone(),
-                                    named_var_shapes,
+                                    resolver,
                                     source_id,
                                 )
+                                .into()
                             }
                         })
                         .collect::<Vec<_>>();
@@ -673,33 +754,33 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.clone()
                     } else {
                         rest.compute_output_shape(
-                            tail.field(key.as_str(), key.shape_location(source_id)),
+                            field(tail, key, resolver, source_id),
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            resolver,
                             source_id,
                         )
+                        .into()
                     };
 
-                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
+                    resolver.resolve(Shape::array(
+                        mapped_prefix,
+                        mapped_rest,
+                        input_shape.locations.clone(),
+                    ))
                 } else {
                     rest.compute_output_shape(
-                        input_shape.field(key.as_str(), key.shape_location(source_id)),
+                        field(&input_shape, key, resolver, source_id),
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        resolver,
                         source_id,
                     )
                 }
             }
 
             PathList::Expr(expr, tail) => tail.compute_output_shape(
-                expr.compute_output_shape(
-                    input_shape,
-                    dollar_shape.clone(),
-                    named_var_shapes,
-                    source_id,
-                ),
+                expr.compute_output_shape(input_shape, dollar_shape.clone(), resolver, source_id),
                 dollar_shape.clone(),
-                named_var_shapes,
+                resolver,
                 source_id,
             ),
 
@@ -712,24 +793,25 @@ impl ApplyToInternal for WithRange<PathList> {
 
                 if let Some(method) = ArrowMethod::lookup(method_name) {
                     let method_result_shape = if let ShapeCase::One(cases) = input_shape.case() {
-                        Shape::one(
+                        resolver.resolve(Shape::one(
                             cases.iter().map(|case| {
                                 self.compute_output_shape(
-                                    case.clone(),
+                                    resolver.resolve(case.clone()),
                                     dollar_shape.clone(),
-                                    named_var_shapes,
+                                    resolver,
                                     source_id,
                                 )
+                                .into()
                             }),
                             input_shape.locations.clone(),
-                        )
+                        ))
                     } else {
                         method.shape(
                             method_name,
                             method_args.as_ref(),
                             input_shape,
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            resolver,
                             source_id,
                         )
                     };
@@ -740,22 +822,22 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.compute_output_shape(
                             method_result_shape,
                             dollar_shape.clone(),
-                            named_var_shapes,
+                            resolver,
                             source_id,
                         )
                     }
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
-                    Shape::error(message.as_str(), method_name.shape_location(source_id))
+                    resolver.resolve(Shape::error(
+                        message.as_str(),
+                        method_name.shape_location(source_id),
+                    ))
                 }
             }
 
-            PathList::Selection(selection) => selection.compute_output_shape(
-                input_shape,
-                dollar_shape,
-                named_var_shapes,
-                source_id,
-            ),
+            PathList::Selection(selection) => {
+                selection.compute_output_shape(input_shape, dollar_shape, resolver, source_id)
+            }
 
             PathList::Empty => input_shape,
         }
@@ -802,14 +884,13 @@ impl ApplyToInternal for WithRange<LitExpr> {
 
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        input_shape: ResolvedShape,
+        dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> ResolvedShape {
         let locations = self.shape_location(source_id);
-
-        match self.as_ref() {
+        let shape = match self.as_ref() {
             LitExpr::Null => Shape::null(locations),
             LitExpr::Bool(value) => Shape::bool_value(*value, locations),
             LitExpr::String(value) => Shape::string_value(value.as_str(), locations),
@@ -829,12 +910,14 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 for (key, value) in map {
                     fields.insert(
                         key.as_string(),
-                        value.compute_output_shape(
-                            input_shape.clone(),
-                            dollar_shape.clone(),
-                            named_var_shapes,
-                            source_id,
-                        ),
+                        value
+                            .compute_output_shape(
+                                input_shape.clone(),
+                                dollar_shape.clone(),
+                                resolver,
+                                source_id,
+                            )
+                            .into(),
                     );
                 }
                 Shape::object(fields, Shape::none(), locations)
@@ -843,20 +926,25 @@ impl ApplyToInternal for WithRange<LitExpr> {
             LitExpr::Array(vec) => {
                 let mut shapes = Vec::with_capacity(vec.len());
                 for value in vec {
-                    shapes.push(value.compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    ));
+                    shapes.push(
+                        value
+                            .compute_output_shape(
+                                input_shape.clone(),
+                                dollar_shape.clone(),
+                                resolver,
+                                source_id,
+                            )
+                            .into(),
+                    );
                 }
                 Shape::array(shapes, Shape::none(), locations)
             }
 
-            LitExpr::Path(path) => {
-                path.compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id)
-            }
-        }
+            LitExpr::Path(path) => path
+                .compute_output_shape(input_shape, dollar_shape, resolver, source_id)
+                .into(),
+        };
+        resolver.resolve(shape)
     }
 }
 
@@ -916,11 +1004,11 @@ impl ApplyToInternal for SubSelection {
 
     fn compute_output_shape(
         &self,
-        input_shape: Shape,
-        _previous_dollar_shape: Shape,
-        named_var_shapes: &IndexMap<&str, Shape>,
+        input_shape: ResolvedShape,
+        _previous_dollar_shape: ResolvedShape,
+        resolver: Resolver,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> ResolvedShape {
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
@@ -928,28 +1016,35 @@ impl ApplyToInternal for SubSelection {
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    self.compute_output_shape(
-                        shape.clone(),
-                        shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    )
+                    let shape = resolver.resolve(shape.clone());
+                    self.compute_output_shape(shape.clone(), shape, resolver, source_id)
+                        .into()
                 })
                 .collect::<Vec<_>>();
 
             let new_tail = if tail.is_none() {
                 tail.clone()
             } else {
-                self.compute_output_shape(tail.clone(), tail.clone(), named_var_shapes, source_id)
+                self.compute_output_shape(
+                    resolver.resolve(tail.clone()),
+                    resolver.resolve(tail.clone()),
+                    resolver,
+                    source_id,
+                )
+                .into()
             };
 
-            return Shape::array(new_prefix, new_tail, self.shape_location(source_id));
+            return resolver.resolve(Shape::array(
+                new_prefix,
+                new_tail,
+                self.shape_location(source_id),
+            ));
         }
 
         // If the input shape is a named shape, it might end up being an array,
         // so we need to hedge the output shape using a wildcard that maps over
         // array elements.
-        let input_shape = input_shape.any_item(Vec::new());
+        let input_shape = resolver.resolve(input_shape.any_item(Vec::new()));
 
         // The SubSelection rebinds the $ variable to the selected input object,
         // so we can ignore _previous_dollar_shape.
@@ -967,12 +1062,14 @@ impl ApplyToInternal for SubSelection {
             all_shape = Shape::all(
                 [
                     all_shape,
-                    named_selection.compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    ),
+                    named_selection
+                        .compute_output_shape(
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                            resolver,
+                            source_id,
+                        )
+                        .into(),
                 ],
                 self.shape_location(source_id),
             );
@@ -985,8 +1082,25 @@ impl ApplyToInternal for SubSelection {
             }
         }
 
-        all_shape
+        resolver.resolve(all_shape)
     }
+}
+
+/// Helper to get the field from a shape or error if the object doesn't have that field.
+fn field(
+    shape: &Shape,
+    key: &WithRange<Key>,
+    resolver: Resolver,
+    source_id: &SourceId,
+) -> ResolvedShape {
+    let field_shape = shape.field(key.as_str(), key.shape_location(source_id));
+    if field_shape.is_none() {
+        return resolver.resolve(Shape::error(
+            format!("field `{field}` not found", field = key.as_str()),
+            key.shape_location(source_id),
+        ));
+    }
+    resolver.resolve(field_shape)
 }
 
 #[cfg(test)]

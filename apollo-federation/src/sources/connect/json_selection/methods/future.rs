@@ -2,12 +2,8 @@
 // JSONSelection strings in connector schemas, but have proposed implementations
 // and tests. After careful review, they may one day move to public.rs.
 
-use std::iter::empty;
-
-use apollo_compiler::collections::IndexMap;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
-use shape::location::SourceId;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -20,6 +16,9 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::ResolvedShape;
+use crate::sources::connect::json_selection::shape::Resolver;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
@@ -53,26 +52,21 @@ fn typeof_method(
     }
 }
 fn typeof_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
+    _input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     // TODO Compute this union type once and clone it here.
-    let locations = method_name.shape_location(source_id);
-    Shape::one(
-        [
-            Shape::string_value("null", locations.clone()),
-            Shape::string_value("boolean", locations.clone()),
-            Shape::string_value("number", locations.clone()),
-            Shape::string_value("string", locations.clone()),
-            Shape::string_value("array", locations.clone()),
-            Shape::string_value("object", locations.clone()),
-        ],
-        locations,
-    )
+    resolver.resolve(Shape::one([
+        Shape::string_value("null"),
+        Shape::string_value("boolean"),
+        Shape::string_value("number"),
+        Shape::string_value("string"),
+        Shape::string_value("array"),
+        Shape::string_value("object"),
+    ]))
 }
 
 impl_arrow_method!(EqMethod, eq_method, eq_shape);
@@ -110,14 +104,13 @@ fn eq_method(
     )
 }
 fn eq_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
-    Shape::bool(method_name.shape_location(source_id))
+    _input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
+    resolver.resolve(Shape::bool())
 }
 
 // Like ->match, but expects the first element of each pair to evaluate to a
@@ -176,11 +169,10 @@ fn match_if_method(
 fn match_if_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     use super::super::methods::public::match_shape;
     // Since match_shape does not inspect the candidate expressions, we can
     // reuse it for ->matchIf, where the only functional difference is that the
@@ -190,8 +182,7 @@ fn match_if_shape(
         method_args,
         input_shape,
         dollar_shape,
-        named_var_shapes,
-        source_id,
+        resolver,
     )
 }
 
@@ -296,14 +287,13 @@ infix_math_op!(div_op, /);
 infix_math_op!(rem_op, %);
 
 fn math_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
-    Shape::error("TODO: math_shape", method_name.shape_location(source_id))
+    _input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
+    resolver.resolve(Shape::error("TODO: math_shape"))
 }
 
 macro_rules! infix_math_method {
@@ -423,16 +413,15 @@ fn has_method(
     }
 }
 fn has_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
+    _input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     // TODO We could be more clever here (sometimes) based on the input_shape
     // and argument shapes.
-    Shape::bool(method_name.shape_location(source_id))
+    resolver.resolve(Shape::bool())
 }
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
@@ -635,25 +624,23 @@ fn get_method(
 fn get_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
             let index_shape = index_literal.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
-                named_var_shapes,
-                source_id,
+                resolver,
             );
-            return match index_shape.case() {
+            return resolver.resolve(match index_shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
                     ShapeCase::Object { fields, rest } => {
                         if let Some(literal_name) = value_opt {
                             if let Some(shape) = fields.get(literal_name.as_str()) {
-                                return shape.clone();
+                                return resolver.resolve(shape.clone());
                             }
                         }
                         let mut value_shapes = fields.values().cloned().collect::<Vec<_>>();
@@ -661,28 +648,25 @@ fn get_shape(
                             value_shapes.push(rest.clone());
                         }
                         value_shapes.push(Shape::none());
-                        Shape::one(value_shapes, Vec::new())
+                        Shape::one(value_shapes)
                     }
-                    ShapeCase::Array { .. } => Shape::error(
+                    ShapeCase::Array { .. } => Shape::error_with_range(
                         format!(
                             "Method ->{} applied to array requires integer index, not string",
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.range(),
                     ),
-                    ShapeCase::String(_) => Shape::error(
+                    ShapeCase::String(_) => Shape::error_with_range(
                         format!(
                             "Method ->{} applied to string requires integer index, not string",
                             method_name.as_ref()
                         )
                         .as_str(),
-                        index_literal.shape_location(source_id),
+                        index_literal.range(),
                     ),
-                    _ => Shape::error(
-                        "Method ->get requires an object, array, or string input",
-                        method_name.shape_location(source_id),
-                    ),
+                    _ => Shape::error("Method ->get requires an object, array, or string input"),
                 },
 
                 ShapeCase::Int(value_opt) => {
@@ -690,61 +674,58 @@ fn get_shape(
                         ShapeCase::Array { prefix, tail } => {
                             if let Some(index) = value_opt {
                                 if let Some(item) = prefix.get(*index as usize) {
-                                    return item.clone();
+                                    return resolver.resolve(item.clone());
                                 }
                             }
                             // If tail.is_none(), this will simplify to Shape::none().
-                            Shape::one([tail.clone(), Shape::none()], empty())
+                            Shape::one([tail.clone(), Shape::none()])
                         }
 
                         ShapeCase::String(Some(s)) => {
                             if let Some(index) = value_opt {
                                 let index = *index as usize;
                                 if index < s.len() {
-                                    Shape::string_value(&s[index..index + 1], empty())
+                                    Shape::string_value(&s[index..index + 1])
                                 } else {
                                     Shape::none()
                                 }
                             } else {
-                                Shape::one([Shape::string(empty()), Shape::none()], empty())
+                                Shape::one([Shape::string(), Shape::none()])
                             }
                         }
-                        ShapeCase::String(None) => {
-                            Shape::one([Shape::string(empty()), Shape::none()], empty())
-                        }
+                        ShapeCase::String(None) => Shape::one([Shape::string(), Shape::none()]),
 
-                        ShapeCase::Object { .. } => Shape::error(
+                        ShapeCase::Object { .. } => Shape::error_with_range(
                             format!(
                                 "Method ->{} applied to object requires string index, not integer",
                                 method_name.as_ref()
                             )
                             .as_str(),
-                            index_literal.shape_location(source_id),
+                            index_literal.range(),
                         ),
 
-                        _ => Shape::error(
-                            "Method ->get requires an object, array, or string input",
-                            method_name.shape_location(source_id),
-                        ),
+                        _ => {
+                            Shape::error("Method ->get requires an object, array, or string input")
+                        }
                     }
                 }
 
-                _ => Shape::error(
+                _ => Shape::error_with_range(
                     format!(
                         "Method ->{} requires an integer or string argument",
                         method_name.as_ref()
                     )
                     .as_str(),
-                    index_literal.shape_location(source_id),
+                    index_literal.range(),
                 ),
-            };
+            });
         }
     }
 
-    Shape::error(
+    resolver.resolve(Shape::error_with_range(
         format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
-        method_name.shape_location(source_id),
-    )
+        method_name.range(),
+    ))
 }
 
 impl_arrow_method!(KeysMethod, keys_method, keys_shape);
@@ -790,20 +771,19 @@ fn keys_method(
     }
 }
 fn keys_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
-    match input_shape.case() {
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
+    resolver.resolve(match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
             // Any statically known field names become string literal shapes in
             // the resulting keys array.
             let keys_vec = fields
                 .keys()
-                .map(|key| Shape::string_value(key.as_str(), empty()))
+                .map(|key| Shape::string_value(key.as_str()))
                 .collect::<Vec<_>>();
 
             Shape::array(
@@ -813,16 +793,12 @@ fn keys_shape(
                 if rest.is_none() {
                     Shape::none()
                 } else {
-                    Shape::string(empty())
+                    Shape::string()
                 },
-                empty(),
             )
         }
-        _ => Shape::error(
-            "Method ->keys requires an object input",
-            method_name.shape_location(source_id),
-        ),
-    }
+        _ => Shape::error("Method ->keys requires an object input"),
+    })
 }
 
 impl_arrow_method!(ValuesMethod, values_method, values_shape);
@@ -868,22 +844,18 @@ fn values_method(
     }
 }
 fn values_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
-    match input_shape.case() {
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
+    resolver.resolve(match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
-            Shape::array(fields.values().cloned(), rest.clone(), empty())
+            Shape::array(fields.values().cloned(), rest.clone())
         }
-        _ => Shape::error(
-            "Method ->values requires an object input",
-            method_name.shape_location(source_id),
-        ),
-    }
+        _ => Shape::error("Method ->values requires an object input"),
+    })
 }
 
 impl_arrow_method!(NotMethod, not_method, not_shape);
@@ -912,29 +884,20 @@ fn not_method(
     }
 }
 fn not_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
-    match input_shape.case() {
-        ShapeCase::Bool(Some(value)) => {
-            Shape::bool_value(!*value, method_name.shape_location(source_id))
-        }
-        ShapeCase::Int(Some(value)) => {
-            Shape::bool_value(*value == 0, method_name.shape_location(source_id))
-        }
-        ShapeCase::String(Some(value)) => {
-            Shape::bool_value(value.is_empty(), method_name.shape_location(source_id))
-        }
-        ShapeCase::Null => Shape::bool_value(true, method_name.shape_location(source_id)),
-        ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-            Shape::bool_value(false, method_name.shape_location(source_id))
-        }
-        _ => Shape::bool(method_name.shape_location(source_id)),
-    }
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
+    resolver.resolve(match input_shape.case() {
+        ShapeCase::Bool(Some(value)) => Shape::bool_value(!*value),
+        ShapeCase::Int(Some(value)) => Shape::bool_value(*value == 0),
+        ShapeCase::String(Some(value)) => Shape::bool_value(value.is_empty()),
+        ShapeCase::Null => Shape::bool_value(true),
+        ShapeCase::Array { .. } | ShapeCase::Object { .. } => Shape::bool_value(false),
+        _ => Shape::bool(),
+    })
 }
 
 fn is_truthy(data: &JSON) -> bool {
@@ -983,56 +946,51 @@ fn or_method(
     }
 }
 fn or_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     match input_shape.case() {
         ShapeCase::Bool(Some(true)) => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(true));
         }
         ShapeCase::Int(Some(value)) if *value != 0 => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(true));
         }
         ShapeCase::String(Some(value)) if !value.is_empty() => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(true));
         }
         ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(true));
         }
         _ => {}
     };
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
-            let arg_shape = arg.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape.clone(),
-                named_var_shapes,
-                source_id,
-            );
+            let arg_shape =
+                arg.compute_output_shape(input_shape.clone(), dollar_shape.clone(), resolver);
             match arg_shape.case() {
                 ShapeCase::Bool(Some(true)) => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(true));
                 }
                 ShapeCase::Int(Some(value)) if *value != 0 => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(true));
                 }
                 ShapeCase::String(Some(value)) if !value.is_empty() => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(true));
                 }
                 ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(true));
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    resolver.resolve(Shape::bool())
 }
 
 impl_arrow_method!(AndMethod, and_method, and_shape);
@@ -1071,54 +1029,49 @@ fn and_method(
     }
 }
 fn and_shape(
-    method_name: &WithRange<String>,
+    _method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
-    source_id: &SourceId,
-) -> Shape {
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
+) -> ResolvedShape {
     match input_shape.case() {
         ShapeCase::Bool(Some(false)) => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(false));
         }
         ShapeCase::Int(Some(value)) if *value == 0 => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(false));
         }
         ShapeCase::String(Some(value)) if value.is_empty() => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(false));
         }
         ShapeCase::Null => {
-            return Shape::bool_value(false, method_name.shape_location(source_id));
+            return resolver.resolve(Shape::bool_value(false));
         }
         _ => {}
     };
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
-            let arg_shape = arg.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape.clone(),
-                named_var_shapes,
-                source_id,
-            );
+            let arg_shape =
+                arg.compute_output_shape(input_shape.clone(), dollar_shape.clone(), resolver);
             match arg_shape.case() {
                 ShapeCase::Bool(Some(false)) => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(false));
                 }
                 ShapeCase::Int(Some(value)) if *value == 0 => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(false));
                 }
                 ShapeCase::String(Some(value)) if value.is_empty() => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(false));
                 }
                 ShapeCase::Null => {
-                    return Shape::bool_value(false, method_name.shape_location(source_id));
+                    return resolver.resolve(Shape::bool_value(false));
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    resolver.resolve(Shape::bool())
 }

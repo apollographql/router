@@ -642,6 +642,9 @@ mod test_validate_source {
     fn validation_tests() {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
+                if path.to_string_lossy().contains("no-snapshot") {
+                    return;
+                }
                 let schema = read_to_string(path).unwrap();
                 let result = validate(&schema, path.to_str().unwrap());
                 assert_snapshot!(format!("{:#?}", result.errors));

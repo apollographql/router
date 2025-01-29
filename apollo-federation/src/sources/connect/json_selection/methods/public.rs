@@ -1,6 +1,3 @@
-use std::iter::empty;
-
-use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
@@ -10,6 +7,8 @@ use shape::ShapeCase;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
+use crate::sources::connect::json_selection::apply_to::ResolvedShape;
+use crate::sources::connect::json_selection::apply_to::Resolver;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
@@ -52,23 +51,18 @@ fn echo_method(
 fn echo_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
-        return first_arg.compute_output_shape(
-            input_shape,
-            dollar_shape,
-            named_var_shapes,
-            source_id,
-        );
+        return first_arg.compute_output_shape(input_shape, dollar_shape, resolver, source_id);
     }
-    Shape::error(
+    resolver.resolve(Shape::error(
         format!("Method ->{} requires one argument", method_name.as_ref()),
         method_name.shape_location(source_id),
-    )
+    ))
 }
 
 impl_arrow_method!(MapMethod, map_method, map_shape);
@@ -136,48 +130,55 @@ fn map_method(
 fn map_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
-        return Shape::error(
+        return resolver.resolve(Shape::error(
             format!("Method ->{} requires one argument", method_name.as_ref()),
             method_name.shape_location(source_id),
-        );
+        ));
     };
-    match input_shape.case() {
+    let shape = match input_shape.case() {
         ShapeCase::Array { prefix, tail } => {
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    first_arg.compute_output_shape(
-                        shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    )
+                    first_arg
+                        .compute_output_shape(
+                            resolver.resolve(shape.clone()),
+                            dollar_shape.clone(),
+                            resolver,
+                            source_id,
+                        )
+                        .into()
                 })
                 .collect::<Vec<_>>();
-            let new_tail = first_arg.compute_output_shape(
-                tail.clone(),
-                dollar_shape.clone(),
-                named_var_shapes,
-                source_id,
-            );
-            Shape::array(new_prefix, new_tail, input_shape.locations)
+            let new_tail = first_arg
+                .compute_output_shape(
+                    resolver.resolve(tail.clone()),
+                    dollar_shape.clone(),
+                    resolver,
+                    source_id,
+                )
+                .into();
+            Shape::array(new_prefix, new_tail, input_shape.into_locations())
         }
         _ => Shape::list(
-            first_arg.compute_output_shape(
-                input_shape.any_item([]),
-                dollar_shape.clone(),
-                named_var_shapes,
-                source_id,
-            ),
-            input_shape.locations,
+            first_arg
+                .compute_output_shape(
+                    resolver.resolve(input_shape.any_item([])),
+                    dollar_shape.clone(),
+                    resolver,
+                    source_id,
+                )
+                .into(),
+            input_shape.into_locations(),
         ),
-    }
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(MatchMethod, match_method, match_shape);
@@ -239,12 +240,12 @@ fn match_method(
 pub(super) fn match_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
-    if let Some(MethodArgs { args, .. }) = method_args {
+) -> ResolvedShape {
+    let shape = if let Some(MethodArgs { args, .. }) = method_args {
         let mut result_union = Vec::new();
         let mut has_infallible_case = false;
 
@@ -259,12 +260,14 @@ pub(super) fn match_shape(
                         }
                     };
 
-                    let value_shape = pair[1].compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_var_shapes,
-                        source_id,
-                    );
+                    let value_shape = pair[1]
+                        .compute_output_shape(
+                            input_shape.clone(),
+                            dollar_shape.clone(),
+                            resolver,
+                            source_id,
+                        )
+                        .into();
                     result_union.push(value_shape);
                 }
             }
@@ -297,7 +300,8 @@ pub(super) fn match_shape(
             ),
             method_name.shape_location(source_id),
         )
-    }
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(FirstMethod, first_method, first_shape);
@@ -346,26 +350,26 @@ fn first_method(
 fn first_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     let location = method_name.shape_location(source_id);
     if method_args.is_some() {
-        return Shape::error(
+        return resolver.resolve(Shape::error(
             format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
             location,
-        );
+        ));
     }
 
     // Location is not solely based on the method, but also the type the method is being applied to
     let locations = input_shape.locations.iter().cloned().chain(location);
 
-    match input_shape.case() {
+    let shape = match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
         ShapeCase::String(None) => Shape::string(locations),
         ShapeCase::Array { prefix, tail } => {
@@ -377,11 +381,11 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()], locations)
             }
         }
-        ShapeCase::Name(_, _) => input_shape.item(0, locations),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.
-        _ => input_shape.clone(),
-    }
+        _ => input_shape.into(),
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(LastMethod, last_method, last_shape);
@@ -430,22 +434,22 @@ fn last_method(
 fn last_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     if method_args.is_some() {
-        return Shape::error(
+        return resolver.resolve(Shape::error(
             format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
             method_name.shape_location(source_id),
-        );
+        ));
     }
 
-    match input_shape.case() {
+    let shape = match input_shape.case() {
         ShapeCase::String(Some(value)) => {
             if let Some(last_char) = value.chars().last() {
                 Shape::string_value(
@@ -485,8 +489,9 @@ fn last_shape(
         ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
         // When there is no obvious last element, ->last gives us the input
         // value itself, which has input_shape.
-        _ => input_shape.clone(),
-    }
+        _ => input_shape.into(),
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(SliceMethod, slice_method, slice_shape);
@@ -582,39 +587,37 @@ fn slice_method(
 fn slice_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     // There are more clever shapes we could compute here (when start and end
     // are statically known integers and input_shape is an array or string with
     // statically known prefix elements, for example) but for now we play it
     // safe (and honest) by returning a new variable-length array whose element
     // shape is a union of the original element (prefix and tail) shapes.
-    match input_shape.case() {
+    let shape = match input_shape.case() {
         ShapeCase::Array { prefix, tail } => {
             let mut one_shapes = prefix.clone();
             if !tail.is_none() {
                 one_shapes.push(tail.clone());
             }
-            Shape::array([], Shape::one(one_shapes, empty()), input_shape.locations)
+            Shape::array([], Shape::one(one_shapes, []), input_shape.into_locations())
         }
-        ShapeCase::String(_) => Shape::string(input_shape.locations),
-        ShapeCase::Name(_, _) => input_shape, // TODO: add a way to validate inputs after name resolution
+        ShapeCase::String(_) => Shape::string(input_shape.into_locations()),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array or string input",
                 method_name.as_ref()
             ),
-            {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
-                input_shape.locations
-            },
+            input_shape
+                .into_locations()
+                .into_iter()
+                .chain(method_name.shape_location(source_id)),
         ),
-    }
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(SizeMethod, size_method, size_shape);
@@ -672,22 +675,22 @@ fn size_method(
 fn size_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     if method_args.is_some() {
-        return Shape::error(
+        return resolver.resolve(Shape::error(
             format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
             method_name.shape_location(source_id),
-        );
+        ));
     }
 
-    match input_shape.case() {
+    let shape = match input_shape.case() {
         ShapeCase::String(Some(value)) => {
             Shape::int_value(value.len() as i64, method_name.shape_location(source_id))
         }
@@ -712,14 +715,13 @@ fn size_shape(
                 "Method ->{} requires an array, string, or object input",
                 method_name.as_ref()
             ),
-            {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
-                input_shape.locations
-            },
+            input_shape
+                .into_locations()
+                .into_iter()
+                .chain(method_name.shape_location(source_id)),
         ),
-    }
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(EntriesMethod, entries_method, entries_shape);
@@ -775,31 +777,28 @@ fn entries_method(
 fn entries_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
+) -> ResolvedShape {
     if method_args.is_some() {
-        return Shape::error(
+        return resolver.resolve(Shape::error(
             format!(
                 "Method ->{} does not take any arguments",
                 method_name.as_ref()
             ),
             method_name.shape_location(source_id),
-        );
+        ));
     }
 
-    match input_shape.case() {
+    let shape = match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
             let entry_shapes = fields
                 .iter()
                 .map(|(key, value)| {
                     let mut key_value_pair = Shape::empty_map();
-                    key_value_pair.insert(
-                        "key".to_string(),
-                        Shape::string_value(key.as_str(), Vec::new()),
-                    );
+                    key_value_pair.insert("key".to_string(), Shape::string_value(key.as_str(), []));
                     key_value_pair.insert("value".to_string(), value.clone());
                     Shape::object(
                         key_value_pair,
@@ -817,7 +816,7 @@ fn entries_shape(
                 )
             } else {
                 let mut tail_key_value_pair = Shape::empty_map();
-                tail_key_value_pair.insert("key".to_string(), Shape::string(Vec::new()));
+                tail_key_value_pair.insert("key".to_string(), Shape::string([]));
                 tail_key_value_pair.insert("value".to_string(), rest.clone());
                 Shape::array(
                     entry_shapes,
@@ -830,29 +829,15 @@ fn entries_shape(
                 )
             }
         }
-        ShapeCase::Name(_, _) => {
-            let mut entries = Shape::empty_map();
-            entries.insert("key".to_string(), Shape::string(Vec::new()));
-            entries.insert("value".to_string(), input_shape.any_field(Vec::new()));
-            Shape::list(
-                Shape::object(
-                    entries,
-                    Shape::none(),
-                    method_name.shape_location(source_id),
-                ),
-                method_name.shape_location(source_id),
-            )
-        }
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
-            {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
-                input_shape.locations
-            },
+            input_shape
+                .into_locations()
+                .into_iter()
+                .chain(method_name.shape_location(source_id)),
         ),
-    }
+    };
+    resolver.resolve(shape)
 }
 
 impl_arrow_method!(
@@ -901,10 +886,10 @@ fn json_stringify_method(
 fn json_stringify_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _input_shape: ResolvedShape,
+    _dollar_shape: ResolvedShape,
+    resolver: Resolver,
     source_id: &SourceId,
-) -> Shape {
-    Shape::string(method_name.shape_location(source_id))
+) -> ResolvedShape {
+    resolver.resolve(Shape::string(method_name.shape_location(source_id)))
 }

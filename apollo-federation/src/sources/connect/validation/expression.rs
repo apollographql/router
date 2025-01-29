@@ -2,7 +2,6 @@
 //! runtime, _only_ during composition because it could be expensive.
 
 use std::ops::Range;
-use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
@@ -10,7 +9,6 @@ use itertools::Itertools;
 use shape::graphql::shape_for_arguments;
 use shape::location::Location;
 use shape::location::SourceId;
-use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 
@@ -116,9 +114,23 @@ pub(crate) fn validate(
     context: &Context,
     expected_shape: &Shape,
 ) -> Result<(), Message> {
-    let shape = expression.expression.shape();
+    let shape_lookup: IndexMap<&str, Shape> = context
+        .var_lookup
+        .iter()
+        .map(|(name, shape)| (name.as_str(), shape.clone()))
+        .chain(
+            context
+                .schema
+                .shape_lookup
+                .iter()
+                .map(|(name, shape)| (*name, shape.clone())),
+        )
+        .collect();
 
-    let actual_shape = resolve_shape(&shape, context, expression)?;
+    let actual_shape = expression.expression.output_shape(&shape_lookup);
+
+    check_for_errors(&actual_shape, context, expression)?;
+
     if let Some(mismatch) = expected_shape
         .validate(&actual_shape)
         .into_iter()
@@ -138,146 +150,83 @@ pub(crate) fn validate(
     }
 }
 
-/// Validate that the shape is an acceptable output shape for an Expression.
-fn resolve_shape(
+/// Check for any `ShapeCase::Error` or `ShapeCase::Name` and return them all as errors.
+fn check_for_errors(
     shape: &Shape,
     context: &Context,
     expression: &Expression,
-) -> Result<Shape, Message> {
-    match shape.case() {
-        ShapeCase::One(shapes) => {
-            let mut inners = Vec::new();
-            for inner in shapes {
-                inners.push(resolve_shape(
-                    &inner.with_locations(shape.locations.clone()),
-                    context,
-                    expression,
-                )?);
-            }
-            Ok(Shape::one(inners, []))
-        }
-        ShapeCase::All(shapes) => {
-            let mut inners = Vec::new();
-            for inner in shapes {
-                inners.push(resolve_shape(
-                    &inner.with_locations(shape.locations.clone()),
-                    context,
-                    expression,
-                )?);
-            }
-            Ok(Shape::all(inners, []))
-        }
-        ShapeCase::Name(name, key) => {
-            let mut resolved = if name.value == "$root" {
-                let mut key_str = key.iter().map(|key| key.to_string()).join(".");
-                if !key_str.is_empty() {
-                    key_str = format!("`{key_str}` ");
-                }
+) -> Result<(), Message> {
+    let mut shapes = vec![shape];
+    while let Some(shape) = shapes.pop() {
+        match shape.case() {
+            ShapeCase::Error(error) => {
                 return Err(Message {
                     code: context.code,
-                    message: format!(
-                        "{key_str}must start with one of {namespaces}",
-                        namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
-                    ),
-                    locations: transform_locations(
-                        key.first()
-                            .map(|key| &key.locations)
-                            .unwrap_or(&shape.locations),
-                        context,
-                        expression,
-                    ),
-                });
-            } else if name.value.starts_with('$') {
-                let namespace = Namespace::from_str(&name.value).map_err(|_| Message {
-                    code: context.code,
-                    message: format!(
-                        "unknown variable `{name}`, must be one of {namespaces}",
-                        namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
-                    ),
+                    message: error.message.clone(),
                     locations: transform_locations(&shape.locations, context, expression),
-                })?;
-                context
-                    .var_lookup
-                    .get(&namespace)
-                    .ok_or_else(|| Message {
-                        code: context.code,
-                        message: format!(
-                            "{namespace} is not valid here, must be one of {namespaces}",
-                            namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
-                        ),
-                        locations: transform_locations(&shape.locations, context, expression),
-                    })?
-                    .clone()
-            } else {
-                context
-                    .schema
-                    .shape_lookup
-                    .get(name.value.as_str())
-                    .cloned()
-                    .ok_or_else(|| Message {
-                        code: context.code,
-                        message: format!("unknown type `{name}`"),
-                        locations: transform_locations(&name.locations, context, expression),
-                    })?
-            };
-            resolved.locations.extend(shape.locations.iter().cloned());
-            let mut path = name.value.clone();
-            for key in key {
-                let child = resolved.child(key.clone());
-                if child.is_none() {
-                    let message = match key.value {
-                        NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
-                            format!("`{path}` is not an array or string")
-                        }
-
-                        NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
-                            format!("`{path}` doesn't have a field named `{key}`")
-                        }
-                    };
-                    return Err(Message {
-                        code: context.code,
-                        message,
-                        locations: transform_locations(&key.locations, context, expression),
-                    });
-                }
-                resolved = child;
-                path = format!("{path}.{key}");
+                })
             }
-            resolve_shape(&resolved, context, expression)
-        }
-        ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
-            code: context.code,
-            message: message.clone(),
-            locations: transform_locations(&shape.locations, context, expression),
-        }),
-        ShapeCase::Array { prefix, tail } => {
-            let prefix = prefix
-                .iter()
-                .map(|shape| resolve_shape(shape, context, expression))
-                .collect::<Result<Vec<_>, _>>()?;
-            let tail = resolve_shape(&tail, context, expression)?;
-            Ok(Shape::array(prefix, tail, shape.locations.clone()))
-        }
-        ShapeCase::Object { fields, rest } => {
-            let mut resolved_fields = Shape::empty_map();
-            for (key, value) in fields {
-                resolved_fields.insert(key.clone(), resolve_shape(value, context, expression)?);
+            ShapeCase::Name(name, path) => {
+                return Err({
+                    if name.value.as_str() == "$root" {
+                        let mut key_str = path.iter().map(|key| key.to_string()).join(".");
+                        if !key_str.is_empty() {
+                            key_str = format!("`{key_str}` ");
+                        }
+                        Message {
+                            code: context.code,
+                            message: format!(
+                                // Any unresolved name at this point is a problem
+                                "{key_str}must start with one of {namespaces}",
+                                namespaces =
+                                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                            ),
+                            locations: transform_locations(
+                                path.first()
+                                    .map(|key| &key.locations)
+                                    .unwrap_or(&shape.locations),
+                                context,
+                                expression,
+                            ),
+                        }
+                    } else {
+                        Message {
+                            code: context.code,
+                            message: format!(
+                                // Any unresolved name at this point is a problem
+                                "`{name}` is not valid here, must be one of {namespaces}",
+                                namespaces =
+                                    context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
+                            ),
+                            locations: transform_locations(&name.locations, context, expression),
+                        }
+                    }
+                });
             }
-            let resolved_rest = resolve_shape(rest, context, expression)?;
-            Ok(Shape::object(
-                resolved_fields,
-                resolved_rest,
-                shape.locations.clone(),
-            ))
+            ShapeCase::Array { prefix, tail } => {
+                shapes.extend(prefix.iter().chain(Some(tail)));
+            }
+            ShapeCase::One(inner) => {
+                shapes.extend(inner);
+            }
+            ShapeCase::All(inner) => {
+                shapes.extend(inner);
+            }
+            ShapeCase::Object { fields, rest } => {
+                shapes.extend(fields.values());
+                shapes.push(rest);
+            }
+            ShapeCase::Bool(_)
+            | ShapeCase::String(_)
+            | ShapeCase::Int(_)
+            | ShapeCase::Float
+            | ShapeCase::Null
+            | ShapeCase::Unknown
+            | ShapeCase::None => {}
         }
-        ShapeCase::None
-        | ShapeCase::Bool(_)
-        | ShapeCase::String(_)
-        | ShapeCase::Int(_)
-        | ShapeCase::Float
-        | ShapeCase::Null
-        | ShapeCase::Unknown => Ok(shape.clone()),
     }
+
+    Ok(())
 }
 
 fn transform_locations<'a>(
@@ -350,44 +299,7 @@ mod tests {
         }
     }
 
-    const SCHEMA: &str = r#"
-        extend schema
-          @link(
-            url: "https://specs.apollo.dev/connect/v0.1"
-            import: ["@connect", "@source"]
-          )
-          @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
-
-        type Query {
-          aField(
-            int: Int
-            string: String
-            customScalar: CustomScalar
-            object: InputObject
-            array: [InputObject]
-            multiLevel: MultiLevelInput
-          ): AnObject  @connect(source: "v2", http: {GET: """{EXPRESSION}"""})
-          something: String
-        }
-
-        scalar CustomScalar
-
-        input InputObject {
-          bool: Boolean
-        }
-
-        type AnObject {
-          bool: Boolean
-        }
-
-        input MultiLevelInput {
-            inner: MultiLevel
-        }
-
-        type MultiLevel {
-            nested: String
-        }
-    "#;
+    const SCHEMA: &str = include_str!("test_data/no-snapshot/expressions.graphql");
 
     fn schema_for(selection: &str) -> String {
         SCHEMA.replace("EXPRESSION", selection)

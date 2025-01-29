@@ -1,0 +1,38 @@
+# A placeholder schema used for tests in `expression.rs`
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
+
+type Query {
+  aField(
+    int: Int
+    string: String
+    customScalar: CustomScalar
+    object: InputObject
+    array: [InputObject]
+    multiLevel: MultiLevelInput
+  ): AnObject  @connect(source: "v2", http: {GET: """{EXPRESSION}"""})
+  something: String
+}
+
+scalar CustomScalar
+
+input InputObject {
+  bool: Boolean
+}
+
+type AnObject {
+  bool: Boolean
+}
+
+input MultiLevelInput {
+    inner: MultiLevel
+}
+
+type MultiLevel {
+    nested: String
+}
+    

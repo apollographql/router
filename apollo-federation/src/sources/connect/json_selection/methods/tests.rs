@@ -1,5 +1,7 @@
+use apollo_compiler::collections::IndexMap;
 use insta::assert_debug_snapshot;
 use serde_json_bytes::json;
+use shape::Shape;
 
 use super::*;
 use crate::selection;
@@ -211,11 +213,9 @@ fn test_map_method() {
             json_selection.apply_to(&single_value_data),
             (Some(json!(["123"])), vec![]),
         );
-        let output_shape = json_selection.compute_output_shape(
-            Shape::from_json_bytes(&single_value_data),
-            &IndexMap::default(),
-            &SourceId::new("test"),
-        );
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert("$root", Shape::from_json_bytes(&single_value_data));
+        let output_shape = json_selection.output_shape(&named_shapes);
         assert_eq!(output_shape.pretty_print(), "List<String>");
     }
 }
