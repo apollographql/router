@@ -12,15 +12,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt as TowerServiceExt;
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-=======
-use super::connectors::query_plans::replace_connector_service_names;
-use super::connectors::query_plans::replace_connector_service_names_text;
->>>>>>> c8d9cb46 (context key revert + minimizing git diffs)
 use crate::layers::ServiceBuilderExt;
->>>>>>> 0794c19c (feat: dry running query planner)
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -66,26 +58,6 @@ impl Plugin for ExposeQueryPlan {
     }
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-<<<<<<< HEAD
-        service
-            .map_request(move |req: execution::Request| {
-                if req
-                    .context
-                    .get::<_, bool>(ENABLED_CONTEXT_KEY)
-                    .ok()
-                    .flatten()
-                    .is_some()
-                {
-                    req.context
-                        .insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone())
-                        .unwrap();
-                    req.context
-                        .insert(
-                            FORMATTED_QUERY_PLAN_CONTEXT_KEY,
-                            req.query_plan.formatted_query_plan.clone(),
-                        )
-                        .unwrap();
-=======
         ServiceBuilder::new()
             .checkpoint(|req: execution::Request| {
                 let setting = req
@@ -96,29 +68,9 @@ impl Plugin for ExposeQueryPlan {
                     .unwrap_or(Setting::Disabled);
 
                 if !matches!(setting, Setting::Disabled) {
-                    let plan =
-                        replace_connector_service_names(req.query_plan.root.clone(), &req.context);
-                    let text = replace_connector_service_names_text(
-                        req.query_plan.formatted_query_plan.clone(),
-                        &req.context,
-                    );
-
-<<<<<<< HEAD
-                    if matches!(setting, Setting::DryRun) {
-                        Ok(ControlFlow::Break(
-                            execution::Response::error_builder()
-                                .errors(vec![])
-                                .context(req.context)
-                                .build()?,
-                        ))
-                    } else {
-                        Ok(ControlFlow::Continue(req))
-                    }
->>>>>>> 0794c19c (feat: dry running query planner)
-=======
-                    req.context.insert(QUERY_PLAN_CONTEXT_KEY, plan).unwrap();
+                    req.context.insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone()).unwrap();
                     req.context
-                        .insert(FORMATTED_QUERY_PLAN_CONTEXT_KEY, text)
+                        .insert(FORMATTED_QUERY_PLAN_CONTEXT_KEY, req.query_plan.formatted_query_plan.clone())
                         .unwrap();
                 }
                 if matches!(setting, Setting::DryRun) {
@@ -130,7 +82,6 @@ impl Plugin for ExposeQueryPlan {
                     ))
                 } else {
                     Ok(ControlFlow::Continue(req))
->>>>>>> eb142e26 (fixing after rebase + include connectors logic that was clobbered)
                 }
             })
             .service(service)
