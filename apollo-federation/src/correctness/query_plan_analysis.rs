@@ -306,6 +306,9 @@ fn rename_at_path(
             rename_at_path(schema, state, type_filter, rest, new_name)
         }
         FetchDataPathElement::TypenameEquals(type_name) => {
+            if type_filter.is_some() {
+                return Err("rename_at_path: multiple type filters".to_string());
+            }
             let type_filter = Some(type_name.clone());
             rename_at_path(schema, state, type_filter, rest, new_name)
         }
