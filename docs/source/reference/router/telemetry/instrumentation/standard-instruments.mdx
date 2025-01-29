@@ -17,15 +17,15 @@ These instruments can be consumed by configuring a [metrics exporter](/router/co
 
 ### Session
 
-- `apollo_router_session_count_active` - Number of in-flight GraphQL requests
+- `apollo.router.session.count.active` - Number of in-flight GraphQL requests
 
 ### Cache
 
-- `apollo_router_cache_size` — Number of entries in the cache
-- `apollo_router_cache_hit_count` - Number of cache hits
-- `apollo_router_cache_miss_count` - Number of cache misses
-- `apollo_router_cache_hit_time` - Time to hit the cache in seconds
-- `apollo_router_cache_miss_time` - Time to miss the cache in seconds
+- `apollo.router.cache.size` — Number of entries in the cache
+- `apollo.router.cache.hit.time` - Time to hit the cache in seconds
+- `apollo.router.cache.hit.time.count` - Number of cache hits
+- `apollo.router.cache.miss.time` - Time to miss the cache in seconds
+- `apollo.router.cache.miss.time.count` - Number of cache misses
 - `apollo.router.cache.storage.estimated_size` - The estimated storage size of the cache in bytes (query planner in memory only).
 
 All cache metrics listed above have the following attributes:
@@ -35,7 +35,7 @@ All cache metrics listed above have the following attributes:
 
 ### Coprocessor
 
-- `apollo_router_operations_coprocessor_total` - Total operations with coprocessors enabled.
+- `apollo.router.operations.coprocessor.total` - Total operations with coprocessors enabled.
 - `apollo.router.operations.coprocessor.duration` - Time spent waiting for the coprocessor to answer, in seconds.
 
 The coprocessor operations metric has the following attributes:
@@ -46,11 +46,11 @@ The coprocessor operations metric has the following attributes:
 ### Performance
 
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
-- `apollo_router_schema_load_duration` - Time spent loading the schema in seconds.
+- `apollo.router.schema.load.duration` - Time spent loading the schema in seconds.
 
 ### Query planning
 
-- `apollo_router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
+- `apollo.router.query_planning.warmup.duration` - Time spent warming up the query planner queries in seconds.
 - `apollo.router.query_planning.plan.duration` - Histogram of plan durations isolated to query planning time only.
 - `apollo.router.query_planning.total.duration` - Histogram of plan durations including queue time.
 - `apollo.router.query_planning.queued` - When the legacy planner is used, a gauge of the number of queued plans requests.
@@ -94,8 +94,8 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 </Tip>
 
-- `apollo_router_opened_subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
-- `apollo_router_skipped_event_count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
+- `apollo.router.opened.subscriptions` - Number of different opened subscriptions (not the number of clients with an opened subscriptions in case it's deduplicated)
+- `apollo.router.skipped.event.count` - Number of subscription events that has been skipped because too many events have been received from the subgraph but not yet sent to the client.
 
 ### Batching
 
