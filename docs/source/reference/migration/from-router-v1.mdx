@@ -411,7 +411,18 @@ For more information about [configuring traffic shaping](../../routing/performan
 
 If, in your Rust plugin, you were using either the subgraph::Request::subgraph_name or the subgraph::Response::subgraph_name, please note that these are no longer `Option`, but are mandatory.
 
-<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+### Emitting metrics in Rust plugins
+
+Previously, Rust plugins could use the Router's internal metrics system using the `tracing` macros. This is no longer supported, and the opentelemetry crates should be used instead.
+
+`tracing` field names starting with these strings are no longer treated specially:
+- `counter.`
+- `histogram.`
+- `monotonic_counter.`
+- `value.`
+
+Instead, use the [OpenTelemetry](https://docs.rs/opentelemetry/latest/opentelemetry/) crates.
+You can use the new `apollo_router::metrics::meter_provider()` API to access the router's global meter provider to register your instruments.
 
 ### Deploy your router
 
