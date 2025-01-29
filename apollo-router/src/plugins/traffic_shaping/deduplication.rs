@@ -97,7 +97,6 @@ where
                     let mut receiver = waiter.subscribe();
                     drop(locked_wait_map);
 
-                    let _guard = request.context.enter_active_request();
                     match receiver.recv().await {
                         Ok(value) => {
                             return value

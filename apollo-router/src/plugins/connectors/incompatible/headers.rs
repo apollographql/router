@@ -22,11 +22,6 @@ impl HeadersIncompatPlugin {
 }
 
 impl IncompatiblePlugin for HeadersIncompatPlugin {
-    fn is_enabled(&self) -> bool {
-        // The built-in headers plugin is always enabled
-        true
-    }
-
     fn is_applied_to_all(&self) -> bool {
         self.config.all.is_some()
     }

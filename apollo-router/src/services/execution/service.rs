@@ -377,7 +377,7 @@ impl ExecutionService {
 
             context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
+                    .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {
