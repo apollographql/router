@@ -1,0 +1,5 @@
+description: Apollo OTLP tracing is no longer experimental
+actions:
+  - type: move
+    from: telemetry.apollo.experimental_otlp_tracing_sampler
+    to: telemetry.apollo.otlp_tracing_sampler
