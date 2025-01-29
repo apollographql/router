@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use futures::stream::StreamExt;
 use http::header::CONTENT_TYPE;
@@ -10,6 +9,7 @@ use http::Method;
 use http::Uri;
 use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -576,7 +576,7 @@ async fn escaped_quotes_in_string_literal() {
             let subgraph_query_log_3 = subgraph_query_log_2.clone();
             service
                 .map_request(move |request: subgraph::Request| {
-                    subgraph_query_log_3.lock().unwrap().push((
+                    subgraph_query_log_3.lock().push((
                         subgraph_name.clone(),
                         request.subgraph_request.body().query.clone(),
                     ));
@@ -602,7 +602,7 @@ async fn escaped_quotes_in_string_literal() {
         .await
         .unwrap();
     let graphql_response = response.next_response().await.unwrap();
-    let subgraph_query_log = subgraph_query_log.lock().unwrap();
+    let subgraph_query_log = subgraph_query_log.lock();
     insta::assert_debug_snapshot!((graphql_response, &subgraph_query_log));
     let subgraph_query = subgraph_query_log[1].1.as_ref().unwrap();
 

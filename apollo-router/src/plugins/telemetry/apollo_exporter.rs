@@ -4,7 +4,6 @@ use std::io::Write;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -18,6 +17,7 @@ use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
 use http::StatusCode;
 use opentelemetry::ExportError;
+use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
@@ -193,7 +193,7 @@ impl ApolloExporter {
         }
 
         // If studio has previously told us not to submit reports, return for further processing
-        let expires_at = *self.studio_backoff.lock().unwrap();
+        let expires_at = *self.studio_backoff.lock();
         let now = Instant::now();
         if expires_at > now {
             let remaining = expires_at - now;
@@ -292,7 +292,7 @@ impl ApolloExporter {
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
                                 retry_after = returned_retry_after;
-                                *self.studio_backoff.lock().unwrap() =
+                                *self.studio_backoff.lock() =
                                     Instant::now() + Duration::from_secs(retry_after);
                             }
                             // Even if we can't update the studio_backoff, we should not continue to
