@@ -1,0 +1,48 @@
+{
+  "enterprise": true,
+  "redis": false,
+  "snapshot": true,
+  "actions": [
+    {
+      "type": "Start",
+      "schema_path": "./supergraph.graphql",
+      "configuration_path": "./configuration.yaml",
+      "subgraphs": {
+        "test": {
+          "snapshot": {
+            "path": "./http_snapshots.json",
+            "base_url": "http://localhost:4008/"
+          }
+        }
+      }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "{ f { id } }"
+      },
+      "expected_response": { "data": { "f": [{ "id": "1" }] } }
+    },
+    {
+      "type": "Request",
+      "request": {
+        "query": "{ f { id f } }"
+      },
+      "expected_response": {
+        "errors": [
+          {
+            "message": "query estimated cost 110 exceeded configured maximum 100",
+            "extensions": {
+              "cost.estimated": 110.0,
+              "cost.max": 100.0,
+              "code": "COST_ESTIMATED_TOO_EXPENSIVE"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Stop"
+    }
+  ]
+}
