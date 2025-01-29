@@ -6,37 +6,51 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/body_sele
 [
     Message {
         code: InvalidJsonSelection,
-        message: "`@connect(http: {body:})` on `Query.dollar` must contain at least one variable reference",
+        message: "In `@connect(http: {body:})` on `Query.dollar`: invalid body selection - body selections have no input to select from",
         locations: [
-            12:19..12:22,
+            12:20..12:21,
         ],
     },
     Message {
         code: InvalidJsonSelection,
-        message: "`@connect(http: {body:})` on `Query.dollarField` must contain at least one variable reference",
+        message: "In `@connect(http: {body:})` on `Query.dollarField`: invalid body selection - body selections have no input to select from",
         locations: [
-            20:19..20:26,
+            20:20..20:25,
         ],
     },
     Message {
         code: InvalidJsonSelection,
-        message: "`@connect(http: {body:})` on `Query.objectLiteral` must contain at least one variable reference",
+        message: "In `@connect(http: {body:})` on `Query.stringLiteral`: body selection cannot be a scalar literal",
         locations: [
-            28:19..28:41,
+            44:20..44:28,
         ],
     },
     Message {
         code: InvalidJsonSelection,
-        message: "`@connect(http: {body:})` on `Query.stringLiteral` must contain at least one variable reference",
+        message: "In `@connect(http: {body:})` on `Query.numericLiteral`: body selection cannot be a scalar literal",
         locations: [
-            44:19..44:29,
+            60:20..60:24,
         ],
     },
     Message {
         code: InvalidJsonSelection,
-        message: "`@connect(http: {body:})` on `Query.numericLiteral` must contain at least one variable reference",
+        message: "In `@connect(http: {body:})` on `Query.invalidArrowMethod`: Method ->no_such_method not found",
         locations: [
-            60:19..60:25,
+            68:49..68:63,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "In `@connect(http: {body:})` on `Query.invalidVariable`: unknown variable `$nosuchvariable`, must be one of $args, $config, $context, $this",
+        locations: [
+            76:32..76:47,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "In `@connect(http: {body:})` on `Query.stringLiteralFromArrowMethod`: body selection cannot be a scalar literal",
+        locations: [
+            84:20..84:62,
         ],
     },
 ]
