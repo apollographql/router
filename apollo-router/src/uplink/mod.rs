@@ -485,7 +485,6 @@ where
 #[cfg(test)]
 mod test {
     use std::collections::VecDeque;
-    use std::sync::Mutex;
     use std::time::Duration;
 
     use buildstructor::buildstructor;
@@ -493,6 +492,7 @@ mod test {
     use graphql_client::GraphQLQuery;
     use http_0_2::StatusCode;
     use insta::assert_yaml_snapshot;
+    use parking_lot::Mutex;
     use serde_json::json;
     use test_query::FetchErrorCode;
     use test_query::TestQueryUplinkQuery;
@@ -975,7 +975,6 @@ mod test {
         fn respond(&self, _request: &Request) -> ResponseTemplate {
             self.responses
                 .lock()
-                .expect("lock poisoned")
                 .pop_front()
                 .unwrap_or_else(response_fetch_error_test_error)
         }

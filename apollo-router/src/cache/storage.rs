@@ -57,8 +57,8 @@ pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
     // It's OK for these to be mutexes as they are only initialized once
-    cache_size_gauge: Arc<std::sync::Mutex<Option<ObservableGauge<i64>>>>,
-    cache_estimated_storage_gauge: Arc<std::sync::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_size_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_estimated_storage_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
 }
 
 impl<K, V> CacheStorage<K, V>
@@ -283,12 +283,9 @@ where
     pub(crate) fn activate(&self) {
         // Gauges MUST be created after the meter provider is initialized
         // This means that on reload we need a non-fallible way to recreate the gauges, hence this function.
-        *self.cache_size_gauge.lock().expect("lock poisoned") =
-            Some(self.create_cache_size_gauge());
-        *self
-            .cache_estimated_storage_gauge
-            .lock()
-            .expect("lock poisoned") = Some(self.create_cache_estimated_storage_size_gauge());
+        *self.cache_size_gauge.lock() = Some(self.create_cache_size_gauge());
+        *self.cache_estimated_storage_gauge.lock() =
+            Some(self.create_cache_estimated_storage_size_gauge());
     }
 }
 

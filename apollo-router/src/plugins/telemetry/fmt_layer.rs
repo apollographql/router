@@ -39,12 +39,9 @@ pub(crate) fn create_fmt_layer(
             tty_format,
             rate_limit,
         } if *enabled => {
-            let format = if std::io::stdout().is_terminal() && tty_format.is_some() {
-                tty_format
-                    .as_ref()
-                    .expect("checked previously in the if; qed")
-            } else {
-                format
+            let format = match tty_format {
+                Some(tty) if std::io::stdout().is_terminal() => tty,
+                _ => format,
             };
             match format {
                 Format::Json(format_config) => {
@@ -116,24 +113,20 @@ where
             attrs.record(&mut visitor);
         }
         let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<LogAttributes>().is_none() {
+        if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+            log_attrs.extend(
+                visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }),
+            );
+        } else {
             let mut fields = LogAttributes::default();
             fields.extend(
                 visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
                 }),
             );
-
             extensions.insert(fields);
-        } else if !visitor.values.is_empty() {
-            let log_attrs = extensions
-                .get_mut::<LogAttributes>()
-                .expect("LogAttributes exists, we checked just before");
-            log_attrs.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
         }
     }
 
@@ -255,8 +248,6 @@ impl field::Visit for FieldsVisitor<'_, '_> {
 mod tests {
     use std::str::FromStr;
     use std::sync::Arc;
-    use std::sync::Mutex;
-    use std::sync::MutexGuard;
 
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
@@ -268,6 +259,8 @@ mod tests {
     use apollo_federation::sources::connect::URLTemplate;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use parking_lot::Mutex;
+    use parking_lot::MutexGuard;
     use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
@@ -421,7 +414,7 @@ connector:
         type Writer = Guard<'a>;
 
         fn make_writer(&'a self) -> Self::Writer {
-            Guard(self.0.lock().unwrap())
+            Guard(self.0.lock())
         }
     }
 
@@ -438,7 +431,7 @@ connector:
 
     impl std::fmt::Display for LogBuffer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let content = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+            let content = String::from_utf8(self.0.lock().clone()).unwrap();
 
             write!(f, "{content}")
         }

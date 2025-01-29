@@ -1974,7 +1974,6 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::time::Duration;
 
     use axum_extra::headers::HeaderName;
@@ -1993,6 +1992,7 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
+    use parking_lot::Mutex;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -3019,7 +3019,7 @@ mod tests {
         }
         impl TestLayer {
             fn assert_log_entry_count(&self, message: &str, expected: usize) {
-                let log_entries = self.visitor.lock().unwrap().log_entries.clone();
+                let log_entries = self.visitor.lock().log_entries.clone();
                 let actual = log_entries.iter().filter(|e| e.contains(message)).count();
                 assert_eq!(actual, expected);
             }
@@ -3037,7 +3037,7 @@ mod tests {
             Self: 'static,
         {
             fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-                event.record(self.visitor.lock().unwrap().deref_mut())
+                event.record(self.visitor.lock().deref_mut())
             }
         }
 
