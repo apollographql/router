@@ -37,30 +37,6 @@ type Query {
         }
         selection: "$"
     )
-    stringLiteral: String
-    @connect(
-        http: {
-            POST: "http://127.0.0.1",
-            body: "$('foo')" # INVALID - output is not valid JSON
-        }
-        selection: "$"
-    )
-    stringLiteralWithVariable(userid: ID!): String
-    @connect(
-        http: {
-            POST: "http://127.0.0.1",
-            body: "$($args.userid)" # INVALID, but currently allowed - output is not valid JSON
-        }
-        selection: "$"
-    )
-    numericLiteral(userid: ID!): String
-    @connect(
-        http: {
-            POST: "http://127.0.0.1",
-            body: "$(1)" # INVALID - output is not valid JSON
-        }
-        selection: "$"
-    )
     invalidArrowMethod(userid: ID!): String
     @connect(
         http: {
@@ -74,14 +50,6 @@ type Query {
         http: {
             POST: "http://127.0.0.1",
             body: "$({ userid: $nosuchvariable })" # INVALID - no such variable
-        }
-        selection: "$"
-    )
-    stringLiteralFromArrowMethod(userid: ID!): String
-    @connect(
-        http: {
-            POST: "http://127.0.0.1",
-            body: "$({ userid: $args.userid })->jsonStringify" # INVALID - results in string literal
         }
         selection: "$"
     )

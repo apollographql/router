@@ -10,6 +10,7 @@ use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::expression;
+use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
@@ -114,7 +115,7 @@ pub(crate) fn validate_arg<'a>(
                 header_value
                     .expressions()
                     .filter_map(|expression| {
-                        expression::validate(expression, &expression_context).err()
+                        expression::validate(expression, &expression_context, &scalars()).err()
                     })
                     .map(|mut err| {
                         err.message = format!("In {coordinate}: {}", err.message);
