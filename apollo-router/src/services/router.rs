@@ -216,17 +216,6 @@ impl Response {
         self.response.body_mut().into_data_stream().next().await
     }
 
-    #[deprecated]
-    pub fn map<F>(self, f: F) -> Response
-    where
-        F: FnOnce(Body) -> Body,
-    {
-        Response {
-            context: self.context,
-            response: self.response.map(f),
-        }
-    }
-
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..

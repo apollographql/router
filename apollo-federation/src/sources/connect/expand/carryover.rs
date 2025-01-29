@@ -34,6 +34,8 @@ const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
 const REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC: Name = name!("requiresScopes");
 const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
+const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
+const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
 
 pub(super) fn carryover_directives(
     from: &FederationSchema,
@@ -179,6 +181,42 @@ pub(super) fn carryover_directives(
                 }
                 referencers.copy_directives(from, to, &directive_name)
             })?;
+    }
+
+    // @cost
+
+    if let Some(link) = metadata.for_identity(&Identity {
+        domain: APOLLO_SPEC_DOMAIN.to_string(),
+        name: COST_DIRECTIVE_NAME_IN_SPEC,
+    }) {
+        let mut insert_link = false;
+
+        let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
+        from.referencers()
+            .get_directive(&directive_name)
+            .and_then(|referencers| {
+                if referencers.len() > 0 {
+                    insert_link = true;
+                    copy_directive_definition(from, to, directive_name.clone())?;
+                }
+                referencers.copy_directives(from, to, &directive_name)
+            })?;
+
+        let directive_name = link.directive_name_in_schema(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
+        from.referencers()
+            .get_directive(&directive_name)
+            .and_then(|referencers| {
+                if referencers.len() > 0 {
+                    insert_link = true;
+                    copy_directive_definition(from, to, directive_name.clone())?;
+                }
+                referencers.copy_directives(from, to, &directive_name)
+            })?;
+
+        if insert_link {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+        }
     }
 
     // compose directive
