@@ -54,13 +54,11 @@ use crate::Supergraph;
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
-    /// If enabled, the query planner will extract inline fragments into fragment
-    /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs.
+    /// If enabled, the query planner will attempt to extract common subselections into named
+    /// fragments. This can significantly reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
-    pub generate_query_fragments_v2: bool,
 
     /// **TODO:** This option is not implemented, and the behaviour is *always enabled*.
     /// <https://github.com/apollographql/router/pull/5871>
@@ -97,7 +95,6 @@ impl Default for QueryPlannerConfig {
     fn default() -> Self {
         Self {
             generate_query_fragments: false,
-            generate_query_fragments_v2: false,
             subgraph_graphql_validation: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
@@ -389,8 +386,6 @@ impl QueryPlanner {
 
         let operation_compression = if self.config.generate_query_fragments {
             SubgraphOperationCompression::GenerateFragments
-        } else if self.config.generate_query_fragments_v2 {
-            SubgraphOperationCompression::GenerateFragmentsV2
         } else {
             SubgraphOperationCompression::Disabled
         };
@@ -779,7 +774,6 @@ fn generate_condition_nodes<'a>(
 
 pub(crate) enum SubgraphOperationCompression {
     GenerateFragments,
-    GenerateFragmentsV2,
     Disabled,
 }
 
@@ -790,11 +784,6 @@ impl SubgraphOperationCompression {
             Self::GenerateFragments => {
                 let mut operation = operation;
                 operation.generate_fragments()?;
-                Ok(operation)
-            }
-            Self::GenerateFragmentsV2 => {
-                let mut operation = operation;
-                operation.generate_fragments_v2()?;
                 Ok(operation)
             }
             Self::Disabled => Ok(operation),

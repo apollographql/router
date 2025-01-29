@@ -39,13 +39,11 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::executable;
 use apollo_compiler::Name;
 
 use super::Fragment;
 use super::FragmentSpreadSelection;
 use super::HasSelectionKey;
-use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
@@ -122,42 +120,19 @@ impl From<SelectionOrSet> for SelectionMapperReturn {
 }
 
 impl Operation {
-    /// Optimize the parsed size of the operation by generating fragments based on the selections
-    /// in the operation.
-    pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
-        // Currently, this method simply pulls out every inline fragment into a named fragment. If
-        // multiple inline fragments are the same, they use the same named fragment.
-        //
-        // This method can generate named fragments that are only used once. It's not ideal, but it
-        // also doesn't seem that bad. Avoiding this is possible but more work, and keeping this
-        // as simple as possible is a big benefit for now.
-        //
-        // When we have more advanced correctness testing, we can add more features to fragment
-        // generation, like factoring out partial repeated slices of selection sets or only
-        // introducing named fragments for patterns that occur more than once.
-        let mut generator = FragmentGenerator::default();
-        generator.visit_selection_set(&mut self.selection_set)?;
-        self.named_fragments = generator.into_inner();
-        Ok(())
-    }
-
     /// Optimize the parsed size of the operation by generating fragments from selection sets that
     /// occur multiple times in the operation.
-    pub(crate) fn generate_fragments_v2(&mut self) -> Result<(), FederationError> {
+    pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
         let mut generator = FragmentGenerator::default();
         generator.collect_selection_usages(&self.selection_set);
         generator.minify(&mut self.selection_set)?;
-        self.named_fragments = generator.into_minimized();
+        self.named_fragments = generator.into_inner();
         Ok(())
     }
 }
 
 #[derive(Debug, Default)]
 struct FragmentGenerator {
-    fragments: NamedFragments,
-    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-    names: IndexMap<(String, usize), usize>,
-    // TODO v2 stuff below - remove v1 after analysis
     selection_counts: HashMap<u64, usize>,
     minimized_fragments: IndexMap<u64, Fragment>,
 }
@@ -191,167 +166,6 @@ fn fragment_name(mut index: usize) -> Name {
 impl FragmentGenerator {
     fn next_name(&self) -> Name {
         fragment_name(self.minimized_fragments.len())
-    }
-
-    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-    // In the future, we will just use `.next_name()`.
-    fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
-        use std::fmt::Write as _;
-
-        let type_condition = frag
-            .inline_fragment
-            .type_condition_position
-            .as_ref()
-            .map_or_else(
-                || "undefined".to_string(),
-                |condition| condition.to_string(),
-            );
-        let selections = frag.selection_set.selections.len();
-        let mut name = format!("_generated_on{type_condition}{selections}");
-
-        let key = (type_condition, selections);
-        let index = self
-            .names
-            .entry(key)
-            .and_modify(|index| *index += 1)
-            .or_default();
-        _ = write!(&mut name, "_{index}");
-
-        Name::new_unchecked(&name)
-    }
-
-    /// Is a selection set worth using for a newly generated named fragment?
-    fn is_worth_using(selection_set: &SelectionSet) -> bool {
-        let mut iter = selection_set.iter();
-        let Some(first) = iter.next() else {
-            // An empty selection is not worth using (and invalid!)
-            return false;
-        };
-        let Selection::Field(field) = first else {
-            return true;
-        };
-        // If there's more than one selection, or one selection with a subselection,
-        // it's probably worth using
-        iter.next().is_some() || field.selection_set.is_some()
-    }
-
-    /// Modify the selection set so that eligible inline fragments are moved to named fragment spreads.
-    fn visit_selection_set(
-        &mut self,
-        selection_set: &mut SelectionSet,
-    ) -> Result<(), FederationError> {
-        let mut new_selection_set = SelectionSet::empty(
-            selection_set.schema.clone(),
-            selection_set.type_position.clone(),
-        );
-
-        for selection in Arc::make_mut(&mut selection_set.selections).values_mut() {
-            match selection {
-                SelectionValue::Field(mut field) => {
-                    if let Some(selection_set) = field.get_selection_set_mut() {
-                        self.visit_selection_set(selection_set)?;
-                    }
-                    new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
-                }
-                SelectionValue::FragmentSpread(frag) => {
-                    new_selection_set
-                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
-                }
-                SelectionValue::InlineFragment(frag)
-                    if !Self::is_worth_using(&frag.get().selection_set) =>
-                {
-                    new_selection_set
-                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
-                }
-                SelectionValue::InlineFragment(mut candidate) => {
-                    self.visit_selection_set(candidate.get_selection_set_mut())?;
-
-                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-                    // JS federation does not consider fragments without a type condition.
-                    if candidate
-                        .get()
-                        .inline_fragment
-                        .type_condition_position
-                        .is_none()
-                    {
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(candidate.get()),
-                        ))?;
-                        continue;
-                    }
-
-                    let directives = &candidate.get().inline_fragment.directives;
-                    let skip_include = directives
-                        .iter()
-                        .map(|directive| match directive.name.as_str() {
-                            "skip" | "include" => Ok(directive.clone()),
-                            _ => Err(()),
-                        })
-                        .collect::<Result<executable::DirectiveList, _>>();
-
-                    // If there are any directives *other* than @skip and @include,
-                    // we can't just transfer them to the generated fragment spread,
-                    // so we have to keep this inline fragment.
-                    let Ok(skip_include) = skip_include else {
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(candidate.get()),
-                        ))?;
-                        continue;
-                    };
-
-                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-                    // JS does not special-case @skip and @include. It never extracts a fragment if
-                    // there's any directives on it. This code duplicates the body from the
-                    // previous condition so it's very easy to remove when we're ready :)
-                    if !skip_include.is_empty() {
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(candidate.get()),
-                        ))?;
-                        continue;
-                    }
-
-                    let existing = self.fragments.iter().find(|existing| {
-                        existing.type_condition_position
-                            == candidate.get().inline_fragment.casted_type()
-                            && existing.selection_set == candidate.get().selection_set
-                    });
-
-                    let existing = if let Some(existing) = existing {
-                        existing
-                    } else {
-                        // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-                        // This should be reverted to `self.next_name();` when we're ready.
-                        let name = self.generate_name(candidate.get());
-                        self.fragments.insert(Fragment {
-                            schema: selection_set.schema.clone(),
-                            name: name.clone(),
-                            type_condition_position: candidate.get().inline_fragment.casted_type(),
-                            directives: Default::default(),
-                            selection_set: candidate.get().selection_set.clone(),
-                        });
-                        self.fragments.get(&name).unwrap()
-                    };
-                    new_selection_set.add_local_selection(&Selection::from(
-                        FragmentSpreadSelection {
-                            spread: FragmentSpread {
-                                schema: selection_set.schema.clone(),
-                                fragment_name: existing.name.clone(),
-                                type_condition_position: existing.type_condition_position.clone(),
-                                directives: skip_include.into(),
-                                fragment_directives: existing.directives.clone(),
-                                selection_id: crate::operation::SelectionId::new(),
-                            },
-                            selection_set: existing.selection_set.clone(),
-                        },
-                    ))?;
-                }
-            }
-        }
-
-        *selection_set = new_selection_set;
-
-        Ok(())
     }
 
     fn hash_key(&self, selection_set: &SelectionSet) -> u64 {
@@ -469,7 +283,7 @@ impl FragmentGenerator {
                         .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
                 }
                 SelectionValue::FragmentSpread(frag) => {
-                    // already fragment spread so just copy it over
+                    // already a fragment spread so just copy it over
                     new_selection_set
                         .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
                 }
@@ -505,7 +319,7 @@ impl FragmentGenerator {
                         let directives = &inline_fragment.get().inline_fragment.directives;
                         let skip_include_only = directives
                             .iter()
-                            .all(|d| d.name.as_str() == "skip" || d.name.as_str() == "include");
+                            .all(|d| matches!(d.name.as_str(), "skip" | "include"));
 
                         if skip_include_only {
                             // convert inline fragment selection to fragment spread
@@ -570,10 +384,6 @@ impl FragmentGenerator {
 
     /// Consumes the generator and returns the fragments it generated.
     fn into_inner(self) -> NamedFragments {
-        self.fragments
-    }
-
-    fn into_minimized(self) -> NamedFragments {
         let mut named_fragments = NamedFragments::default();
         for (_, fragment) in &self.minimized_fragments {
             named_fragments.insert(fragment.clone());
@@ -848,7 +658,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on T {
@@ -903,7 +713,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on T {
@@ -957,7 +767,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("no fragments were generated");
             insta::assert_snapshot!(query, @r###"
             {
@@ -1015,7 +825,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("no fragments were generated");
             insta::assert_snapshot!(query, @r###"
             {
@@ -1076,7 +886,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on T {
@@ -1141,7 +951,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on T {
@@ -1209,7 +1019,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on V {
@@ -1290,7 +1100,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on V {
@@ -1371,7 +1181,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on V {
@@ -1443,7 +1253,7 @@ mod tests {
             .expect("query is valid");
 
             query
-                .generate_fragments_v2()
+                .generate_fragments()
                 .expect("successfully generated fragments");
             insta::assert_snapshot!(query, @r###"
             fragment a on T {
