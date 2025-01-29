@@ -219,7 +219,7 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(manifest_files) = config.persisted_queries.experimental_local_manifests {
+        if let Some(manifest_files) = config.persisted_queries.local_manifests {
             if manifest_files.is_empty() {
                 return Err("no local persisted query list files specified".into());
             }
@@ -818,8 +818,8 @@ mod tests {
                 .persisted_query(
                     PersistedQueries::builder()
                         .enabled(true)
-                        .experimental_local_manifests(vec![
-                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        .local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string()
                         ])
                         .build(),
                 )

@@ -57,6 +57,32 @@ The `--supergraph-urls` command-line argument or the `APOLLO_ROUTER_SUPERGRAPH_U
 
 If hot reloading from a remote URL is desired, consider running a script to download the supergraph URL on an interval, and point the router to the downloaded file on the filesystem.
 
+### `--schema`
+
+The deprecated `--schema` command-line argument is removed. `router config schema` should be used to print the configuration supergraph instead.
+
+### Busy timer for request processing duration
+Request processing duration is already included as part of the spans sent by the
+router, and there is no need for rust plugin, coprocessor and rhai plugin users
+to track this information manually. As a result, the following methods and structs were removed from `context::Context`:
+
+- `context::Context::busy_time()`
+- `context::Context::enter_active_request()`
+- `context::BusyTimer` struct
+- `context::BusyTimerGuard` struct
+
+### Deprecated methods in rust plugins
+
+The following deprecated methods are removed from rust plugins' API:
+
+- `services::router::Response::map()`
+- `router::event::schema::SchemaSource::File.delay` field
+- `router::event::configuration::Configuration::File.delay` field
+- `context::extensions::sync::ExtensionsMutex::lock()`. Use `ExtensionsMutex::with_lock()` instead.
+- `test_harness::TestHarness::build()`. Use `TestHarness::build_supergraph()` instead.
+- `PluginInit::new()`. Use `PluginInit::builder()` instead.
+- `PluginInit::try_new()`. Use `PluginInit::try_builder()` instead.
+
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
@@ -180,29 +206,117 @@ In case it rejects legitimate queries, this check can be disabled in Router conf
 ```yaml
 # Do not enable introspection in production!
 supergraph:
-  introspection: true  # Without this, schema introspection is entirely disabled by default
+  introspection: true # Without this, schema introspection is entirely disabled by default
 limits:
-  introspection_max_depth: false  # Defaults to true
+  introspection_max_depth: false # Defaults to true
 ```
 
 ### Traces
 
 - `telemetry.instrumentation.spans.mode` becomes `spec_compliant` by default instead of `deprecated`.
 
-### Metrics
+### Renamed Metrics
 
-- `apollo_router_http_request_retry_total` has been removed and will be supported now by `http.client.request.duration` metrics
+Some of the older metrics in the router were not using the most recent `.` naming convention and were instead separated by `_`. For consistency purposes, the following metrics are renamed:
+
+| Previous metric | Renamed metric |
+| --------------- | -------------- |
+| `apollo_router_opened_subscriptions` | `apollo.router.opened.subscriptions` |
+| `apollo_router_cache_hit_time` | `apollo.router.cache.hit.time` |
+| `apollo_router_cache_size` | `apollo.router.cache.size` |
+| `apollo_router_cache_miss_time` | `apollo.router.cache.miss.time` |
+| `apollo_router_state_change_total` | `apollo.router.state.change.total` |
+| `apollo_router_span_lru_size` | `apollo.router.exporter.span.lru.size` $_{[1]} |
+| `apollo_router_session_count_active` | `apollo.router.session.count.active` |
+| `apollo_router_uplink_fetch_count_total` | `apollo.router.uplink.fetch.count.total` |
+| `apollo_router_uplink_fetch_duration_seconds` | `apollo.router.uplink.fetch.duration.seconds`|
+
+$_{[1]} `apollo.router.exporter.span.lru.size` now also has an additional `exporter` prefix.
+
+### Removed metrics
+
+The following metrics have been removed:
+
+- `apollo_router_http_request_retry_total`. This will be supported now by `http.client.request.duration` metrics
   with the `http.request.resend_count` attribute which is automatically set when `default_requirement_level` is set to `recommended`.
 
-- `apollo_router_timeout` has been removed. This metric conflated timed-out requests from client to the router, and requests from the router to subgraphs.
-  Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests,
-  and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
+- `apollo_router_timeout`. This metric conflated timed-out requests from client
+  to the router, and requests from the router to subgraphs. Timed-out requests
+  have HTTP status code 504. Use the `http.response.status_code` attribute on the
+  `http.server.request.duration` metric to identify timed-out router requests, and
+  the same attribute on the `http.client.request.duration` metric to identify
+  timed-out subgraph requests.
 
-- `apollo_router_http_requests_total` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+- `apollo_router_http_requests_total`. This is replaced by
+  `http.server.request.duration` metric for requests from clients to router and
+  `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_http_request_duration_seconds_bucket` has been removed and replaced by `http.server.request.duration` metric for requests from clients to router and `http.client.request.duration` for requests from router to subgraphs.
+- `apollo_router_http_request_duration_seconds_bucket`. This is replaced by
+  `http.server.request.duration` metric for requests from clients to router and
+  `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_session_count_total` has been removed and replaced by `http.server.active_requests`.
+- `apollo_router_session_count_total`. This is replaced by
+  `http.server.active_requests`.
+
+- `apollo_require_authentication_failure_count`. Use the
+  `http.server.request.duration` metric's `http.response.status_code` attribute.
+  Requests with authentication failures have HTTP status code 401.
+
+- `apollo_authentication_failure_count`. Use the
+  `apollo.router.operations.authentication.jwt` metric's
+  `authentication.jwt.failed` attribute.
+
+- `apollo_authentication_success_count`. Use the
+  `apollo.router.operations.authentication.jwt` metric instead. If the
+  `authentication.jwt.failed` attribute is _absent_ or `false`, the authentication
+  succeeded.
+
+- `apollo_router_deduplicated_subscriptions_total`. Use the
+  `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated`
+  attribute
+
+- `apollo_router_cache_miss_count`. Cache miss count can be derived from `apollo.router.cache.miss.time.count`.
+
+- `apollo_router_cache_hit_count`. Cache hit count can be derived from `apollo.router.cache.hit.time.count`.
+
+- Calculating the overhead of injecting the router into your service stack when
+  making multiple downstream calls is a complex task. With that, we are removing
+  the following two misleading metrics and recommending that you instead test your
+  workloads with the router to if the latency meets your requirements:
+  - `apollo_router_span`
+  - `apollo_router_processing_time`
+
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+
+- If you used the `subgraph_response_body` selector for telemetry like this:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            http.response.status_code:
+              subgraph_response_status: code
+            my_data_value:
+              subgraph_response_body: .data.test
+```
+
+You'll have to migrate the `subgraph_response_body` to `subgraph_response_data` selector (or `subgraph_response_errors` if you want to target errors):
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            http.response.status_code:
+              subgraph_response_status: code
+            my_data_value:
+              subgraph_response_data: $.test # Heads up, we removed the .data prefix as it's directly targeting data and we added $
+```
 
 ### Context Keys
 
@@ -253,6 +367,33 @@ And ensure that you have enabled OTLP support in your Jaeger instance using `COL
 If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
 With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
 
+### Headers propagation
+
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+
+If you use the ability to get data from request body and insert this data in a subgraph request header, we updated the `path` field type to be [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) compliant
+So if you had this configuration for example:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: .extensions.metadata[0].app_name
+```
+
+You'll have to migrate the `path` field to be JSONPath compliant and just add `$` at the beginning of the `path`, example:
+
+```yaml
+headers:
+  all:
+    request:
+      - insert:
+          name: from_app_name
+          path: $.extensions.metadata[0].app_name
+```
+
 ### OneShotAsyncCheckpoint
 
 This has been removed because it is incompatible with the architectural optimizations we've made in Router 2.0. If you were using this in a Rust Plugin, you can replace it easily with `AsyncCheckpoint` as follows:
@@ -288,8 +429,8 @@ The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilde
 
 Traffic shaping has been improved significantly in Router 2.0. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
 
- - [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
- - [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
+- [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
+- [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
 
 errors as traffic shaping constraints are enforced.
 
@@ -303,7 +444,18 @@ For more information about [configuring traffic shaping](../../routing/performan
 
 If, in your Rust plugin, you were using either the subgraph::Request::subgraph_name or the subgraph::Response::subgraph_name, please note that these are no longer `Option`, but are mandatory.
 
-<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+### Emitting metrics in Rust plugins
+
+Previously, Rust plugins could use the Router's internal metrics system using the `tracing` macros. This is no longer supported, and the opentelemetry crates should be used instead.
+
+`tracing` field names starting with these strings are no longer treated specially:
+- `counter.`
+- `histogram.`
+- `monotonic_counter.`
+- `value.`
+
+Instead, use the [OpenTelemetry](https://docs.rs/opentelemetry/latest/opentelemetry/) crates.
+You can use the new `apollo_router::metrics::meter_provider()` API to access the router's global meter provider to register your instruments.
 
 ### Deploy your router
 

@@ -268,13 +268,13 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .with_lock(|mut ext| ext.insert(DisplayRouterRequest(self.request.level())));
+                .with_lock(|ext| ext.insert(DisplayRouterRequest(self.request.level())));
         }
         if self.response.level() != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .with_lock(|mut ext| ext.insert(DisplayRouterResponse(true)));
+                .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -318,7 +318,7 @@ impl Instrumented
             if let Some(body) = response
                 .context
                 .extensions()
-                .with_lock(|mut ext| ext.remove::<RouterResponseBodyExtensionType>())
+                .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
             {
                 attrs.push(KeyValue::new(
                     HTTP_RESPONSE_BODY,
@@ -425,7 +425,7 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SupergraphEventResponse(self.response.clone())));
+                .with_lock(|lock| lock.insert(SupergraphEventResponse(self.response.clone())));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -490,13 +490,13 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventRequest(self.request.clone())));
+                .with_lock(|lock| lock.insert(SubgraphEventRequest(self.request.clone())));
         }
         if self.response.level() != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventResponse(self.response.clone())));
+                .with_lock(|lock| lock.insert(SubgraphEventResponse(self.response.clone())));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);

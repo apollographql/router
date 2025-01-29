@@ -233,7 +233,7 @@ impl QueryAnalysisLayer {
                     None
                 };
 
-                request.context.extensions().with_lock(|mut lock| {
+                request.context.extensions().with_lock(|lock| {
                     lock.insert::<ParsedDocument>(doc.clone());
                     if let Some(stats) = extended_ref_stats {
                         lock.insert::<ExtendedReferenceStats>(stats);
@@ -246,7 +246,7 @@ impl QueryAnalysisLayer {
                 })
             }
             Err(errors) => {
-                request.context.extensions().with_lock(|mut lock| {
+                request.context.extensions().with_lock(|lock| {
                     lock.insert(Arc::new(UsageReporting {
                         stats_report_key: errors.get_error_key().to_string(),
                         referenced_fields_by_type: HashMap::new(),

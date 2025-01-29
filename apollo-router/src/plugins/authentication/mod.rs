@@ -590,12 +590,6 @@ fn authenticate(
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         u64_counter!(
-            "apollo_authentication_failure_count",
-            "Number of requests with failed JWT authentication (deprecated)",
-            1,
-            kind = "JWT"
-        );
-        u64_counter!(
             "apollo.router.operations.authentication.jwt",
             "Number of requests with JWT authentication",
             1,
@@ -701,12 +695,6 @@ fn authenticate(
             );
         }
         // This is a metric and will not appear in the logs
-        u64_counter!(
-            "apollo_authentication_success_count",
-            "Number of requests with successful JWT authentication (deprecated)",
-            1,
-            kind = "JWT"
-        );
         u64_counter!(
             "apollo.router.operations.jwt",
             "Number of requests with JWT authentication",

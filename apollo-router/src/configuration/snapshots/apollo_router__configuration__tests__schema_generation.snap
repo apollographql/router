@@ -2606,6 +2606,10 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
+        "experimental_otlp_error_metrics": {
+          "$ref": "#/definitions/OtlpErrorMetricsMode",
+          "description": "#/definitions/OtlpErrorMetricsMode"
+        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphErrorConfig",
           "description": "#/definitions/SubgraphErrorConfig"
@@ -4323,6 +4327,25 @@ expression: "&schema"
         }
       ]
     },
+    "OtlpErrorMetricsMode": {
+      "description": "Open Telemetry error metrics mode",
+      "oneOf": [
+        {
+          "description": "Do not store OTLP error metrics",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send OTLP error metrics to Apollo Studio",
+          "enum": [
+            "enabled"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "PersistedQueries": {
       "additionalProperties": false,
       "description": "Persisted Queries (PQ) configuration",
@@ -4332,7 +4355,11 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
-        "experimental_local_manifests": {
+        "experimental_prewarm_query_plan_cache": {
+          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
+          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
+        },
+        "local_manifests": {
           "default": null,
           "description": "Enables using a local copy of the persisted query manifest to safelist operations",
           "items": {
@@ -4340,10 +4367,6 @@ expression: "&schema"
           },
           "nullable": true,
           "type": "array"
-        },
-        "experimental_prewarm_query_plan_cache": {
-          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
-          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
         },
         "log_unknown": {
           "default": false,
@@ -5065,6 +5088,9 @@ expression: "&schema"
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
         }
       },
+      "type": "object"
+    },
+    "RouterLimitsConfig": {
       "type": "object"
     },
     "RouterRequestConf": {
@@ -6325,25 +6351,6 @@ expression: "&schema"
           },
           "required": [
             "subgraph_query_variable"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "subgraph_response_body": {
-              "description": "The subgraph response body json path.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "subgraph_response_body"
           ],
           "type": "object"
         },
@@ -8730,6 +8737,10 @@ expression: "&schema"
     "rhai": {
       "$ref": "#/definitions/Conf7",
       "description": "#/definitions/Conf7"
+    },
+    "router_limits": {
+      "$ref": "#/definitions/RouterLimitsConfig",
+      "description": "#/definitions/RouterLimitsConfig"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",

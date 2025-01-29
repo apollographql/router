@@ -5,7 +5,7 @@ use std::time::Instant;
 ///```ignore
 /// Timer::new(|duration| {
 ///     f64_histogram!(
-///         "apollo_router_test",
+///         "apollo.router.test",
 ///         "Time spent testing the timer",
 ///         duration.as_secs_f64()
 ///     );

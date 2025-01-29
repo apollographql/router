@@ -117,8 +117,7 @@ where
         let current_cache_size_for_gauge = self.cache_size.clone();
         let caller = self.caller;
         meter
-            // TODO move to dot naming convention
-            .i64_observable_gauge("apollo_router_cache_size")
+            .i64_observable_gauge("apollo.router.cache.size")
             .with_description("Cache size")
             .with_callback(move |i| {
                 i.observe(
@@ -171,16 +170,9 @@ where
             Some(v) => {
                 let duration = instant_memory.elapsed();
                 f64_histogram!(
-                    "apollo_router_cache_hit_time",
+                    "apollo.router.cache.hit.time",
                     "Time to get a value from the cache in seconds",
                     duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Memory.to_string()
-                );
-                u64_counter!(
-                    "apollo_router_cache_hit_count",
-                    "Number of cache hits",
-                    1,
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
                 );
@@ -189,16 +181,9 @@ where
             None => {
                 let duration = instant_memory.elapsed();
                 f64_histogram!(
-                    "apollo_router_cache_miss_time",
+                    "apollo.router.cache.miss.time",
                     "Time to check the cache for an uncached value in seconds",
                     duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Memory.to_string()
-                );
-                u64_counter!(
-                    "apollo_router_cache_miss_count",
-                    "Number of cache misses",
-                    1,
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
                 );
@@ -223,16 +208,9 @@ where
 
                             let duration = instant_redis.elapsed();
                             f64_histogram!(
-                                "apollo_router_cache_hit_time",
+                                "apollo.router.cache.hit.time",
                                 "Time to get a value from the cache in seconds",
                                 duration.as_secs_f64(),
-                                kind = self.caller,
-                                storage = CacheStorageName::Redis.to_string()
-                            );
-                            u64_counter!(
-                                "apollo_router_cache_hit_count",
-                                "Number of cache hits",
-                                1,
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
                             );
@@ -241,16 +219,9 @@ where
                         None => {
                             let duration = instant_redis.elapsed();
                             f64_histogram!(
-                                "apollo_router_cache_miss_time",
+                                "apollo.router.cache.miss.time",
                                 "Time to check the cache for an uncached value in seconds",
                                 duration.as_secs_f64(),
-                                kind = self.caller,
-                                storage = CacheStorageName::Redis.to_string()
-                            );
-                            u64_counter!(
-                                "apollo_router_cache_miss_count",
-                                "Number of cache misses",
-                                1,
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
                             );
@@ -384,7 +355,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"
@@ -415,7 +386,7 @@ mod test {
             cache.insert("test".to_string(), Stuff {}).await;
             // This metric won't exist
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 0,
                 "kind" = "test",
                 "type" = "memory"
@@ -461,7 +432,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"
@@ -483,7 +454,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"
@@ -505,7 +476,7 @@ mod test {
                 "type" = "memory"
             );
             assert_gauge!(
-                "apollo_router_cache_size",
+                "apollo.router.cache.size",
                 1,
                 "kind" = "test",
                 "type" = "memory"

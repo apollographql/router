@@ -135,7 +135,7 @@ impl Instrumented for GraphQLInstruments {
         self.custom.on_response_event(response, ctx);
 
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
-            if let Some(executable_document) = ctx.unsupported_executable_document() {
+            if let Some(executable_document) = ctx.executable_document() {
                 GraphQLInstrumentsVisitor {
                     ctx,
                     instruments: self,
@@ -401,9 +401,7 @@ pub(crate) mod test {
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(query));
+        context.extensions().with_lock(|lock| lock.insert(query));
 
         context
     }

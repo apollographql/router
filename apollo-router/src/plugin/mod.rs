@@ -21,6 +21,7 @@ pub mod test;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt;
+#[cfg(test)]
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::task::Context;
@@ -50,6 +51,7 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::ListenAddr;
 
 type InstanceFactory =
@@ -80,51 +82,15 @@ pub struct PluginInit<T> {
     pub(crate) launch_id: Option<Arc<String>>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// User's license's state, including any limits of use
+    pub(crate) license: LicenseState,
 }
 
 impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
-    #[deprecated = "use PluginInit::builder() instead"]
-    /// Create a new PluginInit for the supplied config and SDL.
-    pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
-        Self::builder()
-            .config(config)
-            .supergraph_schema(Arc::new(
-                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                    .expect("failed to parse supergraph schema"),
-            ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
-            .supergraph_sdl(supergraph_sdl)
-            .notify(Notify::builder().build())
-            .build()
-    }
-
-    /// Try to create a new PluginInit for the supplied JSON and SDL.
-    ///
-    /// This will fail if the supplied JSON cannot be deserialized into the configuration
-    /// struct.
-    #[deprecated = "use PluginInit::try_builder() instead"]
-    pub fn try_new(
-        config: serde_json::Value,
-        supergraph_sdl: Arc<String>,
-    ) -> Result<Self, BoxError> {
-        Self::try_builder()
-            .config(config)
-            .supergraph_schema(Arc::new(
-                Schema::parse_and_validate(supergraph_sdl.to_string(), PathBuf::from("synthetic"))
-                    .map_err(|e| {
-                        // This method is deprecated so we're not going to do anything fancy with the error
-                        BoxError::from(e.errors.to_string())
-                    })?,
-            ))
-            .supergraph_schema_id(crate::spec::Schema::schema_id(&supergraph_sdl).into_inner())
-            .supergraph_sdl(supergraph_sdl)
-            .notify(Notify::builder().build())
-            .build()
-    }
-
     #[cfg(test)]
     pub(crate) fn fake_new(config: T, supergraph_sdl: Arc<String>) -> Self {
         let supergraph_schema = Arc::new(if !supergraph_sdl.is_empty() {
@@ -141,22 +107,8 @@ where
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
+            .license(LicenseState::default())
             .build()
-    }
-
-    /// Returns the parsed Schema. This is unstable and may be changed or removed in future router releases.
-    /// In addition, Schema is not stable, and may be changed or removed in future apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_supergraph_schema(&self) -> Arc<Valid<Schema>> {
-        self.supergraph_schema.clone()
-    }
-
-    /// Returns a mapping of subgraph to parsed schema. This is unstable and may be changed or removed in
-    /// future router releases. In addition, Schema is not stable, and may be changed or removed in future
-    /// apollo-rs releases.
-    #[doc(hidden)]
-    pub fn unsupported_subgraph_schemas(&self) -> Arc<HashMap<String, Arc<Valid<Schema>>>> {
-        self.subgraph_schemas.clone()
     }
 }
 
@@ -167,6 +119,7 @@ where
 {
     /// Create a new PluginInit builder
     #[builder(entry = "builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     /// Build a new PluginInit for the supplied configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -178,6 +131,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Self {
         PluginInit {
             config,
@@ -187,10 +141,12 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
             notify,
+            license,
         }
     }
 
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -203,6 +159,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -213,11 +170,13 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify,
+            license,
         })
     }
 
     /// Create a new PluginInit builder
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
@@ -226,6 +185,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
+        license: Option<LicenseState>,
     ) -> Self {
         PluginInit {
             config,
@@ -236,6 +196,7 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
+            license: license.unwrap_or_default(),
         }
     }
 }
@@ -253,6 +214,7 @@ impl PluginInit<serde_json::Value> {
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
+            .license(self.license)
             .build()
     }
 }
