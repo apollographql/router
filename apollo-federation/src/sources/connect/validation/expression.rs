@@ -261,8 +261,8 @@ mod tests {
 
     #[rstest]
     #[case::echo_valid_constants("$->echo(1)")]
-    #[case::map_unknown("$config->map(@)")]
-    #[case::map_scalar("$(1)->map(@)")]
+    #[case::map_unknown("$config->map(@)->first")]
+    #[case::map_scalar("$(1)->map(@)->last")]
     #[case::match_only_valid_values("$config->match([1, 1], [2, true])")]
     #[case::first("$([1, 2])->first")]
     #[case::first_type_unknown("$config.something->first")]
@@ -286,7 +286,9 @@ mod tests {
 
     #[rstest]
     #[case::echo_invalid_constants("$->echo([])")]
+    #[case::map_scalar("$(1)->map(@)")]
     #[case::map_array("$([])->map(@)")]
+    #[case::last("$([1, 2])")]
     #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
     #[case::slice_of_array("$([])->slice(0, 2)")]
     #[case::entries("$config.something->entries")]
@@ -305,7 +307,7 @@ mod tests {
     #[case("$args.customScalar")]
     #[case("$args.object.bool")]
     #[case("$args.array->echo(1)")]
-    #[case("$args.int->map(@)")]
+    #[case("$args.int->map(@)->last")]
     #[case::chained_methods("$args.array->map(@)->slice(0,2)->first.bool")]
     #[case::match_scalars("$args.string->match([\"hello\", \"world\"], [@, null])")]
     #[case::slice("$args.string->slice(0, 2)")]
@@ -335,7 +337,7 @@ mod tests {
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
     #[case::nested_unknown_property("$args.multiLevel.inner.unknown")]
-    // #[case::map_array("$args.array->map(@)")]  // TODO: check for this error once we improve ->map type checking
+    #[case::map_array("$args.array->map(@)")]
     #[case::slice_array("$args.array->slice(0, 2)")]
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
