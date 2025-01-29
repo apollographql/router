@@ -606,6 +606,7 @@ fn slice_shape(
             Shape::array([], Shape::one(one_shapes, []), input_shape.into_locations())
         }
         ShapeCase::String(_) => Shape::string(input_shape.into_locations()),
+        ShapeCase::Unknown => input_shape.into(),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array or string input",
@@ -695,7 +696,6 @@ fn size_shape(
             Shape::int_value(value.len() as i64, method_name.shape_location(source_id))
         }
         ShapeCase::String(None) => Shape::int(method_name.shape_location(source_id)),
-        ShapeCase::Name(_, _) => Shape::int(method_name.shape_location(source_id)), // TODO: catch errors after name resolution
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 Shape::int_value(prefix.len() as i64, method_name.shape_location(source_id))
@@ -710,6 +710,7 @@ fn size_shape(
                 Shape::int(method_name.shape_location(source_id))
             }
         }
+        ShapeCase::Unknown => input_shape.into(),
         _ => Shape::error(
             format!(
                 "Method ->{} requires an array, string, or object input",
@@ -829,6 +830,10 @@ fn entries_shape(
                 )
             }
         }
+        ShapeCase::Unknown => Shape::list(
+            Shape::dict(input_shape.into(), method_name.shape_location(source_id)),
+            method_name.shape_location(source_id),
+        ),
         _ => Shape::error(
             format!("Method ->{} requires an object input", method_name.as_ref()),
             input_shape
