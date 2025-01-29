@@ -176,13 +176,6 @@ where
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
                 );
-                u64_counter!(
-                    "apollo.router.cache.hit.count",
-                    "Number of cache hits",
-                    1,
-                    kind = self.caller,
-                    storage = CacheStorageName::Memory.to_string()
-                );
                 Some(v)
             }
             None => {
@@ -191,13 +184,6 @@ where
                     "apollo.router.cache.miss.time",
                     "Time to check the cache for an uncached value in seconds",
                     duration.as_secs_f64(),
-                    kind = self.caller,
-                    storage = CacheStorageName::Memory.to_string()
-                );
-                u64_counter!(
-                    "apollo.router.cache.miss.count",
-                    "Number of cache misses",
-                    1,
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
                 );
@@ -228,13 +214,6 @@ where
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
                             );
-                            u64_counter!(
-                                "apollo.router.cache.hit.count",
-                                "Number of cache hits",
-                                1,
-                                kind = self.caller,
-                                storage = CacheStorageName::Redis.to_string()
-                            );
                             Some(v.0)
                         }
                         None => {
@@ -243,13 +222,6 @@ where
                                 "apollo.router.cache.miss.time",
                                 "Time to check the cache for an uncached value in seconds",
                                 duration.as_secs_f64(),
-                                kind = self.caller,
-                                storage = CacheStorageName::Redis.to_string()
-                            );
-                            u64_counter!(
-                                "apollo.router.cache.miss.count",
-                                "Number of cache misses",
-                                1,
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
                             );

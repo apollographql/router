@@ -60,8 +60,8 @@ supergraph:
 To get more information on the planning and warm-up process use the following metrics (where `<storage>` can be `redis` for distributed cache or `memory`):
 
 * counters:
-  * `apollo.router.cache.hit.count{kind="query planner", storage="<storage>"}`
-  * `apollo.router.cache.miss.count{kind="query planner", storage="<storage>"}`
+  * `apollo.router.cache.hit.time.count{kind="query planner", storage="<storage>"}`
+  * `apollo.router.cache.miss.time.count{kind="query planner", storage="<storage>"}`
 
 * histograms:
   * `apollo.router.query_planning.plan.duration`: time spent planning queries
