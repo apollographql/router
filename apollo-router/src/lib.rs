@@ -48,7 +48,7 @@ mod json_ext;
 pub mod plugin;
 
 #[macro_use]
-pub(crate) mod metrics;
+pub mod metrics;
 
 mod ageing_priority_queue;
 mod apollo_studio_interop;
