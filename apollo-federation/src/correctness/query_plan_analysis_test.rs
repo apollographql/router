@@ -7,7 +7,10 @@ use crate::query_plan::query_planner;
 
 // The schema used in these tests.
 const SCHEMA_STR: &str = r#"
-schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
   query: Query
 }
 
@@ -25,7 +28,11 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-interface I @join__type(graph: A, key: "id") @join__type(graph: B, key: "id") @join__type(graph: S) {
+interface I
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: S)
+{
   id: ID!
   data_a(arg: Int!): String! @join__field(graph: A)
   data_b(arg: Int!): String! @join__field(graph: B)
@@ -35,9 +42,9 @@ interface I @join__type(graph: A, key: "id") @join__type(graph: B, key: "id") @j
 scalar join__FieldSet
 
 enum join__Graph {
-  A @join__graph(name: "A", url: "query-plan-response-shape/test.graphql?subgraph=A")
-  B @join__graph(name: "B", url: "query-plan-response-shape/test.graphql?subgraph=B")
-  S @join__graph(name: "S", url: "query-plan-response-shape/test.graphql?subgraph=S")
+  A @join__graph(name: "A", url: "local-tests/query-plan-response-shape/test-template.graphql?subgraph=A")
+  B @join__graph(name: "B", url: "local-tests/query-plan-response-shape/test-template.graphql?subgraph=B")
+  S @join__graph(name: "S", url: "local-tests/query-plan-response-shape/test-template.graphql?subgraph=S")
 }
 
 scalar link__Import
@@ -47,56 +54,72 @@ enum link__Purpose {
   `SECURITY` features provide metadata necessary to securely resolve fields.
   """
   SECURITY
+
   """
   `EXECUTION` features provide metadata necessary for operation execution.
   """
   EXECUTION
 }
 
-type Query @join__type(graph: A) @join__type(graph: B) @join__type(graph: S) {
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: S)
+{
   test_i: I! @join__field(graph: S)
 }
 
-type T implements I @join__implements(graph: A, interface: "I") @join__implements(graph: B, interface: "I") @join__implements(graph: S, interface: "I") @join__type(graph: A, key: "id") @join__type(graph: B, key: "id") @join__type(graph: S, key: "id") {
+type T implements I
+  @join__implements(graph: A, interface: "I")
+  @join__implements(graph: B, interface: "I")
+  @join__implements(graph: S, interface: "I")
+  @join__type(graph: A, key: "id")
+  @join__type(graph: B, key: "id")
+  @join__type(graph: S, key: "id")
+{
   id: ID!
   data_a(arg: Int!): String! @join__field(graph: A)
+  nested: I! @join__field(graph: A)
   data_b(arg: Int!): String! @join__field(graph: B)
   data(arg: Int!): Int! @join__field(graph: S)
 }
 "#;
 
 fn plan_response_shape(op_str: &str) -> ResponseShape {
-    // Parse the schema and operation
+    // Initialization
+    let config = query_planner::QueryPlannerConfig {
+        generate_query_fragments: false,
+        type_conditioned_fetching: false,
+        incremental_delivery: query_planner::QueryPlanIncrementalDeliveryConfig {
+            enable_defer: true,
+        },
+        ..Default::default()
+    };
     let supergraph = crate::Supergraph::new(SCHEMA_STR).unwrap();
-    let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+    let planner = query_planner::QueryPlanner::new(&supergraph, config).unwrap();
+
+    // Parse the schema and operation
+    let api_schema = planner.api_schema();
     let op =
         ExecutableDocument::parse_and_validate(api_schema.schema(), op_str, "op.graphql").unwrap();
 
     // Plan the query
-    let config = query_planner::QueryPlannerConfig {
-        generate_query_fragments: false,
-        type_conditioned_fetching: false,
-        ..Default::default()
-    };
-    let planner = query_planner::QueryPlanner::new(&supergraph, config).unwrap();
     let query_plan = planner
         .build_query_plan(&op, None, Default::default())
         .unwrap();
 
     // Compare response shapes
-    let correctness_schema = planner.supergraph_schema();
-    let op_rs =
-        response_shape::compute_response_shape_for_operation(&op, correctness_schema).unwrap();
+    let op_rs = response_shape::compute_response_shape_for_operation(&op, api_schema).unwrap();
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&op).unwrap();
-    let plan_rs = interpret_query_plan(correctness_schema, &root_type, &query_plan).unwrap();
+    let plan_rs = interpret_query_plan(&supergraph.schema, &root_type, &query_plan).unwrap();
     let subgraphs_by_name = supergraph
         .extract_subgraphs()
         .unwrap()
         .into_iter()
         .map(|(name, subgraph)| (name, subgraph.schema))
         .collect();
-    let root_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
-    assert!(compare_response_shapes_with_constraint(&root_constraint, &op_rs, &plan_rs).is_ok());
+    let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(&subgraphs_by_name);
+    assert!(compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs).is_ok());
 
     plan_rs
 }
@@ -202,6 +225,66 @@ fn test_parallel_node() {
         id -----> id
         data_b -----> data_b(arg: 0)
         data_a -----> data_a(arg: 0)
+      }
+    }
+    "###);
+}
+
+#[test]
+fn test_defer_node() {
+    let op_str = r#"
+        query($v1: Boolean!) {
+            test_i @include(if: $v1) {
+                data(arg: 0)
+                ... @defer {
+                  data_a(arg: 0)
+                }
+                ... @defer {
+                  data_b(arg: 0)
+                }
+            }
+        }
+    "#;
+    insta::assert_snapshot!(plan_response_shape(op_str), @r###"
+    {
+      test_i -may-> test_i if v1 {
+        __typename -----> __typename
+        data -----> data(arg: 0)
+        id -----> id
+        data_b -----> data_b(arg: 0)
+        data_a -----> data_a(arg: 0)
+      }
+    }
+    "###);
+}
+
+#[test]
+fn test_defer_node_nested() {
+    let op_str = r#"
+        query($v1: Boolean!) {
+            test_i @include(if: $v1) {
+                data(arg: 0)
+                ... on T @defer {
+                    nested {
+                        ... @defer {
+                            data_b(arg: 1)
+                        }
+                    }
+                }
+            }
+        }
+    "#;
+    insta::assert_snapshot!(plan_response_shape(op_str), @r###"
+    {
+      test_i -may-> test_i if v1 {
+        __typename -----> __typename
+        data -----> data(arg: 0)
+        id -----> id
+        nested -may-> nested on T {
+          __typename -----> __typename
+          id -----> id
+          data_b -----> data_b(arg: 1)
+        }
       }
     }
     "###);

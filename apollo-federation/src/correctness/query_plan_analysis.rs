@@ -10,6 +10,7 @@ use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::ResponseShape;
 use crate::query_plan::ConditionNode;
+use crate::query_plan::DeferNode;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchNode;
@@ -158,7 +159,7 @@ fn interpret_top_level_plan_node(
         TopLevelPlanNode::Condition(condition) => {
             interpret_condition_node(schema, state, &conditions, condition)
         }
-        TopLevelPlanNode::Defer(_defer) => Err("todo: defer (top-level)".to_string()),
+        TopLevelPlanNode::Defer(defer) => interpret_defer_node(schema, state, &conditions, defer),
         TopLevelPlanNode::Subscription(subscription) => {
             let mut result =
                 interpret_fetch_node(schema, state, &conditions, &subscription.primary)?;
@@ -195,7 +196,7 @@ fn interpret_plan_node(
         PlanNode::Condition(condition) => {
             interpret_condition_node(schema, state, conditions, condition)
         }
-        PlanNode::Defer(_defer) => Err("todo: defer".to_string()),
+        PlanNode::Defer(defer) => interpret_defer_node(schema, state, conditions, defer),
     }
 }
 
@@ -599,4 +600,36 @@ fn interpret_parallel_node(
         })?;
     }
     Ok(response_shape)
+}
+
+fn interpret_defer_node(
+    schema: &ValidFederationSchema,
+    state: &ResponseShape,
+    conditions: &[Literal],
+    defer: &DeferNode,
+) -> Result<ResponseShape, String> {
+    // new `state` after the primary node
+    let state = if let Some(primary_node) = &defer.primary.node {
+        &interpret_plan_node(schema, state, conditions, primary_node)?
+    } else {
+        state
+    };
+
+    // interpret the deferred nodes and merge their response shapes.
+    let mut result = state.clone();
+    for defer_block in &defer.deferred {
+        let Some(node) = &defer_block.node else {
+            // Nothing to do => skip
+            continue;
+        };
+        // Note: Use the same primary node state for each parallel node
+        let node_rs = interpret_plan_node(schema, state, conditions, node)?;
+        result.merge_with(&node_rs).map_err(|e| {
+            format!(
+                "Failed to merge response shapes in deferred node: {}\nnode: {node}",
+                format_federation_error(e),
+            )
+        })?;
+    }
+    Ok(result)
 }
