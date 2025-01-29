@@ -266,7 +266,7 @@ impl LightSpanData {
     }
 }
 
-/// An externally updateable gauge for "apollo_router_span_lru_size".
+/// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
 ///
 /// When observed, it reports the most recently stored value (give or take atomicity looseness).
 ///
@@ -286,7 +286,7 @@ impl SpanLruSizeInstrument {
 
         let meter = meter_provider().meter("apollo/router");
         let gauge = meter
-            .u64_observable_gauge("apollo_router_span_lru_size")
+            .u64_observable_gauge("apollo.router.exporter.span.lru.size")
             .with_callback({
                 let value = Arc::clone(&value);
                 move |gauge| {
