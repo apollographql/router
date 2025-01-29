@@ -337,7 +337,7 @@ mod tests {
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
     #[case::nested_unknown_property("$args.multiLevel.inner.unknown")]
-    // #[case::map_array("$args.array->map(@)")]  // TODO: check for this error once we improve ->map type checking
+    #[case::map_array("$args.array->map(@)")]
     #[case::slice_array("$args.array->slice(0, 2)")]
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
