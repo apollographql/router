@@ -57,8 +57,8 @@ impl<'schema> Context<'schema> {
                 Namespace::Args,
                 shape_for_arguments(coordinate.field_coordinate.field),
             ),
-            (Namespace::Config, Shape::unknown(Vec::new())),
-            (Namespace::Context, Shape::unknown(Vec::new())),
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
         ]
         .into_iter()
         .collect();
@@ -81,8 +81,8 @@ impl<'schema> Context<'schema> {
         code: Code,
     ) -> Self {
         let var_lookup: IndexMap<Namespace, Shape> = [
-            (Namespace::Config, Shape::unknown(Vec::new())),
-            (Namespace::Context, Shape::unknown(Vec::new())),
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
         ]
         .into_iter()
         .collect();
@@ -102,7 +102,7 @@ impl<'schema> Context<'schema> {
 pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(), Message> {
     let Expression {
         expression,
-        location, // TODO: use this to get the location in the whole schema document
+        location,
     } = expression;
     let shape = expression.shape();
 
