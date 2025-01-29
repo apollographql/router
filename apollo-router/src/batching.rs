@@ -23,14 +23,14 @@ use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
-use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::spec::QueryHash;
 use crate::Context;
 
 /// A query that is part of a batch.
@@ -110,14 +110,16 @@ impl BatchQuery {
             .await
             .as_ref()
             .ok_or(SubgraphBatchingError::SenderUnavailable)?
-            .send(BatchHandlerMessage::Progress {
-                index: self.index,
-                client_factory,
-                request,
-                gql_request,
-                response_sender: tx,
-                span_context: Span::current().context(),
-            })
+            .send(BatchHandlerMessage::Progress(Box::new(
+                BatchHandlerMessageProgress {
+                    index: self.index,
+                    client_factory,
+                    request,
+                    gql_request,
+                    response_sender: tx,
+                    span_context: Span::current().context(),
+                },
+            )))
             .await?;
 
         if !self.finished() {
@@ -163,17 +165,12 @@ impl BatchQuery {
 // #[derive(Debug)]
 enum BatchHandlerMessage {
     /// Cancel one of the batch items
-    Cancel { index: usize, reason: String },
-
-    /// A query has reached the subgraph service and we should update its state
-    Progress {
+    Cancel {
         index: usize,
-        client_factory: HttpClientServiceFactory,
-        request: SubgraphRequest,
-        gql_request: graphql::Request,
-        response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
-        span_context: otelContext,
+        reason: String,
     },
+
+    Progress(Box<BatchHandlerMessageProgress>),
 
     /// A query has passed query planning and knows how many fetches are needed
     /// to complete.
@@ -181,6 +178,16 @@ enum BatchHandlerMessage {
         index: usize,
         query_hashes: Vec<Arc<QueryHash>>,
     },
+}
+
+/// A query has reached the subgraph service and we should update its state
+struct BatchHandlerMessageProgress {
+    index: usize,
+    client_factory: HttpClientServiceFactory,
+    request: SubgraphRequest,
+    gql_request: graphql::Request,
+    response_sender: oneshot::Sender<Result<SubgraphResponse, BoxError>>,
+    span_context: otelContext,
 }
 
 /// Collection of info needed to resolve a batch query
@@ -274,7 +281,7 @@ impl Batch {
                                 request, sender, ..
                             } in cancelled_requests
                             {
-                                let subgraph_name = request.subgraph_name.ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                                let subgraph_name = request.subgraph_name;
                                 if let Err(log_error) = sender.send(Err(Box::new(FetchError::SubrequestBatchingError {
                                         service: subgraph_name.clone(),
                                         reason: format!("request cancelled: {reason}"),
@@ -306,15 +313,16 @@ impl Batch {
                         );
                     }
 
-                    BatchHandlerMessage::Progress {
-                        index,
-                        client_factory,
-                        request,
-                        gql_request,
-                        response_sender,
-                        span_context,
-                    } => {
+                    BatchHandlerMessage::Progress(progress) => {
                         // Progress the index
+                        let BatchHandlerMessageProgress {
+                            index,
+                            client_factory,
+                            request,
+                            gql_request,
+                            response_sender,
+                            span_context,
+                        } = *progress;
 
                         tracing::debug!("Progress index: {index}");
 
@@ -357,7 +365,7 @@ impl Batch {
                 sender: tx,
             } in all_in_one
             {
-                let subgraph_name = sg_request.subgraph_name.clone().ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                let subgraph_name = sg_request.subgraph_name.clone();
                 let value = svc_map
                     .entry(
                         subgraph_name,
@@ -441,7 +449,7 @@ pub(crate) async fn assemble_batch(
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
     // Construct the actual byte body of the batched request
-    let bytes = get_body_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Retain the various contexts for later use
     let contexts = requests
@@ -462,7 +470,7 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, RouterBody::from(bytes));
+    let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 
@@ -485,13 +493,14 @@ mod tests {
     use crate::graphql;
     use crate::graphql::Request;
     use crate::layers::ServiceExt as LayerExt;
-    use crate::query_planner::fetch::QueryHash;
     use crate::services::http::HttpClientServiceFactory;
     use crate::services::router;
+    use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::subgraph::SubgraphRequestId;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::spec::QueryHash;
     use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
@@ -545,7 +554,8 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&request.into_body().to_bytes().await.unwrap()).unwrap(),
+            std::str::from_utf8(&router::body::into_bytes(request.into_body()).await.unwrap())
+                .unwrap(),
         )
         .unwrap();
 
@@ -573,7 +583,7 @@ mod tests {
                     .body(graphql::Response::builder().data(data.clone()).build())
                     .unwrap(),
                 context: Context::new(),
-                subgraph_name: None,
+                subgraph_name: String::default(),
                 id: SubgraphRequestId(String::new()),
             };
 
@@ -741,7 +751,7 @@ mod tests {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -757,7 +767,7 @@ mod tests {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))
@@ -845,7 +855,7 @@ mod tests {
                 .method("POST")
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json")
-                .body(serde_json::to_vec(&request).unwrap().into())
+                .body(body::from_bytes(serde_json::to_vec(&request).unwrap()))
                 .unwrap(),
         };
 

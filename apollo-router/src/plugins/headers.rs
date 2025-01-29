@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
@@ -23,7 +22,7 @@ use http::HeaderValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json_bytes::path::JsonPathInst;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -32,7 +31,7 @@ use tower_service::Service;
 
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
-use crate::plugin::serde::deserialize_json_query;
+use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
@@ -134,12 +133,12 @@ struct InsertFromBody {
 
     /// The path in the request body
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_json_query")]
-    path: JSONQuery,
+    #[serde(deserialize_with = "deserialize_jsonpath")]
+    path: JsonPathInst,
 
     /// The default if the path in the body did not resolve to an element
     #[schemars(with = "Option<String>", default)]
-    #[serde(deserialize_with = "deserialize_option_header_value")]
+    #[serde(deserialize_with = "deserialize_option_header_value", default)]
     default: Option<HeaderValue>,
 }
 
@@ -316,6 +315,7 @@ where
 impl<S> HeadersService<S> {
     fn modify_request(&self, req: &mut SubgraphRequest) {
         let mut already_propagated: HashSet<&str> = HashSet::new();
+        let mut body_to_value = None;
 
         for operation in &*self.operations {
             match operation {
@@ -345,25 +345,37 @@ impl<S> HeadersService<S> {
                         }
                     }
                     Insert::FromBody(from_body) => {
-                        let output = from_body
-                            .path
-                            .execute(req.supergraph_request.body())
-                            .ok()
-                            .flatten();
-                        if let Some(val) = output {
-                            let header_value = if let Value::String(val_str) = val {
-                                val_str
-                            } else {
-                                val.to_string()
-                            };
-                            match HeaderValue::from_str(&header_value) {
-                                Ok(header_value) => {
+                        if body_to_value.is_none() {
+                            body_to_value =
+                                serde_json_bytes::value::to_value(req.supergraph_request.body())
+                                    .ok();
+                        }
+
+                        if let Some(body_to_value) = &body_to_value {
+                            let output = from_body.path.find(body_to_value);
+                            if let serde_json_bytes::Value::Null = output {
+                                if let Some(default_val) = &from_body.default {
                                     req.subgraph_request
                                         .headers_mut()
-                                        .insert(&from_body.name, header_value);
+                                        .insert(&from_body.name, default_val.clone());
                                 }
-                                Err(err) => {
-                                    tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                            } else {
+                                let header_value =
+                                    if let serde_json_bytes::Value::String(val_str) = output {
+                                        val_str.as_str().to_string()
+                                    } else {
+                                        output.to_string()
+                                    };
+                                match HeaderValue::from_str(&header_value) {
+                                    Ok(header_value) => {
+                                        req.subgraph_request
+                                            .headers_mut()
+                                            .insert(&from_body.name, header_value);
+                                    }
+                                    Err(err) => {
+                                        let header_name = &from_body.name;
+                                        tracing::error!(%header_name, ?err, "cannot convert from the body into a header value for header name");
+                                    }
                                 }
                             }
                         } else if let Some(default_val) = &from_body.default {
@@ -396,19 +408,20 @@ impl<S> HeadersService<S> {
                     rename,
                     default,
                 }) => {
-                    if !already_propagated.contains(named.as_str()) {
+                    let target_header = rename.as_ref().unwrap_or(named);
+                    if !already_propagated.contains(target_header.as_str()) {
                         let headers = req.subgraph_request.headers_mut();
                         let values = req.supergraph_request.headers().get_all(named);
                         if values.iter().count() == 0 {
                             if let Some(default) = default {
-                                headers.append(rename.as_ref().unwrap_or(named), default.clone());
+                                headers.append(target_header, default.clone());
                             }
                         } else {
                             for value in values {
-                                headers.append(rename.as_ref().unwrap_or(named), value.clone());
+                                headers.append(target_header, value.clone());
                             }
                         }
-                        already_propagated.insert(named.as_str());
+                        already_propagated.insert(target_header.as_str());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
@@ -651,7 +664,36 @@ mod test {
         let mut service = HeadersLayer::new(
             Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
                 name: "header_from_request".try_into()?,
-                path: JSONQuery::parse(".operationName")?,
+                path: JsonPathInst::from_str("$.operationName").unwrap(),
+                default: None,
+            }))]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_insert_from_request_body_with_old_access_json_notation() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_request", "my_operation_name"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![Operation::Insert(Insert::FromBody(InsertFromBody {
+                name: "header_from_request".try_into()?,
+                path: JsonPathInst::from_str(".operationName").unwrap(),
                 default: None,
             }))]),
             Arc::new(RESERVED_HEADERS.iter().collect()),
@@ -788,6 +830,49 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_propagate_multiple() -> Result<(), BoxError> {
+        let mut mock = MockSubgraphService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("ra", "vda"),
+                    ("rb", "vda"),
+                ])
+            })
+            .returning(example_response);
+
+        let mut service = HeadersLayer::new(
+            Arc::new(vec![
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+                Operation::Propagate(Propagate::Named {
+                    named: "da".try_into()?,
+                    rename: Some("rb".try_into()?),
+                    default: None,
+                }),
+                // This should not take effect as the header is already propagated
+                Operation::Propagate(Propagate::Named {
+                    named: "db".try_into()?,
+                    rename: Some("ra".try_into()?),
+                    default: None,
+                }),
+            ]),
+            Arc::new(RESERVED_HEADERS.iter().collect()),
+        )
+        .layer(mock);
+
+        service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_propagate_exact_default() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
         mock.expect_call()
@@ -858,7 +943,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),
-            subgraph_name: String::from("test").into(),
+            subgraph_name: String::from("test"),
             subscription_stream: None,
             connection_closed_signal: None,
             query_hash: Default::default(),
@@ -931,7 +1016,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: Context::new(),
-            subgraph_name: String::from("test").into(),
+            subgraph_name: String::from("test"),
             subscription_stream: None,
             connection_closed_signal: None,
             query_hash: Default::default(),
@@ -958,7 +1043,7 @@ mod test {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
-            req.subgraph_name.unwrap_or_default(),
+            req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
     }
@@ -996,7 +1081,7 @@ mod test {
                 .expect("expecting valid request"),
             operation_kind: OperationKind::Query,
             context: ctx,
-            subgraph_name: String::from("test").into(),
+            subgraph_name: String::from("test"),
             subscription_stream: None,
             connection_closed_signal: None,
             query_hash: Default::default(),
@@ -1007,7 +1092,7 @@ mod test {
     }
 
     impl SubgraphRequest {
-        pub fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+        fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
             let mut headers = headers.clone();
             headers.push((HOST.as_str(), "rhost"));
             headers.push((CONTENT_LENGTH.as_str(), "22"));

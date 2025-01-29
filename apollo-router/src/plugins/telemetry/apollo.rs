@@ -67,7 +67,7 @@ pub(crate) struct Config {
     #[schemars(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
-    /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
+    /// The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_name_header: HeaderName,
@@ -84,7 +84,7 @@ pub(crate) struct Config {
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
-    pub(crate) experimental_otlp_tracing_sampler: SamplerOption,
+    pub(crate) otlp_tracing_sampler: SamplerOption,
 
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
@@ -121,6 +121,9 @@ pub(crate) struct Config {
 pub(crate) struct ErrorsConfiguration {
     /// Handling of errors coming from subgraph
     pub(crate) subgraph: SubgraphErrorConfig,
+
+    /// Configuration for storing and sending error metrics via OTLP
+    pub(crate) experimental_otlp_error_metrics: OtlpErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -160,12 +163,23 @@ impl SubgraphErrorConfig {
     }
 }
 
+/// Open Telemetry error metrics mode
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum OtlpErrorMetricsMode {
+    /// Do not store OTLP error metrics
+    #[default]
+    Disabled,
+    /// Send OTLP error metrics to Apollo Studio
+    Enabled,
+}
+
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
-const fn default_experimental_otlp_tracing_sampler() -> SamplerOption {
-    SamplerOption::Always(Sampler::AlwaysOff)
+const fn default_otlp_tracing_sampler() -> SamplerOption {
+    SamplerOption::Always(Sampler::AlwaysOn)
 }
 
 fn endpoint_default() -> Url {
@@ -209,7 +223,7 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
-            experimental_otlp_tracing_sampler: default_experimental_otlp_tracing_sampler(),
+            otlp_tracing_sampler: default_otlp_tracing_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),

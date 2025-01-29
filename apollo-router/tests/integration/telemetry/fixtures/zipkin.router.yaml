@@ -1,4 +1,7 @@
 telemetry:
+  instrumentation:
+    spans:
+      mode: deprecated
   exporters:
     tracing:
       experimental_response_trace_id:

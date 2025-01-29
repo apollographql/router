@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_entities/invalid/entity_true_returning_scalar.graphql
+---
+[
+    Message {
+        code: EntityTypeInvalid,
+        message: "`@connect(entity: true)` on `Query.name` is invalid. Entity connectors must return object types.",
+        locations: [
+            8:7..8:19,
+        ],
+    },
+]

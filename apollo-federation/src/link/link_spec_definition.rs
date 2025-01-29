@@ -1,4 +1,4 @@
-use lazy_static::lazy_static;
+use std::sync::LazyLock;
 
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
@@ -8,18 +8,12 @@ use crate::link::spec_definition::SpecDefinitions;
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
-    minimum_federation_version: Option<Version>,
 }
 
 impl LinkSpecDefinition {
-    pub(crate) fn new(
-        version: Version,
-        minimum_federation_version: Option<Version>,
-        identity: Identity,
-    ) -> Self {
+    pub(crate) fn new(version: Version, identity: Identity) -> Self {
         Self {
             url: Url { identity, version },
-            minimum_federation_version,
         }
     }
 }
@@ -28,20 +22,14 @@ impl SpecDefinition for LinkSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
-
-    fn minimum_federation_version(&self) -> Option<&Version> {
-        self.minimum_federation_version.as_ref()
-    }
 }
 
-lazy_static! {
-    pub(crate) static ref LINK_VERSIONS: SpecDefinitions<LinkSpecDefinition> = {
+pub(crate) static LINK_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
+    LazyLock::new(|| {
         let mut definitions = SpecDefinitions::new(Identity::link_identity());
         definitions.add(LinkSpecDefinition::new(
             Version { major: 1, minor: 0 },
-            Some(Version { major: 2, minor: 0 }),
             Identity::link_identity(),
         ));
         definitions
-    };
-}
+    });

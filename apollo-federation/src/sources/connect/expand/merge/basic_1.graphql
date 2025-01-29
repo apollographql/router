@@ -39,3 +39,11 @@ type Y {
 input YInput {
   z: ID
 }
+
+type Mutation {
+  m: M
+}
+
+type M {
+  n: String
+}

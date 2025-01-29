@@ -286,8 +286,8 @@ If your deployment of routers is terminating due to memory pressure, you can add
 1. Add and track the following metrics to your monitoring system:
   
     * `apollo.router.cache.storage.estimated_size`
-    * `apollo_router_cache_size`
-    * ratio of `apollo_router_cache_hits` to `apollo_router_cache_misses`
+    * `apollo.router.cache.size`
+    * ratio of `apollo.router.cache.hit.time.count` to `apollo.router.cache.miss.time.count`
 
 2. Observe and monitor the metrics:
 

@@ -1,6 +1,5 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry::OrderMap;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
@@ -10,6 +9,7 @@ use super::consts::OTEL_KIND;
 use super::consts::OTEL_NAME;
 use super::consts::OTEL_STATUS_CODE;
 use super::consts::OTEL_STATUS_MESSAGE;
+use super::formatters::APOLLO_CONNECTOR_PREFIX;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
@@ -85,14 +85,14 @@ impl SpanDynAttribute for ::tracing::Span {
                                     update_otel_data(otel_data, &key, &value);
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some([(key, value)].into_iter().collect());
+                                            Some([KeyValue::new(key, value)].into_iter().collect());
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .expect("we checked the attributes value in the condition above")
-                                            .insert(key, value);
+                                            .push(KeyValue::new(key, value));
                                     }
                                 }
                                 None => {
@@ -101,7 +101,7 @@ impl SpanDynAttribute for ::tracing::Span {
                                 }
                             }
                         } else {
-                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) || key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX) {
                                 return;
                             }
                             let mut extensions = s.extensions_mut();
@@ -170,7 +170,10 @@ impl SpanDynAttribute for ::tracing::Span {
                             }
                         } else {
                             let mut attributes = attributes
-                                .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                                .filter(|kv| {
+                                    !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                                        && !kv.key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+                                })
                                 .peekable();
                             if attributes.peek().is_none() {
                                 return;
@@ -249,13 +252,16 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(event_attributes) => {
-                                        event_attributes
-                                            .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                        event_attributes.extend(
+                                            attributes.map(|KeyValue { key, value }| (key, value)),
+                                        );
                                     }
                                     None => {
-                                        otel_data.event_attributes = Some(OrderMap::from_iter(
-                                            attributes.map(|kv| (kv.key, kv.value)),
-                                        ));
+                                        otel_data.event_attributes = Some(
+                                            attributes
+                                                .map(|KeyValue { key, value }| (key, value))
+                                                .collect(),
+                                        );
                                     }
                                 },
                                 None => {
@@ -265,7 +271,10 @@ impl EventDynAttribute for ::tracing::Span {
                             }
                         } else {
                             let mut attributes = attributes
-                                .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                                .filter(|kv| {
+                                    !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                                        && !kv.key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+                                })
                                 .peekable();
                             if attributes.peek().is_none() {
                                 return;

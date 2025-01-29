@@ -677,7 +677,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g{supergraph_route}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/graphql/g*").build())
@@ -687,16 +687,16 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(
         &conf.supergraph.sanitized_path(),
-        "/graphql/g:supergraph_route"
+        "/graphql/g{supergraph_route}"
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*").build())
+        .supergraph(Supergraph::builder().path("/{*rest}").build())
         .build()
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*rest}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())
@@ -714,6 +714,9 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
@@ -1090,20 +1093,4 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
-}
-
-#[test]
-fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
-    let conf = Configuration::builder()
-        .supergraph(
-            Supergraph::builder()
-                .generate_query_fragments(true)
-                .reuse_query_fragments(true)
-                .build(),
-        )
-        .build()
-        .unwrap();
-
-    assert!(conf.supergraph.generate_query_fragments);
-    assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
 }

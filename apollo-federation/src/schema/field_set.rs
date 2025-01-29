@@ -63,23 +63,23 @@ fn check_absence_of_aliases(selection_set: &SelectionSet) -> Result<(), Federati
 pub(crate) fn parse_field_set(
     schema: &ValidFederationSchema,
     parent_type_name: NamedType,
-    value: &str,
+    field_set: &str,
 ) -> Result<SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set = FieldSet::parse_and_validate(
         schema.schema(),
         parent_type_name,
-        value,
+        field_set,
         "field_set.graphql",
     )?;
 
-    // field set should not contain any named fragments
+    // A field set should not contain any named fragments.
     let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
     let selection_set =
         SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
 
-    // Validate the field set has no aliases.
+    // Validate that the field set has no aliases.
     check_absence_of_aliases(&selection_set)?;
 
     Ok(selection_set)
@@ -93,12 +93,12 @@ pub(crate) fn parse_field_set(
 pub(crate) fn parse_field_set_without_normalization(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
-    value: &str,
+    field_set: &str,
 ) -> Result<executable::SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set =
-        FieldSet::parse_and_validate(schema, parent_type_name, value, "field_set.graphql")?;
+        FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?;
     Ok(field_set.into_inner().selection_set)
 }
 
@@ -109,12 +109,12 @@ pub(crate) fn parse_field_set_without_normalization(
 pub(crate) fn collect_target_fields_from_field_set(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
-    value: &str,
+    field_set: &str,
 ) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set =
-        FieldSet::parse_and_validate(schema, parent_type_name, value, "field_set.graphql")?;
+        FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?;
     let mut stack = vec![&field_set.selection_set];
     let mut fields = vec![];
     while let Some(selection_set) = stack.pop() {
@@ -164,6 +164,41 @@ pub(crate) fn collect_target_fields_from_field_set(
         }
     }
     Ok(fields)
+}
+
+pub(crate) fn parse_field_value_without_validation(
+    schema: &ValidFederationSchema,
+    parent_type_name: NamedType,
+    field_value: &str,
+) -> Result<FieldSet, FederationError> {
+    // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
+    // string.
+    Ok(FieldSet::parse(
+        schema.schema(),
+        parent_type_name,
+        field_value,
+        "field_set.graphql",
+    )?)
+}
+
+// Similar to parse_field_set(), we explicitly forbid aliases for field values. In this case though,
+// it's because field value evaluation semantics means aliases would be stripped out and have no
+// effect.
+pub(crate) fn validate_field_value(
+    schema: &ValidFederationSchema,
+    field_value: FieldSet,
+) -> Result<SelectionSet, FederationError> {
+    field_value.validate(schema.schema())?;
+
+    // A field value should not contain any named fragments.
+    let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
+    let selection_set =
+        SelectionSet::from_selection_set(&field_value.selection_set, &named_fragments, schema)?;
+
+    // Validate that the field value has no aliases.
+    check_absence_of_aliases(&selection_set)?;
+
+    Ok(selection_set)
 }
 
 #[cfg(test)]

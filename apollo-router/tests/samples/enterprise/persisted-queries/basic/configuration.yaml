@@ -1,0 +1,14 @@
+persisted_queries:
+  enabled: true
+  local_manifests:
+    - tests/samples/enterprise/persisted-queries/basic/persisted-query-manifest.json
+apq:
+  enabled: false
+telemetry:
+  apollo:
+    client_name_header: custom-client-name
+rhai:
+  scripts: "tests/samples/enterprise/persisted-queries/basic/rhai"
+  main: "main.rhai"
+include_subgraph_errors:
+  all: true

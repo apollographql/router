@@ -1,0 +1,60 @@
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.10")
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+            }
+          )
+
+        type User {
+          id: ID!
+          name: String
+          email: String
+        }
+
+        type Query {
+          users: [User]
+            @connect(source: "json", http: { GET: "/users" }, selection: "id name")
+          user(id: ID!): User
+            @connect(
+              source: "json"
+              http: { GET: "/users/{$$args.id}" }
+              selection: "id name email"
+              entity: true
+            )
+        }
+
+        type Mutation {
+          createUser(name: String!): CreateUserPayload!
+            @connect(
+              source: "json"
+              http: {
+                POST: "/user"
+                body: """
+                  username: $$args.name
+                """
+              }
+              selection: """
+                success: $(true)
+                user: {
+                  id
+                  name: username
+                }
+              """
+            )
+        }
+
+        type CreateUserPayload {
+          success: Boolean!
+          user: User!
+        }

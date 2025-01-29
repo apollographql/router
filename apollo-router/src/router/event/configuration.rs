@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::time::Duration;
 
 use derivative::Derivative;
 use derive_more::Display;
@@ -42,11 +41,6 @@ pub enum ConfigurationSource {
 
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
-
-        /// When watching, the delay to wait before applying the new configuration.
-        /// Note: This variable is deprecated and has no effect.
-        #[deprecated]
-        delay: Option<Duration>,
     },
 }
 
@@ -73,12 +67,7 @@ impl ConfigurationSource {
                     UpdateConfiguration(c)
                 })
                 .boxed(),
-            #[allow(deprecated)]
-            ConfigurationSource::File {
-                path,
-                watch,
-                delay: _,
-            } => {
+            ConfigurationSource::File { path, watch } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
@@ -160,13 +149,9 @@ mod tests {
         let (path, mut file) = create_temp_file();
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: true,
-            delay: None,
-        }
-        .into_stream(Some(UplinkConfig::default()))
-        .boxed();
+        let mut stream = ConfigurationSource::File { path, watch: true }
+            .into_stream(Some(UplinkConfig::default()))
+            .boxed();
 
         // First update is guaranteed
         assert!(matches!(
@@ -194,7 +179,6 @@ mod tests {
         let mut stream = ConfigurationSource::File {
             path: temp_dir().join("does_not_exit"),
             watch: true,
-            delay: None,
         }
         .into_stream(Some(UplinkConfig::default()));
 
@@ -206,12 +190,8 @@ mod tests {
     async fn config_by_file_invalid() {
         let (path, mut file) = create_temp_file();
         write_and_flush(&mut file, "Garbage").await;
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: true,
-            delay: None,
-        }
-        .into_stream(Some(UplinkConfig::default()));
+        let mut stream = ConfigurationSource::File { path, watch: true }
+            .into_stream(Some(UplinkConfig::default()));
 
         // First update fails because the file is invalid.
         assert!(matches!(stream.next().await.unwrap(), NoMoreConfiguration));
@@ -223,12 +203,8 @@ mod tests {
         let contents = include_str!("../../testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
 
-        let mut stream = ConfigurationSource::File {
-            path,
-            watch: false,
-            delay: None,
-        }
-        .into_stream(Some(UplinkConfig::default()));
+        let mut stream = ConfigurationSource::File { path, watch: false }
+            .into_stream(Some(UplinkConfig::default()));
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)

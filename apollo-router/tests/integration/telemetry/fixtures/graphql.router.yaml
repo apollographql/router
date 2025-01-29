@@ -9,6 +9,31 @@ telemetry:
 
   instrumentation:
     instruments:
+      supergraph:
+        oplimits.aliases:
+          value:
+            query: aliases
+          type: histogram
+          unit: number
+          description: "Aliases for an operation"
+        oplimits.depth:
+          value:
+            query: depth
+          type: histogram
+          unit: number
+          description: "Depth for an operation"
+        oplimits.height:
+          value:
+            query: height
+          type: histogram
+          unit: number
+          description: "Height for an operation"
+        oplimits.root_fields:
+          value:
+            query: root_fields
+          type: histogram
+          unit: number
+          description: "Root fields for an operation"
       graphql:
         field.execution: true
         list.length: true
@@ -39,6 +64,3 @@ telemetry:
             eq:
               - field_name: string
               - "topProducts"
-
-
-

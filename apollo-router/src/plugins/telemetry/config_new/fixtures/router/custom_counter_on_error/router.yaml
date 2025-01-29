@@ -11,7 +11,7 @@ telemetry:
           unit: request
           attributes:
             graphql.operation.name:
-              response_context: operation_name
+              response_context: "apollo::supergraph::operation_name"
           condition:
             eq:
             - "request timed out"

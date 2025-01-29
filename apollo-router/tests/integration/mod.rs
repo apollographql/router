@@ -3,6 +3,7 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
+mod connectors;
 mod coprocessor;
 mod docs;
 mod file_upload;
@@ -12,6 +13,7 @@ mod operation_limits;
 mod operation_name;
 mod query_planner;
 mod subgraph_response;
+mod supergraph;
 mod traffic_shaping;
 mod typename;
 
@@ -32,6 +34,15 @@ pub trait ValueExt {
 }
 
 impl ValueExt for Value {
+    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
+        Ok(Selector::new().str_path(path)?.value(self).select()?)
+    }
+    fn as_string(&self) -> Option<String> {
+        self.as_str().map(|s| s.to_string())
+    }
+}
+
+impl ValueExt for &Value {
     fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
         Ok(Selector::new().str_path(path)?.value(self).select()?)
     }

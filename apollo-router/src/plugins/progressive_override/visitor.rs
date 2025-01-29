@@ -29,7 +29,7 @@ impl<'a> OverrideLabelVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for OverrideLabelVisitor<'a> {
+impl traverse::Visitor for OverrideLabelVisitor<'_> {
     fn schema(&self) -> &apollo_compiler::Schema {
         self.schema
     }

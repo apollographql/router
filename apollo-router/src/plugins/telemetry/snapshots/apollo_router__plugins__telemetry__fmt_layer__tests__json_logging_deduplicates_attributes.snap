@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/plugins/telemetry/fmt_layer.rs
+expression: buff.to_string()
+---
+{"timestamp":"[timestamp]","level":"ERROR","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000","static":"foo","subgraph.name":"subgraph_bis","message":"this event has a duplicate attribute","kind":"event.with.duplicate.attribute","target":"apollo_router::plugins::telemetry::config_new::events"}
+{"timestamp":"[timestamp]","level":"ERROR","trace_id":"00000000000000000000000000000000","span_id":"0000000000000000","static":"foo","message":"this event has a duplicate attribute","kind":"event.with.duplicate.attribute","target":"apollo_router::plugins::telemetry::config_new::events"}

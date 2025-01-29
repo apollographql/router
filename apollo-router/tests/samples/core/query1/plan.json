@@ -9,7 +9,7 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"{me{name}}"}
+                                "body": {"query":"{ me { name } }"}
                             },
                             "response": {
                                 "body": {"data": { "me": { "name": "test" } } }
@@ -17,7 +17,7 @@
                         },
                         {
                             "request": {
-                                "body": {"query":"{me{nom:name}}"}
+                                "body": {"query":"{ me { nom: name } }"}
                             },
                             "response": {
                                 "body": {"data": { "me": { "nom": "test" } } }

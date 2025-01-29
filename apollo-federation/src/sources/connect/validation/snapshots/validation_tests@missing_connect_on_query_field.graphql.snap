@@ -1,0 +1,14 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/missing_connect_on_query_field.graphql
+---
+[
+    Message {
+        code: QueryFieldMissingConnect,
+        message: "The field `Query.resources` has no `@connect` directive.",
+        locations: [
+            9:5..9:26,
+        ],
+    },
+]

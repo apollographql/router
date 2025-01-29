@@ -6,6 +6,7 @@ use tower::BoxError;
 use wiremock::ResponseTemplate;
 
 use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
 use crate::integration::IntegrationTest;
 
@@ -40,10 +41,10 @@ async fn test_router_timeout() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 504);
     let response = response.text().await?;
-    assert!(response.contains("REQUEST_TIMEOUT"));
+    assert!(response.contains("GATEWAY_TIMEOUT"));
     assert_yaml_snapshot!(response);
 
-    router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_TIMEOUT",otel_scope_name="apollo/router"} 1"#, None).await;
+    router.assert_metrics_contains(r#"http_server_request_duration_seconds_count{error_type="Gateway Timeout",http_request_method="POST",http_response_status_code="504""#, None).await;
 
     router.graceful_shutdown().await;
     Ok(())
@@ -72,10 +73,11 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
     let (_trace_id, response) = router.execute_default_query().await;
     assert_eq!(response.status(), 200);
     let response = response.text().await?;
-    assert!(response.contains("REQUEST_TIMEOUT"));
+    assert!(response.contains("GATEWAY_TIMEOUT"));
     assert_yaml_snapshot!(response);
 
-    router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_TIMEOUT",otel_scope_name="apollo/router"} 1"#, None).await;
+    // We need to add support for http.client metrics ROUTER-991
+    //router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_TIMEOUT",otel_scope_name="apollo/router"} 1"#, None).await;
 
     router.graceful_shutdown().await;
     Ok(())
@@ -99,16 +101,20 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     router.assert_started().await;
 
     let (_trace_id, response) = router
-        .execute_query(&json!({
-            "query": "query UniqueName { topProducts { name } }"
-        }))
+        .execute_query(
+            Query::builder()
+                .body(json!({
+                    "query": "query UniqueName { topProducts { name } }"
+                }))
+                .build(),
+        )
         .await;
     assert_eq!(response.status(), 504);
     let response = response.text().await?;
-    assert!(response.contains("REQUEST_TIMEOUT"));
+    assert!(response.contains("GATEWAY_TIMEOUT"));
 
     router
-        .assert_log_contains(r#""otel.name":"query UniqueName""#)
+        .wait_for_log_message(r#""otel.name":"GraphQL Operation""#)
         .await;
 
     router.graceful_shutdown().await;
@@ -116,13 +122,13 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_router_timeout_custom_metric() -> Result<(), BoxError> {
+async fn test_router_custom_metric() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
 
     let mut router = IntegrationTest::builder()
-        .telemetry(Telemetry::Jaeger)
+        .telemetry(Telemetry::Otlp { endpoint: None })
         .config(format!(
             r#"
             {PROMETHEUS_CONFIG}
@@ -147,12 +153,12 @@ async fn test_router_timeout_custom_metric() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    let (_trace_id, response) = router.execute_default_query().await;
-    assert_eq!(response.status(), 504);
+    let (_trace_id, response) = router
+        .execute_query(Query::default().with_bad_query())
+        .await;
     let response = response.text().await?;
-    assert!(response.contains("REQUEST_TIMEOUT"));
-
-    router.assert_metrics_contains(r#"http_server_request_duration_seconds_count{error_type="Gateway Timeout",graphql_error="true",http_request_method="POST",http_response_status_code="504""#, None).await;
+    assert!(response.contains("MISSING_QUERY_STRING"));
+    router.assert_metrics_contains(r#"http_server_request_duration_seconds_count{error_type="Bad Request",graphql_error="true",http_request_method="POST",http_response_status_code="400""#, None).await;
 
     router.graceful_shutdown().await;
     Ok(())
@@ -184,12 +190,12 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
     assert_yaml_snapshot!(response);
 
     let (_, response) = router.execute_default_query().await;
-    assert_eq!(response.status(), 429);
+    assert_eq!(response.status(), 503);
     let response = response.text().await?;
     assert!(response.contains("REQUEST_RATE_LIMITED"));
     assert_yaml_snapshot!(response);
 
-    router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router"} 1"#, None).await;
+    router.assert_metrics_contains(r#"http_server_request_duration_seconds_count{error_type="Service Unavailable",http_request_method="POST",http_response_status_code="503""#, None).await;
 
     router.graceful_shutdown().await;
     Ok(())

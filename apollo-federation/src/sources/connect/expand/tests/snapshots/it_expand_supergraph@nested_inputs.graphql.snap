@@ -1,0 +1,19 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/nested_inputs.graphql
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+input BazInput {
+  buzz: String
+  quux: QuuxInput
+}
+
+type Query {
+  foo(bar: String, baz: BazInput, doubleBaz: BazInput): String
+}
+
+input QuuxInput {
+  quaz: String
+}

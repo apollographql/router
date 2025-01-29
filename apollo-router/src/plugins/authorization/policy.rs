@@ -122,7 +122,7 @@ fn policy_argument(
         .filter_map(|v| v.as_str().map(str::to_owned))
 }
 
-impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
+impl traverse::Visitor for PolicyExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_policies.extend(policy_argument(
@@ -417,7 +417,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
+impl transform::Visitor for PolicyFilteringVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -763,7 +763,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,

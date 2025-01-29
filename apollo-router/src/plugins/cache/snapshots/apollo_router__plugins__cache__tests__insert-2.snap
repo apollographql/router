@@ -1,17 +1,7 @@
 ---
 source: apollo-router/src/plugins/cache/tests.rs
-expression: response
+expression: response.response.headers().get(CACHE_CONTROL)
 ---
-{
-  "data": {
-    "currentUser": {
-      "activeOrganization": {
-        "id": "1",
-        "creatorUser": {
-          "__typename": "User",
-          "id": 2
-        }
-      }
-    }
-  }
-}
+Some(
+    "public",
+)

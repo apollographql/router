@@ -1,0 +1,30 @@
+---
+source: apollo-router/src/services/supergraph/tests.rs
+expression: stream.next_response().await.unwrap()
+snapshot_kind: text
+---
+{
+  "hasNext": false,
+  "incremental": [
+    {
+      "data": {
+        "errorField": null
+      },
+      "path": [
+        "computer"
+      ],
+      "errors": [
+        {
+          "message": "Error field",
+          "path": [
+            "computer",
+            "errorField"
+          ],
+          "extensions": {
+            "service": "computers"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -16,6 +16,7 @@ info:
   data:
     datapoints:
       - sum: 0.1
+        count: 1
         attributes:
           http.request.method: GET
           http.response.status_code: 200

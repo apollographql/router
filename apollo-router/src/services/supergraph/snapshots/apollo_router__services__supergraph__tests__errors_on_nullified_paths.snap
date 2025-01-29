@@ -20,7 +20,8 @@ expression: stream.next_response().await.unwrap()
         "bar"
       ],
       "extensions": {
-        "code": "NOT_FOUND"
+        "code": "NOT_FOUND",
+        "service": "S2"
       }
     }
   ]

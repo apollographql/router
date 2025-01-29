@@ -510,7 +510,11 @@ where
 
         match Pin::new(&mut this.msg_receiver).poll_next(cx) {
             Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
-                tracing::info!(monotonic_counter.apollo_router_skipped_event_count = 1u64,);
+                u64_counter!(
+                    "apollo.router.skipped.event.count",
+                    "Amount of events dropped from the internal message queue",
+                    1u64
+                );
                 self.poll_next(cx)
             }
             Poll::Ready(None) => Poll::Ready(None),
@@ -751,9 +755,8 @@ where
             .insert(topic, Subscription::new(sender, heartbeat_enabled))
             .is_some();
         if !existed {
-            // TODO: deprecated name, should use our new convention apollo.router. for router next
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
                 1
             );
@@ -810,7 +813,7 @@ where
             tracing::trace!("deleting subscription from unsubscribe");
             if self.subscriptions.remove(&topic).is_some() {
                 i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
+                    "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
                     -1
                 );
@@ -883,7 +886,7 @@ where
             for (_subscriber_id, subscription) in closed_subs {
                 tracing::trace!("deleting subscription from kill_dead_topics");
                 i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
+                    "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
                     -1
                 );
@@ -913,7 +916,7 @@ where
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
                 -1
             );

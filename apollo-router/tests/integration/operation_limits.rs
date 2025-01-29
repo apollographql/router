@@ -10,6 +10,7 @@ use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -310,7 +311,9 @@ async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    let (_, resp) = router.execute_huge_query().await;
+    let (_, resp) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(resp.status(), 413);
     router.graceful_shutdown().await;
     Ok(())
@@ -324,7 +327,9 @@ async fn test_request_bytes_limit() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    let (_, resp) = router.execute_huge_query().await;
+    let (_, resp) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(resp.status(), 413);
     router.graceful_shutdown().await;
     Ok(())

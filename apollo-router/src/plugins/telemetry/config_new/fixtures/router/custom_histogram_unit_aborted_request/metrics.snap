@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Custom histogram unit
+description: "Custom histogram where router response doesn't happen. This should still increment the metric on Drop."
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -21,4 +21,5 @@ info:
   data:
     datapoints:
       - sum: 1
+        count: 1
         attributes: {}

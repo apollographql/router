@@ -18,8 +18,9 @@ use super::SelectionValue;
 use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 
-impl<'a> FieldSelectionValue<'a> {
+impl FieldSelectionValue<'_> {
     /// Merges the given field selections into this one.
     ///
     /// # Preconditions
@@ -42,12 +43,23 @@ impl<'a> FieldSelectionValue<'a> {
                 other_field.schema == self_field.schema,
                 "Cannot merge field selections from different schemas",
             );
-            ensure!(
-                other_field.field_position == self_field.field_position,
-                "Cannot merge field selection for field \"{}\" into a field selection for field \"{}\"",
-                other_field.field_position,
-                self_field.field_position,
-            );
+            if other_field.field_position != self_field.field_position {
+                return Err(SingleFederationError::InternalUnmergeableFields {
+                    message: format!(
+                        "Cannot merge field selection for field \"{}\" into a field selection for \
+                        field \"{}\". This is a known query planning bug in the old Javascript \
+                        query planner that was silently ignored. The Rust-native query planner \
+                        does not address this bug at this time, but in some cases does catch when \
+                        this bug occurs. If you're seeing this message, this bug was likely \
+                        triggered by one of the field selections mentioned previously having an \
+                        alias that was the same name as the field in the other field selection. \
+                        The recommended workaround is to change this alias to a different one in \
+                        your operation.",
+                        other_field.field_position, self_field.field_position,
+                    ),
+                }
+                .into());
+            }
             if self.get().selection_set.is_some() {
                 let Some(other_selection_set) = &other.selection_set else {
                     bail!(
@@ -70,7 +82,7 @@ impl<'a> FieldSelectionValue<'a> {
     }
 }
 
-impl<'a> InlineFragmentSelectionValue<'a> {
+impl InlineFragmentSelectionValue<'_> {
     /// Merges the given normalized inline fragment selections into this one.
     ///
     /// # Preconditions
@@ -105,7 +117,7 @@ impl<'a> InlineFragmentSelectionValue<'a> {
     }
 }
 
-impl<'a> FragmentSpreadSelectionValue<'a> {
+impl FragmentSpreadSelectionValue<'_> {
     /// Merges the given normalized fragment spread selections into this one.
     ///
     /// # Preconditions

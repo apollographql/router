@@ -377,12 +377,13 @@ impl fmt::Display for FetchDataPathElement {
                 write_conditions(conditions, f)
             }
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
+            Self::Parent => write!(f, ".."),
         }
     }
 }
 
-fn write_conditions(conditions: &[Name], f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    if !conditions.is_empty() {
+fn write_conditions(conditions: &Option<Vec<Name>>, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if let Some(conditions) = conditions {
         write!(f, "|[{}]", conditions.join(","))
     } else {
         Ok(())

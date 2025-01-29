@@ -5,9 +5,9 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
-use opentelemetry::sdk::metrics::MeterProvider;
-use opentelemetry::sdk::metrics::View;
-use opentelemetry::sdk::Resource;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::Resource;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -24,7 +24,6 @@ use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
-use crate::services::router::Body;
 use crate::ListenAddr;
 
 /// Prometheus configuration
@@ -136,7 +135,7 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        let mut meter_provider_builder = MeterProvider::builder()
+        let mut meter_provider_builder = SdkMeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
         for metric_view in metrics_config.views.clone() {
@@ -199,7 +198,7 @@ impl Service<router::Request> for PrometheusService {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
                     .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
-                    .body::<Body>(modified_stats.into())
+                    .body(router::body::from_bytes(modified_stats))
                     .map_err(BoxError::from)?,
                 context: req.context,
             })

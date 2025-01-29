@@ -1,0 +1,120 @@
+# Composed from subgraphs with hash: 753d6866862484ee27a265b4f2f2f9d4e0c97b03
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+  @link(url: "https://specs.apollo.dev/context/v0.1", import: ["@context"], for: SECURITY)
+{
+  query: Query
+}
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Accounts
+  @join__type(graph: SUBGRAPH3, key: "id")
+  @join__type(graph: SUBGRAPH4, key: "id")
+{
+  foo(randomInput: String): Foo @join__field(graph: SUBGRAPH3, contextArguments: [{context: "Subgraph3__retailCtx", name: "ctx_id5", type: "ID", selection: " { identifiers { id5 } }"}, {context: "Subgraph3__retailCtx", name: "ctx_mid", type: "ID", selection: " { mid }"}])
+  id: ID!
+  bar: Bar @join__field(graph: SUBGRAPH4, contextArguments: [{context: "Subgraph4__widCtx", name: "ctx_wid", type: "ID", selection: " { identifiers { wid } }"}])
+}
+
+type Bar
+  @join__type(graph: SUBGRAPH4)
+{
+  id: ID
+}
+
+scalar context__ContextFieldValue
+
+type Customer
+  @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
+  @join__type(graph: SUBGRAPH4, key: "id", resolvable: false)
+  @context(name: "Subgraph3__retailCtx")
+  @context(name: "Subgraph4__widCtx")
+{
+  id: ID!
+  identifiers: Identifiers @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true) @join__field(graph: SUBGRAPH4, external: true)
+  mid: ID @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true)
+  accounts: Accounts @join__field(graph: SUBGRAPH3) @join__field(graph: SUBGRAPH4)
+}
+
+type Foo
+  @join__type(graph: SUBGRAPH3)
+{
+  id: ID
+}
+
+type Identifiers
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
+  @join__type(graph: SUBGRAPH4, key: "id", resolvable: false)
+{
+  id: ID!
+  id2: ID @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2)
+  id3: ID @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2)
+  wid: ID @join__field(graph: SUBGRAPH1, requires: "id2 id3") @join__field(graph: SUBGRAPH4, external: true)
+  id5: ID @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true)
+}
+
+input join__ContextArgument {
+  name: String!
+  type: String!
+  context: String!
+  selection: join__FieldValue!
+}
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar join__FieldValue
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
+  SUBGRAPH4 @join__graph(name: "Subgraph4", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+  @join__type(graph: SUBGRAPH4)
+{
+  customer: Customer @join__field(graph: SUBGRAPH2)
+}

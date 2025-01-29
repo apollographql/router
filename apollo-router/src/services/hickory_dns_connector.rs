@@ -3,15 +3,16 @@ use std::io;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::system_conf::read_system_conf;
 use hickory_resolver::TokioAsyncResolver;
-use hyper::client::connect::dns::Name;
-use hyper::client::HttpConnector;
-use hyper::service::Service;
+use hyper_util::client::legacy::connect::dns::Name;
+use hyper_util::client::legacy::connect::HttpConnector;
+use tower::Service;
 
 use crate::configuration::shared::DnsResolutionStrategy;
 
@@ -22,7 +23,7 @@ use crate::configuration::shared::DnsResolutionStrategy;
 /// the background task is also created, it needs to be spawned on top of an executor before using the client,
 /// or dns requests will block.
 #[derive(Debug, Clone)]
-pub(crate) struct AsyncHyperResolver(TokioAsyncResolver);
+pub(crate) struct AsyncHyperResolver(Arc<TokioAsyncResolver>);
 
 impl AsyncHyperResolver {
     /// constructs a new resolver from default configuration, using [read_system_conf](https://docs.rs/hickory-resolver/0.24.1/hickory_resolver/system_conf/fn.read_system_conf.html)
@@ -32,7 +33,7 @@ impl AsyncHyperResolver {
         let (config, mut options) = read_system_conf()?;
         options.ip_strategy = dns_resolution_strategy.into();
 
-        Ok(Self(TokioAsyncResolver::tokio(config, options)))
+        Ok(Self(Arc::new(TokioAsyncResolver::tokio(config, options))))
     }
 }
 

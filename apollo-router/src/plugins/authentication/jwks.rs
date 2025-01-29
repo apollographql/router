@@ -237,7 +237,7 @@ pub(super) struct Iter<'a> {
     list: Vec<JwksConfig>,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = JwkSetInfo;
 
     fn next(&mut self) -> Option<Self::Item> {

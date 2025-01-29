@@ -1,19 +1,13 @@
-use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 use std::task;
 
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use query_planner::QueryPlannerPlugin;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
-use router_bridge::planner::PlanOptions;
-use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
-use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -22,7 +16,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use super::fetch::QueryHash;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
@@ -35,16 +29,18 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::BridgeQueryPlannerPool;
-use crate::query_planner::QueryPlanResult;
+use crate::query_planner::QueryPlannerService;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
+use crate::services::query_planner::PlanOptions;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
+use crate::spec::SchemaHash;
 use crate::spec::SpecError;
 use crate::Configuration;
 
@@ -52,16 +48,26 @@ use crate::Configuration;
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
-pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
+pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
 
-#[derive(Debug, Clone, Hash)]
-pub(crate) enum ConfigMode {
-    //FIXME: add the Rust planner structure once it is hashable and serializable,
-    // for now use the JS config as it expected to be identical to the Rust one
-    Rust(Arc<apollo_federation::query_plan::query_planner::QueryPlannerConfig>),
-    Both(Arc<QueryPlannerConfig>),
-    BothBestEffort(Arc<QueryPlannerConfig>),
-    Js(Arc<QueryPlannerConfig>),
+/// Hashed value of query planner configuration for use in cache keys.
+#[derive(Clone, Hash, PartialEq, Eq)]
+// XXX(@goto-bus-stop): I think this probably should not be pub(crate), but right now all fields in
+// the cache keys are pub(crate), which I'm not going to change at this time :)
+pub(crate) struct ConfigModeHash(Vec<u8>);
+
+impl std::fmt::Display for ConfigModeHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", hex::encode(&self.0))
+    }
+}
+
+impl std::fmt::Debug for ConfigModeHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ConfigModeHash")
+            .field(&hex::encode(&self.0))
+            .finish()
+    }
 }
 
 /// A query planner wrapper that caches results.
@@ -74,10 +80,10 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     >,
     delegate: T,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
-    config_mode_hash: Arc<QueryHash>,
+    config_mode_hash: Arc<ConfigModeHash>,
 }
 
 fn init_query_plan_from_redis(
@@ -107,7 +113,7 @@ where
     pub(crate) async fn new(
         delegate: T,
         schema: Arc<Schema>,
-        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_schemas: Arc<SubgraphSchemas>,
         configuration: &Configuration,
         plugins: Plugins,
     ) -> Result<CachingQueryPlanner<T>, BoxError> {
@@ -123,32 +129,8 @@ where
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
         let mut hasher = StructHasher::new();
-        match configuration.experimental_query_planner_mode {
-            crate::configuration::QueryPlannerMode::New => {
-                "PLANNER-NEW".hash(&mut hasher);
-                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
-                    .hash(&mut hasher);
-            }
-            crate::configuration::QueryPlannerMode::Legacy => {
-                "PLANNER-LEGACY".hash(&mut hasher);
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config())).hash(&mut hasher);
-            }
-            crate::configuration::QueryPlannerMode::Both => {
-                "PLANNER-BOTH".hash(&mut hasher);
-                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
-                    .hash(&mut hasher);
-                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
-                    .hash(&mut hasher);
-            }
-            crate::configuration::QueryPlannerMode::BothBestEffort => {
-                "PLANNER-BOTH-BEST-EFFORT".hash(&mut hasher);
-                ConfigMode::BothBestEffort(Arc::new(configuration.js_query_planner_config()))
-                    .hash(&mut hasher);
-                ConfigMode::Rust(Arc::new(configuration.rust_query_planner_config()))
-                    .hash(&mut hasher);
-            }
-        };
-        let config_mode_hash = Arc::new(QueryHash(hasher.finalize()));
+        configuration.rust_query_planner_config().hash(&mut hasher);
+        let config_mode_hash = Arc::new(ConfigModeHash(hasher.finalize()));
 
         Ok(Self {
             cache,
@@ -175,8 +157,10 @@ where
         experimental_pql_prewarm: &PersistedQueriesPrewarmQueryPlanCache,
     ) {
         let _timer = Timer::new(|duration| {
-            ::tracing::info!(
-                histogram.apollo.router.query.planning.warmup.duration = duration.as_secs_f64()
+            f64_histogram!(
+                "apollo.router.query_planning.warmup.duration",
+                "Time spent warming up the query planner queries in seconds",
+                duration.as_secs_f64()
             );
         });
 
@@ -205,7 +189,7 @@ where
                                 hash,
                                 metadata,
                                 plan_options,
-                                config_mode: _,
+                                config_mode_hash: _,
                                 schema_id: _,
                             },
                             _,
@@ -215,7 +199,7 @@ where
                             hash: Some(hash.clone()),
                             metadata: metadata.clone(),
                             plan_options: plan_options.clone(),
-                            config_mode: self.config_mode_hash.clone(),
+                            config_mode_hash: self.config_mode_hash.clone(),
                         },
                     )
                     .take(count)
@@ -260,11 +244,13 @@ where
                         hash: None,
                         metadata: CacheKeyMetadata::default(),
                         plan_options: PlanOptions::default(),
-                        config_mode: self.config_mode_hash.clone(),
+                        config_mode_hash: self.config_mode_hash.clone(),
                     });
                 }
             }
         }
+
+        all_cache_keys.shuffle(&mut thread_rng());
 
         all_cache_keys.extend(cache_keys.into_iter());
 
@@ -276,7 +262,7 @@ where
             hash,
             metadata,
             plan_options,
-            config_mode: _,
+            config_mode_hash: _,
         } in all_cache_keys
         {
             let doc = match query_analysis
@@ -291,10 +277,10 @@ where
                 query: query.clone(),
                 operation: operation_name.clone(),
                 hash: doc.hash.clone(),
-                schema_id: Arc::clone(&self.schema.schema_id),
+                schema_id: self.schema.schema_id.clone(),
                 metadata,
                 plan_options,
-                config_mode: self.config_mode_hash.clone(),
+                config_mode_hash: self.config_mode_hash.clone(),
             };
 
             if experimental_reuse_query_plans {
@@ -373,14 +359,8 @@ where
     }
 }
 
-impl CachingQueryPlanner<BridgeQueryPlannerPool> {
-    pub(crate) fn js_planners(&self) -> Vec<Arc<Planner<QueryPlanResult>>> {
-        self.delegate.js_planners()
-    }
-
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+impl CachingQueryPlanner<QueryPlannerService> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.delegate.subgraph_schemas()
     }
 
@@ -484,10 +464,10 @@ where
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
-            schema_id: Arc::clone(&self.schema.schema_id),
+            schema_id: self.schema.schema_id.clone(),
             metadata,
             plan_options,
-            config_mode: self.config_mode_hash.clone(),
+            config_mode_hash: self.config_mode_hash.clone(),
         };
 
         let context = request.context.clone();
@@ -557,7 +537,7 @@ where
 
                             // This will be overridden by the Rust usage reporting implementation
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                                context.extensions().with_lock(|mut lock| {
+                                context.extensions().with_lock(|lock| {
                                     lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                                 });
                             }
@@ -570,7 +550,7 @@ where
                                 entry.insert(Err(err)).await;
                             });
                             if let Some(usage_reporting) = e.usage_reporting() {
-                                context.extensions().with_lock(|mut lock| {
+                                context.extensions().with_lock(|lock| {
                                     lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
                                 });
                             }
@@ -595,7 +575,7 @@ where
             match res {
                 Ok(content) => {
                     if let QueryPlannerContent::Plan { plan, .. } = &content {
-                        context.extensions().with_lock(|mut lock| {
+                        context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
                         });
                     }
@@ -604,7 +584,7 @@ where
                 }
                 Err(error) => {
                     if let Some(usage_reporting) = error.usage_reporting() {
-                        context.extensions().with_lock(|mut lock| {
+                        context.extensions().with_lock(|lock| {
                             lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
                         });
                     }
@@ -626,18 +606,18 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
-    pub(crate) schema_id: Arc<String>,
     pub(crate) operation: Option<String>,
     pub(crate) hash: Arc<QueryHash>,
+    // XXX(@goto-bus-stop): It's probably correct to remove this, since having it here is
+    // misleading. The schema ID is *not* used in the Redis cache, but it's okay because the QueryHash
+    // is schema-aware.
+    pub(crate) schema_id: SchemaHash,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: Arc<QueryHash>,
+    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
 }
 
-// Update this key every time the cache key or the query plan format has to change.
-// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 1;
-const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
+const ROUTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -651,13 +631,13 @@ impl std::fmt::Display for CachingQueryKey {
         "^plan_options".hash(&mut hasher);
         self.plan_options.hash(&mut hasher);
         "^config_mode".hash(&mut hasher);
-        self.config_mode.hash(&mut hasher);
+        self.config_mode_hash.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
             f,
-            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
-            CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
+            "plan:router:{}:{}:opname:{}:metadata:{}",
+            ROUTER_VERSION, self.hash, operation, metadata,
         )
     }
 }
@@ -669,7 +649,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: Arc<QueryHash>,
+    pub(crate) config_mode_hash: Arc<ConfigModeHash>,
 }
 
 struct StructHasher {
@@ -716,12 +696,11 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 mod tests {
     use mockall::mock;
     use mockall::predicate::*;
-    use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
-    use crate::error::PlanErrors;
+    use crate::apollo_studio_interop::UsageReporting;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
@@ -768,15 +747,10 @@ mod tests {
         let mut delegate = MockMyQueryPlanner::new();
         delegate.expect_clone().returning(|| {
             let mut planner = MockMyQueryPlanner::new();
-            planner.expect_sync_call().times(0..2).returning(|_| {
-                Err(QueryPlannerError::from(PlanErrors {
-                    errors: Default::default(),
-                    usage_reporting: UsageReporting {
-                        stats_report_key: "this is a test key".to_string(),
-                        referenced_fields_by_type: Default::default(),
-                    },
-                }))
-            });
+            planner
+                .expect_sync_call()
+                .times(0..2)
+                .returning(|_| Err(QueryPlannerError::UnhandledPlannerResult));
             planner
         });
 
@@ -807,7 +781,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
 
         for _ in 0..5 {
             assert!(planner
@@ -830,7 +804,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc2));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc2));
 
         assert!(planner
             .call(query_planner::CachingRequest::new(
@@ -862,7 +836,7 @@ mod tests {
                         referenced_fields_by_type: Default::default(),
                     }
                     .into(),
-                    query: Arc::new(Query::empty()),
+                    query: Arc::new(Query::empty_for_tests()),
                     query_metrics: Default::default(),
                     estimated_size: Default::default(),
                 };
@@ -901,7 +875,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
 
         for _ in 0..5 {
             let _ = planner
@@ -983,7 +957,7 @@ mod tests {
         let context = Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
 
         assert!(planner
             .call(query_planner::CachingRequest::new(

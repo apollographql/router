@@ -15,6 +15,7 @@ mod tests {
     use apollo_router::services::supergraph;
     use apollo_router::Context;
     use http::StatusCode;
+    use http_body_util::BodyExt;
     use serde_json::json;
     use tower::ServiceExt;
 
@@ -64,9 +65,13 @@ mod tests {
             .expect("a router response");
 
         assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
-        let body = hyper::body::to_bytes(service_response.response)
+        let body = service_response
+            .response
+            .into_body()
+            .collect()
             .await
-            .unwrap();
+            .unwrap()
+            .to_bytes();
         assert_eq!(
             expected_response,
             serde_json::from_slice::<serde_json::Value>(&body).unwrap()

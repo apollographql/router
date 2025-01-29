@@ -1,0 +1,21 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/empty_selection.graphql
+---
+[
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(selection:)` on `Query.resources` is empty",
+        locations: [
+            13:18..13:29,
+        ],
+    },
+    Message {
+        code: InvalidJsonSelection,
+        message: "`@connect(http: {body:})` on `Query.resources` is empty",
+        locations: [
+            12:41..12:45,
+        ],
+    },
+]

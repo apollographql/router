@@ -3,14 +3,15 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use opentelemetry::runtime;
-use opentelemetry::sdk::metrics::PeriodicReader;
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::runtime;
+use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
+use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
@@ -110,6 +111,7 @@ impl Config {
         let exporter = MetricsExporterBuilder::Tonic(
             opentelemetry_otlp::new_exporter()
                 .tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
                 .with_timeout(batch_processor.max_export_timeout)
                 .with_metadata(metadata)
@@ -117,7 +119,7 @@ impl Config {
         )
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry::sdk::metrics::data::Temporality::Delta,
+                opentelemetry_sdk::metrics::data::Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()
@@ -192,6 +194,7 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::default_buffer_size;
@@ -349,6 +352,7 @@ mod test {
         is_subscription: bool,
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -364,7 +368,7 @@ mod test {
                 request_builder.header("accept", "multipart/mixed;subscriptionSpec=1.0");
         }
         TestHarness::builder()
-            .extra_plugin(plugin)
+            .extra_private_plugin(plugin)
             .extra_plugin(create_subscription_plugin().await?)
             .build_router()
             .await?
@@ -395,6 +399,7 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         create_plugin_with_apollo_config(apollo::Config {
             endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
             apollo_key: Some("key".to_string()),
@@ -421,7 +426,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
-        subscription::Subscription::new(PluginInit::fake_new(
+        <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
         ))

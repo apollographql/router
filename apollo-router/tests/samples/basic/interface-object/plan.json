@@ -10,7 +10,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf__accounts__0{i{__typename id x ...on A{a}...on B{b}}}",
+                                    "query": "query TestItf__accounts__0 { i { __typename id x ... on A { a } ... on B { b } } }",
                                     "operationName": "TestItf__accounts__0"
                                 }
                             },
@@ -55,7 +55,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "query": "query TestItf__products__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on I { y } } }",
                                     "operationName": "TestItf__products__1",
                                     "variables": {
                                         "representations": [
@@ -143,7 +143,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf2__accounts__0{req{__typename id i{__typename id x}}}",
+                                    "query": "query TestItf2__accounts__0 { req { __typename id i { __typename id x } } }",
                                     "operationName": "TestItf2__accounts__0"
                                 }
                             },
@@ -170,7 +170,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf2__products__1($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                                    "query": "query TestItf2__products__1($representations: [_Any!]!) { _entities(representations: $representations) { ... on I { y } } }",
                                     "operationName": "TestItf2__products__1",
                                     "variables": {
                                         "representations": [
@@ -201,7 +201,7 @@
                         {
                             "request": {
                                 "body": {
-                                    "query": "query TestItf2__reviews__2($representations:[_Any!]!){_entities(representations:$representations){...on C{c}}}",
+                                    "query": "query TestItf2__reviews__2($representations: [_Any!]!) { _entities(representations: $representations) { ... on C { c } } }",
                                     "operationName": "TestItf2__reviews__2",
                                     "variables": {
                                         "representations": [

@@ -181,16 +181,13 @@ where
     }
 }
 
-impl<A, E, Request, Response, EventResponse> Selectors for Extendable<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors<Request, Response, EventResponse>
+    for Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    A: Default + Selectors<Request, Response, EventResponse>,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
-    type Request = Request;
-    type Response = Response;
-    type EventResponse = EventResponse;
-
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -202,7 +199,7 @@ where
         attrs
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_response(response);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -226,7 +223,7 @@ where
         attrs
     }
 
-    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(&self, response: &EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_response_event(response, ctx);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
@@ -258,7 +255,7 @@ where
 
 impl<A, E, Request, Response, EventResponse> Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    A: Default + Selectors<Request, Response, EventResponse>,
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {

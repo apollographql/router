@@ -49,7 +49,7 @@ impl DefaultForLevel for CacheInstrumentsConfig {
 
 pub(crate) struct CacheInstruments {
     pub(crate) cache_hit: Option<
-        CustomCounter<subgraph::Request, subgraph::Response, CacheAttributes, SubgraphSelector>,
+        CustomCounter<subgraph::Request, subgraph::Response, (), CacheAttributes, SubgraphSelector>,
     >,
 }
 
@@ -65,15 +65,10 @@ impl Instrumented for CacheInstruments {
     }
 
     fn on_response(&self, response: &Self::Response) {
-        let subgraph_name = match &response.subgraph_name {
-            Some(subgraph_name) => subgraph_name,
-            None => {
-                return;
-            }
-        };
+        let subgraph_name = response.subgraph_name.clone();
         let cache_info: CacheSubgraph = match response
             .context
-            .get(CacheMetricContextKey::new(subgraph_name.clone()))
+            .get(CacheMetricContextKey::new(subgraph_name))
             .ok()
             .flatten()
         {

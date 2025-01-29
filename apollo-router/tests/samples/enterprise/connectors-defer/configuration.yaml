@@ -1,0 +1,15 @@
+include_subgraph_errors:
+  all: true
+
+preview_connectors:
+  subgraphs:
+    connectors:
+      sources:
+        jsonPlaceholder:
+          override_url: http://localhost:4007
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text

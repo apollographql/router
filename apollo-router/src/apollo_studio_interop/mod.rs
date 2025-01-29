@@ -26,8 +26,7 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use router_bridge::planner::ReferencedFieldsForType;
-use router_bridge::planner::UsageReporting;
+use serde::Deserialize;
 use serde::Serialize;
 
 use crate::json_ext::Object;
@@ -162,14 +161,32 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
     }
 }
 
-/// The result of the generate_usage_reporting function which contains a UsageReporting struct and
-/// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
-pub(crate) struct ComparableUsageReporting {
-    /// The UsageReporting fields
-    pub(crate) result: UsageReporting,
+/// UsageReporting fields, that will be used to send stats to uplink/studio
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UsageReporting {
+    /// The `stats_report_key` is a unique identifier derived from schema and query.
+    /// Metric data  sent to Studio must be aggregated
+    /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
+    pub(crate) stats_report_key: String,
+    /// a list of all types and fields referenced in the query
+    #[serde(default)]
+    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-/// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
+/// A list of fields that will be resolved for a given type
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferencedFieldsForType {
+    /// names of the fields queried
+    #[serde(default)]
+    pub(crate) field_names: Vec<String>,
+    /// whether the field is an interface
+    #[serde(default)]
+    pub(crate) is_interface: bool,
+}
+
+/// Generate a UsageReporting containing the stats_report_key (a normalized version of the operation signature)
 /// and referenced fields of an operation. The document used to generate the signature and for the references can be
 /// different to handle cases where the operation has been filtered, but we want to keep the same signature.
 pub(crate) fn generate_usage_reporting(
@@ -178,7 +195,7 @@ pub(crate) fn generate_usage_reporting(
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
-) -> ComparableUsageReporting {
+) -> UsageReporting {
     let mut generator = UsageGenerator {
         signature_doc,
         references_doc,
@@ -343,12 +360,10 @@ struct UsageGenerator<'a> {
 }
 
 impl UsageGenerator<'_> {
-    fn generate_usage_reporting(&mut self) -> ComparableUsageReporting {
-        ComparableUsageReporting {
-            result: UsageReporting {
-                stats_report_key: self.generate_stats_report_key(),
-                referenced_fields_by_type: self.generate_apollo_reporting_refs(),
-            },
+    fn generate_usage_reporting(&mut self) -> UsageReporting {
+        UsageReporting {
+            stats_report_key: self.generate_stats_report_key(),
+            referenced_fields_by_type: self.generate_apollo_reporting_refs(),
         }
     }
 
@@ -748,7 +763,7 @@ struct SignatureFormatterWithAlgorithm<'a> {
     normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
 }
 
-impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
+impl fmt::Display for SignatureFormatterWithAlgorithm<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self.formatter {
             ApolloReportingSignatureFormatter::Operation(operation) => {

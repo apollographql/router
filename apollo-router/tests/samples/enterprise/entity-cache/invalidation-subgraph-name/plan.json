@@ -11,7 +11,7 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{me{name}}"}
+                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0 { me { name } }"}
                             },
                             "response": {
                                 "headers": {
@@ -45,7 +45,7 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"mutation InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{updateMyAccount{name}}"}
+                                "body": {"query":"mutation InvalidationSubgraphName__invalidation_subgraph_name_accounts__0 { updateMyAccount { name } }"}
                             },
                             "response": {
                                 "headers": {
@@ -99,7 +99,7 @@
                     "requests": [
                         {
                             "request": {
-                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0{me{name}}"}
+                                "body": {"query":"query InvalidationSubgraphName__invalidation_subgraph_name_accounts__0 { me { name } }"}
                             },
                             "response": {
                                 "headers": {

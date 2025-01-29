@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
+use apollo_compiler::parser::Parser;
 use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 
@@ -16,24 +17,25 @@ use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-use crate::subgraph::Subgraph;
 
-mod defer;
+macro_rules! assert_normalized {
+    ($schema_doc: expr, $query: expr, @$expected: literal) => {{
+        let schema = parse_schema($schema_doc);
+        let without_fragments = parse_and_expand(&schema, $query).unwrap();
+        insta::assert_snapshot!(without_fragments, @$expected);
+        without_fragments
+    }};
+}
 
 pub(super) fn parse_schema_and_operation(
     schema_and_operation: &str,
 ) -> (ValidFederationSchema, ExecutableDocument) {
-    let (schema, executable_document) =
-        apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql").unwrap();
+    let (schema, executable_document) = Parser::new()
+        .parse_mixed_validate(schema_and_operation, "document.graphql")
+        .unwrap();
     let executable_document = executable_document.into_inner();
     let schema = ValidFederationSchema::new(schema).unwrap();
     (schema, executable_document)
-}
-
-pub(super) fn parse_subgraph(name: &str, schema: &str) -> ValidFederationSchema {
-    let parsed_schema =
-        Subgraph::parse_and_expand(name, &format!("https://{name}"), schema).unwrap();
-    ValidFederationSchema::new(parsed_schema.schema).unwrap()
 }
 
 pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
@@ -49,11 +51,7 @@ pub(super) fn parse_and_expand(
     schema: &ValidFederationSchema,
     query: &str,
 ) -> Result<Operation, FederationError> {
-    let doc = apollo_compiler::ExecutableDocument::parse_and_validate(
-        schema.schema(),
-        query,
-        "query.graphql",
-    )?;
+    let doc = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")?;
 
     let operation = doc
         .operations
@@ -63,17 +61,6 @@ pub(super) fn parse_and_expand(
     let fragments = NamedFragments::new(&doc.fragments, schema);
 
     normalize_operation(operation, fragments, schema, &Default::default())
-}
-
-/// Parse and validate the query similarly to `parse_operation`, but does not construct the
-/// `Operation` struct.
-pub(super) fn validate_operation(schema: &ValidFederationSchema, query: &str) {
-    apollo_compiler::ExecutableDocument::parse_and_validate(
-        schema.schema(),
-        query,
-        "query.graphql",
-    )
-    .unwrap();
 }
 
 #[test]
@@ -1064,7 +1051,7 @@ scalar FieldSet
 /// https://github.com/apollographql/federation-next/pull/290#discussion_r1587200664
 #[test]
 fn converting_operation_types() {
-    let schema = apollo_compiler::Schema::parse_and_validate(
+    let schema = Schema::parse_and_validate(
         r#"
         interface Intf {
             intfField: Int
@@ -1398,9 +1385,7 @@ const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
 
 #[test]
 fn add_at_path_merge_scalar_fields() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1427,9 +1412,7 @@ fn add_at_path_merge_scalar_fields() {
 
 #[test]
 fn add_at_path_merge_subselections() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1477,9 +1460,7 @@ fn add_at_path_merge_subselections() {
 
 #[test]
 fn add_at_path_collapses_unnecessary_fragments() {
-    let schema =
-        apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-            .unwrap();
+    let schema = Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql").unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
 
     let mut selection_set = SelectionSet::empty(
@@ -1672,10 +1653,6 @@ fn directive_propagation() {
     )
     .expect("directive applications to be valid");
     insta::assert_snapshot!(query, @r###"
-    fragment DirectiveOnDef on T @fragDefOnly @fragAll {
-      a
-    }
-
     {
       t2 {
         ... on T @fragInlineOnly @fragAll {
@@ -1703,4 +1680,377 @@ fn directive_propagation() {
     )
     .expect_err("directive @fragSpreadOnly to be rejected");
     insta::assert_snapshot!(err, @"Unsupported custom directive @fragSpreadOnly on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.");
+}
+
+#[test]
+fn handles_fragment_matching_at_the_top_level_of_another_fragment() {
+    let schema_doc = r#"
+      type Query {
+        t: T
+      }
+
+      type T {
+        a: String
+        u: U
+      }
+
+      type U {
+        x: String
+        y: String
+      }
+    "#;
+
+    let query = r#"
+        fragment Frag1 on T {
+          a
+        }
+
+        fragment Frag2 on T {
+          u {
+            x
+            y
+          }
+          ...Frag1
+        }
+
+        fragment Frag3 on Query {
+          t {
+            ...Frag2
+          }
+        }
+
+        {
+          ...Frag3
+        }
+    "#;
+
+    assert_normalized!(schema_doc, query, @r###"
+        {
+          t {
+            u {
+              x
+              y
+            }
+            a
+          }
+        }
+    "###);
+}
+
+#[test]
+fn handles_fragments_used_in_context_where_they_get_trimmed() {
+    let schema_doc = r#"
+      type Query {
+        t1: T1
+      }
+
+      interface I {
+        x: Int
+      }
+
+      type T1 implements I {
+        x: Int
+        y: Int
+      }
+
+      type T2 implements I {
+        x: Int
+        z: Int
+      }
+    "#;
+
+    let query = r#"
+        fragment FragOnI on I {
+          ... on T1 {
+            y
+          }
+          ... on T2 {
+            z
+          }
+        }
+
+        {
+          t1 {
+            ...FragOnI
+          }
+        }
+    "#;
+
+    assert_normalized!(schema_doc, query, @r###"
+        {
+          t1 {
+            y
+          }
+        }
+    "###);
+}
+
+#[test]
+fn handles_fragments_on_union_in_context_with_limited_intersection() {
+    let schema_doc = r#"
+        type Query {
+          t1: T1
+        }
+
+        union U = T1 | T2
+
+        type T1 {
+          x: Int
+        }
+
+        type T2 {
+          y: Int
+        }
+    "#;
+
+    let query = r#"
+        fragment OnU on U {
+          ... on T1 {
+            x
+          }
+          ... on T2 {
+            y
+          }
+        }
+
+        {
+          t1 {
+            ...OnU
+          }
+        }
+    "#;
+
+    assert_normalized!(schema_doc, query, @r###"
+        {
+          t1 {
+            x
+          }
+        }
+    "###);
+}
+
+#[test]
+fn off_by_1_error() {
+    let schema = r#"
+      type Query {
+        t: T
+      }
+      type T {
+        id: String!
+        a: A
+        v: V
+      }
+      type A {
+        id: String!
+      }
+      type V {
+        t: T!
+      }
+    "#;
+
+    let query = r#"
+      {
+        t {
+          ...TFrag
+          v {
+            t {
+              id
+              a {
+                __typename
+                id
+              }
+            }
+          }
+        }
+      }
+
+      fragment TFrag on T {
+        __typename
+        id
+      }
+    "#;
+
+    assert_normalized!(schema, query,@r###"
+      {
+        t {
+          id
+          v {
+            t {
+              id
+              a {
+                id
+              }
+            }
+          }
+        }
+      }
+    "###
+    );
+}
+
+///
+/// applied directives
+///
+
+#[test]
+fn reuse_fragments_with_same_directive_in_the_fragment_selection() {
+    let schema_doc = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+    "#;
+
+    let query = r#"
+      fragment DirectiveInDef on T {
+        a @include(if: $cond1)
+      }
+
+      query ($cond1: Boolean!, $cond2: Boolean!) {
+        t1 {
+          a
+        }
+        t2 {
+          ...DirectiveInDef
+        }
+        t3 {
+          a @include(if: $cond2)
+        }
+      }
+    "#;
+
+    assert_normalized!(schema_doc, query, @r###"
+      query($cond1: Boolean!, $cond2: Boolean!) {
+        t1 {
+          a
+        }
+        t2 {
+          a @include(if: $cond1)
+        }
+        t3 {
+          a @include(if: $cond2)
+        }
+      }
+    "###);
+}
+
+#[test]
+fn reuse_fragments_with_directive_on_typename() {
+    let schema = r#"
+        type Query {
+          t1: T
+          t2: T
+          t3: T
+        }
+
+        type T {
+          a: Int
+          b: Int
+          c: Int
+          d: Int
+        }
+    "#;
+    let query = r#"
+        query ($if: Boolean!) {
+          t1 { b a ...x }
+          t2 { ...x }
+        }
+        fragment x on T {
+            __typename @include(if: $if)
+            a
+            c
+        }
+    "#;
+
+    assert_normalized!(schema, query, @r###"
+        query($if: Boolean!) {
+          t1 {
+            b
+            a
+            __typename @include(if: $if)
+            c
+          }
+          t2 {
+            __typename @include(if: $if)
+            a
+            c
+          }
+        }
+        "###);
+}
+
+#[test]
+fn reuse_fragments_with_non_intersecting_types() {
+    let schema = r#"
+        type Query {
+          t: T
+          s: S
+          s2: S
+          i: I
+        }
+
+        interface I {
+            a: Int
+            b: Int
+        }
+
+        type T implements I {
+          a: Int
+          b: Int
+
+          c: Int
+          d: Int
+        }
+        type S implements I {
+          a: Int
+          b: Int
+
+          f: Int
+          g: Int
+        }
+    "#;
+    let query = r#"
+        query ($if: Boolean!) {
+          t { ...x }
+          s { ...x }
+          i { ...x }
+        }
+        fragment x on I {
+            __typename
+            a
+            b
+            ... on T { c d @include(if: $if) }
+        }
+    "#;
+
+    assert_normalized!(schema, query, @r###"
+        query($if: Boolean!) {
+          t {
+            a
+            b
+            c
+            d @include(if: $if)
+          }
+          s {
+            a
+            b
+          }
+          i {
+            a
+            b
+            ... on T {
+              c
+              d @include(if: $if)
+            }
+          }
+        }
+    "###);
 }

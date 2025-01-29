@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/plugins/progressive_override/tests.rs
 expression: query_plan
+snapshot_kind: text
 ---
 {
   "data": null,
@@ -12,14 +13,14 @@ expression: query_plan
           "kind": "Fetch",
           "serviceName": "Subgraph2",
           "variableUsages": [],
-          "operation": "{percent0{foo}}",
+          "operation": "{ percent0 { foo } }",
           "operationName": null,
           "operationKind": "query",
           "id": null,
           "inputRewrites": null,
           "outputRewrites": null,
           "contextRewrites": null,
-          "schemaAwareHash": "23605b350473485e40bc8b1245f0c5c226a2997a96291bf3ad3412570a5172bb",
+          "schemaAwareHash": "83a61d8e05a2342e4c13c5b518e1e4a5b4cbc405477fce069c784526eb3b1ae5",
           "authorization": {
             "is_authenticated": false,
             "scopes": [],

@@ -4,7 +4,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use http::request::Parts;
+use http::HeaderName;
 use http::HeaderValue;
+use http::Method;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -109,36 +111,24 @@ impl Cors {
         let allow_headers = if self.allow_headers.is_empty() {
             cors::AllowHeaders::mirror_request()
         } else {
-            cors::AllowHeaders::list(self.allow_headers.iter().filter_map(|header| {
-                header
-                    .parse()
-                    .map_err(|_| tracing::error!("header name '{header}' is not valid"))
-                    .ok()
-            }))
+            cors::AllowHeaders::list(parse_values::<HeaderName>(
+                &self.allow_headers,
+                "allow header name",
+            )?)
         };
+
         let cors = CorsLayer::new()
             .vary([])
             .allow_credentials(self.allow_credentials)
             .allow_headers(allow_headers)
-            .expose_headers(cors::ExposeHeaders::list(
-                self.expose_headers
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|header| {
-                        header
-                            .parse()
-                            .map_err(|_| tracing::error!("header name '{header}' is not valid"))
-                            .ok()
-                    }),
-            ))
-            .allow_methods(cors::AllowMethods::list(self.methods.iter().filter_map(
-                |method| {
-                    method
-                        .parse()
-                        .map_err(|_| tracing::error!("method '{method}' is not valid"))
-                        .ok()
-                },
-            )));
+            .expose_headers(cors::ExposeHeaders::list(parse_values::<HeaderName>(
+                &self.expose_headers.unwrap_or_default(),
+                "expose header name",
+            )?))
+            .allow_methods(cors::AllowMethods::list(parse_values::<Method>(
+                &self.methods,
+                "method",
+            )?));
         let cors = if let Some(max_age) = self.max_age {
             cors.max_age(max_age)
         } else {
@@ -148,14 +138,7 @@ impl Cors {
         if self.allow_any_origin {
             Ok(cors.allow_origin(cors::Any))
         } else if let Some(match_origins) = self.match_origins {
-            let regexes = match_origins
-                .into_iter()
-                .filter_map(|regex| {
-                    Regex::from_str(regex.as_str())
-                        .map_err(|_| tracing::error!("origin regex '{regex}' is not valid"))
-                        .ok()
-                })
-                .collect::<Vec<_>>();
+            let regexes: Vec<Regex> = parse_values(&match_origins, "match origin regex")?;
 
             Ok(cors.allow_origin(cors::AllowOrigin::predicate(
                 move |origin: &HeaderValue, _: &Parts| {
@@ -169,14 +152,10 @@ impl Cors {
                 },
             )))
         } else {
-            Ok(cors.allow_origin(cors::AllowOrigin::list(
-                self.origins.into_iter().filter_map(|origin| {
-                    origin
-                        .parse()
-                        .map_err(|_| tracing::error!("origin '{origin}' is not valid"))
-                        .ok()
-                }),
-            )))
+            Ok(cors.allow_origin(cors::AllowOrigin::list(parse_values(
+                &self.origins,
+                "origin",
+            )?)))
         }
     }
 
@@ -212,5 +191,99 @@ impl Cors {
             }
         }
         Ok(())
+    }
+}
+
+fn parse_values<T>(values_to_parse: &[String], error_description: &str) -> Result<Vec<T>, String>
+where
+    T: FromStr,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    let mut errors = Vec::new();
+    let mut values = Vec::new();
+    for val in values_to_parse {
+        match val
+            .parse::<T>()
+            .map_err(|err| format!("{error_description} '{val}' is not valid: {err}"))
+        {
+            Ok(val) => values.push(val),
+            Err(err) => errors.push(err),
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(values)
+    } else {
+        Err(errors.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bad_allow_headers_cors_configuration() {
+        let cors = Cors::builder()
+            .allow_headers(vec![String::from("bad\nname")])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from("allow header name 'bad\nname' is not valid: invalid HTTP header name")
+        );
+    }
+
+    #[test]
+    fn test_bad_allow_methods_cors_configuration() {
+        let cors = Cors::builder()
+            .methods(vec![String::from("bad\nmethod")])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from("method 'bad\nmethod' is not valid: invalid HTTP method")
+        );
+    }
+
+    #[test]
+    fn test_bad_origins_cors_configuration() {
+        let cors = Cors::builder()
+            .origins(vec![String::from("bad\norigin")])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from("origin 'bad\norigin' is not valid: failed to parse header value")
+        );
+    }
+
+    #[test]
+    fn test_bad_match_origins_cors_configuration() {
+        let cors = Cors::builder()
+            .match_origins(vec![String::from("[")])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_err());
+
+        assert_eq!(
+            layer.unwrap_err(),
+            String::from("match origin regex '[' is not valid: regex parse error:\n    [\n    ^\nerror: unclosed character class")
+        );
+    }
+
+    #[test]
+    fn test_good_cors_configuration() {
+        let cors = Cors::builder()
+            .allow_headers(vec![String::from("good-name")])
+            .build();
+        let layer = cors.into_layer();
+        assert!(layer.is_ok());
     }
 }

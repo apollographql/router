@@ -18,7 +18,10 @@ expression: stream.next_response().await.unwrap()
       "path": [
         "currentUser",
         "activeOrganization"
-      ]
+      ],
+      "extensions": {
+        "service": "orga"
+      }
     }
   ]
 }

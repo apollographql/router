@@ -1,7 +1,7 @@
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::NamedType;
 use opentelemetry::Key;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
@@ -58,16 +58,14 @@ impl DefaultForLevel for GraphQLAttributes {
     }
 }
 
-impl Selectors for GraphQLAttributes {
-    type Request = supergraph::Request;
-    type Response = supergraph::Response;
-    type EventResponse = crate::graphql::Response;
-
-    fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
+impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Response>
+    for GraphQLAttributes
+{
+    fn on_request(&self, _request: &supergraph::Request) -> Vec<KeyValue> {
         Vec::default()
     }
 
-    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
         Vec::default()
     }
 

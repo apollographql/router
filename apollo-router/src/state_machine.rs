@@ -37,8 +37,10 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
+use crate::uplink::license_enforcement::LicenseLimits;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
+use crate::uplink::schema::SchemaState;
 use crate::ApolloRouterError::NoLicense;
 
 const STATE_CHANGE: &str = "state change";
@@ -54,14 +56,14 @@ pub(crate) struct ListenAddresses {
 enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
-        schema: Option<Arc<String>>,
+        schema: Option<Arc<SchemaState>>,
         license: Option<LicenseState>,
         listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
     Running {
         configuration: Arc<Configuration>,
         _metrics: Option<Metrics>,
-        schema: Arc<String>,
+        schema: Arc<SchemaState>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
@@ -118,7 +120,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
-        new_schema: Option<Arc<String>>,
+        new_schema: Option<Arc<SchemaState>>,
         new_configuration: Option<Arc<Configuration>>,
         new_license: Option<LicenseState>,
     ) -> Self
@@ -308,7 +310,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         server_handle: &mut Option<HttpServerHandle>,
         previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
-        sdl: Arc<String>,
+        schema_state: Arc<SchemaState>,
         license: LicenseState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
@@ -318,21 +320,24 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         FA: RouterSuperServiceFactory,
     {
         let schema = Arc::new(
-            Schema::parse_arc(sdl.clone(), &configuration)
+            Schema::parse_arc(schema_state.clone(), &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
         // Check the license
         let report = LicenseEnforcementReport::build(&configuration, &schema);
 
-        match license {
-            LicenseState::Licensed => {
+        let license_limits = match license {
+            LicenseState::Licensed { limits } => {
                 tracing::debug!("A valid Apollo license has been detected.");
+                limits
             }
-            LicenseState::LicensedWarn if report.uses_restricted_features() => {
+            LicenseState::LicensedWarn { limits } if report.uses_restricted_features() => {
                 tracing::error!("License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                limits
             }
-            LicenseState::LicensedHalt if report.uses_restricted_features() => {
+            LicenseState::LicensedHalt { limits } if report.uses_restricted_features() => {
                 tracing::error!("License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                limits
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
@@ -347,12 +352,16 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             }
             _ => {
                 tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
+                // Without restricted features, there's no need to limit the router
+                Option::<LicenseLimits>::None
             }
-        }
+        };
 
         // If there are no restricted featured in use then the effective license is Licensed as we don't need warn or halt behavior.
         let effective_license = if !report.uses_restricted_features() {
-            LicenseState::Licensed
+            LicenseState::Licensed {
+                limits: license_limits,
+            }
         } else {
             license
         };
@@ -365,6 +374,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 schema,
                 previous_router_service_factory,
                 None,
+                effective_license,
             )
             .await
             .map_err(ServiceCreationError)?;
@@ -422,7 +432,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         Ok(Running {
             configuration,
             _metrics: metrics,
-            schema: sdl,
+            schema: schema_state,
             license,
             server_handle: Some(server_handle),
             router_service_factory,
@@ -557,12 +567,19 @@ where
             #[cfg(test)]
             self.notify_updated.notify_one();
 
-            tracing::debug!(
-                monotonic_counter.apollo_router_state_change_total = 1u64,
+            tracing::info!(
                 event = event_name,
                 state = ?state,
                 previous_state,
                 "state machine transitioned"
+            );
+            u64_counter!(
+                "apollo.router.state.change.total",
+                "Router state changes",
+                1,
+                event = event_name,
+                state = format!("{state:?}"),
+                previous_state = previous_state
             );
 
             // If we've errored then exit even if there are potentially more messages
@@ -612,11 +629,15 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::RouterRequest;
+    use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
 
-    fn example_schema() -> String {
-        include_str!("testdata/supergraph.graphql").to_owned()
+    fn example_schema() -> SchemaState {
+        SchemaState {
+            sdl: include_str!("testdata/supergraph.graphql").to_owned(),
+            launch_id: None,
+        }
     }
 
     macro_rules! assert_matches {
@@ -692,7 +713,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -714,7 +737,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::LicensedHalt),
+                    UpdateLicense(LicenseState::LicensedHalt {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -736,7 +761,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::LicensedWarn),
+                    UpdateLicense(LicenseState::LicensedWarn {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -759,7 +786,9 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
                     Shutdown
@@ -807,7 +836,9 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateLicense(LicenseState::Unlicensed),
                     UpdateConfiguration(test_config_restricted()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -849,7 +880,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     Shutdown
                 ])
             )
@@ -870,8 +901,11 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ])
@@ -893,9 +927,15 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
-                    UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
@@ -916,9 +956,14 @@ mod tests {
                 router_factory,
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
-                    UpdateSchema(minimal_schema.to_owned()),
-                    UpdateLicense(LicenseState::default()),
-                    UpdateLicense(LicenseState::Licensed),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
+                    UpdateLicense(Default::default()),
+                    UpdateLicense(LicenseState::Licensed {
+                        limits: Some(LicenseLimits::default())
+                    }),
                     Shutdown
                 ])
             )
@@ -940,7 +985,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .supergraph(
@@ -972,7 +1017,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     Shutdown
                 ])
             )
@@ -988,7 +1033,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(1)
-            .returning(|_, _, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
 
@@ -999,7 +1044,7 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                 ])
             )
             .await,
@@ -1016,7 +1061,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| {
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1026,7 +1071,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
@@ -1038,8 +1083,11 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateLicense(Default::default()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ])
             )
@@ -1057,7 +1105,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| {
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1067,13 +1115,13 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
         router_factory
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .withf(|_, configuration, _, _, _| configuration.homepage.enabled)
-            .returning(|_, _, _, _, _| {
+            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1090,14 +1138,17 @@ mod tests {
                 stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateLicense(LicenseState::default()),
+                    UpdateLicense(Default::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .homepage(Homepage::builder().enabled(true).build())
                             .build()
                             .unwrap()
                     ),
-                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateSchema(SchemaState {
+                        sdl: minimal_schema.to_owned(),
+                        launch_id: None
+                    }),
                     Shutdown
                 ]),
             )
@@ -1122,6 +1173,7 @@ mod tests {
                 schema: Arc<Schema>,
                 previous_router_service_factory: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+                license: LicenseState
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
     }
@@ -1287,7 +1339,7 @@ mod tests {
             } else {
                 expect_times_called
             })
-            .returning(move |_, _, _, _, _| {
+            .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1300,15 +1352,14 @@ mod tests {
                 .expect_create()
                 .times(expect_times_called - 1)
                 .withf(
-                    move |_, _configuration: &Arc<Configuration>,
+                    move |_,
+                          _configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
-                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>|
-                          {
-                            previous_router_service_factory.is_some()
-                          },
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>,
+                          _| { previous_router_service_factory.is_some() },
                 )
-                .returning(move |_, _, _, _, _| {
+                .returning(move |_, _, _, _, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().return_once(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);

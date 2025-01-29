@@ -72,7 +72,7 @@ impl<'de> Deserialize<'de> for UriEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
 
-        impl<'de> Visitor<'de> for EndpointVisitor {
+        impl Visitor<'_> for EndpointVisitor {
             type Value = UriEndpoint;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -124,17 +124,11 @@ pub(crate) struct SocketEndpoint {
     socket: Option<SocketAddr>,
 }
 
-impl SocketEndpoint {
-    pub(crate) fn to_socket(&self) -> Option<SocketAddr> {
-        self.socket
-    }
-}
-
 impl<'de> Deserialize<'de> for SocketEndpoint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct EndpointVisitor;
 
-        impl<'de> Visitor<'de> for EndpointVisitor {
+        impl Visitor<'_> for EndpointVisitor {
             type Value = SocketEndpoint;
 
             fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
@@ -193,6 +187,12 @@ mod test {
 
     use crate::plugins::telemetry::endpoint::SocketEndpoint;
     use crate::plugins::telemetry::endpoint::UriEndpoint;
+
+    impl SocketEndpoint {
+        fn to_socket(&self) -> Option<SocketAddr> {
+            self.socket
+        }
+    }
 
     #[test]
     fn test_parse_uri_default() {

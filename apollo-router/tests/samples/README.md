@@ -4,7 +4,7 @@ This folder contains a series of Router integration tests that can be defined en
 
 ## How to write a test
 
-One test is recognized as a folder containing a `plan.json` file. Any number of subfolders is accepted, and the test name will be the path to the test folder. If the folder contains a `README.md` file, it will be added to the captured output of the test, and displayed if the test failed.
+One test is recognized as a folder containing a `plan.json` (or `plan.yaml`) file. Any number of subfolders is accepted, and the test name will be the path to the test folder. If the folder contains a `README.md` file, it will be added to the captured output of the test, and displayed if the test failed.
 
 The `plan.json` file contains a top level JSON object with an `actions` field, containing an array of possible actions, that will be executed one by one:
 
@@ -119,4 +119,25 @@ Stops the Router. If the Router does not stop correctly, then this action will f
 {
     "type": "Stop"
 }
+```
+
+## Troubleshooting
+
+### Query planning related
+
+When execution does something unexpected, checking the generated query plan can help.
+Make sure the YAML Router configuration enables the _expose query plan_ plugin:
+
+```yaml
+plugins:
+  experimental.expose_query_plan: true
+```
+
+In a `"type": "Request"` step of `plan.json`, temporarily add the header to ask
+for the response to include `extensions.apolloQueryPlan`:
+
+```json
+"headers": {
+    "Apollo-Expose-Query-Plan": "true"
+},
 ```

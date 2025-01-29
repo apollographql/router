@@ -25,12 +25,14 @@ info:
   data:
     datapoints:
       - sum: 1
+        count: 1
         attributes:
           custom_attribute: name
           graphql.field.name: name
           graphql.field.type: String
           graphql.type.name: Product
       - sum: 1
+        count: 1
         attributes:
           custom_attribute: products
           graphql.field.name: products

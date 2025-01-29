@@ -1,8 +1,5 @@
 use std::fmt;
-use std::fmt::Debug;
 use std::fmt::Display;
-
-use serde::Serializer;
 
 pub(crate) struct State<'fmt, 'fmt2> {
     indent_level: usize,
@@ -70,7 +67,7 @@ pub(crate) fn write_indented_lines<T>(
 
 pub(crate) struct DisplaySlice<'a, T>(pub(crate) &'a [T]);
 
-impl<'a, T: Display> Display for DisplaySlice<'a, T> {
+impl<T: Display> Display for DisplaySlice<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[")?;
         let mut iter = self.0.iter();
@@ -97,31 +94,4 @@ impl<T: Display> Display for DisplayOption<T> {
             None => write!(f, "None"),
         }
     }
-}
-
-pub(crate) fn serialize_as_debug_string<T, S>(data: &T, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: Debug,
-    S: Serializer,
-{
-    ser.serialize_str(&format!("{data:?}"))
-}
-
-pub(crate) fn serialize_as_string<T, S>(data: &T, ser: S) -> Result<S::Ok, S::Error>
-where
-    T: ToString,
-    S: Serializer,
-{
-    ser.serialize_str(&data.to_string())
-}
-
-pub(crate) fn serialize_optional_vec_as_string<T, S>(
-    data: &Option<Vec<T>>,
-    ser: S,
-) -> Result<S::Ok, S::Error>
-where
-    T: Display,
-    S: Serializer,
-{
-    serialize_as_string(&DisplayOption(data.as_deref().map(DisplaySlice)), ser)
 }

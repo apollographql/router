@@ -1,18 +1,14 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::io;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use axum::handler::HandlerWithoutStateExt;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use http::header::CONTENT_TYPE;
-use hyper::server::conn::AddrIncoming;
-use hyper::service::make_service_fn;
-use hyper::service::service_fn;
-use hyper::Server;
 use insta::assert_yaml_snapshot;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
@@ -34,7 +30,8 @@ use super::*;
 use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
 use crate::plugins::authentication::jwks::parse_jwks;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -1028,9 +1025,12 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response =
-                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
-                    .unwrap();
+            let response: graphql::Response = serde_json::from_slice(
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
             assert_eq!(response, graphql::Response::builder()
         .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
         }
@@ -1064,9 +1064,12 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response =
-                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
-                    .unwrap();
+            let response: graphql::Response = serde_json::from_slice(
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
             assert_eq!(response, graphql::Response::builder()
             .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
         }
@@ -1095,9 +1098,12 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response =
-                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
-                    .unwrap();
+            let response: graphql::Response = serde_json::from_slice(
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
             assert_eq!(response, graphql::Response::builder()
         .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
         }
@@ -1292,38 +1298,23 @@ async fn jwks_send_headers() {
 
     let got_header = Arc::new(AtomicBool::new(false));
     let gh = got_header.clone();
-    let service = make_service_fn(move |_| {
-        let gh = gh.clone();
+    let service = move |headers: HeaderMap| {
+        println!("got re: {:?}", headers);
+        let gh: Arc<AtomicBool> = gh.clone();
         async move {
-            //let gh1 = gh.clone();
-            Ok::<_, io::Error>(service_fn(move |req| {
-                println!("got re: {:?}", req.headers());
-                let gh: Arc<AtomicBool> = gh.clone();
-                async move {
-                    if req
-                        .headers()
-                        .get("jwks-authz")
-                        .and_then(|v| v.to_str().ok())
-                        == Some("user1")
-                    {
-                        gh.store(true, Ordering::Release);
-                    }
-                    Ok::<_, io::Error>(
-                        http::Response::builder()
-                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                            .status(StatusCode::OK)
-                            .version(http::Version::HTTP_11)
-                            .body::<crate::services::router::body::RouterBody>(
-                                include_str!("testdata/jwks.json").into(),
-                            )
-                            .unwrap(),
-                    )
-                }
-            }))
+            if headers.get("jwks-authz").and_then(|v| v.to_str().ok()) == Some("user1") {
+                gh.store(true, Ordering::Release);
+            }
+            http::Response::builder()
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .status(StatusCode::OK)
+                .version(http::Version::HTTP_11)
+                .body::<RouterBody>(router::body::from_bytes(include_str!("testdata/jwks.json")))
+                .unwrap()
         }
-    });
-    let server = Server::builder(AddrIncoming::from_listener(listener).unwrap()).serve(service);
-    tokio::task::spawn(server);
+    };
+    let server = axum::serve(listener, service.into_make_service());
+    tokio::task::spawn(async { server.await.unwrap() });
 
     let url = Url::parse(&format!("http://{socket_addr}/")).unwrap();
 

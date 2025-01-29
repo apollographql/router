@@ -1,0 +1,21 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.10", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  ts(first: Int): [T]
+    @connect(
+      http: { GET: "http://test/ts?first={$args.first}" }
+      selection: """
+      id
+      field
+      """
+    )
+}
+
+type T @key(fields: "id") {
+  id: ID!
+  field(foo: String): String
+  other(bar: String): String
+    @connect(http: { GET: "http://test/other?bar={$args.bar}" }, selection: "$")
+}

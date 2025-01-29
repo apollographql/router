@@ -25,6 +25,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::router::service::RouterCreator;
 use crate::services::HasSchema;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 /// This session id is created once when the router starts. It persists between config reloads and supergraph schema changes.
@@ -100,6 +101,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        license: LicenseState,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(
@@ -108,6 +110,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                 schema.clone(),
                 previous_router,
                 extra_plugins,
+                license,
             )
             .await
             .inspect(|factory| {

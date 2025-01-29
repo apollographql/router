@@ -26,6 +26,7 @@ use axum::Extension;
 use axum::Json;
 use bytes::Bytes;
 use http::header::ACCEPT;
+use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
@@ -50,7 +51,7 @@ async fn config(
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
         .route("/", post(traces_handler))
@@ -58,9 +59,7 @@ async fn config(
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
     let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
-        axum::Server::from_tcp(listener)
-            .expect("must be able to create otlp receiver")
-            .serve(app.into_make_service())
+        axum::serve(listener, app)
             .await
             .expect("could not start axum server")
     });
@@ -84,7 +83,7 @@ async fn config(
     .expect("Could not sub in endpoint");
     config = jsonpath_lib::replace_with(
         config,
-        "$.telemetry.apollo.experimental_otlp_tracing_sampler",
+        "$.telemetry.apollo.otlp_tracing_sampler",
         &mut |_| Some(serde_json::Value::String("always_on".to_string())),
     )
     .expect("Could not sub in otlp sampler");
@@ -306,6 +305,7 @@ async fn get_traces<
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
@@ -318,9 +318,12 @@ where
         .expect("router service call failed");
 
     // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+    let mut found_report = match response
+        .response
+        .into_body()
+        .collect()
         .await
-        .map(|b| String::from_utf8(b.to_vec()))
+        .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
         Ok(Ok(response)) => {
             if response.contains("errors") {

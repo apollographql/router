@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::conditional::Conditional;
+use super::connector::spans::ConnectorSpans;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -35,6 +36,10 @@ pub(crate) struct Spans {
     /// Attributes to include on the subgraph span.
     /// Subgraph spans contain information about the subgraph request and response and therefore contain subgraph specific attributes.
     pub(crate) subgraph: SubgraphSpans,
+
+    /// Attributes to include on the connector span.
+    /// Connector spans contain information about the connector request and response and therefore contain connector specific attributes.
+    pub(crate) connector: ConnectorSpans,
 }
 
 impl Spans {
@@ -181,14 +186,16 @@ mod test {
         );
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+            .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(!values.iter().any(|key_val| key_val.key == URL_PATH));
+            .any(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+            .any(|key_val| key_val.key.as_str() == URL_PATH));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -207,14 +214,16 @@ mod test {
         );
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+            .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
+            .any(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == URL_PATH));
         assert!(!values
             .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+            .any(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -233,14 +242,16 @@ mod test {
         );
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
+            .any(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD));
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
+            .any(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION));
         assert!(values
             .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+            .any(|key_val| key_val.key.as_str() == URL_PATH));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL));
     }
 
     #[test]
@@ -256,7 +267,9 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -272,7 +285,9 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -288,7 +303,9 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -312,7 +329,9 @@ mod test {
                 )
                 .build(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -336,7 +355,9 @@ mod test {
                 )
                 .build(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(!values
+            .iter()
+            .any(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT));
     }
 
     #[test]
@@ -776,6 +797,7 @@ mod test {
         let values = spans.attributes.on_response(
             &subgraph::Response::fake2_builder()
                 .header("my-header", "test_val")
+                .subgraph_name(String::default())
                 .build()
                 .unwrap(),
         );
@@ -808,6 +830,7 @@ mod test {
             &subgraph::Response::fake2_builder()
                 .header("my-header", "test_val")
                 .status_code(http::StatusCode::OK)
+                .subgraph_name(String::default())
                 .build()
                 .unwrap(),
         );
@@ -840,6 +863,7 @@ mod test {
             &subgraph::Response::fake2_builder()
                 .header("my-header", "test_val")
                 .status_code(http::StatusCode::OK)
+                .subgraph_name(String::default())
                 .build()
                 .unwrap(),
         );
