@@ -8,6 +8,7 @@ use itertools::Itertools;
 use shape::Shape;
 use shape::ShapeCase;
 
+use crate::sources::connect::range::RangeExt;
 use crate::sources::connect::string_template::Error;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
@@ -89,11 +90,7 @@ pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(),
         .errors()
         .map(|err| Error {
             message: err.message.clone(),
-            location: err
-                .range
-                .as_ref()
-                .map(|range| range.start + location.start..range.end + location.start)
-                .unwrap_or_else(|| location.clone()),
+            location: location.narrow(err.range.as_ref()),
         })
         .collect();
     if !errors.is_empty() {
