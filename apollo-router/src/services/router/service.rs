@@ -426,7 +426,7 @@ impl RouterService {
             Err(err) => {
                 u64_counter!(
                     "apollo_router_http_requests_total",
-                    "Total number of HTTP requests made.",
+                    "Total number of HTTP requests made. (deprecated)",
                     1,
                     status = err.status.as_u16() as i64,
                     error = err.error.to_string()

@@ -26,11 +26,11 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
@@ -120,7 +120,7 @@ impl QueryAnalysisLayer {
                 .build()];
             u64_counter!(
                 "apollo_router_http_requests_total",
-                "Total number of HTTP requests made.",
+                "Total number of HTTP requests made. (deprecated)",
                 1,
                 status = StatusCode::BAD_REQUEST.as_u16() as i64,
                 error = "Must provide query string"
@@ -320,7 +320,7 @@ impl Display for ParsedDocumentInner {
 
 impl Hash for ParsedDocumentInner {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash.0.hash(state);
+        self.hash.hash(state);
     }
 }
 
