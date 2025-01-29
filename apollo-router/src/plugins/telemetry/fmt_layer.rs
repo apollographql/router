@@ -23,10 +23,9 @@ use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -53,11 +52,8 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(
-                        FilteringFormatter::new(format, filter_metric_events, rate_limit),
-                        std::io::stdout,
-                    )
-                    .boxed()
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
 
                 Format::Text(format_config) => {
@@ -65,11 +61,8 @@ pub(crate) fn create_fmt_layer(
                         config.exporters.logging.common.to_resource(),
                         format_config.clone(),
                     );
-                    FmtLayer::new(
-                        FilteringFormatter::new(format, filter_metric_events, rate_limit),
-                        std::io::stdout,
-                    )
-                    .boxed()
+                    FmtLayer::new(RateLimitFormatter::new(format, rate_limit), std::io::stdout)
+                        .boxed()
                 }
             }
         }
@@ -494,11 +487,7 @@ connector:
     async fn test_text_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Text::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -511,11 +500,7 @@ connector:
     async fn test_text_logging_attributes_nested_spans() {
         let buff = LogBuffer::default();
         let format = Text::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -529,11 +514,7 @@ connector:
     async fn test_json_logging_attributes() {
         let buff = LogBuffer::default();
         let format = Json::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -546,11 +527,7 @@ connector:
     async fn test_json_logging_attributes_nested_spans() {
         let buff = LogBuffer::default();
         let format = Json::default();
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -570,11 +547,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Default::default(), json_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -595,11 +568,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new().with(fmt_layer),
@@ -617,11 +586,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -670,11 +635,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         ::tracing::subscriber::with_default(
             fmt::Subscriber::new()
@@ -723,11 +684,7 @@ connector:
             ..Default::default()
         };
         let format = Json::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
@@ -818,6 +775,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .subgraph_name("subgraph")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
@@ -842,6 +800,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .subgraph_name("subgraph_bis")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
@@ -955,6 +914,111 @@ connector:
     }
 
     #[tokio::test]
+    async fn test_json_logging_deduplicates_attributes() {
+        let buff = LogBuffer::default();
+        let text_format = JsonFormat {
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ..Default::default()
+        };
+        let format = Json::new(Default::default(), text_format);
+        let fmt_layer = FmtLayer::new(
+            RateLimitFormatter::new(format, &RateLimit::default()),
+            buff.clone(),
+        )
+        .boxed();
+
+        let event_config: events::Events = serde_yaml::from_str(
+            r#"
+subgraph:
+  request: info
+  response: warn
+  error: error
+  event.with.duplicate.attribute:
+    message: "this event has a duplicate attribute"
+    level: error
+    on: response
+    attributes:
+      subgraph.name: true
+      static: foo # This shows up twice without attribute deduplication
+        "#,
+        )
+        .unwrap();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
+            move || {
+                let test_span = info_span!("test");
+                let _enter = test_span.enter();
+
+                let router_events = event_config.new_router_events();
+                let supergraph_events = event_config.new_supergraph_events();
+                let subgraph_events = event_config.new_subgraph_events();
+
+                // In: Router -> Supergraph -> Subgraphs
+                let router_req = router::Request::fake_builder().build().unwrap();
+                router_events.on_request(&router_req);
+
+                let supergraph_req = supergraph::Request::fake_builder()
+                    .query("query { foo }")
+                    .build()
+                    .unwrap();
+                supergraph_events.on_request(&supergraph_req);
+
+                let subgraph_req_1 = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph")
+                    .subgraph_request(http::Request::new(
+                        graphql::Request::fake_builder()
+                            .query("query { foo }")
+                            .build(),
+                    ))
+                    .build();
+                subgraph_events.on_request(&subgraph_req_1);
+
+                let subgraph_req_2 = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph_bis")
+                    .subgraph_request(http::Request::new(
+                        graphql::Request::fake_builder()
+                            .query("query { foo }")
+                            .build(),
+                    ))
+                    .build();
+                subgraph_events.on_request(&subgraph_req_2);
+
+                // Out: Subgraphs -> Supergraph -> Router
+                let subgraph_resp_1 = subgraph::Response::fake2_builder()
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp_1);
+
+                let subgraph_resp_2 = subgraph::Response::fake2_builder()
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp_2);
+
+                let supergraph_resp = supergraph::Response::fake_builder()
+                    .data(serde_json::json!({"data": "res"}).to_string())
+                    .build()
+                    .expect("expecting valid response");
+                supergraph_events.on_response(&supergraph_resp);
+
+                let router_resp = router::Response::fake_builder()
+                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .build()
+                    .expect("expecting valid response");
+                router_events.on_response(&router_resp);
+            },
+        );
+
+        insta::assert_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
     async fn test_text_logging_with_custom_events_with_instrumented() {
         let buff = LogBuffer::default();
         let text_format = TextFormat {
@@ -965,11 +1029,7 @@ connector:
             ..Default::default()
         };
         let format = Text::new(Default::default(), text_format);
-        let fmt_layer = FmtLayer::new(
-            FilteringFormatter::new(format, filter_metric_events, &RateLimit::default()),
-            buff.clone(),
-        )
-        .boxed();
+        let fmt_layer = FmtLayer::new(format, buff.clone()).boxed();
 
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
@@ -1015,7 +1075,7 @@ connector:
                     .unwrap();
                 router_events.on_request(&router_req);
                 let ctx = crate::Context::new();
-                ctx.extensions().with_lock(|mut ext| {
+                ctx.extensions().with_lock(|ext| {
                     ext.insert(RouterResponseBodyExtensionType(
                         r#"{"data": {"data": "res"}}"#.to_string(),
                     ));
@@ -1066,6 +1126,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .subgraph_name("subgraph")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
@@ -1090,6 +1151,7 @@ connector:
                     .header("custom-header", "val1")
                     .header("x-log-request", HeaderValue::from_static("log"))
                     .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .subgraph_name("subgraph_bis")
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);

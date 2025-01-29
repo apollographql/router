@@ -145,6 +145,8 @@ impl Request {
 use displaydoc::Display;
 use thiserror::Error;
 
+use crate::context::CONTAINS_GRAPHQL_ERROR;
+
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
     /// couldn't create a valid http GET uri '{0}'
@@ -214,17 +216,6 @@ impl Response {
         self.response.body_mut().into_data_stream().next().await
     }
 
-    #[deprecated]
-    pub fn map<F>(self, f: F) -> Response
-    where
-        F: FnOnce(Body) -> Body,
-    {
-        Response {
-            context: self.context,
-            response: self.response.map(f),
-        }
-    }
-
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
@@ -241,6 +232,9 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        }
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)

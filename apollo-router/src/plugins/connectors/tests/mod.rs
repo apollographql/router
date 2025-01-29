@@ -35,6 +35,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 mod mock_api;
@@ -1785,6 +1786,7 @@ async fn execute(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
+            LicenseState::default(),
         )
         .await
         .unwrap();

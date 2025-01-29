@@ -476,7 +476,7 @@ impl SubgraphAuth {
                     let signing_params = signing_params.clone();
                     req.context
                         .extensions()
-                        .with_lock(|mut lock| lock.insert(signing_params));
+                        .with_lock(|lock| lock.insert(signing_params));
                     req
                 })
                 .service(service)
@@ -811,7 +811,7 @@ mod test {
         Ok(SubgraphResponse::new_from_response(
             http::Response::default(),
             Context::new(),
-            req.subgraph_name.unwrap_or_else(|| String::from("test")),
+            req.subgraph_name,
             SubgraphRequestId(String::new()),
         ))
     }
@@ -842,6 +842,7 @@ mod test {
             )
             .operation_kind(OperationKind::Query)
             .context(Context::new())
+            .subgraph_name(String::default())
             .build()
     }
 

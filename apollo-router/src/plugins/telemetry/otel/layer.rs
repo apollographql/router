@@ -37,7 +37,6 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::reload::IsSampled;
 use crate::plugins::telemetry::reload::SampledSpan;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
@@ -917,10 +916,6 @@ where
     /// [`ERROR`]: tracing::Level::ERROR
     /// [`Error`]: opentelemetry::trace::StatusCode::Error
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // Don't include deprecated metric events
-        if !filter_metric_events(event) {
-            return;
-        }
         // Ignore events that are not in the context of a span
         if let Some(span) = ctx.lookup_current() {
             let mut extensions = span.extensions_mut();
@@ -961,7 +956,11 @@ where
                 let event_attributes = otel_data.as_ref().and_then(|o| o.event_attributes.clone());
 
                 if let Some(event_attributes) = event_attributes {
-                    otel_event.attributes.extend(event_attributes)
+                    otel_event.attributes.extend(
+                        event_attributes
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    )
                 }
             }
 
