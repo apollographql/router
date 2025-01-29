@@ -415,13 +415,14 @@ impl<S> HeadersService<S> {
                         if values.iter().count() == 0 {
                             if let Some(default) = default {
                                 headers.append(target_header, default.clone());
+                                already_propagated.insert(target_header.as_str());
                             }
                         } else {
                             for value in values {
                                 headers.append(target_header, value.clone());
+                                already_propagated.insert(target_header.as_str());
                             }
                         }
-                        already_propagated.insert(target_header.as_str());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
@@ -471,10 +472,10 @@ mod test {
     use tower::BoxError;
 
     use super::*;
+    use crate::graphql;
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
-    use crate::plugins::headers::Config;
-    use crate::plugins::headers::HeadersLayer;
+    use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
@@ -1107,5 +1108,92 @@ mod test {
 
             true
         }
+    }
+
+    #[tokio::test]
+    async fn test_propagate_or() -> Result<(), BoxError> {
+        let test_harness = PluginTestHarness::<Headers>::builder()
+            .config(include_str!("fixtures/propagate_or.router.yaml"))
+            .build()
+            .await;
+        let service = test_harness.subgraph_service("test", |r| async move {
+            assert!(r.subgraph_request.headers().get("b").is_some());
+            Ok(subgraph::Response::fake_builder().build())
+        });
+
+        let _ = service
+            .call(
+                subgraph::Request::fake_builder()
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .header("a", "av")
+                            .body(graphql::Request::default())
+                            .unwrap(),
+                    ))
+                    .build(),
+            )
+            .await;
+
+        let _ = service
+            .call(
+                subgraph::Request::fake_builder()
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .header("b", "bv")
+                            .body(graphql::Request::default())
+                            .unwrap(),
+                    ))
+                    .build(),
+            )
+            .await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_propagate_or_defaulted() -> Result<(), BoxError> {
+        let test_harness = PluginTestHarness::<Headers>::builder()
+            .config(include_str!("fixtures/propagate_or_defaulted.router.yaml"))
+            .build()
+            .await;
+        let service = test_harness.subgraph_service("test", |r| async move {
+            let header = r
+                .subgraph_request
+                .headers()
+                .get("b")
+                .expect("expected header")
+                .to_str()
+                .expect("expected header value");
+            assert!(header == "defaulted" || header == "av");
+            Ok(subgraph::Response::fake_builder().build())
+        });
+
+        let _ = service
+            .call(
+                subgraph::Request::fake_builder()
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .header("a", "av")
+                            .body(graphql::Request::default())
+                            .unwrap(),
+                    ))
+                    .build(),
+            )
+            .await;
+
+        let _ = service
+            .call(
+                subgraph::Request::fake_builder()
+                    .supergraph_request(Arc::new(
+                        http::Request::builder()
+                            .header("b", "bv")
+                            .body(graphql::Request::default())
+                            .unwrap(),
+                    ))
+                    .build(),
+            )
+            .await;
+
+        Ok(())
     }
 }

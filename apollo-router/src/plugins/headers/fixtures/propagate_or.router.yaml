@@ -1,0 +1,8 @@
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
