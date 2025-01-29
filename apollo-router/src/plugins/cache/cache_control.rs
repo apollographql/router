@@ -267,6 +267,7 @@ impl CacheControl {
     }
 
     fn merge_inner(&self, other: &CacheControl, now: u64) -> CacheControl {
+        // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
         if self.no_store || other.no_store {
             return CacheControl {
                 no_store: true,
