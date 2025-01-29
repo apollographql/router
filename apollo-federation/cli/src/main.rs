@@ -277,8 +277,8 @@ fn cmd_plan(
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
     let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
     println!("{query_plan}");
-    // Use the supergraph schema, not the API schema, for correctness check,
-    // since the plan may access hidden fields.
+
+    // Check the query plan
     let subgraphs_by_name = supergraph
         .extract_subgraphs()
         .unwrap()
@@ -286,6 +286,7 @@ fn cmd_plan(
         .map(|(name, subgraph)| (name, subgraph.schema))
         .collect();
     let result = apollo_federation::correctness::check_plan(
+        planner.api_schema(),
         &supergraph.schema,
         &subgraphs_by_name,
         &query_doc,

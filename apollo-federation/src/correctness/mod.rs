@@ -59,22 +59,24 @@ pub fn compare_operations(
 }
 
 pub fn check_plan(
-    schema: &ValidFederationSchema,
+    api_schema: &ValidFederationSchema,
+    supergraph_schema: &ValidFederationSchema,
     subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
 ) -> Result<Option<CheckFailure>, FederationError> {
-    let op_rs = response_shape::compute_response_shape_for_operation(operation_doc, schema)?;
+    let op_rs = response_shape::compute_response_shape_for_operation(operation_doc, api_schema)?;
 
     let root_type = response_shape::compute_the_root_type_condition_for_operation(operation_doc)?;
-    let plan_rs = match query_plan_analysis::interpret_query_plan(schema, &root_type, plan) {
-        Ok(rs) => rs,
-        Err(e) => {
-            return Ok(Some(CheckFailure::new(format!(
-                "Failed to compute the response shape from query plan:\n{e}"
-            ))));
-        }
-    };
+    let plan_rs =
+        match query_plan_analysis::interpret_query_plan(supergraph_schema, &root_type, plan) {
+            Ok(rs) => rs,
+            Err(e) => {
+                return Ok(Some(CheckFailure::new(format!(
+                    "Failed to compute the response shape from query plan:\n{e}"
+                ))));
+            }
+        };
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
     match compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs) {
