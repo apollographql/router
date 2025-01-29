@@ -184,7 +184,7 @@ impl CacheControl {
             return Ok(s);
         }
         if self.no_cache {
-            write!(&mut s, "no_cache")?;
+            write!(&mut s, "no-cache")?;
             // Early return to avoid conflicts https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
             return Ok(s);
         }
