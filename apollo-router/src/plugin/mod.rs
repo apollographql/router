@@ -51,6 +51,7 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::ListenAddr;
 
 type InstanceFactory =
@@ -81,6 +82,9 @@ pub struct PluginInit<T> {
     pub(crate) launch_id: Option<Arc<String>>,
 
     pub(crate) notify: Notify<String, graphql::Response>,
+
+    /// User's license's state, including any limits of use
+    pub(crate) license: LicenseState,
 }
 
 impl<T> PluginInit<T>
@@ -103,6 +107,7 @@ where
             .supergraph_schema(supergraph_schema)
             .launch_id(Arc::new("launch_id".to_string()))
             .notify(Notify::for_tests())
+            .license(LicenseState::default())
             .build()
     }
 }
@@ -114,6 +119,7 @@ where
 {
     /// Create a new PluginInit builder
     #[builder(entry = "builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     /// Build a new PluginInit for the supplied configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -125,6 +131,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Option<Arc<String>>>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Self {
         PluginInit {
             config,
@@ -134,10 +141,12 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id: launch_id.flatten(),
             notify,
+            license,
         }
     }
 
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -150,6 +159,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Notify<String, graphql::Response>,
+        license: LicenseState,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
@@ -160,11 +170,13 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify,
+            license,
         })
     }
 
     /// Create a new PluginInit builder
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
+    #[allow(clippy::too_many_arguments)]
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,
@@ -173,6 +185,7 @@ where
         subgraph_schemas: Option<Arc<HashMap<String, Arc<Valid<Schema>>>>>,
         launch_id: Option<Arc<String>>,
         notify: Option<Notify<String, graphql::Response>>,
+        license: Option<LicenseState>,
     ) -> Self {
         PluginInit {
             config,
@@ -183,6 +196,7 @@ where
             subgraph_schemas: subgraph_schemas.unwrap_or_default(),
             launch_id,
             notify: notify.unwrap_or_else(Notify::for_tests),
+            license: license.unwrap_or_default(),
         }
     }
 }
@@ -200,6 +214,7 @@ impl PluginInit<serde_json::Value> {
             .supergraph_sdl(self.supergraph_sdl)
             .subgraph_schemas(self.subgraph_schemas)
             .notify(self.notify.clone())
+            .license(self.license)
             .build()
     }
 }

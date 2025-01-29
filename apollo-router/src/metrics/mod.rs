@@ -1146,6 +1146,27 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
+/// Shared counter for `apollo.router.graphql_error` for consistency
+pub(crate) fn count_graphql_error(count: u64, code: Option<&str>) {
+    match code {
+        None => {
+            u64_counter!(
+                "apollo.router.graphql_error",
+                "Number of GraphQL error responses returned by the router",
+                count
+            );
+        }
+        Some(code) => {
+            u64_counter!(
+                "apollo.router.graphql_error",
+                "Number of GraphQL error responses returned by the router",
+                count,
+                code = code.to_string()
+            );
+        }
+    }
+}
+
 /// Assert that all metrics match an [insta] snapshot.
 ///
 /// Consider using [assert_non_zero_metrics_snapshot] to produce more grokkable snapshots if
