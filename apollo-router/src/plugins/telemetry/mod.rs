@@ -90,7 +90,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
-use crate::metrics::meter_provider;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -125,7 +125,6 @@ use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::metrics_layer;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -1661,7 +1660,7 @@ impl Telemetry {
 
 impl TelemetryActivation {
     fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider();
+        let meter_provider = meter_provider_internal();
         commit_prometheus();
         let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
 
@@ -1677,8 +1676,6 @@ impl TelemetryActivation {
 
         old_meter_providers[2] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        metrics_layer().clear();
 
         Self::checked_meter_shutdown(old_meter_providers);
     }

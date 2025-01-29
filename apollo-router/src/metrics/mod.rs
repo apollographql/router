@@ -1,3 +1,9 @@
+//! APIs for integrating with the router's metrics.
+//!
+//! ## Compatibility
+//! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
+//! API-stable, we may update it in a minor version, which may require code changes to plugins.
+
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
@@ -11,9 +17,6 @@ use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
-pub(crate) mod layer;
-
-// During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 
 #[cfg(test)]
 pub(crate) mod test_utils {
@@ -492,8 +495,12 @@ pub(crate) mod test_utils {
         Gauge,
     }
 }
+
+/// Returns a MeterProvider, as a concrete type so we can use our own extensions.
+///
+/// During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 #[cfg(test)]
-pub(crate) fn meter_provider() -> AggregateMeterProvider {
+pub(crate) fn meter_provider_internal() -> AggregateMeterProvider {
     test_utils::meter_provider_and_readers().0
 }
 
@@ -502,14 +509,26 @@ pub(crate) use test_utils::collect_metrics;
 
 #[cfg(not(test))]
 static AGGREGATE_METER_PROVIDER: OnceLock<AggregateMeterProvider> = OnceLock::new();
+
+/// Returns the currently configured global MeterProvider, as a concrete type
+/// so we can use our own extensions.
 #[cfg(not(test))]
-pub(crate) fn meter_provider() -> AggregateMeterProvider {
+pub(crate) fn meter_provider_internal() -> AggregateMeterProvider {
     AGGREGATE_METER_PROVIDER
         .get_or_init(Default::default)
         .clone()
 }
 
-#[macro_export]
+/// Returns the currently configured global [`MeterProvider`].
+///
+/// See the [module-level documentation] for important details on the semver-compatibility guarantees of this API.
+///
+/// [`MeterProvider`]: opentelemetry::metrics::MeterProvider
+/// [module-level documentation]: crate::metrics
+pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
+    meter_provider_internal()
+}
+
 /// Get or create a `u64` monotonic counter metric and add a value to it.
 ///
 /// Each metric needs a description.
@@ -816,7 +835,7 @@ macro_rules! metric {
 
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
-                            let meter_provider = crate::metrics::meter_provider();
+                            let meter_provider = crate::metrics::meter_provider_internal();
                             let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
                             std::sync::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
@@ -828,7 +847,7 @@ macro_rules! metric {
                         instrument
                     } else {
                         // Slow path, we need to obtain the instrument again.
-                        let meter_provider = crate::metrics::meter_provider();
+                        let meter_provider = crate::metrics::meter_provider_internal();
                         let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
                         *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
@@ -1233,7 +1252,7 @@ pub(crate) trait FutureMetricsExt<T> {
             async move {
                 let result = self.await;
                 let _ = tokio::task::spawn_blocking(|| {
-                    meter_provider().shutdown();
+                    meter_provider_internal().shutdown();
                 })
                 .await;
                 result
@@ -1253,6 +1272,7 @@ mod test {
 
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
+    use crate::metrics::meter_provider_internal;
     use crate::metrics::FutureMetricsExt;
 
     #[test]
@@ -1460,28 +1480,28 @@ mod test {
         }
 
         // Callsite hasn't been used yet, so there should be no metrics
-        assert_eq!(meter_provider().registered_instruments(), 0);
+        assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Call the metrics, it will be registered
         test();
         assert_counter!("test", 1, "attr" = "val");
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Call the metrics again, but the second call will not register a new metric because it will have be retrieved from the static
         test();
         assert_counter!("test", 2, "attr" = "val");
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Force invalidation of instruments
-        meter_provider().set(MeterProviderType::PublicPrometheus, None);
-        assert_eq!(meter_provider().registered_instruments(), 0);
+        meter_provider_internal().set(MeterProviderType::PublicPrometheus, None);
+        assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Slow path
         test();
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Fast path
         test();
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
     }
 }
