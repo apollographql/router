@@ -54,7 +54,7 @@ fn typeof_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     // TODO Compute this union type once and clone it here.
     Shape::one([
@@ -106,7 +106,7 @@ fn eq_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     Shape::bool()
 }
@@ -169,7 +169,7 @@ fn match_if_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     use super::super::methods::public::match_shape;
     // Since match_shape does not inspect the candidate expressions, we can
@@ -180,7 +180,7 @@ fn match_if_shape(
         method_args,
         input_shape,
         dollar_shape,
-        named_var_shapes,
+        named_shapes,
     )
 }
 
@@ -289,7 +289,7 @@ fn math_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     Shape::error("TODO: math_shape")
 }
@@ -415,7 +415,7 @@ fn has_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     // TODO We could be more clever here (sometimes) based on the input_shape
     // and argument shapes.
@@ -624,14 +624,14 @@ fn get_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
             let index_shape = index_literal.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
             );
             return match index_shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
@@ -773,7 +773,7 @@ fn keys_shape(
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
@@ -846,7 +846,7 @@ fn values_shape(
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
@@ -886,7 +886,7 @@ fn not_shape(
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Bool(Some(value)) => Shape::bool_value(!*value),
@@ -948,7 +948,7 @@ fn or_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Bool(Some(true)) => {
@@ -968,11 +968,8 @@ fn or_shape(
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
-            let arg_shape = arg.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape.clone(),
-                named_var_shapes,
-            );
+            let arg_shape =
+                arg.compute_output_shape(input_shape.clone(), dollar_shape.clone(), named_shapes);
             match arg_shape.case() {
                 ShapeCase::Bool(Some(true)) => {
                     return Shape::bool_value(true);
@@ -1034,7 +1031,7 @@ fn and_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
 ) -> Shape {
     match input_shape.case() {
         ShapeCase::Bool(Some(false)) => {
@@ -1054,11 +1051,8 @@ fn and_shape(
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
-            let arg_shape = arg.compute_output_shape(
-                input_shape.clone(),
-                dollar_shape.clone(),
-                named_var_shapes,
-            );
+            let arg_shape =
+                arg.compute_output_shape(input_shape.clone(), dollar_shape.clone(), named_shapes);
             match arg_shape.case() {
                 ShapeCase::Bool(Some(false)) => {
                     return Shape::bool_value(false);
