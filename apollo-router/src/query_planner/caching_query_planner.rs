@@ -250,6 +250,8 @@ where
             }
         }
 
+        all_cache_keys.shuffle(&mut thread_rng());
+
         all_cache_keys.extend(cache_keys.into_iter());
 
         let mut count = 0usize;
