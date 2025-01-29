@@ -679,6 +679,9 @@ async fn it_stores_operation_error_when_config_is_enabled() {
             .unwrap();
 
         router_service
+            .ready()
+            .await
+            .unwrap()
             .call(post_request.try_into().unwrap())
             .await
             .unwrap();
