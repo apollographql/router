@@ -68,9 +68,14 @@ impl Plugin for ExposeQueryPlan {
                     .unwrap_or(Setting::Disabled);
 
                 if !matches!(setting, Setting::Disabled) {
-                    req.context.insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone()).unwrap();
                     req.context
-                        .insert(FORMATTED_QUERY_PLAN_CONTEXT_KEY, req.query_plan.formatted_query_plan.clone())
+                        .insert(QUERY_PLAN_CONTEXT_KEY, req.query_plan.root.clone())
+                        .unwrap();
+                    req.context
+                        .insert(
+                            FORMATTED_QUERY_PLAN_CONTEXT_KEY,
+                            req.query_plan.formatted_query_plan.clone(),
+                        )
                         .unwrap();
                 }
                 if matches!(setting, Setting::DryRun) {
