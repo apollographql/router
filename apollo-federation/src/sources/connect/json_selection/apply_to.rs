@@ -994,7 +994,7 @@ fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
     if let ShapeCase::One(inner) = shape.case() {
         let mut new_fields = Vec::new();
         for inner_field in inner {
-            new_fields.push(field(inner_field, key, source_id).into());
+            new_fields.push(field(inner_field, key, source_id));
         }
         return Shape::one(new_fields, shape.locations.clone());
     }
