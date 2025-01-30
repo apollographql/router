@@ -577,8 +577,10 @@ pub enum Code {
     EntityTypeInvalid,
     /// A @key is defined without a cooresponding entity connector.
     MissingEntityConnector,
-    /// A syntax error in `selection`
-    InvalidJsonSelection,
+    /// An error in `selection`
+    InvalidSelection,
+    /// A problem with `http.body`
+    InvalidBody,
     /// A cycle was detected within a `selection`
     CircularReference,
     /// A field was selected but is not defined on the type

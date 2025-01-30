@@ -8,6 +8,7 @@ use url::Url;
 use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::expression;
+use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
@@ -36,7 +37,7 @@ pub(crate) fn validate_template(
 
     for expression in template.expressions() {
         messages.extend(
-            expression::validate(expression, &expression_context)
+            expression::validate(expression, &expression_context, &scalars())
                 .err()
                 .into_iter()
                 .map(|mut err| {
