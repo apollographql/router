@@ -35,6 +35,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 mod mock_api;
@@ -826,6 +827,51 @@ async fn test_mutation() {
             "id": 3,
             "name": "New User"
           }
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .body(serde_json::json!({ "username": "New User" }))
+            .path("/user")],
+    );
+}
+
+#[tokio::test]
+async fn test_mutation_empty_body() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        MUTATION_SCHEMA,
+        &mock_server.uri(),
+        "mutation CreateUser($name: String!) {
+            createUser(name: $name) {
+                success
+            }
+        }",
+        serde_json_bytes::json!({ "name": "New User" })
+            .as_object()
+            .unwrap()
+            .clone(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "createUser": {
+          "success": true
         }
       }
     }
@@ -1785,6 +1831,7 @@ async fn execute(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
+            LicenseState::default(),
         )
         .await
         .unwrap();

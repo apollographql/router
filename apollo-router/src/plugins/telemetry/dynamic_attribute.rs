@@ -83,16 +83,11 @@ impl SpanDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     update_otel_data(otel_data, &key, &value);
-                                    if otel_data.builder.attributes.is_none() {
+                                    if let Some(attrs) = otel_data.builder.attributes.as_mut() {
+                                        attrs.push(KeyValue::new(key, value))
+                                    } else {
                                         otel_data.builder.attributes =
                                             Some([KeyValue::new(key, value)].into_iter().collect());
-                                    } else {
-                                        otel_data
-                                            .builder
-                                            .attributes
-                                            .as_mut()
-                                            .expect("we checked the attributes value in the condition above")
-                                            .push(KeyValue::new(key, value));
                                     }
                                 }
                                 None => {
@@ -101,7 +96,9 @@ impl SpanDynAttribute for ::tracing::Span {
                                 }
                             }
                         } else {
-                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) || key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX) {
+                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX)
+                                || key.as_str().starts_with(APOLLO_CONNECTOR_PREFIX)
+                            {
                                 return;
                             }
                             let mut extensions = s.extensions_mut();

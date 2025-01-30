@@ -90,7 +90,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
-use crate::metrics::meter_provider;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -125,7 +125,6 @@ use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::metrics_layer;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -1186,7 +1185,7 @@ impl Telemetry {
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
+                .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
         }
     }
 
@@ -1256,7 +1255,7 @@ impl Telemetry {
                             if !matches!(sender, Sender::Noop) {
                                 if let (true, Some(query)) = (
                                     config.apollo.experimental_local_field_metrics,
-                                    ctx.unsupported_executable_document(),
+                                    ctx.executable_document(),
                                 ) {
                                     local_stat_recorder.visit(
                                         &query,
@@ -1392,7 +1391,7 @@ impl Telemetry {
                 // values for deferred responses and subscriptions.
                 let enum_response_references = context
                     .extensions()
-                    .with_lock(|mut lock| lock.remove::<ReferencedEnums>())
+                    .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
                 SingleStatsReport {
@@ -1661,7 +1660,7 @@ impl Telemetry {
 
 impl TelemetryActivation {
     fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider();
+        let meter_provider = meter_provider_internal();
         commit_prometheus();
         let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
 
@@ -1677,8 +1676,6 @@ impl TelemetryActivation {
 
         old_meter_providers[2] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        metrics_layer().clear();
 
         Self::checked_meter_shutdown(old_meter_providers);
     }
@@ -1977,7 +1974,6 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::time::Duration;
 
     use axum_extra::headers::HeaderName;
@@ -1996,6 +1992,7 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
+    use parking_lot::Mutex;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -2089,7 +2086,7 @@ mod tests {
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
             .split('\n')
-            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
+            .filter(|l| l.contains("bucket"))
             .sorted()
             .join("\n")
     }
@@ -3022,7 +3019,7 @@ mod tests {
         }
         impl TestLayer {
             fn assert_log_entry_count(&self, message: &str, expected: usize) {
-                let log_entries = self.visitor.lock().unwrap().log_entries.clone();
+                let log_entries = self.visitor.lock().log_entries.clone();
                 let actual = log_entries.iter().filter(|e| e.contains(message)).count();
                 assert_eq!(actual, expected);
             }
@@ -3040,7 +3037,7 @@ mod tests {
             Self: 'static,
         {
             fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-                event.record(self.visitor.lock().unwrap().deref_mut())
+                event.record(self.visitor.lock().deref_mut())
             }
         }
 
@@ -3134,7 +3131,7 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: SupergraphRequest| {
-                req.context.extensions().with_lock(|mut lock| {
+                req.context.extensions().with_lock(|lock| {
                     lock.insert(cost_details.clone());
                 });
                 req.context

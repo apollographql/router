@@ -50,6 +50,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::metrics::count_graphql_error;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugins::telemetry::apollo::OtlpErrorMetricsMode;
@@ -361,7 +362,7 @@ impl RouterService {
                     let body = body?;
 
                     if display_router_response.0 {
-                        context.extensions().with_lock(|mut ext| {
+                        context.extensions().with_lock(|ext| {
                             ext.insert(RouterResponseBodyExtensionType(body.clone()));
                         });
                     }
@@ -491,7 +492,7 @@ impl RouterService {
                 // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
                 let batch_query_opt = context
                     .extensions()
-                    .with_lock(|mut lock| lock.remove::<BatchQuery>());
+                    .with_lock(|lock| lock.remove::<BatchQuery>());
                 if let Some(batch_query) = batch_query_opt {
                     // Only proceed with signalling cancelled if the batch_query is not finished
                     if !batch_query.finished() {
@@ -691,7 +692,7 @@ impl RouterService {
             .then(|| {
                 context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(self.batching.clone()));
+                    .with_lock(|lock| lock.insert(self.batching.clone()));
 
                 self.batching.subgraph.as_ref()
             })
@@ -750,7 +751,7 @@ impl RouterService {
             } else {
                 None
             };
-            new_context.extensions().with_lock(|mut lock| {
+            new_context.extensions().with_lock(|lock| {
                 if let Some(client_request_accepts) = client_request_accepts_opt {
                     lock.insert(client_request_accepts);
                 }
@@ -775,7 +776,7 @@ impl RouterService {
                 })?;
             context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(b_for_index));
+                .with_lock(|lock| lock.insert(b_for_index));
         }
 
         results.insert(
@@ -890,23 +891,7 @@ impl RouterService {
         }
 
         for (code, count) in map {
-            match code {
-                None => {
-                    u64_counter!(
-                        "apollo.router.graphql_error",
-                        "Number of GraphQL error responses returned by the router",
-                        count
-                    );
-                }
-                Some(code) => {
-                    u64_counter!(
-                        "apollo.router.graphql_error",
-                        "Number of GraphQL error responses returned by the router",
-                        count,
-                        code = code.to_string()
-                    );
-                }
-            }
+            count_graphql_error(count, code);
         }
     }
 

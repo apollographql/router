@@ -92,7 +92,7 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
+                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
             )
@@ -103,7 +103,7 @@ impl FilterMeterProvider {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .deny(
-                Regex::new(r"apollo\.router\.(config|entities|instance|operations\.(connectors|fetch|request_size|response_size)|schema\.connectors)(\..*|$)")
+                Regex::new(r"apollo\.router\.(config|entities|instance|operations\.(connectors|fetch|request_size|response_size|error)|schema\.connectors)(\..*|$)")
                     .expect("regex should have been valid"),
             )
             .build()
