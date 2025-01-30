@@ -66,6 +66,7 @@ pub fn check_plan(
     plan: &QueryPlan,
 ) -> Result<Option<CheckFailure>, FederationError> {
     let op_rs = response_shape::compute_response_shape_for_operation(operation_doc, api_schema)?;
+    tracing::debug!("Operation response shape: {op_rs}");
 
     let root_type = response_shape::compute_the_root_type_condition_for_operation(operation_doc)?;
     let plan_rs =
@@ -77,6 +78,7 @@ pub fn check_plan(
                 ))));
             }
         };
+    tracing::debug!("Query plan response shape: {plan_rs}");
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
     match compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs) {
