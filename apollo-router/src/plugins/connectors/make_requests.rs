@@ -1179,35 +1179,20 @@ mod tests {
                                 inline: false,
                                 path: PathSelection {
                                     path: WithRange {
-                                        node: Var(
+                                        node: Expr(
                                             WithRange {
-                                                node: $,
+                                                node: [
+                                                    WithRange {
+                                                        node: String(
+                                                            "_Entity",
+                                                        ),
+                                                        range: None,
+                                                    },
+                                                ],
                                                 range: None,
                                             },
                                             WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
+                                                node: Empty,
                                                 range: None,
                                             },
                                         ),
@@ -1287,35 +1272,20 @@ mod tests {
                                 inline: false,
                                 path: PathSelection {
                                     path: WithRange {
-                                        node: Var(
+                                        node: Expr(
                                             WithRange {
-                                                node: $,
+                                                node: [
+                                                    WithRange {
+                                                        node: String(
+                                                            "_Entity",
+                                                        ),
+                                                        range: None,
+                                                    },
+                                                ],
                                                 range: None,
                                             },
                                             WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
+                                                node: Empty,
                                                 range: None,
                                             },
                                         ),
@@ -1497,35 +1467,20 @@ mod tests {
                                 inline: false,
                                 path: PathSelection {
                                     path: WithRange {
-                                        node: Var(
+                                        node: Expr(
                                             WithRange {
-                                                node: $,
+                                                node: [
+                                                    WithRange {
+                                                        node: String(
+                                                            "_Entity",
+                                                        ),
+                                                        range: None,
+                                                    },
+                                                ],
                                                 range: None,
                                             },
                                             WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
+                                                node: Empty,
                                                 range: None,
                                             },
                                         ),
@@ -1605,35 +1560,20 @@ mod tests {
                                 inline: false,
                                 path: PathSelection {
                                     path: WithRange {
-                                        node: Var(
+                                        node: Expr(
                                             WithRange {
-                                                node: $,
+                                                node: [
+                                                    WithRange {
+                                                        node: String(
+                                                            "_Entity",
+                                                        ),
+                                                        range: None,
+                                                    },
+                                                ],
                                                 range: None,
                                             },
                                             WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
+                                                node: Empty,
                                                 range: None,
                                             },
                                         ),
