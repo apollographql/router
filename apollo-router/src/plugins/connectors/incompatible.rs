@@ -4,6 +4,7 @@ use apollo_federation::sources::connect::expand::Connectors;
 use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
+use coprocessor::CoprocessorIncompatPlugin;
 use headers::HeadersIncompatPlugin;
 use rhai::RhaiIncompatPlugin;
 use tls::TlsIncompatPlugin;
@@ -15,6 +16,7 @@ use crate::Configuration;
 mod apq;
 mod authentication;
 mod batching;
+mod coprocessor;
 mod headers;
 mod rhai;
 mod tls;
@@ -84,6 +86,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         APQIncompatPlugin::from_config(config).map(boxify!()),
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
+        CoprocessorIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
         RhaiIncompatPlugin::from_config(config).map(boxify!()),
         TlsIncompatPlugin::from_config(config).map(boxify!()),
