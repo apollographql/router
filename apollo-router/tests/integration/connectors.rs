@@ -547,6 +547,88 @@ mod headers {
     }
 }
 
+mod tls {
+    use std::path::PathBuf;
+
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                tls:
+                  subgraph:
+                    all:
+                      certificate_authorities: "${file./path/to/ca.crt}"
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `tls` indirectly targets a connector-enabled subgraph"#)
+        .await;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                tls:
+                  subgraphs:
+                    connectors:
+                      certificate_authorities: "${file./path/to/product_ca.crt}"
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `tls` is explicitly configured for connector-enabled subgraph"#)
+        .await;
+
+        Ok(())
+    }
+}
+
 mod traffic_shaping {
     use std::path::PathBuf;
 
