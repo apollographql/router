@@ -214,6 +214,7 @@ fn test_map_method() {
         let output_shape = json_selection.compute_output_shape(
             Shape::from_json_bytes(&single_value_data),
             &IndexMap::default(),
+            &SourceId::new("test"),
         );
         assert_eq!(output_shape.pretty_print(), "List<String>");
     }

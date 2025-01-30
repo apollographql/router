@@ -1,17 +1,25 @@
 //! This module is all about validating [`Expression`]s for a given context. This isn't done at
 //! runtime, _only_ during composition because it could be expensive.
 
+use std::ops::Range;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
+use shape::graphql::shape_for_arguments;
+use shape::location::Location;
+use shape::location::SourceId;
+use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
 
-use crate::sources::connect::string_template::Error;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
+use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 use crate::sources::connect::Namespace;
 
 /// Details about the available variables and shapes for the current expression.
@@ -19,6 +27,10 @@ use crate::sources::connect::Namespace;
 pub(super) struct Context<'schema> {
     pub(crate) schema: &'schema SchemaInfo<'schema>,
     var_lookup: IndexMap<Namespace, Shape>,
+    source: &'schema GraphQLString<'schema>,
+    /// The code that all resulting messages will use
+    /// TODO: make code dynamic based on coordinate so new validations can be warnings
+    code: Code,
 }
 
 impl<'schema> Context<'schema> {
@@ -26,6 +38,8 @@ impl<'schema> Context<'schema> {
     pub(super) fn for_connect_request(
         schema: &'schema SchemaInfo,
         coordinate: ConnectDirectiveCoordinate,
+        source: &'schema GraphQLString,
+        code: Code,
     ) -> Self {
         let object_type = coordinate.field_coordinate.object;
         let is_root_type = schema
@@ -41,37 +55,43 @@ impl<'schema> Context<'schema> {
         let mut var_lookup: IndexMap<Namespace, Shape> = [
             (
                 Namespace::Args,
-                Shape::record(
-                    coordinate
-                        .field_coordinate
-                        .field
-                        .arguments
-                        .iter()
-                        .map(|arg| (arg.name.to_string(), Shape::from(arg.ty.as_ref())))
-                        .collect(),
-                ),
+                shape_for_arguments(coordinate.field_coordinate.field),
             ),
-            (Namespace::Config, Shape::unknown()),
-            (Namespace::Context, Shape::unknown()),
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
         ]
         .into_iter()
         .collect();
         if !is_root_type {
-            var_lookup.insert(Namespace::This, Shape::from(object_type.as_ref()));
+            var_lookup.insert(Namespace::This, Shape::from(object_type));
         }
 
-        Self { schema, var_lookup }
+        Self {
+            schema,
+            var_lookup,
+            source,
+            code,
+        }
     }
 
     /// Create a context valid for expressions within the `@source` directive
-    pub(super) fn for_source(schema: &'schema SchemaInfo) -> Self {
+    pub(super) fn for_source(
+        schema: &'schema SchemaInfo,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
         let var_lookup: IndexMap<Namespace, Shape> = [
-            (Namespace::Config, Shape::unknown()),
-            (Namespace::Context, Shape::unknown()),
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
         ]
         .into_iter()
         .collect();
-        Self { schema, var_lookup }
+        Self {
+            schema,
+            var_lookup,
+            source,
+            code,
+        }
     }
 }
 
@@ -79,91 +99,137 @@ impl<'schema> Context<'schema> {
 /// the expression can be executed given the known args and that the output shape is as expected.
 ///
 /// TODO: this is only useful for URIs and headers right now, because it assumes objects/arrays are invalid.
-pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(), Vec<Error>> {
+pub(crate) fn validate(expression: &Expression, context: &Context) -> Result<(), Message> {
     let Expression {
         expression,
         location,
     } = expression;
     let shape = expression.shape();
-    let errors: Vec<Error> = shape
-        .errors()
-        .map(|err| Error {
-            message: err.message.clone(),
-            location: err
-                .range
-                .as_ref()
-                .map(|range| range.start + location.start..range.end + location.start)
-                .unwrap_or_else(|| location.clone()),
-        })
-        .collect();
-    if !errors.is_empty() {
-        return Err(errors);
-    }
 
-    validate_shape(&shape, context).map_err(|message| {
-        vec![Error {
-            message,
-            location: location.clone(),
-        }]
-    })
+    validate_shape(&shape, context, location.start)
 }
 
 /// Validate that the shape is an acceptable output shape for an Expression.
 ///
 /// TODO: Some day, whether objects or arrays are allowed will be dependent on &self (i.e., is the * modifier used)
-fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
+fn validate_shape(
+    shape: &Shape,
+    context: &Context,
+    expression_offset: usize,
+) -> Result<(), Message> {
     match shape.case() {
-        ShapeCase::Array { .. } => Err("array values aren't valid here".to_string()),
-        ShapeCase::Object { .. } => Err("object values aren't valid here".to_string()),
-        ShapeCase::One(shapes) | ShapeCase::All(shapes) => {
-            for shape in shapes {
-                validate_shape(shape, context)?;
+        ShapeCase::Array { .. } => Err(Message {
+            code: context.code,
+            message: "array values aren't valid here".to_string(),
+            locations: transform_locations(&shape.locations, context, expression_offset),
+        }),
+        ShapeCase::Object { .. } => Err(Message {
+            code: context.code,
+            message: "object values aren't valid here".to_string(),
+            locations: transform_locations(&shape.locations, context, expression_offset),
+        }),
+        ShapeCase::One(shapes) => {
+            for inner in shapes {
+                validate_shape(
+                    &inner.with_locations(shape.locations.clone()),
+                    context,
+                    expression_offset,
+                )?;
+            }
+            Ok(())
+        }
+        ShapeCase::All(shapes) => {
+            for inner in shapes {
+                validate_shape(
+                    &inner.with_locations(shape.locations.clone()),
+                    context,
+                    expression_offset,
+                )?;
             }
             Ok(())
         }
         ShapeCase::Name(name, key) => {
-            let mut shape = if name == "$root" {
-                return Err(format!(
-                    "`{key}` must start with an argument name, like `$this` or `$args`",
-                    key = key.iter().map(|key| key.to_string()).join(".")
-                ));
-            } else if name.starts_with('$') {
-                let namespace = Namespace::from_str(name).map_err(|_| {
-                    format!(
+            let mut resolved = if name.value == "$root" {
+                return Err(Message {
+                    code: context.code,
+                    message: format!(
+                        "`{key}` must start with one of {namespaces}",
+                        key = key.iter().map(|key| key.to_string()).join("."),
+                        namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
+                    ),
+                    locations: transform_locations(
+                        key.first().iter().flat_map(|key| &key.locations),
+                        context,
+                        expression_offset,
+                    ),
+                });
+            } else if name.value.starts_with('$') {
+                let namespace = Namespace::from_str(&name.value).map_err(|_| Message {
+                    code: context.code,
+                    message: format!(
                         "unknown variable `{name}`, must be one of {namespaces}",
                         namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", ")
-                    )
+                    ),
+                    locations: transform_locations(&shape.locations, context, expression_offset),
                 })?;
                 context
                     .var_lookup
                     .get(&namespace)
-                    .ok_or_else(|| {
-                        format!(
+                    .ok_or_else(|| Message {
+                        code: context.code,
+                        message: format!(
                             "{namespace} is not valid here, must be one of {namespaces}",
                             namespaces = context.var_lookup.keys().map(|ns| ns.as_str()).join(", "),
-                        )
+                        ),
+                        locations: transform_locations(
+                            &shape.locations,
+                            context,
+                            expression_offset,
+                        ),
                     })?
                     .clone()
             } else {
                 context
                     .schema
                     .shape_lookup
-                    .get(name.as_str())
+                    .get(name.value.as_str())
                     .cloned()
-                    .ok_or_else(|| format!("unknown type `{name}`"))?
+                    .ok_or_else(|| Message {
+                        code: context.code,
+                        message: format!("unknown type `{name}`"),
+                        locations: transform_locations(&name.locations, context, expression_offset),
+                    })?
             };
-            let mut path = name.clone();
+            resolved.locations.extend(shape.locations.iter().cloned());
+            let mut path = name.value.clone();
             for key in key {
-                let child = shape.child(key);
+                let child = resolved.child(key.clone());
                 if child.is_none() {
-                    return Err(format!("`{path}` doesn't have a field named `{key}`"));
+                    let message = match key.value {
+                        NamedShapePathKey::AnyIndex | NamedShapePathKey::Index(_) => {
+                            format!("`{path}` is not an array or string")
+                        }
+
+                        NamedShapePathKey::AnyField | NamedShapePathKey::Field(_) => {
+                            format!("`{path}` doesn't have a field named `{key}`")
+                        }
+                    };
+                    return Err(Message {
+                        code: context.code,
+                        message,
+                        locations: transform_locations(&key.locations, context, expression_offset),
+                    });
                 }
-                shape = child;
+                resolved = child;
                 path = format!("{path}.{key}");
             }
-            validate_shape(&shape, context)
+            validate_shape(&resolved, context, expression_offset)
         }
-        ShapeCase::Error(shape::Error { message, .. }) => Err(message.clone()),
+        ShapeCase::Error(shape::Error { message, .. }) => Err(Message {
+            code: context.code,
+            message: message.clone(),
+            locations: transform_locations(&shape.locations, context, expression_offset),
+        }),
         ShapeCase::None
         | ShapeCase::Bool(_)
         | ShapeCase::String(_)
@@ -174,10 +240,35 @@ fn validate_shape(shape: &Shape, context: &Context) -> Result<(), String> {
     }
 }
 
+fn transform_locations<'a>(
+    locations: impl IntoIterator<Item = &'a Location>,
+    context: &Context,
+    expression_offset: usize,
+) -> Vec<Range<LineColumn>> {
+    locations
+        .into_iter()
+        .filter_map(|location| match &location.source_id {
+            SourceId::GraphQL(file_id) => context
+                .schema
+                .sources
+                .get(file_id)
+                .and_then(|source| source.get_line_column_range(location.span.clone())),
+            SourceId::Other(_) => {
+                // Right now, this always refers to the JSONSelection location
+                context.source.line_col_for_subslice(
+                    location.span.start + expression_offset..location.span.end + expression_offset,
+                    context.schema,
+                )
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
@@ -207,7 +298,7 @@ mod tests {
             object: InputObject
             array: [InputObject]
             multiLevel: MultiLevelInput
-          ): AnObject  @connect(source: "v2")
+          ): AnObject  @connect(source: "v2", http: {GET: """{EXPRESSION}"""})
           something: String
         }
         
@@ -230,6 +321,56 @@ mod tests {
         }
     "#;
 
+    fn schema_for(selection: &str) -> String {
+        SCHEMA.replace("EXPRESSION", selection)
+    }
+
+    fn validate_with_context(selection: &str) -> Result<(), Message> {
+        let schema_str = schema_for(selection);
+        let schema = Schema::parse(&schema_str, "schema").unwrap();
+        let object = schema.get_object("Query").unwrap();
+        let field = &object.fields["aField"];
+        let directive = field.directives.get("connect").unwrap();
+        let source_directive = name!("source");
+        let schema_info = SchemaInfo::new(&schema, &schema_str, &directive.name, &source_directive);
+        let expr_string = GraphQLString::new(
+            &directive
+                .argument_by_name("http", &schema)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .first()
+                .unwrap()
+                .1,
+            &schema.sources,
+        )
+        .unwrap();
+        let coordinate = ConnectDirectiveCoordinate {
+            field_coordinate: FieldCoordinate { field, object },
+            directive,
+        };
+        let context =
+            Context::for_connect_request(&schema_info, coordinate, &expr_string, Code::InvalidUrl);
+        validate(&expression(selection), &context)
+    }
+
+    /// Given a full expression replaced in `{EXPRESSION}` above, find the line/col of a substring.
+    fn location_of_expression(part: &str, full_expression: &str) -> Range<LineColumn> {
+        let schema = schema_for(full_expression);
+        let line_col_lookup = LineColLookup::new(&schema);
+        let expression_offset = schema.find(full_expression).unwrap() - 1;
+        let start_offset = expression_offset + full_expression.find(part).unwrap();
+        let (start_line, start_col) = line_col_lookup.get(start_offset);
+        let (end_line, end_col) = line_col_lookup.get(start_offset + part.len());
+        LineColumn {
+            line: start_line,
+            column: start_col,
+        }..LineColumn {
+            line: end_line,
+            column: end_col,
+        }
+    }
+
     #[rstest]
     #[case::int("$(1)")]
     #[case::float("$(1.0)")]
@@ -237,29 +378,6 @@ mod tests {
     #[case::string("$(\"hello\")")]
     #[case::null("$(null)")]
     #[case::property_of_object("$({\"a\": 1}).a")]
-    fn allowed_literals(#[case] selection: &str) {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let context = Context::for_source(&schema_info);
-        validate(&expression(selection), &context).unwrap();
-    }
-
-    #[rstest]
-    #[case::array("$([])")]
-    #[case::object("$({\"a\": 1})")]
-    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
-    fn disallowed_literals(#[case] selection: &str) {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let context = Context::for_source(&schema_info);
-        assert!(validate(&expression(selection), &context).is_err());
-    }
-
-    #[rstest]
     #[case::echo_valid_constants("$->echo(1)")]
     #[case::map_unknown("$config->map(@)->first")]
     #[case::map_scalar("$(1)->map(@)->last")]
@@ -275,33 +393,6 @@ mod tests {
     #[case::size_of_entries("$config->entries->size")]
     #[case::size_of_slice("$([1, 2, 3])->slice(0, 2)->size")]
     #[case::slice_after_match("$config->match([1, \"something\"], [2, \"another\"])->slice(0, 2)")]
-    fn valid_methods(#[case] selection: &str) {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let context = Context::for_source(&schema_info);
-        validate(&expression(selection), &context).unwrap();
-    }
-
-    #[rstest]
-    #[case::echo_invalid_constants("$->echo([])")]
-    #[case::map_scalar("$(1)->map(@)")]
-    #[case::map_array("$([])->map(@)")]
-    #[case::last("$([1, 2])")]
-    #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
-    #[case::slice_of_array("$([])->slice(0, 2)")]
-    #[case::entries("$config.something->entries")]
-    fn invalid_methods(#[case] selection: &str) {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let context = Context::for_source(&schema_info);
-        assert!(validate(&expression(selection), &context).is_err());
-    }
-
-    #[rstest]
     #[case("$args.int")]
     #[case("$args.string")]
     #[case("$args.customScalar")]
@@ -315,63 +406,96 @@ mod tests {
     #[case::first("$args.array->first.bool")]
     #[case::last("$args.array->last.bool")]
     #[case::multi_level_input("$args.multiLevel.inner.nested")]
-    fn valid_after_args_resolution(#[case] selection: &str) {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let object = schema.get_object("Query").unwrap();
-        let field = object.fields.get("aField").unwrap();
-        let directive = field.directives.get("connect").unwrap();
-        let coordinate = ConnectDirectiveCoordinate {
-            field_coordinate: FieldCoordinate { field, object },
-            directive,
-        };
-        let context = Context::for_connect_request(&schema_info, coordinate);
-        validate(&expression(selection), &context).unwrap();
+    fn valid_expressions(#[case] selection: &str) {
+        validate_with_context(selection).unwrap();
     }
 
     #[rstest]
+    #[case::array("$([])")]
+    #[case::object("$({\"a\": 1})")]
+    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
+    #[case::echo_invalid_constants("$->echo([])")]
+    #[case::map_scalar("$(1)->map(@)")]
+    #[case::map_array("$([])->map(@)")]
+    #[case::last("$([1, 2])")]
+    #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
+    #[case::slice_of_array("$([])->slice(0, 2)")]
+    #[case::entries("$config.something->entries")]
     #[case::unknown_var("$args.unknown")]
     #[case::arg_is_array("$args.array")]
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
-    #[case::nested_unknown_property("$args.multiLevel.inner.unknown")]
     #[case::map_array("$args.array->map(@)")]
     #[case::slice_array("$args.array->slice(0, 2)")]
     #[case::entries_scalar("$args.int->entries")]
     #[case::first("$args.array->first")]
     #[case::last("$args.array->last")]
-    fn invalid_args(#[case] selection: &str) {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let object = schema.get_object("Query").unwrap();
-        let field = object.fields.get("aField").unwrap();
-        let directive = field.directives.get("connect").unwrap();
-        let coordinate = ConnectDirectiveCoordinate {
-            field_coordinate: FieldCoordinate { field, object },
-            directive,
-        };
-        let context = Context::for_connect_request(&schema_info, coordinate);
-        assert!(validate(&expression(selection), &context).is_err());
+    #[case::this_on_query("$this.something")]
+    #[case::bare_field_no_var("something")]
+    fn invalid_expressions(#[case] selection: &str) {
+        let err = validate_with_context(selection);
+        assert!(err.is_err());
+        assert!(
+            !err.err().unwrap().locations.is_empty(),
+            "Every error should have at least one location"
+        );
     }
 
     #[test]
-    fn this_on_query() {
-        let schema = Schema::parse(SCHEMA, "schema").unwrap();
-        let connect = name!("connect");
-        let source = name!("source");
-        let schema_info = SchemaInfo::new(&schema, "", &connect, &source);
-        let object = schema.get_object("Query").unwrap();
-        let field = object.fields.get("aField").unwrap();
-        let directive = field.directives.get("connect").unwrap();
-        let coordinate = ConnectDirectiveCoordinate {
-            field_coordinate: FieldCoordinate { field, object },
-            directive,
-        };
-        let context = Context::for_connect_request(&schema_info, coordinate);
-        assert!(validate(&expression("$this.something"), &context).is_err());
+    fn bare_field_with_path() {
+        let selection = "something.blah";
+        let err = validate_with_context(selection).expect_err("missing property is unknown");
+        let expected_location = location_of_expression("something", selection);
+        assert!(
+            err.message.contains("`something.blah`"),
+            "{} didn't reference missing arg",
+            err.message
+        );
+        assert!(
+            err.message.contains("$args"),
+            "{} didn't provide suggested variables",
+            err.message
+        );
+        assert!(
+            err.locations.contains(&expected_location),
+            "The expected location {:?} wasn't included in {:?}",
+            expected_location,
+            err.locations
+        );
+    }
+
+    #[test]
+    fn object_in_url() {
+        let selection = "$args.object";
+        let err = validate_with_context(selection).expect_err("objects are not allowed");
+        let expected_location = location_of_expression("object", selection);
+        assert!(
+            err.locations.contains(&expected_location),
+            "The expected location {:?} wasn't included in {:?}",
+            expected_location,
+            err.locations
+        );
+    }
+
+    #[test]
+    fn nested_unknown_property() {
+        let selection = "$args.multiLevel.inner.unknown";
+        let err = validate_with_context(selection).expect_err("missing property is unknown");
+        assert!(
+            err.message.contains("`MultiLevel`"),
+            "{} didn't reference type",
+            err.message
+        );
+        assert!(
+            err.message.contains("`unknown`"),
+            "{} didn't reference field name",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("unknown", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
     }
 }
