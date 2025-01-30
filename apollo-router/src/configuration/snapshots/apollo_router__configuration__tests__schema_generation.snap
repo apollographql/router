@@ -1860,6 +1860,7 @@ expression: "&schema"
             "description": "#/definitions/AuthConfig"
           },
           "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
           "type": "object"
         }
       },
@@ -2112,12 +2113,22 @@ expression: "&schema"
           "nullable": true,
           "type": "integer"
         },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SourceConfiguration",
+            "description": "#/definitions/SourceConfiguration"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to source configuration",
+          "type": "object"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphConnectorConfiguration",
             "description": "#/definitions/SubgraphConnectorConfiguration"
           },
           "default": {},
+          "deprecated": true,
           "description": "A map of subgraph name to connectors config for that subgraph",
           "type": "object"
         }
@@ -5708,6 +5719,12 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for a `@source` directive",
       "properties": {
+        "$config": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Other values that can be used by connectors via `{$config.<key>}`",
+          "type": "object"
+        },
         "max_requests_per_operation": {
           "default": null,
           "description": "The maximum number of requests for this source",
@@ -8735,6 +8752,10 @@ expression: "&schema"
       "$ref": "#/definitions/Batching",
       "description": "#/definitions/Batching"
     },
+    "connectors": {
+      "$ref": "#/definitions/ConnectorsConfig",
+      "description": "#/definitions/ConnectorsConfig"
+    },
     "coprocessor": {
       "$ref": "#/definitions/Conf4",
       "description": "#/definitions/Conf4"
@@ -8803,10 +8824,6 @@ expression: "&schema"
     "plugins": {
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
-    },
-    "preview_connectors": {
-      "$ref": "#/definitions/ConnectorsConfig",
-      "description": "#/definitions/ConnectorsConfig"
     },
     "preview_entity_cache": {
       "$ref": "#/definitions/Config8",

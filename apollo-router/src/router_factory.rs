@@ -692,7 +692,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
-    add_optional_apollo_plugin!("preview_connectors");
+    add_optional_apollo_plugin!("connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
