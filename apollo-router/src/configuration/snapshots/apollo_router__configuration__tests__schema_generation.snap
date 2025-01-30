@@ -4759,7 +4759,7 @@ expression: "&schema"
       "properties": {
         "allowed": {
           "default": 100,
-          "description": "How many errors/interval are allowed until unready (default: 100)",
+          "description": "How many rejections are allowed in an interval (default: 100) If this number is exceeded, the router will start to report unready.",
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
