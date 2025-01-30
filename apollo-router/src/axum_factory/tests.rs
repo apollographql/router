@@ -2276,7 +2276,7 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
         .unwrap();
 
     // Manually add the endpoints, since they are only created if the health-check plugin is
-    // enabled and that won't happ in init_with_config()
+    // enabled and that won't happen in init_with_config()
     let endpoint = service_fn(|req: router::Request| async move {
         Ok::<_, BoxError>(
             http::Response::builder()

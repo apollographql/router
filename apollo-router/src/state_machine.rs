@@ -271,10 +271,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         new_state.unwrap_or(self)
     }
 
-    async fn shutdown<S>(self, _http_server_factory: &S) -> Self
-    where
-        S: HttpServerFactory,
-    {
+    async fn shutdown(self) -> Self {
         match self {
             Running {
                 server_handle: Some(server_handle),
@@ -551,7 +548,7 @@ where
                 }
                 Reload => state.update_inputs(&mut self, None, None, None).await,
                 NoMoreLicense => state.no_more_license().await,
-                Shutdown => state.shutdown(&self.http_server_factory).await,
+                Shutdown => state.shutdown().await,
             };
 
             // Update the shared state

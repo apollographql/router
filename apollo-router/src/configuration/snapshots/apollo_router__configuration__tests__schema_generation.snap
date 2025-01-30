@@ -4777,13 +4777,13 @@ expression: "&schema"
       "properties": {
         "sampling": {
           "default": "0s",
-          "description": "The sampling interval (default: 10s)",
+          "description": "The sampling interval (default: 5s)",
           "nullable": true,
           "type": "string"
         },
         "unready": {
           "default": null,
-          "description": "The unready interval (default: 3 * sampling interval)",
+          "description": "The unready interval (default: 2 * sampling interval)",
           "nullable": true,
           "type": "string"
         }

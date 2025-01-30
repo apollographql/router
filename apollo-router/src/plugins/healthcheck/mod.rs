@@ -53,13 +53,13 @@ pub(crate) struct ReadinessIntervalConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>", default)]
-    /// The sampling interval (default: 10s)
+    /// The sampling interval (default: 5s)
     pub(crate) sampling: Duration,
 
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>")]
-    /// The unready interval (default: 3 * sampling interval)
+    /// The unready interval (default: 2 * sampling interval)
     pub(crate) unready: Option<Duration>,
 }
 
@@ -71,14 +71,15 @@ pub(crate) struct ReadinessConfig {
     /// The readiness interval configuration
     pub(crate) interval: ReadinessIntervalConfig,
 
-    /// How many errors/interval are allowed until unready (default: 100)
+    /// How many rejections are allowed in an interval (default: 100)
+    /// If this number is exceeded, the router will start to report unready.
     pub(crate) allowed: usize,
 }
 
 impl Default for ReadinessIntervalConfig {
     fn default() -> Self {
         Self {
-            sampling: Duration::from_secs(10),
+            sampling: Duration::from_secs(5),
             unready: None,
         }
     }
@@ -188,11 +189,10 @@ impl PluginPrivate for HealthCheck {
             .readiness
             .interval
             .unready
-            .unwrap_or(3 * my_sampling_interval);
+            .unwrap_or(2 * my_sampling_interval);
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
-        my_rejected.store(0, Ordering::Relaxed);
         let ticker = tokio::spawn(async move {
             loop {
                 let start = Instant::now() + my_sampling_interval;
@@ -344,7 +344,7 @@ mod test {
 
         test_harness.activate();
 
-        // Limitations in the plugin test hardness (requires an Fn function)
+        // Limitations in the plugin test harness (requires an Fn function)
         // mean we need to create our responses here...
         let svc = match response_status_code {
             StatusCode::OK => test_harness.router_service(|_req| async {

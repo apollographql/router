@@ -89,15 +89,46 @@ In Kubernetes, you can configure health checks by setting `readinessProbe` and `
           # ... snipped for partial example ...
           livenessProbe:
             httpGet:
-              path: "/health"
+              path: "/health?live"
               port: 8088
           readinessProbe:
             httpGet:
-              path: "/health"
+              path: "/health?ready"
               port: 8088
           # ... snipped for partial example ...
 ```
+
 See a more complete example in our [Kubernetes documentation](/router/containerization/kubernetes/).
+
+<Note>
+For these checks we take advantage of additional functionality in the router which enables specific "ready" and "live" checks to better support kubernetes deployments. For each check, if the router is live or ready it will return OK (200). If not, it will return Service Unavailable (503).
+</Note>
+
+### Liveness
+
+Liveness is clearly defined in Router 2 as the point at which a router configuration has been activated. From this point onwards, the router will remain Live unless the endpoint stops responding.
+
+### Readiness
+
+Readiness is clearly defined in Router 2 as the point at which a router configuration has been activated. From this point onwards, the router will monitor responses and identify over-loading. If over-loading passes beyond a defined tolerance, the router will declare itself unready for a period of time. During this time, it will continue to service requests and when the unready period expires, the router will once more start to monitor for over-loading. This is all controlled by new configuration in the router health check.
+
+```yaml title="router.yaml"
+health_check:
+  listen: 0.0.0.0:8088
+  enabled: true
+  readiness:        # optional, with default as detailed below
+    allowed: 50     # optional, default 100
+    interval:
+      sampling: 5s # optional, default 5s
+      unready: 10s  # optional, default (2 * sampling)
+```
+
+In this snippet, readiness has been configured to allow 50 rejections due to load shedding (GATEWAY_TIMEOUT or SERVICE_UNAVAILABLE) in each sampling interval (10 seconds). If the router determines that it is "unready", i.e.: these limits are exceeded, then it will indicate this status (SERVICE_UNAVAILABLE) via the `readinessProbe` for the unready interval (30 seconds). Once this interval has passed, it will return to "ready" and start sampling responses.
+
+<Note>
+The default sampling and unready intervals are chosen to align with the defaults for Kubernetes readinessProbe interval (10s). The idea being that there is sampling within a default interval and that the unready interval matches the probe perdiod.
+</Note>
+
 ## Using with Docker
 Docker has a `HEALTHCHECK` instruction that tells Docker how to test whether a container is still working. These are defined in the `Dockerfile` when building your container:
 ```
