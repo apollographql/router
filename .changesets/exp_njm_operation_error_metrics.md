@@ -12,4 +12,4 @@ Adds a new experimental OpenTelemetry metric that includes error counts at a per
 
 This metric is currently only sent to GraphOS and is not available in 3rd-party OTel destinations. The metric can be enabled using the configuration `telemetry.apollo.errors.experimental_otlp_error_metrics: enabled`.
 
-By [@bonnici](https://github.com/bonnici) and [@rregitsky](https://gihub.com/rregitsky) in https://github.com/apollographql/router/pull/6443, https://github.com/apollographql/router/pull/6666
+By [@bonnici](https://github.com/bonnici) and [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/6443, https://github.com/apollographql/router/pull/6666
