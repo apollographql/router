@@ -4,7 +4,13 @@ use apollo_federation::sources::connect::expand::Connectors;
 use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
+use coprocessor::CoprocessorIncompatPlugin;
+use demand_control::DemandControlIncompatPlugin;
+use entity_cache::EntityCacheIncompatPlugin;
 use headers::HeadersIncompatPlugin;
+use rhai::RhaiIncompatPlugin;
+use telemetry::TelemetryIncompatPlugin;
+use tls::TlsIncompatPlugin;
 use traffic_shaping::TrafficShapingIncompatPlugin;
 use url_override::UrlOverrideIncompatPlugin;
 
@@ -13,7 +19,13 @@ use crate::Configuration;
 mod apq;
 mod authentication;
 mod batching;
+mod coprocessor;
+mod demand_control;
+mod entity_cache;
 mod headers;
+mod rhai;
+mod telemetry;
+mod tls;
 mod traffic_shaping;
 mod url_override;
 
@@ -80,7 +92,13 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         APQIncompatPlugin::from_config(config).map(boxify!()),
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
+        CoprocessorIncompatPlugin::from_config(config).map(boxify!()),
+        DemandControlIncompatPlugin::from_config(config).map(boxify!()),
+        EntityCacheIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
+        RhaiIncompatPlugin::from_config(config).map(boxify!()),
+        TelemetryIncompatPlugin::from_config(config).map(boxify!()),
+        TlsIncompatPlugin::from_config(config).map(boxify!()),
         TrafficShapingIncompatPlugin::from_config(config).map(boxify!()),
         UrlOverrideIncompatPlugin::from_config(config).map(boxify!()),
     ]
