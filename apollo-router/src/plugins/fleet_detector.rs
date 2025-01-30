@@ -2,7 +2,6 @@ use std::env;
 use std::env::consts::ARCH;
 use std::env::consts::OS;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -12,6 +11,7 @@ use http_body_util::BodyExt as _;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
@@ -121,7 +121,7 @@ impl GaugeStore {
                     .with_unit("Mhz")
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
-                        let mut system_getter = local_system_getter.lock().unwrap();
+                        let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
                         let cpus = system.cpus();
                         let cpu_freq =
@@ -142,7 +142,7 @@ impl GaugeStore {
                     )
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
-                        let mut system_getter = local_system_getter.lock().unwrap();
+                        let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
                         let cpu_count = detect_cpu_count(system);
                         gauge.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
@@ -161,7 +161,7 @@ impl GaugeStore {
                     )
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
-                        let mut system_getter = local_system_getter.lock().unwrap();
+                        let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
                         gauge.observe(
                             system.total_memory(),
@@ -238,7 +238,7 @@ impl PluginPrivate for FleetDetector {
     }
 
     fn activate(&self) {
-        let mut store = self.gauge_store.lock().expect("lock poisoned");
+        let mut store = self.gauge_store.lock();
         if matches!(*store, GaugeStore::Pending) {
             *store = GaugeStore::active(&self.gauge_options);
         }

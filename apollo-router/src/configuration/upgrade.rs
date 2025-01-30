@@ -62,12 +62,17 @@ pub(crate) fn upgrade_configuration(
     log_warnings: bool,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
     // Transformers are loaded from a file and applied in order
-    let migrations: Vec<Migration> = Asset::iter()
-        .sorted()
-        .filter(|filename| filename.ends_with(".yaml"))
-        .map(|filename| Asset::get(&filename).expect("migration must exist").data)
-        .map(|data| serde_yaml::from_slice(&data).expect("migration must be valid"))
-        .collect();
+    let mut migrations: Vec<Migration> = Vec::new();
+    for filename in Asset::iter().sorted().filter(|f| f.ends_with(".yaml")) {
+        if let Some(migration) = Asset::get(&filename) {
+            let parsed_migration = serde_yaml::from_slice(&migration.data).map_err(|error| {
+                ConfigurationError::MigrationFailure {
+                    error: format!("Failed to parse migration {}: {}", filename, error),
+                }
+            })?;
+            migrations.push(parsed_migration);
+        }
+    }
 
     let mut config = config.clone();
 
@@ -92,8 +97,7 @@ pub(crate) fn upgrade_configuration(
 fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, ConfigurationError> {
     let mut transformer_builder = TransformBuilder::default();
     //We always copy the entire doc to the destination first
-    transformer_builder =
-        transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
+    transformer_builder = transformer_builder.add_action(Parser::parse("", "")?);
     for action in &migration.actions {
         match action {
             Action::Add { path, name, value } => {
@@ -104,10 +108,10 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                         .unwrap_or_default()
                         .is_empty()
                 {
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({value})"#), &format!("{path}.{name}"))
-                            .expect("migration must be valid"),
-                    );
+                    transformer_builder = transformer_builder.add_action(Parser::parse(
+                        &format!(r#"const({value})"#),
+                        &format!("{path}.{name}"),
+                    )?);
                 }
             }
             Action::Delete { path } => {
@@ -116,9 +120,8 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .is_empty()
                 {
                     // Deleting isn't actually supported by protus so we add a magic value to delete later
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(REMOVAL_EXPRESSION, path).expect("migration must be valid"),
-                    );
+                    transformer_builder =
+                        transformer_builder.add_action(Parser::parse(REMOVAL_EXPRESSION, path)?);
                 }
             }
             Action::Copy { from, to } => {
@@ -126,8 +129,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    transformer_builder = transformer_builder
-                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                    transformer_builder = transformer_builder.add_action(Parser::parse(from, to)?);
                 }
             }
             Action::Move { from, to } => {
@@ -135,12 +137,10 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    transformer_builder = transformer_builder
-                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                    transformer_builder = transformer_builder.add_action(Parser::parse(from, to)?);
                     // Deleting isn't actually supported by protus so we add a magic value to delete later
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
-                    );
+                    transformer_builder =
+                        transformer_builder.add_action(Parser::parse(REMOVAL_EXPRESSION, from)?);
                 }
             }
             Action::Change { path, from, to } => {
@@ -148,14 +148,12 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                     .unwrap_or_default()
                     .is_empty()
                 {
-                    transformer_builder = transformer_builder.add_action(
-                        Parser::parse(&format!(r#"const({to})"#), path)
-                            .expect("migration must be valid"),
-                    );
+                    transformer_builder = transformer_builder
+                        .add_action(Parser::parse(&format!(r#"const({to})"#), path)?);
                 }
             }
             Action::Log { path, level, log } => {
-                let level = Level::from_str(level).expect("unknown level for log migration");
+                let level = Level::from_str(level).map_err(migration_failure_error)?;
 
                 if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
@@ -172,15 +170,8 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
             }
         }
     }
-    let transformer = transformer_builder
-        .build()
-        .expect("transformer for migration must be valid");
-    let mut new_config =
-        transformer
-            .apply(config)
-            .map_err(|e| ConfigurationError::MigrationFailure {
-                error: e.to_string(),
-            })?;
+    let transformer = transformer_builder.build()?;
+    let mut new_config = transformer.apply(config)?;
 
     // Now we need to clean up elements that should be deleted.
     cleanup(&mut new_config);
@@ -190,17 +181,13 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
 
 pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
     let parsed_config =
-        serde_yaml::from_str(config).map_err(|e| ConfigurationError::MigrationFailure {
-            error: e.to_string(),
+        serde_yaml::from_str(config).map_err(|error| ConfigurationError::MigrationFailure {
+            error: format!("Failed to parse config: {}", error),
         })?;
-    let upgraded_config = upgrade_configuration(&parsed_config, true).map_err(|e| {
+    let upgraded_config = upgrade_configuration(&parsed_config, true)?;
+    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|error| {
         ConfigurationError::MigrationFailure {
-            error: e.to_string(),
-        }
-    })?;
-    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|e| {
-        ConfigurationError::MigrationFailure {
-            error: e.to_string(),
+            error: format!("Failed to serialize upgraded config: {}", error),
         }
     })?;
     generate_upgrade_output(config, &upgraded_config, diff)
@@ -224,28 +211,28 @@ pub(crate) fn generate_upgrade_output(
                 let trimmed = l.trim();
                 if !trimmed.starts_with('#') && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "-{l}").expect("write will never fail");
+                        writeln!(output, "-{l}").map_err(migration_failure_error)?;
                     }
                 } else if diff {
-                    writeln!(output, " {l}").expect("write will never fail");
+                    writeln!(output, " {l}").map_err(migration_failure_error)?;
                 } else {
-                    writeln!(output, "{l}").expect("write will never fail");
+                    writeln!(output, "{l}").map_err(migration_failure_error)?;
                 }
             }
             diff::Result::Both(l, _) => {
                 if diff {
-                    writeln!(output, " {l}").expect("write will never fail");
+                    writeln!(output, " {l}").map_err(migration_failure_error)?;
                 } else {
-                    writeln!(output, "{l}").expect("write will never fail");
+                    writeln!(output, "{l}").map_err(migration_failure_error)?;
                 }
             }
             diff::Result::Right(r) => {
                 let trimmed = r.trim();
                 if trimmed != "---" && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "+{r}").expect("write will never fail");
+                        writeln!(output, "+{r}").map_err(migration_failure_error)?;
                     } else {
-                        writeln!(output, "{r}").expect("write will never fail");
+                        writeln!(output, "{r}").map_err(migration_failure_error)?;
                     }
                 }
             }
@@ -272,6 +259,12 @@ fn cleanup(value: &mut Value) {
                 cleanup(value);
             }
         }
+    }
+}
+
+fn migration_failure_error<T: std::fmt::Display>(error: T) -> ConfigurationError {
+    ConfigurationError::MigrationFailure {
+        error: error.to_string(),
     }
 }
 

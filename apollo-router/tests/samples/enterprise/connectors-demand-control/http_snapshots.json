@@ -1,0 +1,21 @@
+[
+  {
+    "request": {
+      "method": "GET",
+      "path": "/",
+      "body": null
+    },
+    "response": {
+      "status": 200,
+      "headers": {
+        "content-type": ["application/json; charset=utf-8"]
+      },
+      "body": [
+        {
+          "id": "1",
+          "f": "2"
+        }
+      ]
+    }
+  }
+]

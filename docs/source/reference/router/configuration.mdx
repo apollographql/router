@@ -301,21 +301,6 @@ If set, the router prints its version number, then exits.
 <tr>
 <td style="min-width: 150px;">
 
-##### `--schema`
-
-</td>
-<td>
-
-**Deprecated**—use [`./router config schema`](#configuration-awareness-in-your-text-editor) instead.
-
-If set, the router prints a JSON schema representation of its full supported configuration format, then exits.
-
-</td>
-</tr>
-
-</tbody>
-</table>
-
 ### Dev mode defaults
 
 <Caution>
@@ -485,6 +470,20 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 # Do not enable introspection in production!
 supergraph:
   introspection: true
+```
+
+The [schema-intropsection schema](https://spec.graphql.org/draft/#sec-Schema-Introspection.Schema-Introspection-Schema) is recursive: a client can query the fields of the types of some other fields, and so on arbitrarily deep. This can produce responses that grow much faster than the size of the request.
+
+To protect against abusive Router now refuses to execute introspection queries that nest list fields too deep and returns an error instead. The criteria matches `MaxIntrospectionDepthRule` in graphql-js, but may change in future versions.
+
+In case it rejects legitimate queries, this check can be disabled in Router configuration:
+
+```yaml title="router.yaml"
+# Do not enable introspection in production!
+supergraph:
+  introspection: true
+limits:
+  introspection_max_depth: false
 ```
 
 ### Debugging
@@ -865,6 +864,10 @@ To configure the shape of traffic between clients, routers, and subgraphs, see [
 ### Cross-Origin Resource Sharing (CORS)
 
 See [Configuring CORS in the router](/router/configuration/cors).
+
+### Connectors support
+
+See [Working with Router](/graphos/schema-design/connectors/router) in the Apollo Connectors documentation.
 
 ### Defer support
 

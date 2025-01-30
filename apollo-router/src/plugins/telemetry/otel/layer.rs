@@ -37,7 +37,6 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::reload::IsSampled;
 use crate::plugins::telemetry::reload::SampledSpan;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
@@ -917,10 +916,6 @@ where
     /// [`ERROR`]: tracing::Level::ERROR
     /// [`Error`]: opentelemetry::trace::StatusCode::Error
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // Don't include deprecated metric events
-        if !filter_metric_events(event) {
-            return;
-        }
         // Ignore events that are not in the context of a span
         if let Some(span) = ctx.lookup_current() {
             let mut extensions = span.extensions_mut();
@@ -961,7 +956,11 @@ where
                 let event_attributes = otel_data.as_ref().and_then(|o| o.event_attributes.clone());
 
                 if let Some(event_attributes) = event_attributes {
-                    otel_event.attributes.extend(event_attributes)
+                    otel_event.attributes.extend(
+                        event_attributes
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    )
                 }
             }
 
@@ -1103,13 +1102,13 @@ mod tests {
     use std::error::Error;
     use std::fmt::Display;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::thread;
     use std::time::SystemTime;
 
     use opentelemetry::trace::noop;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::StringValue;
+    use parking_lot::Mutex;
     use tracing_subscriber::prelude::*;
 
     use super::*;
@@ -1137,7 +1136,7 @@ mod tests {
             builder: otel::SpanBuilder,
             parent_cx: &OtelContext,
         ) -> Self::Span {
-            *self.0.lock().unwrap() = Some(OtelData {
+            *self.0.lock() = Some(OtelData {
                 builder,
                 parent_cx: parent_cx.clone(),
                 event_attributes: None,
@@ -1162,7 +1161,7 @@ mod tests {
 
     impl TestTracer {
         fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
-            let lock = self.0.lock().unwrap();
+            let lock = self.0.lock();
             let data = lock.as_ref().expect("no span data has been recorded yet");
             f(data)
         }
@@ -1232,12 +1231,7 @@ mod tests {
             tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
         });
 
-        let recorded_name = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|b| b.builder.name.clone());
+        let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(dynamic_name.into()))
     }
 
@@ -1258,12 +1252,7 @@ mod tests {
             );
         });
 
-        let recorded_name = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|b| b.builder.name.clone());
+        let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(Cow::Owned(forced_dynamic_name)))
     }
 
@@ -1307,15 +1296,7 @@ mod tests {
             tracing::debug_span!("request", otel.status_message = message);
         });
 
-        let recorded_status_message = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .builder
-            .status
-            .clone();
+        let recorded_status_message = tracer.0.lock().as_ref().unwrap().builder.status.clone();
 
         assert_eq!(recorded_status_message, otel::Status::error(message))
     }
@@ -1391,7 +1372,6 @@ mod tests {
         let attributes = tracer
             .0
             .lock()
-            .unwrap()
             .as_ref()
             .unwrap()
             .builder
@@ -1528,7 +1508,6 @@ mod tests {
         let attributes = tracer
             .0
             .lock()
-            .unwrap()
             .as_ref()
             .unwrap()
             .builder
