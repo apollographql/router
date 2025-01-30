@@ -541,6 +541,54 @@ mod coprocessor {
     }
 }
 
+mod demand_control {
+    use std::path::PathBuf;
+
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                demand_control:
+                  enabled: true
+                  mode: measure
+                  strategy:
+                    static_estimated:
+                      list_size: 10
+                      max: 1000
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+        .wait_for_log_message(r#""subgraphs":"connectors","message":"demand control cost calculations do not take connector-enabled subgraphs into consideration"#)
+        .await;
+
+        Ok(())
+    }
+}
+
 mod entity_cache {
     use std::path::PathBuf;
 
