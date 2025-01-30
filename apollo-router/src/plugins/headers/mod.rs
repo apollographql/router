@@ -1111,49 +1111,74 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_propagate_or() -> Result<(), BoxError> {
+    async fn test_propagate_passthrough() -> Result<(), BoxError> {
         let test_harness = PluginTestHarness::<Headers>::builder()
-            .config(include_str!("fixtures/propagate_or.router.yaml"))
+            .config(include_str!("fixtures/propagate_passthrough.router.yaml"))
             .build()
             .await;
         let service = test_harness.subgraph_service("test", |r| async move {
-            assert!(r.subgraph_request.headers().get("b").is_some());
-            Ok(subgraph::Response::fake_builder().build())
+            Ok(subgraph::Response::fake_builder()
+                .headers(r.subgraph_request.headers().clone())
+                .build())
         });
 
-        let _ = service
+        let res = service
             .call(
                 subgraph::Request::fake_builder()
                     .supergraph_request(Arc::new(
                         http::Request::builder()
                             .header("a", "av")
+                            .header("c", "cv")
                             .body(graphql::Request::default())
                             .unwrap(),
                     ))
                     .build(),
             )
-            .await;
+            .await?;
+        assert_eq!(
+            res.response.headers().get("a").unwrap().to_str().unwrap(),
+            "av"
+        );
+        assert_eq!(
+            res.response.headers().get("b").unwrap().to_str().unwrap(),
+            "av"
+        );
+        assert_eq!(
+            res.response.headers().get("c").unwrap().to_str().unwrap(),
+            "cv"
+        );
 
-        let _ = service
+        let res = service
             .call(
                 subgraph::Request::fake_builder()
                     .supergraph_request(Arc::new(
                         http::Request::builder()
                             .header("b", "bv")
+                            .header("c", "cv")
                             .body(graphql::Request::default())
                             .unwrap(),
                     ))
                     .build(),
             )
-            .await;
+            .await?;
+        assert_eq!(
+            res.response.headers().get("b").unwrap().to_str().unwrap(),
+            "bv"
+        );
+        assert_eq!(
+            res.response.headers().get("c").unwrap().to_str().unwrap(),
+            "cv"
+        );
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_propagate_or_defaulted() -> Result<(), BoxError> {
+    async fn test_propagate_passthrough_defaulted() -> Result<(), BoxError> {
         let test_harness = PluginTestHarness::<Headers>::builder()
-            .config(include_str!("fixtures/propagate_or_defaulted.router.yaml"))
+            .config(include_str!(
+                "fixtures/propagate_passthrough_defaulted.router.yaml"
+            ))
             .build()
             .await;
         let service = test_harness.subgraph_service("test", |r| async move {
