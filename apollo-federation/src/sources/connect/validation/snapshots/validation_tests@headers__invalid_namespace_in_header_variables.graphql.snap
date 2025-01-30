@@ -27,21 +27,21 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: unknown variable `$foo`, must be one of $args, $config, $context",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: unknown variable `$foo`, must be one of $args, $config, $context, $request",
         locations: [
             24:49..24:57,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: $status is not valid here, must be one of $args, $config, $context",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: $status is not valid here, must be one of $args, $config, $context, $request",
         locations: [
             25:62..25:69,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: $this is not valid here, must be one of $args, $config, $context",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: $this is not valid here, must be one of $args, $config, $context, $request",
         locations: [
             26:47..26:52,
         ],

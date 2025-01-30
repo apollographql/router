@@ -3276,6 +3276,8 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
@@ -3284,6 +3286,11 @@ mod tests {
                                             JSONSelection::parse("$.data").unwrap(),
                                         ),
                                     };
+                                    let supergraph_request = Arc::new(
+                                        http::Request::builder()
+                                            .body(graphql::Request::builder().build())
+                                            .unwrap(),
+                                    );
                                     let request = Request {
                                         context: Context::default(),
                                         connector: Arc::new(connector),
@@ -3291,6 +3298,7 @@ mod tests {
                                         transport_request,
                                         key: response_key.clone(),
                                         mapping_problems,
+                                        supergraph_request,
                                     };
                                     connector_instruments = Some({
                                         let connector_instruments = config
@@ -3338,6 +3346,8 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
