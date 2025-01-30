@@ -5,6 +5,7 @@ use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
 use headers::HeadersIncompatPlugin;
+use rhai::RhaiIncompatPlugin;
 use tls::TlsIncompatPlugin;
 use traffic_shaping::TrafficShapingIncompatPlugin;
 use url_override::UrlOverrideIncompatPlugin;
@@ -15,6 +16,7 @@ mod apq;
 mod authentication;
 mod batching;
 mod headers;
+mod rhai;
 mod tls;
 mod traffic_shaping;
 mod url_override;
@@ -83,6 +85,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
+        RhaiIncompatPlugin::from_config(config).map(boxify!()),
         TlsIncompatPlugin::from_config(config).map(boxify!()),
         TrafficShapingIncompatPlugin::from_config(config).map(boxify!()),
         UrlOverrideIncompatPlugin::from_config(config).map(boxify!()),
