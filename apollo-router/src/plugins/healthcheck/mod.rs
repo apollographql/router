@@ -192,17 +192,17 @@ impl PluginPrivate for HealthCheck {
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
+        my_rejected.store(0, Ordering::Relaxed);
         let ticker = tokio::spawn(async move {
             loop {
                 let start = Instant::now() + my_sampling_interval;
                 let mut interval = tokio::time::interval_at(start, my_sampling_interval);
                 loop {
-                    my_rejected.store(0, Ordering::Relaxed);
                     interval.tick().await;
-                    tracing::info!(rejected = %my_rejected.load(Ordering::Relaxed), allowed, "check for unready");
                     if my_rejected.load(Ordering::Relaxed) > allowed {
                         my_ready.store(false, Ordering::SeqCst);
                         tokio::time::sleep(my_recovery_interval).await;
+                        my_rejected.store(0, Ordering::Relaxed);
                         my_ready.store(true, Ordering::SeqCst);
                         break;
                     }
@@ -325,28 +325,87 @@ mod test {
 
     use super::*;
     use crate::plugins::test::PluginTestHarness;
+    use crate::plugins::test::ServiceHandle;
 
-    async fn get_axum_router(listen_addr: ListenAddr, config: &'static str) -> axum::Router {
+    // Create a base for testing. Even though we don't use the test_harness once this function
+    // completes, we return it because we need to keep it alive to prevent the ticker from being
+    // dropped.
+    async fn get_axum_router(
+        listen_addr: ListenAddr,
+        config: &'static str,
+        response_status_code: StatusCode,
+    ) -> (
+        axum::Router,
+        Option<ServiceHandle<router::Request, router::BoxService>>,
+        PluginTestHarness<HealthCheck>,
+    ) {
         let test_harness: PluginTestHarness<HealthCheck> =
             PluginTestHarness::builder().config(config).build().await;
+
+        test_harness.activate();
+
+        // Limitations in the plugin test hardness (requires an Fn function)
+        // mean we need to create our responses here...
+        let svc = match response_status_code {
+            StatusCode::OK => test_harness.router_service(|_req| async {
+                router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .build()
+            }),
+            StatusCode::GATEWAY_TIMEOUT => test_harness.router_service(|_req| async {
+                router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .status_code(StatusCode::GATEWAY_TIMEOUT)
+                    .build()
+            }),
+            StatusCode::SERVICE_UNAVAILABLE => test_harness.router_service(|_req| async {
+                router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                    .build()
+            }),
+            _ => panic!("unsupported status code"),
+        };
 
         let endpoints = test_harness.web_endpoints();
 
         let endpoint = endpoints.get(&listen_addr).expect("it better be there");
 
-        endpoint.clone().into_router()
+        (endpoint.clone().into_router(), Some(svc), test_harness)
     }
 
-    async fn base_test_health_check(router_addr: &str, config: &'static str) {
+    // This could be improved. It makes assumptions about the content of config files regarding how
+    // many fails are allowed and unready durations. A better test would either parse the config to
+    // extract those values or (not as good) take extra parameters specifying them.
+    async fn base_test_health_check(
+        router_addr: &str,
+        config: &'static str,
+        status_string: &str,
+        response_status_code: StatusCode,
+    ) {
         let listen_addr: ListenAddr = SocketAddr::from_str(router_addr).unwrap().into();
 
-        let mut axum_router = get_axum_router(listen_addr, config).await;
+        let (mut axum_router, pipeline_svc_opt, _test_harness) =
+            get_axum_router(listen_addr, config, response_status_code).await;
 
         let request = http::Request::builder()
-            .uri(format!("http://{}/health", router_addr))
+            .uri(format!("http://{}/health?ready=", router_addr))
             .body(http_body_util::Empty::new())
             .expect("valid request");
 
+        // Make more than 10 requests to trigger our condition
+        if let Some(pipeline_svc) = pipeline_svc_opt {
+            for _ in 0..20 {
+                let _response = pipeline_svc.call_default().await.unwrap();
+            }
+            // Wait for 3 second so that our condition is recognised
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+
+        // This creates our web_endpoint (in this case the health check) so that we can call it
         let mut svc = axum_router.as_service();
         let response = svc
             .ready()
@@ -356,14 +415,21 @@ mod test {
             .await
             .expect("called it");
 
-        assert_eq!(response.status(), StatusCode::OK);
+        let expected_code = if status_string == "DOWN" {
+            StatusCode::SERVICE_UNAVAILABLE
+        } else {
+            StatusCode::OK
+        };
+
+        assert_eq!(expected_code, response.status());
+
         let j: serde_json::Value = serde_json::from_slice(
             &crate::services::router::body::into_bytes(response)
                 .await
                 .expect("we have a body"),
         )
         .expect("some json");
-        assert_eq!(json!({"status": "UP" }), j)
+        assert_eq!(json!({"status": status_string }), j)
     }
 
     #[tokio::test]
@@ -372,6 +438,8 @@ mod test {
         base_test_health_check(
             router_addr,
             include_str!("testdata/default_listener.router.yaml"),
+            "UP",
+            StatusCode::OK,
         )
         .await;
     }
@@ -382,6 +450,56 @@ mod test {
         base_test_health_check(
             router_addr,
             include_str!("testdata/custom_listener.router.yaml"),
+            "UP",
+            StatusCode::OK,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_health_check_timeout_unready() {
+        let router_addr = "127.0.0.1:8088";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/allowed_ten_per_second.router.yaml"),
+            "DOWN",
+            StatusCode::GATEWAY_TIMEOUT,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_health_check_unavailable_unready() {
+        let router_addr = "127.0.0.1:8088";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/allowed_ten_per_second.router.yaml"),
+            "DOWN",
+            StatusCode::SERVICE_UNAVAILABLE,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_health_check_timeout_ready() {
+        let router_addr = "127.0.0.1:8088";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/allowed_fifty_per_second.router.yaml"),
+            "UP",
+            StatusCode::GATEWAY_TIMEOUT,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_health_check_unavailable_ready() {
+        let router_addr = "127.0.0.1:8088";
+        base_test_health_check(
+            router_addr,
+            include_str!("testdata/allowed_fifty_per_second.router.yaml"),
+            "UP",
+            StatusCode::SERVICE_UNAVAILABLE,
         )
         .await;
     }
