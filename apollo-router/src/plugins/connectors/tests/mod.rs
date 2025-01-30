@@ -842,6 +842,51 @@ async fn test_mutation() {
 }
 
 #[tokio::test]
+async fn test_mutation_empty_body() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        MUTATION_SCHEMA,
+        &mock_server.uri(),
+        "mutation CreateUser($name: String!) {
+            createUser(name: $name) {
+                success
+            }
+        }",
+        serde_json_bytes::json!({ "name": "New User" })
+            .as_object()
+            .unwrap()
+            .clone(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "createUser": {
+          "success": true
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .body(serde_json::json!({ "username": "New User" }))
+            .path("/user")],
+    );
+}
+
+#[tokio::test]
 async fn test_selection_set() {
     let mock_server = MockServer::start().await;
     mock_api::commits().mount(&mock_server).await;
