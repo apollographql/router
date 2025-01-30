@@ -45,32 +45,49 @@ struct Health {
     status: HealthStatus,
 }
 
+/// Configuration options pertaining to the readiness health interval sub-component.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct ReadinessIntervalConfig {
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[serde(serialize_with = "humantime_serde::serialize")]
+    #[schemars(with = "Option<String>", default)]
+    /// The sampling interval (default: 5s)
+    pub(crate) sampling: Duration,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[serde(serialize_with = "humantime_serde::serialize")]
+    #[schemars(with = "Option<String>")]
+    /// The unready interval (default: sampling interval)
+    pub(crate) unready: Option<Duration>,
+}
+
 /// Configuration options pertaining to the readiness health sub-component.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct ReadinessConfig {
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[serde(serialize_with = "humantime_serde::serialize")]
-    #[schemars(with = "Option<String>", default)]
-    /// The sampling period (default: 5s)
-    pub(crate) sampling_period: Duration,
-
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[serde(serialize_with = "humantime_serde::serialize")]
-    #[schemars(with = "Option<String>")]
-    /// The recovery period (default: Sampling Period)
-    pub(crate) recovery_period: Option<Duration>,
+    /// The readiness interval configuration
+    pub(crate) interval: ReadinessIntervalConfig,
 
     /// How many errors/interval are allowed until unready (default: 100)
     pub(crate) allowed: usize,
 }
 
+impl Default for ReadinessIntervalConfig {
+    fn default() -> Self {
+        Self {
+            sampling: Duration::from_secs(5),
+            unready: None,
+        }
+    }
+}
+
 impl Default for ReadinessConfig {
     fn default() -> Self {
         Self {
-            sampling_period: Duration::from_secs(5),
-            recovery_period: None,
+            interval: Default::default(),
             allowed: 100,
         }
     }
@@ -165,25 +182,27 @@ impl PluginPrivate for HealthCheck {
         let rejected = Arc::new(AtomicUsize::new(0));
 
         let allowed = init.config.readiness.allowed;
-        let my_sampling_period = init.config.readiness.sampling_period;
-        let my_recovery_period = init
+        let my_sampling_interval = init.config.readiness.interval.sampling;
+        let my_recovery_interval = init
             .config
             .readiness
-            .recovery_period
-            .unwrap_or(my_sampling_period);
+            .interval
+            .unready
+            .unwrap_or(my_sampling_interval);
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
         let ticker = tokio::spawn(async move {
             loop {
-                let start = Instant::now() + my_sampling_period;
-                let mut interval = tokio::time::interval_at(start, my_sampling_period);
+                let start = Instant::now() + my_sampling_interval;
+                let mut interval = tokio::time::interval_at(start, my_sampling_interval);
                 loop {
                     my_rejected.store(0, Ordering::Relaxed);
                     interval.tick().await;
+                    tracing::info!(rejected = %my_rejected.load(Ordering::Relaxed), allowed, "check for unready");
                     if my_rejected.load(Ordering::Relaxed) > allowed {
                         my_ready.store(false, Ordering::SeqCst);
-                        tokio::time::sleep(my_recovery_period).await;
+                        tokio::time::sleep(my_recovery_interval).await;
                         my_ready.store(true, Ordering::SeqCst);
                         break;
                     }
@@ -300,13 +319,12 @@ register_private_plugin!("apollo", "health_check", HealthCheck);
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
-    use crate::plugins::test::PluginTestHarness;
     use serde_json::json;
-
     use tower::Service;
     use tower::ServiceExt;
+
+    use super::*;
+    use crate::plugins::test::PluginTestHarness;
 
     async fn get_axum_router(listen_addr: ListenAddr, config: &'static str) -> axum::Router {
         let test_harness: PluginTestHarness<HealthCheck> =

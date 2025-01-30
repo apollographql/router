@@ -4764,15 +4764,26 @@ expression: "&schema"
           "minimum": 0.0,
           "type": "integer"
         },
-        "recovery_period": {
-          "default": null,
-          "description": "The recovery period (default: Sampling Period)",
+        "interval": {
+          "$ref": "#/definitions/ReadinessIntervalConfig",
+          "description": "#/definitions/ReadinessIntervalConfig"
+        }
+      },
+      "type": "object"
+    },
+    "ReadinessIntervalConfig": {
+      "additionalProperties": false,
+      "description": "Configuration options pertaining to the readiness health interval sub-component.",
+      "properties": {
+        "sampling": {
+          "default": "0s",
+          "description": "The sampling interval (default: 5s)",
           "nullable": true,
           "type": "string"
         },
-        "sampling_period": {
-          "default": "0s",
-          "description": "The sampling period (default: 5s)",
+        "unready": {
+          "default": null,
+          "description": "The unready interval (default: sampling interval)",
           "nullable": true,
           "type": "string"
         }
