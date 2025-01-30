@@ -606,9 +606,10 @@ mod tls {
             .config(
                 r#"
                 tls:
-                  subgraphs:
-                    connectors:
-                      certificate_authorities: "${file./path/to/product_ca.crt}"
+                  subgraph:
+                    subgraphs:
+                      connectors:
+                        certificate_authorities: "${file./path/to/product_ca.crt}"
         "#,
             )
             .supergraph(PathBuf::from_iter([
