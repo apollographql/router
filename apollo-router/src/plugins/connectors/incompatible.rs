@@ -5,7 +5,6 @@ use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
 use coprocessor::CoprocessorIncompatPlugin;
-use demand_control::DemandControlIncompatPlugin;
 use entity_cache::EntityCacheIncompatPlugin;
 use headers::HeadersIncompatPlugin;
 use rhai::RhaiIncompatPlugin;
@@ -20,7 +19,6 @@ mod apq;
 mod authentication;
 mod batching;
 mod coprocessor;
-mod demand_control;
 mod entity_cache;
 mod headers;
 mod rhai;
@@ -93,7 +91,6 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
         CoprocessorIncompatPlugin::from_config(config).map(boxify!()),
-        DemandControlIncompatPlugin::from_config(config).map(boxify!()),
         EntityCacheIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
         RhaiIncompatPlugin::from_config(config).map(boxify!()),
