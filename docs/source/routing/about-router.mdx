@@ -16,16 +16,18 @@ GraphOS Router is the runtime of the GraphOS platform. It executes client operat
   class="hidden dark:block"
 />
 
-Apollo Connectors are a core part of the router, enabling API orchestration with REST APIs.
-
-<img src='../../img/connectors/connector.svg' class="dark:hidden"/>
-<img src='../../img/connectors/connector-dark.svg' class="hidden dark:block"/>
-
 ### Runtime of GraphOS platform
 
 As the runtime of the [GraphOS platform](/graphos/get-started/concepts/graphos), a GraphOS Router gets the supergraph schema—the blueprint of the federated graphs—from the GraphOS control plane. It then executes incoming clients operations based on that schema.
 
 Unlike API gateways that offer capabilities to manage API endpoints, the router isn't based on URLs or REST endpoints. Rather, the router is a GraphQL-native solution for handling client APIs.
+
+### Enables Apollo Connectors
+
+Apollo Connectors are a core part of the router, enabling API orchestration with REST APIs.
+
+<img src='../../img/connectors/connector.svg' class="dark:hidden"/>
+<img src='../../img/connectors/connector-dark.svg' class="hidden dark:block"/>
 
 ### Subgraph query planner
 
@@ -46,6 +48,7 @@ You can use the following tools for inspecting query plans:
 ### Entry point to federated GraphQL API
 
 The GraphOS Router is the gateway and entry point to a federated supergraph. Clients send GraphQL operations to your router's public endpoint instead of directly to your APIs.
+
 
 ## GraphOS Router deployment types
 
