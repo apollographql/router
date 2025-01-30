@@ -220,13 +220,13 @@ impl NormalizedTypeCondition {
 
     pub(crate) fn from_object_types(
         types: impl Iterator<Item = ObjectTypeDefinitionPosition>,
-    ) -> Result<Self, FederationError> {
+    ) -> Self {
         let mut ground_set: Vec<_> = types.collect();
         ground_set.sort_by(|a, b| a.type_name.cmp(&b.type_name));
-        Ok(NormalizedTypeCondition {
+        NormalizedTypeCondition {
             ground_set,
             for_display: DisplayTypeCondition::deduced(),
-        })
+        }
     }
 
     /// Special constructor with empty conditions (logically contains *all* types).
@@ -267,7 +267,7 @@ impl NormalizedTypeCondition {
 
 impl NormalizedTypeCondition {
     /// Construct a new type condition with a named type condition added.
-    fn add_type_name(
+    pub(crate) fn add_type_name(
         &self,
         name: Name,
         schema: &ValidFederationSchema,
@@ -339,7 +339,7 @@ impl NormalizedTypeCondition {
             ground_types.extend(pos_types.into_iter());
         }
 
-        // Simple csae #2 - `declared_type` is same as the collected types.
+        // Simple case #2 - `declared_type` is same as the collected types.
         let declared_type_cond =
             NormalizedTypeCondition::from_type_name(declared_type.clone(), schema)?;
         if declared_type_cond.ground_set.len() == ground_types.len()
@@ -351,7 +351,9 @@ impl NormalizedTypeCondition {
             return Ok(declared_type_cond);
         }
 
-        NormalizedTypeCondition::from_object_types(ground_types.into_iter())
+        Ok(NormalizedTypeCondition::from_object_types(
+            ground_types.into_iter(),
+        ))
     }
 }
 
