@@ -4,6 +4,6 @@ headers:
       - propagate:
           named: a
           rename: b
-          default: defaulted
       - propagate:
           named: b
+          default: defaulted
