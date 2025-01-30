@@ -481,7 +481,7 @@ mod tests {
     #[rstest]
     #[case::array("$([])")]
     #[case::object("$({\"a\": 1})")]
-    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
+    #[case::missing_property_of_object("$({\"a\": 1}).b")]
     #[case::echo_invalid_constants("$->echo([])")]
     #[case::map_scalar("$(1)->map(@)")]
     #[case::map_array("$([])->map(@)")]
