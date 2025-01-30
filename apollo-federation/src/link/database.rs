@@ -170,6 +170,39 @@ fn is_link_directive_definition(definition: &DirectiveDefinition) -> bool {
             .is_some_and(|argument| *argument.ty == ty!(String))
 }
 
+/// Returns true if the given definition matches the @core definition.
+///
+/// This is used to return early for federation v1 supergraphs when validating
+/// the supergraph.
+///
+/// Either of these definitions are accepted:
+/// ```graphql
+/// directive @_ANY_NAME_(feature: String!, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(feature: String, as: String) repeatable on SCHEMA
+/// directive @_ANY_NAME_(feature: String!) repeatable on SCHEMA
+/// directive @_ANY_NAME_(feature: String) repeatable on SCHEMA
+/// ```
+pub(crate) fn is_core_directive_definition(definition: &DirectiveDefinition) -> bool {
+    // XXX(@goto-bus-stop): @core compatibility is primarily to support old tests--should be
+    // removed when those are updated.
+    definition.repeatable
+        && definition.locations == [DirectiveLocation::Schema]
+        && definition
+            .argument_by_name("feature")
+            .is_some_and(|argument| {
+                // The "true" type of `url` in the @core spec is actually `String` (nullable), and this
+                // for future-proofing reasons (the idea was that we may introduce later other
+                // ways to identify specs that are not urls). But we allow the definition to
+                // have a non-nullable type both for convenience and because some early
+                // federation previews actually generated that.
+                *argument.ty == ty!(String!) || *argument.ty == ty!(String)
+            })
+        && definition
+            .argument_by_name("as")
+            // Definition may be omitted in old graphs
+            .map_or(true, |argument| *argument.ty == ty!(String))
+}
+
 /// Returns whether a given directive is the @link directive that imports the
 /// @link spec.
 fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {

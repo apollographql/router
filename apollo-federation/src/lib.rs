@@ -81,6 +81,14 @@ pub(crate) fn validate_supergraph(
     join_versions: &'static SpecDefinitions<JoinSpecDefinition>,
     context_versions: &'static SpecDefinitions<ContextSpecDefinition>,
 ) -> Result<SupergraphSpecs, FederationError> {
+    // We want to error out early should the current supergraph be a
+    // federation v1 supergraph.
+    if supergraph_schema.is_fed_1() {
+        return Err(SingleFederationError::UnsupportedFederationVersion {
+            message: String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater")
+        }.into());
+    }
+
     let Some(metadata) = supergraph_schema.metadata() else {
         return Err(SingleFederationError::InvalidFederationSupergraph {
             message: "Invalid supergraph: must be a core schema".to_owned(),

@@ -214,6 +214,14 @@ impl FederationSchema {
             None => Ok(None),
         }
     }
+
+    /// Check if current schema is a fed v1 schema.
+    pub(crate) fn is_fed_1(&self) -> bool {
+        self.schema
+            .directive_definitions
+            .iter()
+            .any(|(_name, def)| crate::link::database::is_core_directive_definition(def))
+    }
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.

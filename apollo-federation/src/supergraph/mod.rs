@@ -55,7 +55,6 @@ use crate::link::join_spec_definition::FieldDirectiveArguments;
 use crate::link::join_spec_definition::JoinSpecDefinition;
 use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
-use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::is_graphql_reserved_name;
@@ -93,7 +92,6 @@ pub(crate) fn extract_subgraphs_from_supergraph(
     let validate_extracted_subgraphs = validate_extracted_subgraphs.unwrap_or(true);
     let (link_spec_definition, join_spec_definition, context_spec_definition) =
         crate::validate_supergraph_for_query_planning(supergraph_schema)?;
-    let is_fed_1 = *join_spec_definition.version() == Version { major: 0, minor: 1 };
     let (mut subgraphs, federation_spec_definitions, graph_enum_value_name_to_subgraph_name) =
         collect_empty_subgraphs(supergraph_schema, join_spec_definition)?;
 
@@ -110,23 +108,15 @@ pub(crate) fn extract_subgraphs_from_supergraph(
                 .map(Not::not)
         })
         .try_collect()?;
-    if is_fed_1 {
-        let unsupported =
-            SingleFederationError::UnsupportedFederationVersion {
-                message: String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater")
-            };
-        return Err(unsupported.into());
-    } else {
-        extract_subgraphs_from_fed_2_supergraph(
-            supergraph_schema,
-            &mut subgraphs,
-            &graph_enum_value_name_to_subgraph_name,
-            &federation_spec_definitions,
-            join_spec_definition,
-            context_spec_definition,
-            &filtered_types,
-        )?;
-    }
+    extract_subgraphs_from_fed_2_supergraph(
+        supergraph_schema,
+        &mut subgraphs,
+        &graph_enum_value_name_to_subgraph_name,
+        &federation_spec_definitions,
+        join_spec_definition,
+        context_spec_definition,
+        &filtered_types,
+    )?;
 
     for graph_enum_value in graph_enum_value_name_to_subgraph_name.keys() {
         let subgraph = get_subgraph(
@@ -149,23 +139,14 @@ pub(crate) fn extract_subgraphs_from_supergraph(
                 Ok(schema) => schema,
                 Err((schema, error)) => {
                     subgraph.schema = schema;
-                    if is_fed_1 {
-                        let message =
-                                String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater");
-                        return Err(SingleFederationError::UnsupportedFederationVersion {
-                            message,
-                        }
-                        .into());
-                    } else {
-                        let mut message = format!(
-                                    "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{error}",
-                                    subgraph.name,
-                                    );
-                        maybe_dump_subgraph_schema(subgraph, &mut message);
-                        return Err(
-                            SingleFederationError::InvalidFederationSupergraph { message }.into(),
-                        );
-                    }
+                    let mut message = format!(
+                        "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{error}",
+                        subgraph.name,
+                    );
+                    maybe_dump_subgraph_schema(subgraph, &mut message);
+                    return Err(
+                        SingleFederationError::InvalidFederationSupergraph { message }.into(),
+                    );
                 }
             }
         } else {

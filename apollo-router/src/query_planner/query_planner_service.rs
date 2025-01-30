@@ -633,6 +633,25 @@ mod tests {
     #[test(tokio::test)]
     async fn federation_versions() {
         async {
+            let sdl = include_str!("../testdata/minimal_fed1_supergraph.graphql");
+            let config = Arc::default();
+            let schema = Schema::parse(sdl, &config).unwrap();
+            let error = QueryPlannerService::new(schema.into(), config)
+                .await
+                .err()
+                .expect("expected error for fed1 supergraph");
+            assert_eq!(error.to_string(), "supergraphs composed with federation version 1 are not supported, and need to be recomposed with federation version 2 or greater");
+
+            assert_gauge!(
+                "apollo.router.supergraph.federation",
+                1,
+                federation.version = 1
+            );
+        }
+        .with_metrics()
+        .await;
+
+        async {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");
             let config = Arc::default();
             let schema = Schema::parse(sdl, &config).unwrap();

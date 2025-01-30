@@ -221,6 +221,7 @@ impl QueryPlanner {
             include_defer: config.incremental_delivery.enable_defer,
             ..Default::default()
         })?;
+
         let query_graph = build_federated_query_graph(
             supergraph_schema.clone(),
             api_schema.clone(),

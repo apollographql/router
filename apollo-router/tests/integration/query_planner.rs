@@ -18,8 +18,9 @@ async fn fed1_schema_with_new_qp() {
     router
         .wait_for_log_message(
             "could not create router: \
-             failed to initialize the query planner: \
-             Supergraphs composed with federation version 1 are not supported.",
+             Federation error: \
+             Supergraphs composed with federation version 1 are not supported. \
+             Please recompose your supergraph with federation version 2 or greater",
         )
         .await;
     router.assert_shutdown().await;
