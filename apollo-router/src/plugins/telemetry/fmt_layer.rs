@@ -106,43 +106,43 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-        // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
-        if !span.is_sampled() {
-            attrs.record(&mut visitor);
-        }
-        let mut extensions = span.extensions_mut();
-        if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
-            log_attrs.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
+        if let Some(span) = ctx.span(id) {
+            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+            // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
+            if !span.is_sampled() {
+                attrs.record(&mut visitor);
+            }
+            let mut extensions = span.extensions_mut();
+            if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
+                }));
+            } else {
+                let mut fields = LogAttributes::default();
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+                extensions.insert(fields);
+            }
         } else {
-            let mut fields = LogAttributes::default();
-            fields.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
-            extensions.insert(fields);
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if let Some(fields) = extensions.get_mut::<LogAttributes>() {
-            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-            values.record(&mut visitor);
-            fields.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if let Some(fields) = extensions.get_mut::<LogAttributes>() {
+                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+                values.record(&mut visitor);
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
+                }));
+            } else {
+                eprintln!("cannot access to LogAttributes, this is a bug");
+            }
         } else {
-            eprintln!("cannot access to LogAttributes, this is a bug");
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
@@ -431,7 +431,7 @@ connector:
 
     impl std::fmt::Display for LogBuffer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let content = String::from_utf8(self.0.lock().clone()).unwrap();
+            let content = String::from_utf8(self.0.lock().clone()).map_err(|_e| std::fmt::Error)?;
 
             write!(f, "{content}")
         }
