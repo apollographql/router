@@ -8,6 +8,7 @@ use url::Url;
 use crate::sources::connect::string_template;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::expression;
+use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
@@ -16,9 +17,8 @@ use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,
-    expression_context: &expression::Context,
+    schema: &SchemaInfo,
 ) -> Result<URLTemplate, Vec<Message>> {
-    let schema = expression_context.schema;
     let (template, str_value) = match parse_template(coordinate, schema) {
         Ok(tuple) => tuple,
         Err(message) => return Err(vec![message]),
@@ -28,21 +28,21 @@ pub(crate) fn validate_template(
         messages
             .extend(validate_base_url(base, coordinate, coordinate.node, str_value, schema).err());
     }
-    let expression_context = expression::Context::for_connect_request(schema, coordinate.connect);
+    let expression_context = expression::Context::for_connect_request(
+        schema,
+        coordinate.connect,
+        &str_value,
+        Code::InvalidUrl,
+    );
 
     for expression in template.expressions() {
         messages.extend(
-            expression::validate(expression, &expression_context)
+            expression::validate(expression, &expression_context, &scalars())
                 .err()
                 .into_iter()
-                .flatten()
-                .map(|err| Message {
-                    code: Code::InvalidUrl,
-                    message: format!("In {coordinate}: {}", err.message),
-                    locations: str_value
-                        .line_col_for_subslice(err.location, schema)
-                        .into_iter()
-                        .collect(),
+                .map(|mut err| {
+                    err.message = format!("In {coordinate}: {}", err.message);
+                    err
                 }),
         );
     }

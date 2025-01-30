@@ -394,13 +394,12 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             }
         }
 
-        let expression_context = expression::Context::for_source(schema);
         errors.extend(headers::validate_arg(
             http_arg,
-            &expression_context,
             HttpHeadersCoordinate::Source {
                 directive_name: &directive.name,
             },
+            schema,
         ));
     } else {
         errors.push(Message {
@@ -578,8 +577,10 @@ pub enum Code {
     EntityTypeInvalid,
     /// A @key is defined without a cooresponding entity connector.
     MissingEntityConnector,
-    /// A syntax error in `selection`
-    InvalidJsonSelection,
+    /// An error in `selection`
+    InvalidSelection,
+    /// A problem with `http.body`
+    InvalidBody,
     /// A cycle was detected within a `selection`
     CircularReference,
     /// A field was selected but is not defined on the type
