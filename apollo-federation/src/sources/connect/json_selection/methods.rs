@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::location::SourceId;
 use shape::Shape;
 
 use super::immutable::InputPath;
@@ -79,6 +80,7 @@ macro_rules! impl_arrow_method {
                 input_shape: Shape,
                 dollar_shape: Shape,
                 named_var_shapes: &IndexMap<&str, Shape>,
+                source_id: &SourceId,
             ) -> Shape {
                 $shape_fn_name(
                     method_name,
@@ -86,6 +88,7 @@ macro_rules! impl_arrow_method {
                     input_shape,
                     dollar_shape,
                     named_var_shapes,
+                    source_id,
                 )
             }
         }
@@ -124,6 +127,8 @@ pub(super) trait ArrowMethodImpl {
         // variables and their subproperties can be represented abstractly using
         // $var.nested.property ShapeCase::Name shapes.
         named_var_shapes: &IndexMap<&str, Shape>,
+        // The shared source name which can be used to produce Shape locations
+        source_id: &SourceId,
     ) -> Shape;
 }
 

@@ -145,8 +145,9 @@ pub(crate) trait DatadogId {
 }
 impl DatadogId for TraceId {
     fn to_datadog(&self) -> String {
-        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
-        u64::from_be_bytes(bytes.try_into().unwrap()).to_string()
+        let mut bytes: [u8; 8] = Default::default();
+        bytes.copy_from_slice(&self.to_bytes()[8..16]);
+        u64::from_be_bytes(bytes).to_string()
     }
 }
 

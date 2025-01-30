@@ -48,13 +48,16 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions.get_mut::<LogAttributes>().is_none() {
-            extensions.insert(LogAttributes::default());
-        }
-        if extensions.get_mut::<EventAttributes>().is_none() {
-            extensions.insert(EventAttributes::default());
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if extensions.get_mut::<LogAttributes>().is_none() {
+                extensions.insert(LogAttributes::default());
+            }
+            if extensions.get_mut::<EventAttributes>().is_none() {
+                extensions.insert(EventAttributes::default());
+            }
+        } else {
+            tracing::error!("Span not found, this is a bug");
         }
     }
 }
@@ -134,30 +137,17 @@ impl SpanDynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
-                                    if otel_data.builder.attributes.is_none() {
-                                        otel_data.builder.attributes = Some(
-                                            attributes
-                                                .inspect(|attr| {
-                                                    update_otel_data(
-                                                        otel_data,
-                                                        &attr.key,
-                                                        &attr.value,
-                                                    )
-                                                })
-                                                .collect(),
-                                        );
+                                    let attributes: Vec<KeyValue> = attributes
+                                        .inspect(|attr| {
+                                            update_otel_data(otel_data, &attr.key, &attr.value)
+                                        })
+                                        .collect();
+                                    if let Some(existing_attributes) =
+                                        otel_data.builder.attributes.as_mut()
+                                    {
+                                        existing_attributes.extend(attributes);
                                     } else {
-                                        let attributes: Vec<KeyValue> = attributes
-                                            .inspect(|attr| {
-                                                update_otel_data(otel_data, &attr.key, &attr.value)
-                                            })
-                                            .collect();
-                                        otel_data
-                                            .builder
-                                            .attributes
-                                            .as_mut()
-                                            .unwrap()
-                                            .extend(attributes);
+                                        otel_data.builder.attributes = Some(attributes);
                                     }
                                 }
                                 None => {

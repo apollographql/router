@@ -11,9 +11,11 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use itertools::Itertools;
+use shape::Shape;
 
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::SelectionCoordinate;
+use super::expression;
 use super::Code;
 use super::Message;
 use super::Name;
@@ -24,7 +26,9 @@ use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
+use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::variable::VariableResolver;
@@ -91,65 +95,67 @@ pub(super) fn validate_body_selection(
     field: &Component<FieldDefinition>,
     schema: &SchemaInfo,
     selection_node: &Node<Value>,
-) -> Result<(), Message> {
+) -> Vec<Message> {
     let coordinate =
         connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
 
-    let selection_str =
-        GraphQLString::new(selection_node, &schema.sources).map_err(|_| Message {
-            code: Code::GraphQLError,
-            message: format!("{coordinate} must be a string."),
-            locations: selection_node
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })?;
-
-    let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
-        code: Code::InvalidJsonSelection,
-        message: format!("{coordinate} is not a valid JSONSelection: {err}"),
-        locations: selection_node
-            .line_column_range(&schema.sources)
-            .into_iter()
-            .collect(),
-    })?;
-
+    // Ensure that the body selection is a valid JSON selection string
+    let selection_str = match GraphQLString::new(selection_node, &schema.sources) {
+        Ok(selection_str) => selection_str,
+        Err(_) => {
+            return vec![Message {
+                code: Code::GraphQLError,
+                message: format!("{coordinate} must be a string."),
+                locations: selection_node
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]
+        }
+    };
+    let selection = match JSONSelection::parse(selection_str.as_str()) {
+        Ok(selection) => selection,
+        Err(err) => {
+            return vec![Message {
+                code: Code::InvalidBody,
+                message: format!("{coordinate} is not valid: {err}"),
+                locations: selection_node
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]
+        }
+    };
     if selection.is_empty() {
-        return Err(Message {
-            code: Code::InvalidJsonSelection,
+        return vec![Message {
+            code: Code::InvalidBody,
             message: format!("{coordinate} is empty"),
             locations: selection_node
                 .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
-        });
-    }
-    let var_paths = selection.external_var_paths();
-    if var_paths.is_empty() {
-        return Err(Message {
-            code: Code::InvalidJsonSelection,
-            message: format!("{coordinate} must contain at least one variable reference"),
-            locations: selection_node
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        });
+        }];
     }
 
-    let context = VariableContext::new(
-        connect_coordinate.field_coordinate.object,
-        connect_coordinate.field_coordinate.field,
-        Phase::Request,
-        Target::Body,
-    );
-    validate_selection_variables(
-        &VariableResolver::new(context.clone(), schema),
-        coordinate,
-        selection_str,
-        schema,
-        context,
-        var_paths,
-    )
+    // Validate the selection shape
+    if let Err(mut message) = expression::validate(
+        &Expression {
+            expression: selection,
+            location: 0..selection_str.as_str().len(),
+        },
+        &Context::for_connect_request(
+            schema,
+            connect_coordinate,
+            &selection_str,
+            Code::InvalidBody,
+        ),
+        &Shape::unknown([]),
+    ) {
+        message.message = format!("In {coordinate}: {message}", message = message.message);
+        return vec![message];
+    }
+
+    Vec::new()
 }
 
 /// Validate variable references in a JSON Selection
@@ -220,8 +226,8 @@ fn get_json_selection<'a>(
         })?;
 
     let selection = JSONSelection::parse(selection_str.as_str()).map_err(|err| Message {
-        code: Code::InvalidJsonSelection,
-        message: format!("{coordinate} is not a valid JSONSelection: {err}",),
+        code: Code::InvalidSelection,
+        message: format!("{coordinate} is not valid: {err}",),
         locations: selection_str
             .line_col_for_subslice(err.offset..err.offset + 1, schema)
             .into_iter()
@@ -230,7 +236,7 @@ fn get_json_selection<'a>(
 
     if selection.is_empty() {
         return Err(Message {
-            code: Code::InvalidJsonSelection,
+            code: Code::InvalidSelection,
             message: format!("{coordinate} is empty",),
             locations: selection_arg
                 .value
@@ -286,7 +292,7 @@ impl SelectionValidator<'_, '_> {
                     // TODO: make a helper function for easier range collection
                     locations: self.get_range_location(field.inner_range())
                         // Skip over fields which duplicate the location of the selection
-                        .chain(if depth > 1 {ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources))} else {None})
+                        .chain(if depth > 1 { ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources)) } else { None })
                         .chain(field.definition.line_column_range(&self.schema.sources))
                         .collect(),
                 });
@@ -465,7 +471,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
         match (field_type, is_group) {
             (ExtendedType::Object(object), true) => {
                 self.check_for_circular_reference(field, object)
-            },
+            }
             (_, true) => {
                 Err(Message {
                     code: Code::GroupSelectionIsNotObject,
@@ -475,7 +481,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                     ),
                     locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
-            },
+            }
             (ExtendedType::Object(_), false) => {
                 Err(Message {
                     code: Code::GroupSelectionRequiredForObject,
@@ -485,7 +491,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                     ),
                     locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
                 })
-            },
+            }
             (_, false) => Ok(()),
         }
     }

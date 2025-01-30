@@ -15,7 +15,6 @@ use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::entity::validate_entity_arg;
-use super::expression;
 use super::http::headers;
 use super::http::method;
 use super::resolvable_key_fields;
@@ -232,14 +231,11 @@ fn validate_field(
             return errors;
         };
 
-        let expression_context =
-            expression::Context::for_connect_request(schema, connect_coordinate);
-
         let url_template = match method::validate(
             http_arg,
             ConnectHTTPCoordinate::from(connect_coordinate),
             http_arg_node,
-            &expression_context,
+            schema,
         ) {
             Ok(method) => Some(method),
             Err(errs) => {
@@ -252,16 +248,14 @@ fn validate_field(
             .iter()
             .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
         {
-            if let Err(err) = validate_body_selection(
+            errors.extend(validate_body_selection(
                 connect_directive,
                 connect_coordinate,
                 object,
                 field,
                 schema,
                 body,
-            ) {
-                errors.push(err);
-            }
+            ));
         }
 
         if let Some(source_name) = connect_directive
@@ -307,12 +301,12 @@ fn validate_field(
 
         errors.extend(headers::validate_arg(
             http_arg,
-            &expression_context,
             HttpHeadersCoordinate::Connect {
                 connect: connect_coordinate,
                 object: &object.name,
                 field: &field.name,
             },
+            schema,
         ));
     }
     errors
