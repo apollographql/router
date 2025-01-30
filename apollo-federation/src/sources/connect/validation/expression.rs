@@ -512,9 +512,7 @@ mod tests {
     #[test]
     fn bare_field_with_path() {
         let selection = "something.blah";
-        let err = validate_with_context(selection, scalars())
-            .err()
-            .expect("missing property is unknown");
+        let err = validate_with_context(selection, scalars()).expect_err("missing property is unknown");
         let expected_location = location_of_expression("something", selection);
         assert!(
             err.message.contains("`something.blah`"),
@@ -537,9 +535,7 @@ mod tests {
     #[test]
     fn object_in_url() {
         let selection = "$args.object";
-        let err = validate_with_context(selection, scalars())
-            .err()
-            .expect("objects are not allowed");
+        let err = validate_with_context(selection, scalars()).expect_err("objects are not allowed");
         let expected_location = location_of_expression("object", selection);
         assert!(
             err.locations.contains(&expected_location),
@@ -552,9 +548,7 @@ mod tests {
     #[test]
     fn nested_unknown_property() {
         let selection = "$args.multiLevel.inner.unknown";
-        let err = validate_with_context(selection, scalars())
-            .err()
-            .expect("missing property is unknown");
+        let err = validate_with_context(selection, scalars()).expect_err("missing property is unknown");
         assert!(
             err.message.contains("`MultiLevel`"),
             "{} didn't reference type",
