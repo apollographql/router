@@ -32,6 +32,7 @@ pub(crate) mod file_uploads;
 mod fleet_detector;
 mod forbid_mutations;
 mod headers;
+pub(crate) mod healthcheck;
 mod include_subgraph_errors;
 pub(crate) mod limits;
 pub(crate) mod override_url;
