@@ -255,7 +255,7 @@ fn resolve_shape(
                 .iter()
                 .map(|shape| resolve_shape(shape, context, expression))
                 .collect::<Result<Vec<_>, _>>()?;
-            let tail = resolve_shape(&tail, context, expression)?;
+            let tail = resolve_shape(tail, context, expression)?;
             Ok(Shape::array(prefix, tail, shape.locations.clone()))
         }
         ShapeCase::Object { fields, rest } => {
@@ -512,7 +512,8 @@ mod tests {
     #[test]
     fn bare_field_with_path() {
         let selection = "something.blah";
-        let err = validate_with_context(selection, scalars()).expect_err("missing property is unknown");
+        let err =
+            validate_with_context(selection, scalars()).expect_err("missing property is unknown");
         let expected_location = location_of_expression("something", selection);
         assert!(
             err.message.contains("`something.blah`"),
@@ -548,7 +549,8 @@ mod tests {
     #[test]
     fn nested_unknown_property() {
         let selection = "$args.multiLevel.inner.unknown";
-        let err = validate_with_context(selection, scalars()).expect_err("missing property is unknown");
+        let err =
+            validate_with_context(selection, scalars()).expect_err("missing property is unknown");
         assert!(
             err.message.contains("`MultiLevel`"),
             "{} didn't reference type",
