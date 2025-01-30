@@ -573,8 +573,7 @@ mod tests {
     fn unknown_var_in_scalar() {
         let selection = r#"$({"something": $blahblahblah})"#;
         let err = validate_with_context(selection, Shape::unknown([]))
-            .err()
-            .expect("unknown variable is unknown");
+            .expect_err("unknown variable is unknown");
         assert!(
             err.message.contains("`$blahblahblah`"),
             "{} didn't reference variable",
