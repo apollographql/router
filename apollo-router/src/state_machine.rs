@@ -156,9 +156,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         .map_ok_or_else(Errored, |f| f)
                         .await,
                     );
-                    if matches!(new_state, Some(Running { .. })) {
-                        state_machine.http_server_factory.ready(true);
-                    }
                 }
             }
             Running {
@@ -274,18 +271,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         new_state.unwrap_or(self)
     }
 
-    async fn shutdown<S>(self, http_server_factory: &S) -> Self
-    where
-        S: HttpServerFactory,
-    {
+    async fn shutdown(self) -> Self {
         match self {
             Running {
                 server_handle: Some(server_handle),
                 mut all_connections_stopped_signals,
                 ..
             } => {
-                // We want to set the ready state to false before we start shutting down the server.
-                http_server_factory.ready(false);
                 tracing::info!("shutting down");
                 let state = server_handle
                     .shutdown()
@@ -531,10 +523,6 @@ where
                 .expect("must have listen address guard"),
         };
 
-        // Mark ourselves as live at this point
-
-        self.http_server_factory.live(true);
-
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
             let event_name = format!("{event:?}");
@@ -560,7 +548,7 @@ where
                 }
                 Reload => state.update_inputs(&mut self, None, None, None).await,
                 NoMoreLicense => state.no_more_license().await,
-                Shutdown => state.shutdown(&self.http_server_factory).await,
+                Shutdown => state.shutdown().await,
             };
 
             // Update the shared state
@@ -589,9 +577,6 @@ where
         }
         tracing::info!("stopped");
 
-        // Note that ready(false) will not be called on a non-graceful shutdown.
-        self.http_server_factory.live(false);
-
         match state {
             Stopped => Ok(()),
             Errored(err) => Err(err),
@@ -610,7 +595,6 @@ mod tests {
 
     use futures::channel::oneshot;
     use mockall::mock;
-    use mockall::predicate::eq;
     use mockall::Sequence;
     use multimap::MultiMap;
     use parking_lot::Mutex;
@@ -653,7 +637,7 @@ mod tests {
     #[test(tokio::test)]
     async fn no_configuration() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
@@ -668,7 +652,7 @@ mod tests {
     #[test(tokio::test)]
     async fn no_schema() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
@@ -683,7 +667,7 @@ mod tests {
     #[test(tokio::test)]
     async fn no_license() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(
                 server_factory,
@@ -704,7 +688,7 @@ mod tests {
     #[test(tokio::test)]
     async fn restricted_licensed() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -728,7 +712,7 @@ mod tests {
     #[test(tokio::test)]
     async fn restricted_licensed_halted() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -752,7 +736,7 @@ mod tests {
     #[test(tokio::test)]
     async fn restricted_licensed_warn() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -776,7 +760,7 @@ mod tests {
     #[test(tokio::test)]
     async fn restricted_licensed_unlicensed() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         // The unlicensed event is dropped so we should get a reload
         assert_matches!(
@@ -803,7 +787,7 @@ mod tests {
     #[test(tokio::test)]
     async fn restricted_unlicensed() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert_matches!(
             execute(
@@ -825,7 +809,7 @@ mod tests {
     #[test(tokio::test)]
     async fn unrestricted_unlicensed_restricted_licensed() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert_matches!(
             execute(
@@ -851,7 +835,7 @@ mod tests {
     #[test(tokio::test)]
     async fn listen_addresses_are_locked() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 0, 0, 0, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         let is_telemetry_disabled = false;
         let state_machine =
             StateMachine::new(is_telemetry_disabled, server_factory, router_factory);
@@ -861,7 +845,7 @@ mod tests {
     #[test(tokio::test)]
     async fn shutdown_during_startup() {
         let router_factory = create_mock_router_configurator(0);
-        let (server_factory, _) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
             execute(server_factory, router_factory, stream::iter(vec![Shutdown])).await,
             Ok(())
@@ -871,7 +855,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_shutdown() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -893,7 +877,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_reload_schema() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert_matches!(
             execute(
@@ -919,7 +903,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_no_reload_schema() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert_matches!(
             execute(
@@ -948,7 +932,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_reload_license() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
         assert_matches!(
             execute(
@@ -976,7 +960,7 @@ mod tests {
     #[test(tokio::test)]
     async fn startup_reload_configuration() {
         let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
         assert_matches!(
             execute(
@@ -1008,7 +992,7 @@ mod tests {
     #[test(tokio::test)]
     async fn extract_routing_urls() {
         let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -1035,7 +1019,7 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
 
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
         assert_matches!(
             execute(
@@ -1073,7 +1057,7 @@ mod tests {
             .in_sequence(&mut seq)
             .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
 
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
 
         assert_matches!(
@@ -1128,7 +1112,7 @@ mod tests {
                 Ok(router)
             });
 
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2, 1, 1, 1, 1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
 
         assert_matches!(
@@ -1203,8 +1187,6 @@ mod tests {
             fn create_server(&self,
                 configuration: Arc<Configuration>,
                 main_listener: Option<Listener>,) -> Result<HttpServerHandle, ApolloRouterError>;
-            fn live(&self, live: bool);
-            fn ready(&self, ready: bool);
         }
     }
 
@@ -1229,12 +1211,6 @@ mod tests {
             let res = self.create_server(configuration, main_listener);
             Box::pin(async move { res })
         }
-        fn live(&self, live: bool) {
-            self.live(live);
-        }
-        fn ready(&self, ready: bool) {
-            self.ready(ready);
-        }
     }
 
     async fn execute(
@@ -1250,10 +1226,6 @@ mod tests {
 
     fn create_mock_server_factory(
         expect_times_called: usize,
-        live_true_times: usize,
-        ready_true_times: usize,
-        live_false_times: usize,
-        ready_false_times: usize,
     ) -> (
         MockMyHttpServerFactory,
         (SharedOneShotReceiver, SharedOneShotReceiver),
@@ -1299,26 +1271,6 @@ mod tests {
                     ))
                 },
             );
-        server_factory
-            .expect_live()
-            .with(eq(true))
-            .times(live_true_times)
-            .return_const(());
-        server_factory
-            .expect_ready()
-            .with(eq(true))
-            .times(ready_true_times)
-            .return_const(());
-        server_factory
-            .expect_live()
-            .with(eq(false))
-            .times(live_false_times)
-            .return_const(());
-        server_factory
-            .expect_ready()
-            .with(eq(false))
-            .times(ready_false_times)
-            .return_const(());
         (
             server_factory,
             (shutdown_receivers, extra_shutdown_receivers),
