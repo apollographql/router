@@ -5,6 +5,7 @@ use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
 use batching::BatchingIncompatPlugin;
 use coprocessor::CoprocessorIncompatPlugin;
+use entity_cache::EntityCacheIncompatPlugin;
 use headers::HeadersIncompatPlugin;
 use rhai::RhaiIncompatPlugin;
 use tls::TlsIncompatPlugin;
@@ -17,6 +18,7 @@ mod apq;
 mod authentication;
 mod batching;
 mod coprocessor;
+mod entity_cache;
 mod headers;
 mod rhai;
 mod tls;
@@ -87,6 +89,7 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         AuthIncompatPlugin::from_config(config).map(boxify!()),
         BatchingIncompatPlugin::from_config(config).map(boxify!()),
         CoprocessorIncompatPlugin::from_config(config).map(boxify!()),
+        EntityCacheIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
         RhaiIncompatPlugin::from_config(config).map(boxify!()),
         TlsIncompatPlugin::from_config(config).map(boxify!()),

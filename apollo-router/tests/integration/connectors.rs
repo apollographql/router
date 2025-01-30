@@ -541,6 +541,136 @@ mod coprocessor {
     }
 }
 
+mod entity_cache {
+    use std::path::PathBuf;
+
+    use tower::BoxError;
+
+    use crate::integration::IntegrationTest;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                preview_entity_cache:
+                  enabled: true
+                  subgraph:
+                    all:
+                      enabled: true
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` indirectly targets a connector-enabled subgraph, which is not supported"#)
+        .await;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                preview_entity_cache:
+                  enabled: true
+                  subgraph:
+                    all:
+                      enabled: false
+                    subgraphs:
+                      connectors:
+                        enabled: true
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `preview_entity_cache` is explicitly configured for connector-enabled subgraph"#)
+        .await;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_incompatible_warnings_with_overrides() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                preview_entity_cache:
+                  enabled: true
+                  subgraph:
+                    all:
+                      enabled: false
+                    subgraphs:
+                      connectors:
+                        enabled: false
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+            .assert_log_not_contains(
+                r#""subgraph":"connectors","message":"plugin `preview_entity_cache`"#,
+            )
+            .await;
+
+        Ok(())
+    }
+}
+
 mod headers {
     use std::path::PathBuf;
 
