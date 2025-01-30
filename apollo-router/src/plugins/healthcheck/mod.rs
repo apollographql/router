@@ -53,13 +53,13 @@ pub(crate) struct ReadinessIntervalConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>", default)]
-    /// The sampling interval (default: 5s)
+    /// The sampling interval (default: 10s)
     pub(crate) sampling: Duration,
 
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>")]
-    /// The unready interval (default: sampling interval)
+    /// The unready interval (default: 3 * sampling interval)
     pub(crate) unready: Option<Duration>,
 }
 
@@ -78,7 +78,7 @@ pub(crate) struct ReadinessConfig {
 impl Default for ReadinessIntervalConfig {
     fn default() -> Self {
         Self {
-            sampling: Duration::from_secs(5),
+            sampling: Duration::from_secs(10),
             unready: None,
         }
     }
@@ -188,7 +188,7 @@ impl PluginPrivate for HealthCheck {
             .readiness
             .interval
             .unready
-            .unwrap_or(my_sampling_interval);
+            .unwrap_or(3 * my_sampling_interval);
         let my_rejected = rejected.clone();
         let my_ready = ready.clone();
 
