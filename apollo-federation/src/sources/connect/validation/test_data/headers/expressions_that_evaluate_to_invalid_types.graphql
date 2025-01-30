@@ -10,7 +10,7 @@ extend schema
         headers: [
             { name: "an-array", value: "{$->echo([])}" },
             { name: "an-object", value: "{$({})}"},
-            { name: "maybe-object", value: "$config->match([1, 1], [2, {}])" },
+            { name: "maybe-object", value: "{$config->match([1, 1], [2, {}])}" },
         ]
     }
 )
