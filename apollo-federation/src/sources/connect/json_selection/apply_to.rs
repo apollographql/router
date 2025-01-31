@@ -705,6 +705,8 @@ impl ApplyToInternal for WithRange<PathList> {
 
             PathList::Method(method_name, _method_args, _tail) => {
                 if let Some(_method) = ArrowMethod::lookup(method_name) {
+                    // TODO: call method.shape here to re-enable method type-checking
+                    //  call for each inner type of a One
                     Shape::unknown(method_name.shape_location(source_id))
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
