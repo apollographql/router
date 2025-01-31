@@ -703,47 +703,11 @@ impl ApplyToInternal for WithRange<PathList> {
                 source_id,
             ),
 
-            PathList::Method(method_name, method_args, tail) => {
-                if input_shape.is_none() {
-                    // Following WithRange<PathList>::apply_to_path, we do not
-                    // want to apply methods to missing input data.
-                    return input_shape;
-                }
-
-                if let Some(method) = ArrowMethod::lookup(method_name) {
-                    let method_result_shape = if let ShapeCase::One(cases) = input_shape.case() {
-                        Shape::one(
-                            cases.iter().map(|case| {
-                                self.compute_output_shape(
-                                    case.clone(),
-                                    dollar_shape.clone(),
-                                    named_var_shapes,
-                                    source_id,
-                                )
-                            }),
-                            input_shape.locations.clone(),
-                        )
-                    } else {
-                        method.shape(
-                            method_name,
-                            method_args.as_ref(),
-                            input_shape,
-                            dollar_shape.clone(),
-                            named_var_shapes,
-                            source_id,
-                        )
-                    };
-
-                    if method_result_shape.is_none() {
-                        method_result_shape.clone()
-                    } else {
-                        tail.compute_output_shape(
-                            method_result_shape,
-                            dollar_shape.clone(),
-                            named_var_shapes,
-                            source_id,
-                        )
-                    }
+            PathList::Method(method_name, _method_args, _tail) => {
+                if let Some(_method) = ArrowMethod::lookup(method_name) {
+                    // TODO: call method.shape here to re-enable method type-checking
+                    //  call for each inner type of a One
+                    Shape::unknown(method_name.shape_location(source_id))
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
                     Shape::error(message.as_str(), method_name.shape_location(source_id))
@@ -2616,50 +2580,51 @@ mod tests {
             "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
         );
 
-        assert_eq!(
-            selection!(r#"
-                id
-                name
-                friends: friend_ids->map({ id: @ })
-                alias: arrayOfArrays { x y }
-                ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).shape().pretty_print(),
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })")
-                .shape()
-                .pretty_print(),
-            "{ thrice: [$root, $root, $root] }",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries")
-                .shape()
-                .pretty_print(),
-            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-                .shape()
-                .pretty_print(),
-            "[\"thrice\"]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-                .shape()
-                .pretty_print(),
-            "[[$root, $root, $root]]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-                .shape()
-                .pretty_print(),
-            "[{ k: \"wrapped\", v: $root }]",
-        );
+        // TODO: re-test when method type checking is re-enabled
+        // assert_eq!(
+        //     selection!(r#"
+        //         id
+        //         name
+        //         friends: friend_ids->map({ id: @ })
+        //         alias: arrayOfArrays { x y }
+        //         ys: arrayOfArrays.y xs: arrayOfArrays.x
+        //     "#).shape().pretty_print(),
+        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })")
+        //         .shape()
+        //         .pretty_print(),
+        //     "{ thrice: [$root, $root, $root] }",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })->entries")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })->entries.key")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[\"thrice\"]",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })->entries.value")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[[$root, $root, $root]]",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[{ k: \"wrapped\", v: $root }]",
+        // );
     }
 }
