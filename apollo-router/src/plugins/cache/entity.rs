@@ -99,14 +99,14 @@ impl Storage {
 pub(crate) struct Config {
     /// Enable or disable the entity caching feature
     #[serde(default)]
-    enabled: bool,
+    pub(crate) enabled: bool,
 
     #[serde(default)]
     /// Expose cache keys in context
     expose_keys_in_context: bool,
 
     /// Configure invalidation per subgraph
-    subgraph: SubgraphConfiguration<Subgraph>,
+    pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
