@@ -870,7 +870,10 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         self.dump_stack_traces();
-        panic!("'{msg}' not detected in logs");
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -881,7 +884,10 @@ impl IntegrationTest {
             }
         }
 
-        panic!("'{msg}' not detected in logs");
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -891,7 +897,10 @@ impl IntegrationTest {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 if line.contains(msg) {
                     self.dump_stack_traces();
-                    panic!("'{msg}' detected in logs");
+                    panic!(
+                        "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                        logs = self.logs.join("\n")
+                    );
                 }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
