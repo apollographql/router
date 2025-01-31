@@ -406,7 +406,7 @@ impl ApplyToInternal for NamedSelection {
                 let output_key = alias_opt
                     .as_ref()
                     .map_or(key.as_str(), |alias| alias.name());
-                let field_shape = dollar_shape.field(key.as_str(), key.shape_location(source_id));
+                let field_shape = field(&dollar_shape, key, source_id);
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
@@ -660,7 +660,7 @@ impl ApplyToInternal for WithRange<PathList> {
                                 shape.clone()
                             } else {
                                 rest.compute_output_shape(
-                                    shape.field(key.as_str(), key.shape_location(source_id)),
+                                    field(shape, key, source_id),
                                     dollar_shape.clone(),
                                     named_var_shapes,
                                     source_id,
@@ -673,7 +673,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         tail.clone()
                     } else {
                         rest.compute_output_shape(
-                            tail.field(key.as_str(), key.shape_location(source_id)),
+                            field(tail, key, source_id),
                             dollar_shape.clone(),
                             named_var_shapes,
                             source_id,
@@ -683,7 +683,7 @@ impl ApplyToInternal for WithRange<PathList> {
                     Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
                 } else {
                     rest.compute_output_shape(
-                        input_shape.field(key.as_str(), key.shape_location(source_id)),
+                        field(&input_shape, key, source_id),
                         dollar_shape.clone(),
                         named_var_shapes,
                         source_id,
@@ -987,6 +987,28 @@ impl ApplyToInternal for SubSelection {
 
         all_shape
     }
+}
+
+/// Helper to get the field from a shape or error if the object doesn't have that field.
+fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
+    if let ShapeCase::One(inner) = shape.case() {
+        let mut new_fields = Vec::new();
+        for inner_field in inner {
+            new_fields.push(field(inner_field, key, source_id));
+        }
+        return Shape::one(new_fields, shape.locations.clone());
+    }
+    if shape.is_none() || shape.is_null() {
+        return Shape::none();
+    }
+    let field_shape = shape.field(key.as_str(), key.shape_location(source_id));
+    if field_shape.is_none() {
+        return Shape::error(
+            format!("field `{field}` not found", field = key.as_str()),
+            key.shape_location(source_id),
+        );
+    }
+    field_shape
 }
 
 #[cfg(test)]
