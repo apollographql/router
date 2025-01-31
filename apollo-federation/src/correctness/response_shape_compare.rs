@@ -97,8 +97,8 @@ pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint<'a>>
     })
 }
 
-/// Merge all definitions applicable to the given type condition.
-fn merge_definitions_for_type_condition(
+/// Collect and merge all definitions applicable to the given type condition.
+fn collect_definitions_for_type_condition(
     defs: &PossibleDefinitions,
     filter_cond: &NormalizedTypeCondition,
 ) -> Result<PossibleDefinitionsPerTypeCondition, CheckFailure> {
@@ -111,7 +111,7 @@ fn merge_definitions_for_type_condition(
                 .try_for_each(|variant| result.insert_variant(variant.clone()))
                 .map_err(|e| {
                     CheckFailure::new(format!(
-                        "merge_definitions_for_type_condition failed for {filter_cond}\ntype_cond: {type_cond}\nerror: {e}",
+                        "collect_definitions_for_type_condition failed for {filter_cond}\ntype_cond: {type_cond}\nerror: {e}",
                     ))
                 })?;
         }
@@ -125,45 +125,86 @@ fn merge_definitions_for_type_condition(
     }
 }
 
+fn path_constraint_allows_type_condition<'a, T: PathConstraint<'a>>(
+    path_constraint: &T,
+    type_cond: &NormalizedTypeCondition,
+) -> bool {
+    type_cond
+        .ground_set()
+        .iter()
+        .any(|ty| path_constraint.allows(ty))
+}
+
+fn detail_single_object_type_condition(type_cond: &NormalizedTypeCondition) -> String {
+    let Some(ground_ty) = type_cond.ground_set().iter().next() else {
+        return "".to_string();
+    };
+    if !type_cond.is_named_object_type() {
+        format!(" (has single object type: {ground_ty})")
+    } else {
+        "".to_string()
+    }
+}
+
 fn compare_possible_definitions<'a, T: PathConstraint<'a>>(
     path_constraint: &T,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
 ) -> Result<(), CheckFailure> {
     this.iter().try_for_each(|(this_cond, this_def)| {
+        if !path_constraint_allows_type_condition(path_constraint, this_cond) {
+            // Skip `this_cond` since it's not satisfiable under the path constraint.
+            return Ok(());
+        }
+
+        let updated_constraint = path_constraint.under_type_condition(this_cond);
+
+        // First try: Use the single exact match (common case).
         if let Some(other_def) = other.get(this_cond) {
-            // TODO: Consider the intersection of path_constraint and this_cond?
-            let updated_constraint = path_constraint.under_type_condition(this_cond);
             let result = compare_possible_definitions_per_type_condition(
                 &updated_constraint,
                 this_def,
                 other_def,
             );
+            if let Ok(result) = result {
+                return Ok(result);
+            }
+            // fall through
+        }
+
+        // Second try: Collect all definitions implied by the `this_cond`.
+        if let Ok(other_def) = collect_definitions_for_type_condition(other, this_cond) {
+            let result = compare_possible_definitions_per_type_condition(
+                &updated_constraint,
+                this_def,
+                &other_def,
+            );
             match result {
                 Ok(result) => return Ok(result),
                 Err(err) => {
-                    // See if `this_cond` is an object (or non-abstract) type.
+                    // See if we can case-split over ground set items.
                     if this_cond.ground_set().len() == 1 {
-                        // Concrete types can't be type blasted.
+                        // Single object type has no other option. Stop and report the error.
+                        let detail = detail_single_object_type_condition(this_cond);
                         return Err(CheckFailure::new(format!(
-                            "mismatch for type condition: {this_cond}\n{}",
+                            "mismatch for type condition: {this_cond}{detail}\n{}",
                             err.description()
                         )));
                     }
                 }
             }
             // fall through
-        }
+        };
 
-        // If there is no exact match for `this_cond`, try individual ground types.
+        // Finally: Case-split over individual ground types.
         let ground_set_iter = this_cond.ground_set().iter();
         let mut ground_set_iter = ground_set_iter.filter(|ty| path_constraint.allows(ty));
         ground_set_iter.try_for_each(|ground_ty| {
             let filter_cond = NormalizedTypeCondition::from_object_type(ground_ty);
             let other_def =
-                merge_definitions_for_type_condition(other, &filter_cond).map_err(|e| {
+                collect_definitions_for_type_condition(other, &filter_cond).map_err(|e| {
                     e.add_description(&format!(
-                        "missing type condition: {this_cond} ({ground_ty})"
+                        "missing type condition: {this_cond} (case: {ground_ty})"
                     ))
                 })?;
             let updated_constraint = path_constraint.under_type_condition(&filter_cond);
@@ -174,7 +215,7 @@ fn compare_possible_definitions<'a, T: PathConstraint<'a>>(
             )
             .map_err(|e| {
                 e.add_description(&format!(
-                    "mismatch for type condition: {this_cond} ({ground_ty})"
+                    "mismatch for type condition: {this_cond} (case: {ground_ty})"
                 ))
             })
         })
@@ -210,7 +251,7 @@ fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint<'a>>(
                 })?;
             if !found {
                 Err(CheckFailure::new(
-                    format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\n expected clause: {}\ntarget definitions:\n{}",
+                    format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\nexpected clause: {}\ntarget definitions:\n{}",
                             this_def.boolean_clause(),
                             other,
                     ),

@@ -259,6 +259,15 @@ impl NormalizedTypeCondition {
         rest.is_empty() && first.type_name == *type_name
     }
 
+    /// Is this type condition a named object type?
+    pub fn is_named_object_type(&self) -> bool {
+        let Some((display_first, display_rest)) = self.for_display.0.split_first() else {
+            // Deduced condition is not an object type.
+            return false;
+        };
+        display_rest.is_empty() && display_first.is_object_type()
+    }
+
     /// precondition: `self` and `other` are not empty.
     pub fn implies(&self, other: &Self) -> bool {
         self.ground_set.iter().all(|t| other.ground_set.contains(t))
