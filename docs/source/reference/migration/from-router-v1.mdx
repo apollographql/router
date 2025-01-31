@@ -362,10 +362,18 @@ telemetry:
 
 And ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and or `4318` for gRPC and HTTP respectively.
 
-### Check CORS configuration
+### Enforce CORS configuration
 
-If you already configured [CORS](../../routing/security/cors) on the router, the configuration won't change but with v1.x it accepted bad configuration and displayed an error log when some header names or regexes were invalid.
-With v2.x it will end up with an error and it won't start at all to avoid confusions and misconfigurations.
+In 1.x, invalid values in the CORS configuration, such as malformed regexes, were ignored with an error logged.
+In 2.x, such values prevent router startup.
+
+If your router 2.x does not start with an error message like this:
+
+```
+could not create router: CORS configuration error:
+```
+
+Check the [CORS configuration documentation](../../routing/security/cors) and fix the problems or delete the invalid values.
 
 ### Headers propagation
 
