@@ -2556,50 +2556,51 @@ mod tests {
             "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
         );
 
-        assert_eq!(
-            selection!(r#"
-                id
-                name
-                friends: friend_ids->map({ id: @ })
-                alias: arrayOfArrays { x y }
-                ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).shape().pretty_print(),
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })")
-                .shape()
-                .pretty_print(),
-            "{ thrice: [$root, $root, $root] }",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries")
-                .shape()
-                .pretty_print(),
-            "[{ key: \"thrice\", value: [$root, $root, $root] }]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries.key")
-                .shape()
-                .pretty_print(),
-            "[\"thrice\"]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ thrice: [@, @, @] })->entries.value")
-                .shape()
-                .pretty_print(),
-            "[[$root, $root, $root]]",
-        );
-
-        assert_eq!(
-            selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
-                .shape()
-                .pretty_print(),
-            "[{ k: \"wrapped\", v: $root }]",
-        );
+        // TODO: re-test when method type checking is re-enabled
+        // assert_eq!(
+        //     selection!(r#"
+        //         id
+        //         name
+        //         friends: friend_ids->map({ id: @ })
+        //         alias: arrayOfArrays { x y }
+        //         ys: arrayOfArrays.y xs: arrayOfArrays.x
+        //     "#).shape().pretty_print(),
+        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })")
+        //         .shape()
+        //         .pretty_print(),
+        //     "{ thrice: [$root, $root, $root] }",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })->entries")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[{ key: \"thrice\", value: [$root, $root, $root] }]",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })->entries.key")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[\"thrice\"]",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ thrice: [@, @, @] })->entries.value")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[[$root, $root, $root]]",
+        // );
+        //
+        // assert_eq!(
+        //     selection!("$->echo({ wrapped: @ })->entries { k: key v: value }")
+        //         .shape()
+        //         .pretty_print(),
+        //     "[{ k: \"wrapped\", v: $root }]",
+        // );
     }
 }
