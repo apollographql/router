@@ -697,7 +697,7 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                 KeyValue::new("apollo.client.version", client_version),
                 KeyValue::new("graphql.error.extensions.code", "SOME_ERROR_CODE"),
                 KeyValue::new("graphql.error.path", "/obj/field"),
-                KeyValue::new("apollo.router.error.source", "mySubgraph"),
+                KeyValue::new("apollo.router.error.service", "mySubgraph"),
             ]
         );
         assert_counter!(
@@ -711,7 +711,7 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                 KeyValue::new("apollo.client.version", client_version),
                 KeyValue::new("graphql.error.extensions.code", "SOME_OTHER_ERROR_CODE"),
                 KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
-                KeyValue::new("apollo.router.error.source", "myOtherSubgraph"),
+                KeyValue::new("apollo.router.error.service", "myOtherSubgraph"),
             ]
         );
     }

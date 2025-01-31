@@ -897,7 +897,7 @@ impl RouterService {
                     "apollo.client.version" = client_version.clone(),
                     "graphql.error.extensions.code" = code_str,
                     "graphql.error.path" = path,
-                    "apollo.router.error.source" = service
+                    "apollo.router.error.service" = service
                 );
             }
         }
