@@ -52,6 +52,7 @@ fn typeof_method(
         tail.apply_to_path(&typeof_string, vars, input_path)
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn typeof_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -109,6 +110,7 @@ fn eq_method(
         )],
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn eq_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -173,6 +175,7 @@ fn match_if_method(
         ),
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn match_if_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -295,6 +298,7 @@ infix_math_op!(mul_op, *);
 infix_math_op!(div_op, /);
 infix_math_op!(rem_op, %);
 
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn math_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -422,6 +426,7 @@ fn has_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn has_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -632,6 +637,7 @@ fn get_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn get_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -789,6 +795,7 @@ fn keys_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn keys_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -867,6 +874,7 @@ fn values_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn values_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -911,6 +919,7 @@ fn not_method(
         tail.apply_to_path(&JSON::Bool(!is_truthy(data)), vars, input_path)
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn not_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -982,6 +991,7 @@ fn or_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn or_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -1070,6 +1080,7 @@ fn and_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn and_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
