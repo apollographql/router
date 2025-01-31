@@ -481,7 +481,8 @@ mod tests {
     #[rstest]
     #[case::array("$([])")]
     #[case::object("$({\"a\": 1})")]
-    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
+    #[case::missing_property_of_object("$({\"a\": 1}).b")]
+    #[case::missing_property_of_in_array("$([{\"a\": 1}]).b")]
     #[case::last("$([1, 2])")]
     #[case::unknown_var("$args.unknown")]
     #[case::arg_is_array("$args.array")]
@@ -583,6 +584,42 @@ mod tests {
         assert!(
             err.locations
                 .contains(&location_of_expression("$blahblahblah", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn subselection_of_literal_with_missing_field() {
+        let selection = r#"$({"a": 1}) { b }"#;
+        let err = validate_with_context(selection, Shape::unknown([]))
+            .expect_err("invalid property is an error");
+        assert!(
+            err.message.contains("`b`"),
+            "{} didn't reference variable",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("b", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn subselection_of_literal_in_array_with_missing_field() {
+        let selection = r#"$([{"a": 1}]) { b }"#;
+        let err = validate_with_context(selection, Shape::unknown([]))
+            .expect_err("invalid property is an error");
+        assert!(
+            err.message.contains("`b`"),
+            "{} didn't reference variable",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("b", selection)),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );
