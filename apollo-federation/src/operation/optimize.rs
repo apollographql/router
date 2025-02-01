@@ -256,7 +256,7 @@ impl<'a> FragmentGenerator<'a> {
                 }
                 Selection::InlineFragment(inline_fragment) => {
                     let minified_selection =
-                        self.minify_inline_fragment_selection(&inline_fragment)?;
+                        self.minify_inline_fragment_selection(inline_fragment)?;
                     new_selection_set.add_local_selection(&minified_selection)?;
                 }
             }
