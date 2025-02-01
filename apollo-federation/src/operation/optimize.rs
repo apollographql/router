@@ -277,7 +277,7 @@ impl<'a> FragmentGenerator<'a> {
             let minified_selection_set = match self.selection_counts.get(&selection_key) {
                 Some(count_entry) if count_entry.count > 1 => {
                     // extract named fragment OR use one that already exists
-                    let unique_fragment_id = count_entry.selection_id.clone();
+                    let unique_fragment_id = count_entry.selection_id;
                     let fragment =
                         if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
                             existing
@@ -331,7 +331,7 @@ impl<'a> FragmentGenerator<'a> {
         let minified_selection = match self.selection_counts.get(&selection_key) {
             Some(count_entry) if count_entry.count > 1 => {
                 // extract named fragment OR use one that already exists
-                let unique_fragment_id = count_entry.selection_id.clone();
+                let unique_fragment_id = count_entry.selection_id;
                 let fragment =
                     if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
                         existing
@@ -350,19 +350,17 @@ impl<'a> FragmentGenerator<'a> {
 
                 if skip_include_only {
                     // convert inline fragment selection to a fragment spread
-                    let lifted_fragment_spread_selection =
-                        Selection::from(FragmentSpreadSelection {
-                            spread: FragmentSpread {
-                                schema: fragment.schema.clone(),
-                                fragment_name: fragment.name.clone(),
-                                type_condition_position: fragment.type_condition_position.clone(),
-                                directives: directives.clone(),
-                                fragment_directives: fragment.directives.clone(),
-                                selection_id: SelectionId::new(),
-                            },
-                            selection_set: fragment.selection_set.clone(),
-                        });
-                    lifted_fragment_spread_selection
+                    Selection::from(FragmentSpreadSelection {
+                        spread: FragmentSpread {
+                            schema: fragment.schema.clone(),
+                            fragment_name: fragment.name.clone(),
+                            type_condition_position: fragment.type_condition_position.clone(),
+                            directives: directives.clone(),
+                            fragment_directives: fragment.directives.clone(),
+                            selection_id: SelectionId::new(),
+                        },
+                        selection_set: fragment.selection_set.clone(),
+                    })
                 } else {
                     // cannot lift out inline selection directly as it has directives
                     // extract named fragment from inline fragment selections
