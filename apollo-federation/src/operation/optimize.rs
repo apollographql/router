@@ -41,18 +41,20 @@ use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 
+use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpreadSelection;
 use super::HasSelectionKey;
+use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
+use super::SelectionId;
 use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
-use crate::operation::SelectionValue;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 //=============================================================================
 // Selection/SelectionSet minus operation
@@ -123,18 +125,38 @@ impl Operation {
     /// Optimize the parsed size of the operation by generating fragments from selection sets that
     /// occur multiple times in the operation.
     pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
-        let mut generator = FragmentGenerator::default();
-        generator.collect_selection_usages(&self.selection_set);
-        generator.minify(&mut self.selection_set)?;
+        let mut generator = FragmentGenerator::new(&self.selection_set);
+        let minified_selection = generator.minify(&self.selection_set)?;
         self.named_fragments = generator.into_inner();
+        self.selection_set = minified_selection;
         Ok(())
     }
 }
 
-#[derive(Debug, Default)]
-struct FragmentGenerator {
-    selection_counts: HashMap<u64, usize>,
-    minimized_fragments: IndexMap<u64, Fragment>,
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct SelectionCountKey<'a> {
+    type_position: &'a CompositeTypeDefinitionPosition,
+    selection_set: &'a SelectionSet,
+}
+
+struct SelectionCountValue {
+    selection_id: SelectionId,
+    count: usize,
+}
+
+impl SelectionCountValue {
+    fn new() -> Self {
+        SelectionCountValue {
+            selection_id: SelectionId::new(),
+            count: 0,
+        }
+    }
+}
+
+#[derive(Default)]
+struct FragmentGenerator<'a> {
+    selection_counts: HashMap<SelectionCountKey<'a>, SelectionCountValue>,
+    minimized_fragments: IndexMap<SelectionId, Fragment>,
 }
 
 /// Returns a consistent GraphQL name for the given index.
@@ -163,32 +185,32 @@ fn fragment_name(mut index: usize) -> Name {
     }
 }
 
-impl FragmentGenerator {
+impl<'a> FragmentGenerator<'a> {
     fn next_name(&self) -> Name {
         fragment_name(self.minimized_fragments.len())
     }
 
-    fn hash_key(&self, selection_set: &SelectionSet) -> u64 {
-        #[derive(PartialEq, Eq, Hash)]
-        struct NamedFragmentCandidateKey<'a> {
-            type_position: &'a CompositeTypeDefinitionPosition,
-            selection_set: &'a SelectionSet,
-        }
-        let key = NamedFragmentCandidateKey {
+    fn new(selection_set: &'a SelectionSet) -> Self {
+        let mut generator = FragmentGenerator::default();
+        generator.collect_selection_usages(selection_set);
+        generator
+    }
+
+    fn increment_selection_count(&mut self, selection_set: &'a SelectionSet) {
+        let selection_key = SelectionCountKey {
             type_position: &selection_set.type_position,
             selection_set,
         };
-        self.minimized_fragments.hasher().hash_one(key)
-    }
-
-    fn increment_selection_count(&mut self, selection_set: &SelectionSet) {
-        let hash = self.hash_key(selection_set);
-        *self.selection_counts.entry(hash).or_insert(0) += 1;
+        let entry = self
+            .selection_counts
+            .entry(selection_key)
+            .or_insert(SelectionCountValue::new());
+        entry.count += 1;
     }
 
     /// Recursively iterate over all selections to capture counts of how many times given selection
     /// occurs within the operation.
-    fn collect_selection_usages(&mut self, selection_set: &SelectionSet) {
+    fn collect_selection_usages(&mut self, selection_set: &'a SelectionSet) {
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field) => {
@@ -202,7 +224,7 @@ impl FragmentGenerator {
                     self.collect_selection_usages(&frag.selection_set);
                 }
                 Selection::FragmentSpread(_) => {
-                    // nothing to here as it is already a fragment spread
+                    // nothing to do here as it is already a fragment spread
                     // NOTE: there shouldn't be any fragment spreads in selections at this time
                     continue;
                 }
@@ -213,173 +235,190 @@ impl FragmentGenerator {
     /// Recursively iterates over all selections to check if their selection sets are used multiple
     /// times within the operation. Every selection set that is used more than once will be extracted
     /// as a named fragment.
-    fn minify(&mut self, selection_set: &mut SelectionSet) -> Result<(), FederationError> {
-        // iterate over all selections to check if given selection is used multiple times
-        // if selection is used multiple times then we extract it as named fragment
+    fn minify(&mut self, selection_set: &SelectionSet) -> Result<SelectionSet, FederationError> {
         let mut new_selection_set = SelectionSet::empty(
             selection_set.schema.clone(),
             selection_set.type_position.clone(),
         );
 
-        for selection in Arc::make_mut(&mut selection_set.selections).values_mut() {
+        for selection in selection_set.selections.values() {
             match selection {
-                SelectionValue::Field(mut field) => {
-                    if let Some(field_selection_set) = field.get_selection_set_mut() {
-                        let hash = self.hash_key(field_selection_set);
-                        if self
-                            .selection_counts
-                            .get(&hash)
-                            .is_some_and(|count| count > &1)
-                        {
-                            // extract named fragment OR use one that already exists
-                            let fragment =
-                                if let Some(existing) = self.minimized_fragments.get(&hash) {
-                                    existing
-                                } else {
-                                    // minify current selection set and extract named fragment
-                                    self.minify(field_selection_set)?;
-                                    self.minimized_fragments.insert(
-                                        hash,
-                                        Fragment {
-                                            schema: field_selection_set.schema.clone(),
-                                            name: self.next_name(),
-                                            type_condition_position: field_selection_set
-                                                .type_position
-                                                .clone(),
-                                            directives: Default::default(),
-                                            selection_set: field_selection_set.clone(),
-                                        },
-                                    );
-                                    self.minimized_fragments.get(&hash).unwrap()
-                                };
-
-                            // replace field selection set with fragment spread
-                            let schema = &selection_set.schema;
-                            *field_selection_set = SelectionSet::empty(
-                                schema.clone(),
-                                field_selection_set.type_position.clone(),
-                            );
-                            field_selection_set.add_local_selection(&Selection::from(
-                                FragmentSpreadSelection {
-                                    spread: FragmentSpread {
-                                        schema: fragment.schema.clone(),
-                                        fragment_name: fragment.name.clone(),
-                                        type_condition_position: fragment
-                                            .type_condition_position
-                                            .clone(),
-                                        directives: Default::default(),
-                                        fragment_directives: fragment.directives.clone(),
-                                        selection_id: crate::operation::SelectionId::new(),
-                                    },
-                                    selection_set: fragment.selection_set.clone(),
-                                },
-                            ))?;
-                        } else {
-                            // minify current sub selection as it cannot be updated to a fragment reference
-                            self.minify(field_selection_set)?;
-                        }
-                    }
+                Selection::Field(field) => {
+                    let minified_field_selection = self.minify_field_selection(field)?;
+                    let new_field = field.with_updated_selection_set(minified_field_selection);
                     new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
+                        .add_local_selection(&Selection::Field(Arc::new(new_field)))?;
                 }
-                SelectionValue::FragmentSpread(frag) => {
+                Selection::FragmentSpread(frag) => {
                     // already a fragment spread so just copy it over
                     new_selection_set
-                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag)))?;
                 }
-                SelectionValue::InlineFragment(mut inline_fragment) => {
-                    let hash = self.hash_key(&inline_fragment.get().selection_set);
-                    if self
-                        .selection_counts
-                        .get(&hash)
-                        .is_some_and(|count| count > &1)
-                    {
-                        // extract named fragment OR use one that already exists
-                        let fragment = if let Some(existing) = self.minimized_fragments.get(&hash) {
-                            existing
-                        } else {
-                            self.minify(inline_fragment.get_selection_set_mut())?;
-                            let name = self.next_name();
-                            self.minimized_fragments.insert(
-                                hash,
-                                Fragment {
-                                    schema: selection_set.schema.clone(),
-                                    name: name.clone(),
-                                    type_condition_position: inline_fragment
-                                        .get()
-                                        .inline_fragment
-                                        .casted_type(),
-                                    directives: Default::default(),
-                                    selection_set: inline_fragment.get().selection_set.clone(),
-                                },
-                            );
-                            self.minimized_fragments.get(&hash).unwrap()
-                        };
-
-                        let directives = &inline_fragment.get().inline_fragment.directives;
-                        let skip_include_only = directives
-                            .iter()
-                            .all(|d| matches!(d.name.as_str(), "skip" | "include"));
-
-                        if skip_include_only {
-                            // convert inline fragment selection to fragment spread
-                            let fragment_spread_selection =
-                                Selection::from(FragmentSpreadSelection {
-                                    spread: FragmentSpread {
-                                        schema: selection_set.schema.clone(),
-                                        fragment_name: fragment.name.clone(),
-                                        type_condition_position: fragment
-                                            .type_condition_position
-                                            .clone(),
-                                        directives: directives.clone(),
-                                        fragment_directives: fragment.directives.clone(),
-                                        selection_id: crate::operation::SelectionId::new(),
-                                    },
-                                    selection_set: fragment.selection_set.clone(),
-                                });
-
-                            new_selection_set.add_local_selection(&fragment_spread_selection)?;
-                        } else {
-                            // cannot lift out inline selection directly as it has directives
-                            // extract named fragment from inline fragment selections
-                            let fragment_spread_selection =
-                                Selection::from(FragmentSpreadSelection {
-                                    spread: FragmentSpread {
-                                        schema: selection_set.schema.clone(),
-                                        fragment_name: fragment.name.clone(),
-                                        type_condition_position: fragment
-                                            .type_condition_position
-                                            .clone(),
-                                        directives: Default::default(),
-                                        fragment_directives: fragment.directives.clone(),
-                                        selection_id: crate::operation::SelectionId::new(),
-                                    },
-                                    selection_set: fragment.selection_set.clone(),
-                                });
-
-                            let mut new_inline_selection_set = SelectionSet::empty(
-                                fragment.schema.clone(),
-                                fragment.type_condition_position.clone(),
-                            );
-                            new_inline_selection_set
-                                .add_local_selection(&fragment_spread_selection)?;
-                            *inline_fragment.get_selection_set_mut() = new_inline_selection_set;
-                            new_selection_set.add_local_selection(&Selection::InlineFragment(
-                                Arc::clone(inline_fragment.get()),
-                            ))?;
-                        }
-                    } else {
-                        self.minify(inline_fragment.get_selection_set_mut())?;
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(inline_fragment.get()),
-                        ))?;
-                    }
+                Selection::InlineFragment(inline_fragment) => {
+                    let minified_selection =
+                        self.minify_inline_fragment_selection(&inline_fragment)?;
+                    new_selection_set.add_local_selection(&minified_selection)?;
                 }
             }
         }
 
-        *selection_set = new_selection_set;
-        Ok(())
+        Ok(new_selection_set)
+    }
+
+    fn minify_field_selection(
+        &mut self,
+        field: &Arc<FieldSelection>,
+    ) -> Result<Option<SelectionSet>, FederationError> {
+        if let Some(field_selection_set) = &field.selection_set {
+            let selection_key = SelectionCountKey {
+                type_position: &field_selection_set.type_position,
+                selection_set: field_selection_set,
+            };
+            let minified_selection_set = match self.selection_counts.get(&selection_key) {
+                Some(count_entry) if count_entry.count > 1 => {
+                    // extract named fragment OR use one that already exists
+                    let unique_fragment_id = count_entry.selection_id.clone();
+                    let fragment =
+                        if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
+                            existing
+                        } else {
+                            self.create_new_fragment(
+                                unique_fragment_id,
+                                field_selection_set,
+                                &field_selection_set.type_position,
+                            )?
+                        };
+
+                    // create new field selection set with just a fragment spread
+                    let mut new_field_selection_set = SelectionSet::empty(
+                        field_selection_set.schema.clone(),
+                        field_selection_set.type_position.clone(),
+                    );
+                    new_field_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
+                            spread: FragmentSpread {
+                                schema: fragment.schema.clone(),
+                                fragment_name: fragment.name.clone(),
+                                type_condition_position: fragment.type_condition_position.clone(),
+                                directives: Default::default(),
+                                fragment_directives: fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            },
+                            selection_set: fragment.selection_set.clone(),
+                        },
+                    ))?;
+                    new_field_selection_set
+                }
+                _ => {
+                    // minify current sub selection as it cannot be updated with a fragment reference
+                    self.minify(field_selection_set)?
+                }
+            };
+            Ok(Some(minified_selection_set))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn minify_inline_fragment_selection(
+        &mut self,
+        inline_fragment: &Arc<InlineFragmentSelection>,
+    ) -> Result<Selection, FederationError> {
+        let selection_key = SelectionCountKey {
+            type_position: &inline_fragment.selection_set.type_position,
+            selection_set: &inline_fragment.selection_set,
+        };
+        let minified_selection = match self.selection_counts.get(&selection_key) {
+            Some(count_entry) if count_entry.count > 1 => {
+                // extract named fragment OR use one that already exists
+                let unique_fragment_id = count_entry.selection_id.clone();
+                let fragment =
+                    if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
+                        existing
+                    } else {
+                        self.create_new_fragment(
+                            unique_fragment_id,
+                            &inline_fragment.selection_set,
+                            &inline_fragment.inline_fragment.casted_type(),
+                        )?
+                    };
+
+                let directives = &inline_fragment.inline_fragment.directives;
+                let skip_include_only = directives
+                    .iter()
+                    .all(|d| matches!(d.name.as_str(), "skip" | "include"));
+
+                if skip_include_only {
+                    // convert inline fragment selection to a fragment spread
+                    let lifted_fragment_spread_selection =
+                        Selection::from(FragmentSpreadSelection {
+                            spread: FragmentSpread {
+                                schema: fragment.schema.clone(),
+                                fragment_name: fragment.name.clone(),
+                                type_condition_position: fragment.type_condition_position.clone(),
+                                directives: directives.clone(),
+                                fragment_directives: fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            },
+                            selection_set: fragment.selection_set.clone(),
+                        });
+                    lifted_fragment_spread_selection
+                } else {
+                    // cannot lift out inline selection directly as it has directives
+                    // extract named fragment from inline fragment selections
+                    let fragment_spread_selection = Selection::from(FragmentSpreadSelection {
+                        spread: FragmentSpread {
+                            schema: fragment.schema.clone(),
+                            fragment_name: fragment.name.clone(),
+                            type_condition_position: fragment.type_condition_position.clone(),
+                            directives: Default::default(),
+                            fragment_directives: fragment.directives.clone(),
+                            selection_id: SelectionId::new(),
+                        },
+                        selection_set: fragment.selection_set.clone(),
+                    });
+
+                    let mut new_inline_selection_set = SelectionSet::empty(
+                        fragment.schema.clone(),
+                        fragment.type_condition_position.clone(),
+                    );
+                    new_inline_selection_set.add_local_selection(&fragment_spread_selection)?;
+                    let new_inline_fragment =
+                        inline_fragment.with_updated_selection_set(new_inline_selection_set);
+                    Selection::from(new_inline_fragment)
+                }
+            }
+            _ => {
+                // inline fragment is only used once so we should keep it
+                // still need to minify its sub selections
+                let new_inline_selection_set = self.minify(&inline_fragment.selection_set)?;
+                let new_fragment_selection =
+                    inline_fragment.with_updated_selection_set(new_inline_selection_set);
+                Selection::from(new_fragment_selection)
+            }
+        };
+        Ok(minified_selection)
+    }
+
+    fn create_new_fragment(
+        &mut self,
+        unique_fragment_id: SelectionId,
+        selection_set: &SelectionSet,
+        type_condition_position: &CompositeTypeDefinitionPosition,
+    ) -> Result<&Fragment, FederationError> {
+        // minify current selection set and extract named fragment
+        let minified_selection_set = self.minify(selection_set)?;
+        let new_fragment = Fragment {
+            schema: minified_selection_set.schema.clone(),
+            name: self.next_name(),
+            type_condition_position: type_condition_position.clone(),
+            directives: Default::default(),
+            selection_set: minified_selection_set,
+        };
+
+        self.minimized_fragments
+            .insert(unique_fragment_id, new_fragment);
+        Ok(self.minimized_fragments.get(&unique_fragment_id).unwrap())
     }
 
     /// Consumes the generator and returns the fragments it generated.

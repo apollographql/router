@@ -599,9 +599,12 @@ impl Ord for Selection {
             (Selection::InlineFragment(_), Selection::FragmentSpread(_)) => Ordering::Less,
             (Selection::FragmentSpread(f1), Selection::FragmentSpread(f2)) => {
                 // compare fragment names
-                // no need to compare directives as it doesn't make sense to have same
-                // fragment multiple times but with different directives
-                f1.spread.fragment_name.cmp(&f2.spread.fragment_name)
+                let compare_fragment_names = f1.spread.fragment_name.cmp(&f2.spread.fragment_name);
+                if compare_fragment_names == Ordering::Equal {
+                    compare_directives(&f1.spread.directives, &f2.spread.directives)
+                } else {
+                    compare_fragment_names
+                }
             }
             (Selection::FragmentSpread(_), _) => Ordering::Greater,
         }
