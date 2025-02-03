@@ -88,7 +88,6 @@ where
                     // This is the difference between http_body::Limited and our implementation.
                     // Dropping this mutex allows the containing layer to immediately return an error response
                     // This prevents the need to deal with wrapped errors.
-                    this.control.update_limit(0);
                     this.permit.release();
                     return Poll::Pending;
                 } else {

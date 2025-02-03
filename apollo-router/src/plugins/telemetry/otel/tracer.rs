@@ -83,19 +83,17 @@ impl PreSampledTracer for SdkTracer {
         let (flags, trace_state) = if let Some(result) = &builder.sampling_result {
             process_sampling_result(result, parent_trace_flags)
         } else {
-            builder.sampling_result = Some(self.should_sample().should_sample(
+            let sampling_result = self.should_sample().should_sample(
                 Some(parent_cx),
                 trace_id,
                 &builder.name,
                 builder.span_kind.as_ref().unwrap_or(&SpanKind::Internal),
                 builder.attributes.as_ref().unwrap_or(&Vec::new()),
                 builder.links.as_deref().unwrap_or(&[]),
-            ));
-
-            process_sampling_result(
-                builder.sampling_result.as_ref().unwrap(),
-                parent_trace_flags,
-            )
+            );
+            let processed_result = process_sampling_result(&sampling_result, parent_trace_flags);
+            builder.sampling_result = Some(sampling_result);
+            processed_result
         }
         .unwrap_or_default();
 

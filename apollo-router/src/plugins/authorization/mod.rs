@@ -292,7 +292,7 @@ impl AuthorizationPlugin {
             .unwrap_or_default();
         policies.sort();
 
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(CacheKeyMetadata {
                 is_authenticated,
                 scopes,
@@ -550,18 +550,14 @@ impl Plugin for AuthorizationPlugin {
         if self.require_authentication {
             ServiceBuilder::new()
                 .checkpoint(move |request: supergraph::Request| {
+                    // XXX(@goto-bus-stop): Why are we doing this here, as opposed to the
+                    // authentication plugin, which manages this context value?
                     if request
                         .context
                         .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                     {
                         Ok(ControlFlow::Continue(request))
                     } else {
-                        // This is a metric and will not appear in the logs
-                        u64_counter!(
-                            "apollo_require_authentication_failure_count",
-                            "Number of unauthenticated requests (deprecated)",
-                            1
-                        );
                         tracing::error!("rejecting unauthenticated request");
                         let response = supergraph::Response::error_builder()
                             .error(

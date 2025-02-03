@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
 use base64::prelude::BASE64_STANDARD;
@@ -18,6 +17,7 @@ use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
+use parking_lot::Mutex;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
@@ -74,22 +74,22 @@ pub(super) type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
-        let mut guard = self.lock().expect("poisoned mutex");
+        let mut guard = self.lock();
         f(guard.as_mut().expect("re-entrant option dance"))
     }
 
     fn replace(&self, f: impl FnOnce(T) -> T) {
-        let mut guard = self.lock().expect("poisoned mutex");
+        let mut guard = self.lock();
         *guard = Some(f(guard.take().expect("re-entrant option dance")))
     }
 
     fn take_unwrap(self) -> T {
         match Arc::try_unwrap(self) {
-            Ok(mutex) => mutex.into_inner().expect("poisoned mutex"),
+            Ok(mutex) => mutex.into_inner(),
 
             // TODO: Should we assume the Arc refcount is 1
             // and use `try_unwrap().expect("shared ownership")` instead of this fallback ?
-            Err(arc) => arc.lock().expect("poisoned mutex").take(),
+            Err(arc) => arc.lock().take(),
         }
         .expect("re-entrant option dance")
     }
@@ -1728,7 +1728,7 @@ impl Rhai {
             engine: block.engine.clone(),
             ast: block.ast.clone(),
         };
-        let mut guard = scope.lock().unwrap();
+        let mut guard = scope.lock();
         // Note: We don't use `process_error()` here, because this code executes in the context of
         // the pipeline processing. We can't return an HTTP error, we can only return a boxed
         // service which represents the next stage of the pipeline.

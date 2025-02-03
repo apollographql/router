@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/headers/invalid_nested_paths_in_header_variables.graphql
 ---
 [
@@ -8,28 +8,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
         locations: [
-            13:47..13:64,
+            13:60..13:64,
         ],
     },
     Message {
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
-            23:47..23:79,
+            23:59..23:79,
         ],
     },
     Message {
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
         locations: [
-            33:45..33:70,
+            33:56..33:70,
         ],
     },
     Message {
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Object.newField`: `$this` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
-            47:47..47:73,
+            47:53..47:73,
         ],
     },
 ]
