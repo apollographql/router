@@ -23,7 +23,7 @@ In the request path, each request is processed by the request lifecycle services
 * The **Execution service** executes a query plan by calling the necessary subgraph services to make subgraph requests
 * Each subgraph has an associated **Subgraph service** that makes HTTP requests to the subgraph.
 
-Each service encapsulates and transforms the contents of a request into own context. The following diagram and its steps describe how an HTTP request is transformed and propagated through the request path:
+Each service encapsulates and transforms the contents of a request into its own context. The following diagram and its steps describe how an HTTP request is transformed and propagated through the request path:
 
 ```mermaid
 flowchart TB;
@@ -74,7 +74,7 @@ service2 --"8b. HTTP request"--> subgraphB;
 
 1. The router receives a client request at an HTTP server. 
 2. The HTTP server transforms the HTTP request into a `RouterRequest` containing HTTP headers and the request body as a stream of byte arrays.
-3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON, and calls the supergraph service with the resulting `SupergraphRequest`.
+3. The router service receives the `RouterRequest`. It handles Automatic Persisted Queries (APQ), parses the GraphQL request from JSON, validates the query against the schema, and calls the supergraph service with the resulting `SupergraphRequest`.
 4. The supergraph service calls the query planner with the GraphQL query from the `SupergraphRequest`.
 5. The query planner returns a query plan for most efficiently executing the query.
 6. The supergraph service calls the execution service with an `ExecutionRequest`, made up of `SupergraphRequest` and the query plan.
@@ -150,7 +150,9 @@ httpServer --"14. HTTP response" --> client
 
 Although the preceding diagrams showed the request and response paths separately and sequentially, in reality some requests and responses may happen simultaneously and repeatedly.
 
-For example, `SubgraphRequest`s can happen both in parallel _and_ in sequence: one subgraph's response may be necessary for another's `SubgraphRequest`. (The query planner decides which requests can happen in parallel vs. which need to happen in sequence). To match subgraph requests to responses in customizations, the router exposes a `subgraph_request_id` field that will hold the same value in paired requests and responses.
+For example, `SubgraphRequest`s can happen both in parallel _and_ in sequence: one subgraph's response may be necessary for another's `SubgraphRequest`. The [query planner](/graphos/reference/federation/query-plans) decides which requests can happen in parallel vs. which need to happen in sequence. 
+
+To match subgraph requests to responses in customizations, the router exposes a `subgraph_request_id` field that will hold the same value in paired requests and responses.
 
 ### Requests run in parallel 
 
