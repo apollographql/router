@@ -174,6 +174,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         list_size_from_upstream: Option<i32>,
     ) -> Result<f64, DemandControlError> {
+        // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
         if field.name == TYPENAME {
             return Ok(0.0);
         }
@@ -541,6 +542,10 @@ impl<'schema> ResponseCostCalculator<'schema> {
         value: &Value,
         include_argument_score: bool,
     ) {
+        // When we pre-process the schema, __typename isn't included. So, we short-circuit here to avoid failed lookups.
+        if field.name == TYPENAME {
+            return;
+        }
         if let Some(definition) = self.schema.output_field_definition(parent_ty, &field.name) {
             match value {
                 Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
@@ -573,7 +578,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
                             self.cost += score;
                         }
                     } else {
-                        tracing::warn!(
+                        tracing::debug!(
                             "Failed to get schema definition for argument {}.{}({}:). The resulting response cost will be a partial result.",
                             parent_ty,
                             field.name,
@@ -583,7 +588,7 @@ impl<'schema> ResponseCostCalculator<'schema> {
                 }
             }
         } else {
-            tracing::warn!(
+            tracing::debug!(
                 "Failed to get schema definition for field {}.{}. The resulting response cost will be a partial result.",
                 parent_ty,
                 field.name,
@@ -625,8 +630,10 @@ mod tests {
     use bytes::Bytes;
     use test_log::test;
     use tower::Service;
+    use tracing::instrument::WithSubscriber;
 
     use super::*;
+    use crate::assert_snapshot_subscriber;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
     use crate::services::layers::query_analysis::ParsedDocument;
@@ -1056,6 +1063,22 @@ mod tests {
 
         assert_eq!(conservative_estimate, 10200.0);
         assert_eq!(narrow_estimate, 35.0);
+    }
+
+    #[test(tokio::test)]
+    async fn federated_query_with_typenames() {
+        let schema = include_str!("./fixtures/federated_ships_schema.graphql");
+        let query = include_str!("./fixtures/federated_ships_typename_query.graphql");
+        let variables = "{}";
+        let response = include_bytes!("./fixtures/federated_ships_typename_response.json");
+
+        async {
+            assert_eq!(actual_cost(schema, query, variables, response), 2.0);
+        }
+        // This was previously logging a warning for every __typename in the response. At the time of writing,
+        // this should not produce logs. Generally, it should not produce undue noise for valid requests.
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
     }
 
     #[test(tokio::test)]
