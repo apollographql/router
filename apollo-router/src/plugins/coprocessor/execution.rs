@@ -12,7 +12,7 @@ use tower_service::Service;
 
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
@@ -85,7 +85,7 @@ impl ExecutionStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+            AsyncCheckpointLayer::new(move |request: execution::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -176,6 +176,7 @@ impl ExecutionStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -231,11 +232,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
     let duration = start.elapsed();
-    drop(guard);
     record_coprocessor_duration(PipelineStep::ExecutionRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
@@ -374,11 +373,9 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
     let duration = start.elapsed();
-    drop(guard);
     record_coprocessor_duration(PipelineStep::ExecutionResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
@@ -443,11 +440,9 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                drop(guard);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 

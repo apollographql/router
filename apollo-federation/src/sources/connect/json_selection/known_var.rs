@@ -1,26 +1,23 @@
-use std::str::FromStr;
-
 #[cfg(test)]
 use super::location::WithRange;
-use crate::sources::connect::variable::Namespace;
 
 #[derive(PartialEq, Eq, Clone, Hash)]
 pub(crate) enum KnownVariable {
-    External(Namespace),
+    External(String),
     Dollar,
     AtSign,
 }
 
 impl KnownVariable {
-    pub(crate) fn from_str(var_name: &str) -> Option<Self> {
+    pub(crate) fn from_str(var_name: &str) -> Self {
         match var_name {
-            "$" => Some(Self::Dollar),
-            "@" => Some(Self::AtSign),
-            s => Namespace::from_str(s).ok().map(Self::External),
+            "$" => Self::Dollar,
+            "@" => Self::AtSign,
+            s => Self::External(s.to_string()),
         }
     }
 
-    pub(crate) fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &str {
         match self {
             Self::External(namespace) => namespace.as_str(),
             Self::Dollar => "$",
@@ -43,11 +40,5 @@ impl std::fmt::Debug for KnownVariable {
 impl std::fmt::Display for KnownVariable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
-    }
-}
-
-impl From<Namespace> for KnownVariable {
-    fn from(namespace: Namespace) -> Self {
-        Self::External(namespace)
     }
 }

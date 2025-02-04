@@ -44,7 +44,6 @@ use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::Configuration;
-use crate::Context;
 
 type HTTPClient = Decompression<
     hyper_util::client::legacy::Client<
@@ -248,11 +247,23 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         #[cfg(unix)]
         let client = match schema_uri.scheme().map(|s| s.as_str()) {
-            Some("unix") => Either::Right(self.unix_client.clone()),
-            _ => Either::Left(self.http_client.clone()),
+            Some("unix") => {
+                // Because we clone our inner service, we'd better swap the readied one
+                let clone = self.unix_client.clone();
+                Either::Right(std::mem::replace(&mut self.unix_client, clone))
+            }
+            _ => {
+                // Because we clone our inner service, we'd better swap the readied one
+                let clone = self.http_client.clone();
+                Either::Left(std::mem::replace(&mut self.http_client, clone))
+            }
         };
         #[cfg(not(unix))]
-        let client = self.http_client.clone();
+        let client = {
+            // Because we clone our inner service, we'd better swap the readied one
+            let clone = self.http_client.clone();
+            std::mem::replace(&mut self.http_client, clone)
+        };
 
         let service_name = self.service.clone();
 
@@ -305,7 +316,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
                 http_request
             };
 
-            let http_response = do_fetch(client, &context, &service_name, http_request)
+            let http_response = do_fetch(client, &service_name, http_request)
                 .instrument(http_req_span)
                 .await?;
 
@@ -347,11 +358,9 @@ fn report_hyper_client_error(err: hyper_util::client::legacy::Error) -> String {
 
 async fn do_fetch(
     mut client: MixedClient,
-    context: &Context,
     service_name: &str,
     request: Request<RouterBody>,
 ) -> Result<http::Response<RouterBody>, FetchError> {
-    let _active_request_guard = context.enter_active_request();
     let (parts, body) = client
         .call(request)
         .await

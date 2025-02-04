@@ -28,7 +28,7 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Discussed;
-use crate::metrics::meter_provider;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
@@ -202,10 +202,6 @@ pub struct Opt {
     /// Locations (comma separated) to fetch the supergraph from. These will be queried in order.
     #[clap(env = "APOLLO_ROUTER_SUPERGRAPH_URLS", value_delimiter = ',')]
     supergraph_urls: Option<Vec<Url>>,
-
-    /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue), hide(true))]
-    schema: bool,
 
     /// Subcommands
     #[clap(subcommand)]
@@ -417,13 +413,6 @@ impl Executable {
 
         setup_panic_handler();
 
-        if opt.schema {
-            eprintln!("`router --schema` is deprecated. Use `router config schema`");
-            let schema = generate_config_schema();
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-            return Ok(());
-        }
-
         let result = match opt.command.as_ref() {
             Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
@@ -459,7 +448,7 @@ impl Executable {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
                 opentelemetry::global::shutdown_tracer_provider();
-                meter_provider().shutdown();
+                meter_provider_internal().shutdown();
             })
             .await?;
         }
@@ -498,7 +487,6 @@ impl Executable {
                     ConfigurationSource::File {
                         path,
                         watch: opt.hot_reload,
-                        delay: None,
                     }
                 })
                 .unwrap_or_default(),
@@ -541,17 +529,18 @@ impl Executable {
                 SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
-                    delay: None,
                 }
             }
             (_, _, Some(supergraph_urls), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
+                if opt.hot_reload {
+                    tracing::warn!("Schema hot reloading is disabled for --supergraph-urls / APOLLO_ROUTER_SUPERGRAPH_URLS.");
+                }
+
                 SchemaSource::URLs {
                     urls: supergraph_urls.clone(),
-                    watch: opt.hot_reload,
-                    period: INITIAL_UPLINK_POLL_INTERVAL,
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {
