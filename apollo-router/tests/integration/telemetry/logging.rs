@@ -241,3 +241,36 @@ async fn test_text_sampler_off() -> Result<(), BoxError> {
     router.graceful_shutdown().await;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_router_reloads() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        eprintln!("test skipped");
+        return Ok(());
+    }
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp { endpoint: None })
+        .config(include_str!("fixtures/router_reload.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    router.execute_default_query().await;
+    router.assert_metrics_contains(r#"http_client_request_duration_seconds_count{subgraph_name="products",otel_scope_name="apollo/router"} 1"#, None).await;
+
+    // We don't want to log this message, but we know metrics errors are being logged on reload
+    router.touch_config().await;
+    router
+        .wait_for_log_message("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down")
+        .await;
+
+    // The metrics should still be recorded after reloading, despite the error
+    router.execute_default_query().await;
+    router.assert_metrics_contains(r#"http_client_request_duration_seconds_count{subgraph_name="products",otel_scope_name="apollo/router"} 2"#, None).await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
