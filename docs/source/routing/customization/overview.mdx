@@ -67,21 +67,28 @@ NextService["Next service"] -->|response| coreService
 
 Each request and response object contains a `Context` object, which is carried throughout the entire process. Each request's `Context` object is unique. You can use it to store plugin-specific information between the request and response or to communicate between different hook points. (A plugin can be called at multiple steps of the request lifecycle.)
 
-### Request and Response buffering
+### Request and response buffering
+
+<Note>
+
+This guidance applies if you are:
+ - Modifying the router
+ - Creating a native Rust plugin
+ - Creating a custom binary
+
+</Note>
 
 The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
 
-- **Request Path**: No buffering before the end of the `router_service` processing step
-- **Response Path**: No buffering
+* **Request Path**: No buffering before the end of the `router_service` processing step
+* **Response Path**: No buffering
 
-> In general, it's best to avoid buffering where possible. If necessary, it is ok to do so on the request path once the `router_service` step is complete.
+<Tip>
 
-This guidance applies if you are:
+In general, it's best to avoid buffering where possible. If necessary, it is ok to do so on the request path once the `router_service` step is complete.
 
-- Modifying the router
-- Creating a native Rust plugin
-- Creating a custom binary
+</Tip>
 
-## Creating customizations
+## Creating customizations 
 
-To learn how to hook in to the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.
+To learn how to hook into the various lifecycle stages, including examples customizations, refer to the [Rhai scripts](/graphos/routing/customization/rhai/) and [external coprocessing](/router/customizations/coprocessor/) docs.

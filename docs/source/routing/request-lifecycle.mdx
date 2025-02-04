@@ -6,10 +6,15 @@ description: Understand how GraphQL client requests get processed by the request
 
 import RequestLifecycleOverviewDiagram from '../../shared/diagrams/router-request-lifecycle-overview.mdx';
 
-
 Every client request made to a GraphOS Router goes through the **router request lifecycle**: a multi-stage pipeline of services that processes requests and returns responses.
 
 <RequestLifecycleOverviewDiagram />
+
+<Tip>
+
+Understanding the router request lifecycle makes it easier for you to write router customization plugins or configure router telemetry.
+
+</Tip>
 
 The router processes a client request by first passing it between services along the lifecycle's **request path**. The request path breaks up a request and sends constituent sub-requests to subgraphs. Then along the lifecycle's **response path**, the router gathers all the responses from the subgraph requests into a client response.
 
@@ -220,28 +225,6 @@ flowchart LR;
 ```
 
 Additionally, some requests and responses may happen multiple times for the same operation. With subscriptions, for example, a subgraph sends a new `SubgraphResponse` whenever data is updated. Each response object travels through all the services in the response path and interacts with any customizations you've created.
-
-### Request and response buffering
-
-<Note>
-
-This guidance applies if you are:
- - Modifying the router
- - Creating a native Rust plugin
- - Creating a custom binary
-
-</Note>
-
-The router expects to execute on a stream of data. In order to work correctly and provide high performance, the following expectations must be met:
-
-* **Request Path**: No buffering before the end of the `router_service` processing step
-* **Response Path**: No buffering
-
-<Tip>
-
-In general, it's best to avoid buffering where possible. If necessary, it is ok to do so on the request path once the `router_service` step is complete.
-
-</Tip>
 
 ## Observability of the request lifecycle
 
