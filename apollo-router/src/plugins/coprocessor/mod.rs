@@ -1,6 +1,7 @@
 //! Externalization plugin
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -32,6 +33,8 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::configuration::shared::Client;
+use crate::context::context_key_from_deprecated;
+use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
@@ -55,6 +58,7 @@ use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
+use crate::Context;
 
 #[cfg(test)]
 mod test;
@@ -251,7 +255,7 @@ pub(super) struct RouterRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -272,7 +276,7 @@ pub(super) struct RouterResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -290,7 +294,7 @@ pub(super) struct SubgraphRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the subgraph URI
@@ -313,7 +317,7 @@ pub(super) struct SubgraphResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the service name
@@ -348,6 +352,53 @@ struct Conf {
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
+}
+
+/// Configures the context
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(super) enum ContextConf {
+    /// Send all context keys to coprocessor
+    All,
+    #[default]
+    /// Don't send any context keys to coprocessor
+    None,
+    /// Send all context keys using deprecated names (from router 1.x) to coprocessor
+    Deprecated,
+    /// Only send the list of context keys to coprocessor
+    Selective(Arc<HashSet<String>>),
+}
+
+impl ContextConf {
+    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
+        match self {
+            Self::All => Some(ctx.clone()),
+            Self::Deprecated => {
+                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    (
+                        context_key_to_deprecated(elt.key().clone()),
+                        elt.value().clone(),
+                    )
+                }));
+                new_ctx.id = ctx.id.clone();
+
+                Some(new_ctx)
+            }
+            Self::Selective(context_keys) => {
+                let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
+                    if context_keys.contains(elt.key()) {
+                        Some((elt.key().clone(), elt.value().clone()))
+                    } else {
+                        None
+                    }
+                }));
+                new_ctx.id = ctx.id.clone();
+
+                Some(new_ctx)
+            }
+            Self::None => None,
+        }
+    }
 }
 
 fn default_timeout() -> Duration {
@@ -674,7 +725,7 @@ where
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
-    let context_to_send = request_config.context.then(|| request.context.clone());
+    let context_to_send = request_config.context.get_context(&request.context);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -753,7 +804,10 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            for (key, value) in context.try_into_iter()? {
+            for (mut key, value) in context.try_into_iter()? {
+                if let ContextConf::Deprecated = &request_config.context {
+                    key = context_key_from_deprecated(key);
+                }
                 res.context.upsert_json_value(key, move |_current| value);
             }
         }
@@ -773,7 +827,10 @@ where
     request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::Deprecated = &request_config.context {
+                key = context_key_from_deprecated(key);
+            }
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -843,7 +900,7 @@ where
         .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.then(|| response.context.clone());
+    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -885,7 +942,10 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::Deprecated = &response_config.context {
+                key = context_key_from_deprecated(key);
+            }
             response
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -912,6 +972,7 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
+            let context_conf = response_config.context.clone();
 
             async move {
                 let bytes = deferred_response.to_vec();
@@ -919,9 +980,8 @@ where
                     .body
                     .then(|| String::from_utf8(bytes.clone()))
                     .transpose()?;
-                let context_to_send = response_config
-                    .context
-                    .then(|| generator_map_context.clone());
+                let generator_map_context = generator_map_context.clone();
+                let context_to_send = context_conf.get_context(&generator_map_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -954,7 +1014,10 @@ where
                 };
 
                 if let Some(context) = co_processor_output.context {
-                    for (key, value) in context.try_into_iter()? {
+                    for (mut key, value) in context.try_into_iter()? {
+                        if let ContextConf::Deprecated = &context_conf {
+                            key = context_key_from_deprecated(key);
+                        }
                         generator_map_context.upsert_json_value(key, move |_current| value);
                     }
                 }
@@ -1018,7 +1081,7 @@ where
         .body
         .then(|| serde_json::to_value(&body))
         .transpose()?;
-    let context_to_send = request_config.context.then(|| request.context.clone());
+    let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
@@ -1094,7 +1157,10 @@ where
             };
 
             if let Some(context) = co_processor_output.context {
-                for (key, value) in context.try_into_iter()? {
+                for (mut key, value) in context.try_into_iter()? {
+                    if let ContextConf::Deprecated = &request_config.context {
+                        key = context_key_from_deprecated(key);
+                    }
                     subgraph_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -1118,7 +1184,10 @@ where
     request.subgraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::Deprecated = &request_config.context {
+                key = context_key_from_deprecated(key);
+            }
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -1176,7 +1245,7 @@ where
         .body
         .then(|| serde_json::to_value(&body))
         .transpose()?;
-    let context_to_send = response_config.context.then(|| response.context.clone());
+    let context_to_send = response_config.context.get_context(&response.context);
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1219,7 +1288,10 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::Deprecated = &response_config.context {
+                key = context_key_from_deprecated(key);
+            }
             response
                 .context
                 .upsert_json_value(key, move |_current| value);

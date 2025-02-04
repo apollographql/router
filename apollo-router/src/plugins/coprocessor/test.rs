@@ -102,7 +102,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -164,7 +164,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -226,7 +226,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: false,
@@ -469,6 +469,332 @@ mod tests {
 
         let mut request = subgraph::Request::fake_builder().build();
         request.id = SubgraphRequestId("5678".to_string());
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!("5678", &*response.id);
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_with_selective_context() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                context: ContextConf::Selective(Arc::new(
+                    ["this-is-a-test-context".to_string()].into(),
+                )),
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Let's assert that the subgraph request has been transformed as it should have.
+                assert_eq!(
+                    req.subgraph_request.headers().get("cookie").unwrap(),
+                    "tasty_cookie=strawberry"
+                );
+                assert_eq!(
+                    req.context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .unwrap()
+                        .unwrap(),
+                    42
+                );
+
+                // The subgraph uri should have changed
+                assert_eq!(
+                    "http://thisurihaschanged/",
+                    req.subgraph_request.uri().to_string()
+                );
+
+                // The query should have changed
+                assert_eq!(
+                    "query Long {\n  me {\n  name\n}\n}",
+                    req.subgraph_request.into_body().query.unwrap()
+                );
+
+                // this should be the same as the initial request id
+                assert_eq!(&*req.id, "5678");
+
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
+                let context = deserialized_request.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    42
+                );
+                assert!(context
+                    .get::<&str, u8>("not_passed")
+                    .ok()
+                    .flatten()
+                    .is_none());
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "query": "query Long {\n  me {\n  name\n}\n}"
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "this-is-a-test-context": 42
+                                    }
+                                  },
+                                  "serviceName": "service name shouldn't change",
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+        request
+            .context
+            .insert("not_passed", "OK".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 42)
+            .unwrap();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!("5678", &*response.id);
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_with_deprecated_context() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                context: ContextConf::Deprecated,
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Let's assert that the subgraph request has been transformed as it should have.
+                assert_eq!(
+                    req.subgraph_request.headers().get("cookie").unwrap(),
+                    "tasty_cookie=strawberry"
+                );
+                assert_eq!(
+                    req.context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .unwrap()
+                        .unwrap(),
+                    42
+                );
+                assert_eq!(
+                    req.context
+                        .get::<&str, String>("apollo::supergraph::operation_name")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    "New".to_string()
+                );
+
+                // The subgraph uri should have changed
+                assert_eq!(
+                    "http://thisurihaschanged/",
+                    req.subgraph_request.uri().to_string()
+                );
+
+                // The query should have changed
+                assert_eq!(
+                    "query Long {\n  me {\n  name\n}\n}",
+                    req.subgraph_request.into_body().query.unwrap()
+                );
+
+                // this should be the same as the initial request id
+                assert_eq!(&*req.id, "5678");
+
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
+                let context = deserialized_request.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    42
+                );
+                assert_eq!(
+                    context
+                        .get::<&str, String>("operation_name")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    "Test".to_string()
+                );
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "query": "query Long {\n  me {\n  name\n}\n}"
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "this-is-a-test-context": 42,
+                                      "operation_name": "New"
+                                    }
+                                  },
+                                  "serviceName": "service name shouldn't change",
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+        request
+            .context
+            .insert("apollo::supergraph::operation_name", "Test".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 42)
+            .unwrap();
 
         let response = service.oneshot(request).await.unwrap();
 
@@ -932,7 +1258,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: false,
+                context: ContextConf::None,
                 body: true,
                 status_code: false,
                 sdl: false,
@@ -993,7 +1319,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -1123,7 +1449,7 @@ mod tests {
                 ])
                 .into(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -1232,7 +1558,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -1365,7 +1691,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -1460,7 +1786,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 path: true,
@@ -1546,7 +1872,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::All,
                 body: true,
                 sdl: true,
                 status_code: false,
