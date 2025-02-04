@@ -1,10 +1,12 @@
 extern crate core;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Deref;
+use std::time::Duration;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
@@ -15,6 +17,7 @@ use wiremock::matchers::path;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::Times;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Query;
@@ -26,11 +29,38 @@ use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_trace_error() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mock_server = mock_otlp_server_delayed().await;
+    let config = include_str!("fixtures/otlp_invalid_endpoint.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full").await;
+    router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router"}"#, None).await;
+    router.graceful_shutdown().await;
+
+    drop(mock_server);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -79,11 +109,42 @@ async fn test_basic() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_resources() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        panic!("Error: test skipped because GraphOS is not enabled");
+    }
+    let mock_server = mock_otlp_server(1..).await;
+    let config = include_str!("fixtures/otlp.router.yaml")
+        .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(&config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    TraceSpec::builder()
+        .services(["client", "router", "subgraph"].into())
+        .resource("env", "local1")
+        .resource("service.version", "router_version_override")
+        .resource("service.name", "router")
+        .build()
+        .validate_otlp_trace(&mut router, &mock_server, Query::default())
+        .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_otlp_request_with_datadog_propagator() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_propagation.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -114,7 +175,7 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_propagation_no_agent.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -148,7 +209,7 @@ async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_request_with_zipkin_propagator.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -268,7 +329,7 @@ async fn test_untraced_request_no_sample_datadog_agent() -> Result<(), BoxError>
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_agent_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -303,7 +364,7 @@ async fn test_untraced_request_sample_datadog_agent() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_agent_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -338,7 +399,7 @@ async fn test_untraced_request_sample_datadog_agent_unsampled() -> Result<(), Bo
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_agent_sample_no_sample.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -373,7 +434,7 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_propagation.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -454,11 +515,107 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
+) -> Result<(), BoxError> {
+    // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
+    let mock_server = mock_otlp_server(0..).await;
+
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let config = include_str!(
+        "fixtures/otlp_parent_sampler_very_small_no_parent_no_agent_sampling.router.yaml"
+    )
+    .replace("<otel-collector-endpoint>", &mock_server.uri());
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Otlp {
+            endpoint: Some(format!("{}/v1/traces", mock_server.uri())),
+        })
+        .config(config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    // The router should not respect upstream but also almost never sample if left to its own devices.
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(true).build(),
+        )
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("-1").traced(true).build(),
+        )
+        .await?;
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("0").traced(true).build(),
+        )
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("1").traced(true).build(),
+        )
+        .await?;
+
+    TraceSpec::builder()
+        .services(["client"].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().psr("2").traced(true).build(),
+        )
+        .await?;
+
+    TraceSpec::builder()
+        .services([].into())
+        .subgraph_sampled(false)
+        .build()
+        .validate_otlp_trace(
+            &mut router,
+            &mock_server,
+            Query::builder().traced(false).build(),
+        )
+        .await?;
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_priority_sampling_no_parent_propagated() -> Result<(), BoxError> {
     if !graph_os_enabled() {
         return Ok(());
     }
-    let mock_server = mock_otlp_server().await;
+    let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp_datadog_propagation_no_parent_sampler.router.yaml")
         .replace("<otel-collector-endpoint>", &mock_server.uri());
     let mut router = IntegrationTest::builder()
@@ -652,7 +809,7 @@ impl Verifier for OtlpTraceSpec<'_> {
             .collect::<HashSet<_>>();
         if actual_services != expected_services {
             return Err(BoxError::from(format!(
-                "incomplete traces, got {actual_services:?} expected {expected_services:?}"
+                "unexpected traces, got {actual_services:?} expected {expected_services:?}"
             )));
         }
         Ok(())
@@ -745,9 +902,75 @@ impl Verifier for OtlpTraceSpec<'_> {
         }
         Ok(())
     }
+
+    fn verify_resources(&self, trace: &Value) -> Result<(), BoxError> {
+        if !self.resources.is_empty() {
+            let resources = trace.select_path("$..resource.attributes")?;
+            // Find the attributes for the router service
+            let router_resources = resources
+                .iter()
+                .filter(|r| {
+                    !r.select_path("$..[?(@.stringValue == 'router')]")
+                        .unwrap()
+                        .is_empty()
+                })
+                .collect::<Vec<_>>();
+            // Let's map this to a map of key value pairs
+            let router_resources = router_resources
+                .iter()
+                .flat_map(|v| v.as_array().expect("array required"))
+                .map(|v| {
+                    let entry = v.as_object().expect("must be an object");
+                    (
+                        entry
+                            .get("key")
+                            .expect("must have key")
+                            .as_string()
+                            .expect("key must be a string"),
+                        entry
+                            .get("value")
+                            .expect("must have value")
+                            .as_object()
+                            .expect("value must be an object")
+                            .get("stringValue")
+                            .expect("value must be a string")
+                            .as_string()
+                            .expect("value must be a string"),
+                    )
+                })
+                .collect::<HashMap<_, _>>();
+
+            for (key, value) in &self.resources {
+                if let Some(actual_value) = router_resources.get(*key) {
+                    assert_eq!(actual_value, value);
+                } else {
+                    return Err(BoxError::from(format!("missing resource key: {}", *key)));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
-async fn mock_otlp_server() -> MockServer {
+async fn mock_otlp_server_delayed() -> MockServer {
+    let mock_server = wiremock::MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/traces"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(1))
+                .set_body_raw(
+                    ExportTraceServiceResponse::default().encode_to_vec(),
+                    "application/x-protobuf",
+                ),
+        )
+        .mount(&mock_server)
+        .await;
+
+    mock_server
+}
+
+async fn mock_otlp_server<T: Into<Times> + Clone>(expected_requests: T) -> MockServer {
     let mock_server = wiremock::MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/v1/traces"))
@@ -755,7 +978,7 @@ async fn mock_otlp_server() -> MockServer {
             ExportTraceServiceResponse::default().encode_to_vec(),
             "application/x-protobuf",
         ))
-        .expect(1..)
+        .expect(expected_requests.clone())
         .mount(&mock_server)
         .await;
     Mock::given(method("POST"))
@@ -764,7 +987,7 @@ async fn mock_otlp_server() -> MockServer {
             ExportMetricsServiceResponse::default().encode_to_vec(),
             "application/x-protobuf",
         ))
-        .expect(1..)
+        .expect(expected_requests.clone())
         .mount(&mock_server)
         .await;
     mock_server

@@ -11,12 +11,17 @@ use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::sources::connect::expand::expand_connectors;
+use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::subgraph;
-use bench::BenchOutput;
+use apollo_federation::ApiSchemaOptions;
+use apollo_federation::Supergraph;
 use clap::Parser;
+use tracing_subscriber::prelude::*;
 
 mod bench;
 use bench::run_bench;
+use bench::BenchOutput;
 
 #[derive(Parser)]
 struct QueryPlannerArgs {
@@ -100,6 +105,19 @@ enum Command {
         #[command(flatten)]
         planner: QueryPlannerArgs,
     },
+
+    /// Expand connector-enabled supergraphs
+    Expand {
+        /// The path to the supergraph schema file, or `-` for stdin
+        supergraph_schema: PathBuf,
+
+        /// The output directory for the extracted subgraph schemas
+        destination_dir: Option<PathBuf>,
+
+        /// An optional prefix to match against expanded subgraph names
+        #[arg(long)]
+        filter_prefix: Option<String>,
+    },
 }
 
 impl QueryPlannerArgs {
@@ -123,7 +141,20 @@ impl From<QueryPlannerArgs> for QueryPlannerConfig {
     }
 }
 
+/// Set up the tracing subscriber
+fn init_tracing() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .without_time()
+        .with_target(false);
+    let filter_layer = tracing_subscriber::EnvFilter::from_default_env();
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(filter_layer)
+        .init();
+}
+
 fn main() -> ExitCode {
+    init_tracing();
     let args = Args::parse();
     let result = match args.command {
         Command::Api {
@@ -148,6 +179,15 @@ fn main() -> ExitCode {
             operations_dir,
             planner,
         } => cmd_bench(&supergraph_schema, &operations_dir, planner),
+        Command::Expand {
+            supergraph_schema,
+            destination_dir,
+            filter_prefix,
+        } => cmd_expand(
+            &supergraph_schema,
+            destination_dir.as_ref(),
+            filter_prefix.as_deref(),
+        ),
     };
     match result {
         Err(error) => {
@@ -289,6 +329,75 @@ fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), Federatio
             println!(); // newline
         }
     }
+    Ok(())
+}
+
+fn cmd_expand(
+    file_path: &Path,
+    dest: Option<&PathBuf>,
+    filter_prefix: Option<&str>,
+) -> Result<(), FederationError> {
+    let original_supergraph = load_supergraph_file(file_path)?;
+    let ExpansionResult::Expanded { raw_sdl, .. } = expand_connectors(
+        &original_supergraph.schema.schema().serialize().to_string(),
+        &ApiSchemaOptions::default(),
+    )?
+    else {
+        return Err(FederationError::internal(
+            "supplied supergraph has no connectors to expand",
+        ));
+    };
+
+    // Validate the schema
+    // TODO: If expansion errors here due to bugs, it can be very hard to trace
+    // what specific portion of the expansion process failed. Work will need to be
+    // done to expansion to allow for returning an error type that carries the error
+    // and the expanded subgraph as seen until the error.
+    let expanded = Supergraph::new(&raw_sdl)?;
+
+    let subgraphs = expanded.extract_subgraphs()?;
+    if let Some(dest) = dest {
+        fs::create_dir_all(dest).map_err(|_| SingleFederationError::Internal {
+            message: "Error: directory creation failed".into(),
+        })?;
+        for (name, subgraph) in subgraphs {
+            // Skip any files not matching the prefix, if specified
+            if let Some(prefix) = filter_prefix {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
+            }
+
+            let subgraph_path = dest.join(format!("{}.graphql", name));
+            fs::write(subgraph_path, subgraph.schema.schema().to_string()).map_err(|_| {
+                SingleFederationError::Internal {
+                    message: "Error: file output failed".into(),
+                }
+            })?;
+        }
+    } else {
+        // Print out the schemas as YAML so that it can be piped into rover
+        // TODO: It would be nice to use rover's supergraph type here instead of manually printing
+        println!("federation_version: 2");
+        println!("subgraphs:");
+        for (name, subgraph) in subgraphs {
+            // Skip any files not matching the prefix, if specified
+            if let Some(prefix) = filter_prefix {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
+            }
+
+            let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);
+            println!("  {name}:");
+            println!("    routing_url: none");
+            println!("    schema:");
+            println!("      sdl: |");
+            println!("{schema_str}");
+            println!(); // newline
+        }
+    }
+
     Ok(())
 }
 

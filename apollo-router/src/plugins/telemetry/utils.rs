@@ -4,7 +4,11 @@ use std::time::Instant;
 /// Timer implementing Drop to automatically compute the duration between the moment it has been created until it's dropped
 ///```ignore
 /// Timer::new(|duration| {
-///     tracing::info!(histogram.apollo_router_test = duration.as_secs_f64());
+///     f64_histogram!(
+///         "apollo.router.test",
+///         "Time spent testing the timer",
+///         duration.as_secs_f64()
+///     );
 /// })
 /// ```
 pub(crate) struct Timer<F>

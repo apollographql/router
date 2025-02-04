@@ -413,11 +413,6 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                #[cfg(not(feature = "hyper_header_limits"))]
-                if yaml.contains("http1_max_request_headers") {
-                    continue;
-                }
-
                 if let Err(e) = validate_yaml_configuration(
                     &yaml,
                     Expansion::default().unwrap(),
@@ -682,7 +677,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g{supergraph_route}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/graphql/g*").build())
@@ -692,16 +687,16 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(
         &conf.supergraph.sanitized_path(),
-        "/graphql/g:supergraph_route"
+        "/graphql/g{supergraph_route}"
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*").build())
+        .supergraph(Supergraph::builder().path("/{*rest}").build())
         .build()
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*rest}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())
@@ -719,6 +714,9 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
@@ -920,7 +918,12 @@ fn it_defaults_health_check_configuration() {
 #[test]
 fn it_sets_custom_health_check_path() {
     let conf = Configuration::builder()
-        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("/healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -931,7 +934,12 @@ fn it_sets_custom_health_check_path() {
 fn it_adds_slash_to_custom_health_check_path_if_missing() {
     let conf = Configuration::builder()
         // NB the missing `/`
-        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 

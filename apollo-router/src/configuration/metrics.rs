@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use paste::paste;
 use serde_json::Value;
 
@@ -120,19 +120,20 @@ impl InstrumentData {
     }
 
     pub(crate) fn populate_config_instruments(&mut self, yaml: &serde_json::Value) {
-        // This macro will query the config json for a primary metric and optionally metric attributes.
-
-        // The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
-        // We should consider converting the rest of the codebase to use jsonpath_rust.
-
-        // Example usage:
-        // populate_usage_instrument!(
-        //             value.apollo.router.config.authorization, // The metric name
-        //             "$.authorization", // The path into the config
-        //             opt.require_authentication, // The name of the attribute
-        //             "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
-        //         );
-
+        /// This macro will query the config json for a primary metric and optionally metric attributes.
+        ///
+        /// The reason we use jsonpath_rust is that jsonpath_lib has correctness issues and looks abandoned.
+        /// We should consider converting the rest of the codebase to use jsonpath_rust.
+        ///
+        /// Example usage:
+        /// ```rust,ignore
+        /// populate_config_instrument!(
+        ///     apollo.router.config.authorization, // The metric name
+        ///     "$.authorization", // The path into the config
+        ///     opt.require_authentication, // The name of the attribute
+        ///     "$[?(@.require_authentication == true)]" // The path for the attribute relative to the metric
+        /// );
+        /// ```
         macro_rules! populate_config_instrument {
             ($($metric:ident).+, $path:literal) => {
                 let instrument_name = stringify!($($metric).+).to_string();
@@ -299,9 +300,7 @@ impl InstrumentData {
             opt.subgraph.compression,
             "$[?(@.all.compression || @.subgraphs..compression)]",
             opt.subgraph.deduplicate_query,
-            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]",
-            opt.subgraph.retry,
-            "$[?(@.all.experimental_retry || @.subgraphs..experimental_retry)]"
+            "$[?(@.all.deduplicate_query == true || @.subgraphs..deduplicate_query == true)]"
         );
 
         populate_config_instrument!(
@@ -329,8 +328,6 @@ impl InstrumentData {
             "$..tracing.otlp[?(@.enabled==true)]",
             opt.tracing.datadog,
             "$..tracing.datadog[?(@.enabled==true)]",
-            opt.tracing.jaeger,
-            "$..tracing.jaeger[?(@.enabled==true)]",
             opt.tracing.zipkin,
             "$..tracing.zipkin[?(@.enabled==true)]",
             opt.events,
@@ -341,6 +338,8 @@ impl InstrumentData {
             "$..events.supergraph",
             opt.events.subgraph,
             "$..events.subgraph",
+            opt.events.connector,
+            "$..events.connector",
             opt.instruments,
             "$..instruments",
             opt.instruments.router,
@@ -349,6 +348,8 @@ impl InstrumentData {
             "$..instruments.supergraph",
             opt.instruments.subgraph,
             "$..instruments.subgraph",
+            opt.instruments.connector,
+            "$..instruments.connector",
             opt.instruments.graphql,
             "$..instruments.graphql",
             opt.instruments.default_attribute_requirement_level,
@@ -364,9 +365,7 @@ impl InstrumentData {
             opt.spans.subgraph,
             "$..spans.subgraph",
             opt.spans.supergraph,
-            "$..spans.supergraph",
-            opt.logging.experimental_when_header,
-            "$..logging.experimental_when_header"
+            "$..spans.supergraph"
         );
 
         populate_config_instrument!(
@@ -399,6 +398,23 @@ impl InstrumentData {
             "$.signature_normalization_algorithm",
             opt.metrics_reference_mode,
             "$.metrics_reference_mode"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.connectors,
+            "$.preview_connectors",
+            opt.debug_extensions,
+            "$[?(@.debug_extensions == true)]",
+            opt.expose_sources_in_context,
+            "$[?(@.expose_sources_in_context == true)]",
+            opt.max_requests_per_operation_per_source,
+            "$[?(@.max_requests_per_operation_per_source)]",
+            opt.subgraph.config,
+            "$[?(@.subgraphs..['$config'])]",
+            opt.source.override_url,
+            "$[?(@.subgraphs..sources..override_url)]",
+            opt.source.max_requests_per_operation,
+            "$[?(@.subgraphs..sources..max_requests_per_operation)]"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.
@@ -525,6 +541,7 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
 
     #[derive(RustEmbed)]
@@ -559,7 +576,9 @@ mod test {
     #[test]
     fn test_license_warn() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedWarn);
+        data.populate_license_instrument(&LicenseState::LicensedWarn {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -567,7 +586,9 @@ mod test {
     #[test]
     fn test_license_halt() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedHalt);
+        data.populate_license_instrument(&LicenseState::LicensedHalt {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

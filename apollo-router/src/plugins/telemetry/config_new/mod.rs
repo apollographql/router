@@ -3,7 +3,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -20,9 +20,9 @@ pub(crate) mod conditions;
 
 pub(crate) mod cache;
 mod conditional;
+pub(crate) mod connector;
 pub(crate) mod cost;
 pub(crate) mod events;
-mod experimental_when_header;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
 pub(crate) mod instruments;
@@ -145,8 +145,9 @@ pub(crate) trait DatadogId {
 }
 impl DatadogId for TraceId {
     fn to_datadog(&self) -> String {
-        let bytes = &self.to_bytes()[std::mem::size_of::<u64>()..std::mem::size_of::<u128>()];
-        u64::from_be_bytes(bytes.try_into().unwrap()).to_string()
+        let mut bytes: [u8; 8] = Default::default();
+        bytes.copy_from_slice(&self.to_bytes()[8..16]);
+        u64::from_be_bytes(bytes).to_string()
     }
 }
 
@@ -164,7 +165,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
 pub(crate) fn get_baggage(key: &str) -> Option<opentelemetry::Value> {
     let context = Span::current().context();
     let baggage = context.baggage();
-    baggage.get(key.to_string()).cloned()
+    baggage.get(key).cloned()
 }
 
 pub(crate) trait ToOtelValue {

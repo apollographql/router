@@ -17,11 +17,21 @@ const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
 
 #[derive(Clone)]
-pub(crate) enum IntrospectionCache {
+pub(crate) struct IntrospectionCache(Mode);
+
+#[derive(Clone)]
+enum Mode {
     Disabled,
     Enabled {
         storage: Arc<CacheStorage<String, graphql::Response>>,
+        max_depth: MaxDepth,
     },
+}
+
+#[derive(Copy, Clone)]
+enum MaxDepth {
+    Check,
+    Ignore,
 }
 
 impl IntrospectionCache {
@@ -32,16 +42,23 @@ impl IntrospectionCache {
                 "introspection",
             ));
             storage.activate();
-            Self::Enabled { storage }
+            Self(Mode::Enabled {
+                storage,
+                max_depth: if configuration.limits.introspection_max_depth {
+                    MaxDepth::Check
+                } else {
+                    MaxDepth::Ignore
+                },
+            })
         } else {
-            Self::Disabled
+            Self(Mode::Disabled)
         }
     }
 
     pub(crate) fn activate(&self) {
-        match self {
-            IntrospectionCache::Disabled => {}
-            IntrospectionCache::Enabled { storage } => storage.activate(),
+        match &self.0 {
+            Mode::Disabled => {}
+            Mode::Enabled { storage, .. } => storage.activate(),
         }
     }
 
@@ -62,9 +79,13 @@ impl IntrospectionCache {
                     ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
                 }
             } else if !doc.has_explicit_root_fields {
-                // root __typename only, probably a small query
-                // Execute it without caching:
-                ControlFlow::Break(Self::execute_introspection(schema, doc))?
+                // Root __typename only
+
+                // No list field so depth is already known to be zero:
+                let max_depth = MaxDepth::Ignore;
+
+                // Probably a small query, execute it without caching:
+                ControlFlow::Break(Self::execute_introspection(max_depth, schema, doc))?
             }
         }
         ControlFlow::Continue(())
@@ -117,9 +138,9 @@ impl IntrospectionCache {
         key: &QueryKey,
         doc: &ParsedDocument,
     ) -> graphql::Response {
-        let storage = match self {
-            IntrospectionCache::Enabled { storage } => storage,
-            IntrospectionCache::Disabled => {
+        let (storage, max_depth) = match &self.0 {
+            Mode::Enabled { storage, max_depth } => (storage, *max_depth),
+            Mode::Disabled => {
                 let error = graphql::Error::builder()
                     .message(String::from("introspection has been disabled"))
                     .extension_code("INTROSPECTION_DISABLED")
@@ -138,32 +159,55 @@ impl IntrospectionCache {
         let schema = schema.clone();
         let doc = doc.clone();
         let priority = compute_job::Priority::P1; // Low priority
-        let response =
-            compute_job::execute(priority, move || Self::execute_introspection(&schema, &doc))
-                .await
-                .expect("Introspection panicked");
+        let response = compute_job::execute(priority, move || {
+            Self::execute_introspection(max_depth, &schema, &doc)
+        })
+        .await
+        // `expect()` propagates any panic that potentially happens in the closure, but:
+        //
+        // * We try to avoid such panics in the first place and consider them bugs
+        // * The panic handler in `apollo-router/src/executable.rs` exits the process
+        //   so this error case should never be reached.
+        .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;
         response
     }
 
-    fn execute_introspection(schema: &spec::Schema, doc: &ParsedDocument) -> graphql::Response {
-        let schema = schema.api_schema();
+    fn execute_introspection(
+        max_depth: MaxDepth,
+        schema: &spec::Schema,
+        doc: &ParsedDocument,
+    ) -> graphql::Response {
+        let api_schema = schema.api_schema();
         let operation = &doc.operation;
         let variable_values = Default::default();
-        match apollo_compiler::execution::coerce_variable_values(
-            schema,
-            operation,
-            &variable_values,
-        ) {
-            Ok(variable_values) => apollo_compiler::execution::execute_introspection_only_query(
-                schema,
-                &doc.executable,
-                operation,
-                &variable_values,
-            )
-            .into(),
+        let max_depth_result = match max_depth {
+            MaxDepth::Check => {
+                apollo_compiler::introspection::check_max_depth(&doc.executable, operation)
+            }
+            MaxDepth::Ignore => Ok(()),
+        };
+        let result = max_depth_result
+            .and_then(|()| {
+                apollo_compiler::request::coerce_variable_values(
+                    api_schema,
+                    operation,
+                    &variable_values,
+                )
+            })
+            .and_then(|variable_values| {
+                apollo_compiler::introspection::partial_execute(
+                    api_schema,
+                    &schema.implementers_map,
+                    &doc.executable,
+                    operation,
+                    &variable_values,
+                )
+            });
+        match result {
+            Ok(response) => response.into(),
             Err(e) => {
-                let error = e.into_graphql_error(&doc.executable.sources);
+                let error = e.to_graphql_error(&doc.executable.sources);
                 graphql::Response::builder().error(error).build()
             }
         }

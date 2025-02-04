@@ -6,6 +6,7 @@ use std::sync::Arc;
 use http::HeaderValue;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -21,7 +22,19 @@ use crate::graphql;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
+use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
+use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
+use crate::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -31,6 +44,13 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
+
+#[derive(Default, Clone)]
+pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
+#[derive(Default, Clone)]
+pub(crate) struct DisplayRouterResponse(pub(crate) bool);
+#[derive(Default, Clone)]
+pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
 
 /// Events are
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -42,6 +62,8 @@ pub(crate) struct Events {
     supergraph: Extendable<SupergraphEventsConfig, Event<SupergraphAttributes, SupergraphSelector>>,
     /// Supergraph service events
     subgraph: Extendable<SubgraphEventsConfig, Event<SubgraphAttributes, SubgraphSelector>>,
+    /// Connector events
+    connector: Extendable<ConnectorEventsConfig, Event<ConnectorAttributes, ConnectorSelector>>,
 }
 
 impl Events {
@@ -135,6 +157,10 @@ impl Events {
         }
     }
 
+    pub(crate) fn new_connector_events(&self) -> ConnectorEvents {
+        super::connector::events::new_connector_events(&self.connector)
+    }
+
     pub(crate) fn validate(&self) -> Result<(), String> {
         if let StandardEventConfig::Conditional { condition, .. } = &self.router.attributes.request
         {
@@ -164,6 +190,16 @@ impl Events {
         {
             condition.validate(Some(Stage::Response))?;
         }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.connector.attributes.request
+        {
+            condition.validate(Some(Stage::Request))?;
+        }
+        if let StandardEventConfig::Conditional { condition, .. } =
+            &self.connector.attributes.response
+        {
+            condition.validate(Some(Stage::Response))?;
+        }
         for (name, custom_event) in &self.router.custom {
             custom_event.validate().map_err(|err| {
                 format!("configuration error for router custom event {name:?}: {err}")
@@ -177,6 +213,11 @@ impl Events {
         for (name, custom_event) in &self.subgraph.custom {
             custom_event.validate().map_err(|err| {
                 format!("configuration error for subgraph custom event {name:?}: {err}")
+            })?;
+        }
+        for (name, custom_event) in &self.connector.custom {
+            custom_event.validate().map_err(|err| {
+                format!("configuration error for connector HTTP custom event {name:?}: {err}")
             })?;
         }
 
@@ -203,10 +244,10 @@ where
     Attributes: Selectors<Request, Response, EventResponse> + Default,
     Sel: Selector<Request = Request, Response = Response> + Debug,
 {
-    request: StandardEvent<Sel>,
-    response: StandardEvent<Sel>,
-    error: StandardEvent<Sel>,
-    custom: Vec<CustomEvent<Request, Response, EventResponse, Attributes, Sel>>,
+    pub(super) request: StandardEvent<Sel>,
+    pub(super) response: StandardEvent<Sel>,
+    pub(super) error: StandardEvent<Sel>,
+    pub(super) custom: Vec<CustomEvent<Request, Response, EventResponse, Attributes, Sel>>,
 }
 
 impl Instrumented
@@ -223,43 +264,17 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = Vec::with_capacity(5);
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
-                .router_request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = request.router_request.headers();
 
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.headers"),
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
-            ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.method"),
-                opentelemetry::Value::String(format!("{}", request.router_request.method()).into()),
-            ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.uri"),
-                opentelemetry::Value::String(format!("{}", request.router_request.uri()).into()),
-            ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.version"),
-                opentelemetry::Value::String(
-                    format!("{:?}", request.router_request.version()).into(),
-                ),
-            ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.body"),
-                opentelemetry::Value::String(format!("{:?}", request.router_request.body()).into()),
-            ));
-            log_event(self.request.level(), "router.request", attrs, "");
+            request
+                .context
+                .extensions()
+                .with_lock(|ext| ext.insert(DisplayRouterRequest(self.request.level())));
+        }
+        if self.response.level() != EventLevel::Off {
+            request
+                .context
+                .extensions()
+                .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -288,21 +303,29 @@ impl Instrumented
             #[cfg(not(test))]
             let headers = response.response.headers();
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.headers"),
+                HTTP_RESPONSE_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.status"),
+                HTTP_RESPONSE_STATUS,
                 opentelemetry::Value::String(format!("{}", response.response.status()).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.version"),
+                HTTP_RESPONSE_VERSION,
                 opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
             ));
-            attrs.push(KeyValue::new(
-                Key::from_static_str("http.response.body"),
-                opentelemetry::Value::String(format!("{:?}", response.response.body()).into()),
-            ));
+
+            if let Some(body) = response
+                .context
+                .extensions()
+                .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
+            {
+                attrs.push(KeyValue::new(
+                    HTTP_RESPONSE_BODY,
+                    opentelemetry::Value::String(body.0.into()),
+                ));
+            }
+
             log_event(self.response.level(), "router.response", attrs, "");
         }
         for custom_event in &self.custom {
@@ -367,29 +390,29 @@ impl Instrumented
             #[cfg(not(test))]
             let headers = request.supergraph_request.headers();
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.headers"),
+                HTTP_REQUEST_HEADERS,
                 opentelemetry::Value::String(format!("{:?}", headers).into()),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.method"),
+                HTTP_REQUEST_METHOD,
                 opentelemetry::Value::String(
                     format!("{}", request.supergraph_request.method()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.uri"),
+                HTTP_REQUEST_URI,
                 opentelemetry::Value::String(
                     format!("{}", request.supergraph_request.uri()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.version"),
+                HTTP_REQUEST_VERSION,
                 opentelemetry::Value::String(
                     format!("{:?}", request.supergraph_request.version()).into(),
                 ),
             ));
             attrs.push(KeyValue::new(
-                Key::from_static_str("http.request.body"),
+                HTTP_REQUEST_BODY,
                 opentelemetry::Value::String(
                     serde_json::to_string(request.supergraph_request.body())
                         .unwrap_or_default()
@@ -402,7 +425,7 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SupergraphEventResponse(self.response.clone())));
+                .with_lock(|lock| lock.insert(SupergraphEventResponse(self.response.clone())));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -467,13 +490,13 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventRequest(self.request.clone())));
+                .with_lock(|lock| lock.insert(SubgraphEventRequest(self.request.clone())));
         }
         if self.response.level() != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventResponse(self.response.clone())));
+                .with_lock(|lock| lock.insert(SubgraphEventResponse(self.response.clone())));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -622,21 +645,21 @@ where
     E: Debug,
 {
     /// The log level of the event.
-    level: EventLevel,
+    pub(super) level: EventLevel,
 
     /// The event message.
-    message: Arc<String>,
+    pub(super) message: Arc<String>,
 
     /// When to trigger the event.
-    on: EventOn,
+    pub(super) on: EventOn,
 
     /// The event attributes.
     #[serde(default = "Extendable::empty_arc::<A, E>")]
-    attributes: Arc<Extendable<A, E>>,
+    pub(super) attributes: Arc<Extendable<A, E>>,
 
     /// The event conditions.
     #[serde(default = "Condition::empty::<E>")]
-    condition: Condition<E>,
+    pub(super) condition: Condition<E>,
 }
 
 impl<A, E, Request, Response, EventResponse> Event<A, E>
@@ -671,22 +694,22 @@ where
     A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    inner: Mutex<CustomEventInner<Request, Response, EventResponse, A, T>>,
+    pub(super) inner: Mutex<CustomEventInner<Request, Response, EventResponse, A, T>>,
 }
 
-struct CustomEventInner<Request, Response, EventResponse, A, T>
+pub(super) struct CustomEventInner<Request, Response, EventResponse, A, T>
 where
     A: Selectors<Request, Response, EventResponse> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    name: String,
-    level: EventLevel,
-    event_on: EventOn,
-    message: Arc<String>,
-    selectors: Option<Arc<Extendable<A, T>>>,
-    condition: Condition<T>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
-    _phantom: PhantomData<EventResponse>,
+    pub(super) name: String,
+    pub(super) level: EventLevel,
+    pub(super) event_on: EventOn,
+    pub(super) message: Arc<String>,
+    pub(super) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(super) condition: Condition<T>,
+    pub(super) attributes: Vec<opentelemetry::KeyValue>,
+    pub(super) _phantom: PhantomData<EventResponse>,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented
@@ -815,8 +838,19 @@ pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::sources::connect::URLTemplate;
     use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use router::body;
     use tracing::instrument::WithSubscriber;
 
     use super::*;
@@ -824,8 +858,15 @@ mod tests {
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
+    use crate::plugins::connectors::handle_responses::MappedResponse;
+    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
+    use crate::services::connector::request_service::transport;
+    use crate::services::connector::request_service::Request;
+    use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportRequest;
+    use crate::services::connector::request_service::TransportResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_events() {
@@ -836,13 +877,7 @@ mod tests {
 
         async {
             test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header(CONTENT_LENGTH, "0")
-                        .header("custom-header", "val1")
-                        .header("x-log-request", HeaderValue::from_static("log"))
-                        .build()
-                        .unwrap(),
+                .router_service(
                     |_r|async  {
                         Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
@@ -852,6 +887,14 @@ mod tests {
                             .build()
                             .expect("expecting valid response"))
                     },
+                )
+                .call(
+                    router::Request::fake_builder()
+                        .header(CONTENT_LENGTH, "0")
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .build()
+                        .unwrap()
                 )
                 .await
                 .expect("expecting successful response");
@@ -872,11 +915,8 @@ mod tests {
         async {
             // Without the header to enable custom event
             test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header("custom-header", "val1")
-                        .build()
-                        .unwrap(),
+                .router_service(
+
                     |_r| async {
                         let context_with_error = Context::new();
                         let _ = context_with_error
@@ -890,6 +930,10 @@ mod tests {
                             .expect("expecting valid response"))
                     },
                 )
+                .call(router::Request::fake_builder()
+                    .header("custom-header", "val1")
+                    .build()
+                    .unwrap())
                 .await
                 .expect("expecting successful response");
         }
@@ -909,11 +953,7 @@ mod tests {
         async {
             // Without the header to enable custom event
             test_harness
-                .call_router(
-                    router::Request::fake_builder()
-                        .header("custom-header", "val1")
-                        .build()
-                        .unwrap(),
+                .router_service(
                     |_r| async {
                         Ok(router::Response::fake_builder()
                             .header("custom-header", "val1")
@@ -924,6 +964,10 @@ mod tests {
                             .expect("expecting valid response"))
                     },
                 )
+                .call(router::Request::fake_builder()
+                    .header("custom-header", "val1")
+                    .build()
+                    .unwrap())
                 .await
                 .expect("expecting successful response");
         }
@@ -942,20 +986,19 @@ mod tests {
 
         async {
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -977,33 +1020,32 @@ mod tests {
             let ctx = Context::new();
             ctx.insert(OPERATION_NAME, String::from("Test")).unwrap();
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query Test { foo }")
                         .context(ctx)
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    Ok(supergraph::Response::fake_builder()
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                        .expect("expecting valid response"))
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1021,24 +1063,23 @@ mod tests {
 
         async {
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    let context_with_error = Context::new();
+                    let _ = context_with_error
+                        .insert(CONTAINS_GRAPHQL_ERROR, true)
+                        .unwrap();
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .context(context_with_error)
+                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        let context_with_error = Context::new();
-                        let _ = context_with_error
-                            .insert(CONTAINS_GRAPHQL_ERROR, true)
-                            .unwrap();
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .context(context_with_error)
-                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1056,19 +1097,18 @@ mod tests {
 
         async {
             test_harness
-                .call_supergraph(
+                .supergraph_service(|_r| async {
+                    supergraph::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                        .build()
+                })
+                .call(
                     supergraph::Request::fake_builder()
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
-                        supergraph::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1094,19 +1134,18 @@ mod tests {
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
             test_harness
-                .call_subgraph(
+                .subgraph_service("subgraph", |_r| async {
+                    subgraph::Response::fake2_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
                         .subgraph_request(subgraph_req)
                         .build(),
-                    |_r| {
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
                 .await
                 .expect("expecting successful response");
@@ -1132,21 +1171,184 @@ mod tests {
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
             test_harness
-                .call_subgraph(
+                .subgraph_service("subgraph", |_r| async {
+                    subgraph::Response::fake2_builder()
+                        .header("custom-header", "val1")
+                        .header("x-log-response", HeaderValue::from_static("log"))
+                        .subgraph_name("subgraph")
+                        .data(serde_json::json!({"data": "res"}).to_string())
+                        .build()
+                })
+                .call(
                     subgraph::Request::fake_builder()
                         .subgraph_name("subgraph")
                         .subgraph_request(subgraph_req)
                         .build(),
-                    |_r| {
-                        subgraph::Response::fake2_builder()
-                            .header("custom-header", "val1")
-                            .header("x-log-response", HeaderValue::from_static("log"))
-                            .subgraph_name("subgraph")
-                            .data(serde_json::json!({"data": "res"}).to_string())
-                            .build()
-                            .expect("expecting valid response")
-                    },
                 )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_connector_events_request() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let context = crate::Context::default();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+            http_request
+                .headers_mut()
+                .insert("x-log-request", HeaderValue::from_static("log"));
+            let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                inner: http_request,
+                debug: None,
+            });
+            let connector = Connector {
+                id: ConnectId::new(
+                    "subgraph".into(),
+                    Some("source".into()),
+                    name!(Query),
+                    name!(users),
+                    0,
+                    "label",
+                ),
+                transport: HttpJsonTransport {
+                    source_url: None,
+                    connect_template: URLTemplate::from_str("/test").unwrap(),
+                    method: HTTPMethod::Get,
+                    headers: Default::default(),
+                    body: None,
+                },
+                selection: JSONSelection::empty(),
+                config: None,
+                max_requests: None,
+                entity_resolver: None,
+                spec: ConnectSpec::V0_1,
+                request_variables: Default::default(),
+                response_variables: Default::default(),
+            };
+            let response_key = ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            };
+            let connector_request = Request {
+                context: context.clone(),
+                connector: Arc::new(connector.clone()),
+                service_name: Default::default(),
+                transport_request,
+                key: response_key.clone(),
+                mapping_problems: vec![],
+            };
+            test_harness
+                .call_connector_request_service(connector_request, |request| Response {
+                    context: request.context.clone(),
+                    connector: request.connector.clone(),
+                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                        inner: http::Response::builder()
+                            .status(200)
+                            .header("x-log-request", HeaderValue::from_static("log"))
+                            .body(body::empty())
+                            .expect("expecting valid response")
+                            .into_parts()
+                            .0,
+                    })),
+                    mapped_response: MappedResponse::Data {
+                        data: serde_json::json!({})
+                            .try_into()
+                            .expect("expecting valid JSON"),
+                        key: request.key.clone(),
+                        problems: vec![],
+                    },
+                })
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_connector_events_response() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let context = crate::Context::default();
+            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+            http_request
+                .headers_mut()
+                .insert("x-log-response", HeaderValue::from_static("log"));
+            let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                inner: http_request,
+                debug: None,
+            });
+            let connector = Connector {
+                id: ConnectId::new(
+                    "subgraph".into(),
+                    Some("source".into()),
+                    name!(Query),
+                    name!(users),
+                    0,
+                    "label",
+                ),
+                transport: HttpJsonTransport {
+                    source_url: None,
+                    connect_template: URLTemplate::from_str("/test").unwrap(),
+                    method: HTTPMethod::Get,
+                    headers: Default::default(),
+                    body: None,
+                },
+                selection: JSONSelection::empty(),
+                config: None,
+                max_requests: None,
+                entity_resolver: None,
+                spec: ConnectSpec::V0_1,
+                request_variables: Default::default(),
+                response_variables: Default::default(),
+            };
+            let response_key = ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+            };
+            let connector_request = Request {
+                context: context.clone(),
+                connector: Arc::new(connector.clone()),
+                service_name: Default::default(),
+                transport_request,
+                key: response_key.clone(),
+                mapping_problems: vec![],
+            };
+            test_harness
+                .call_connector_request_service(connector_request, |request| Response {
+                    context: request.context.clone(),
+                    connector: request.connector.clone(),
+                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                        inner: http::Response::builder()
+                            .status(200)
+                            .header("x-log-response", HeaderValue::from_static("log"))
+                            .body(body::empty())
+                            .expect("expecting valid response")
+                            .into_parts()
+                            .0,
+                    })),
+                    mapped_response: MappedResponse::Data {
+                        data: serde_json::json!({})
+                            .try_into()
+                            .expect("expecting valid JSON"),
+                        key: request.key.clone(),
+                        problems: vec![],
+                    },
+                })
                 .await
                 .expect("expecting successful response");
         }

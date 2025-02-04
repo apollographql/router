@@ -4,6 +4,105 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.0.0-preview.0] - 2024-10-01
+
+Learn more about [migrating from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1).
+
+## 🚀 Features
+
+### Apollo Connectors Public Preview
+
+[Apollo Connectors](https://go.apollo.dev/connectors) are a new declarative programming model for GraphQL, allowing you to plug your existing REST services directly into your graph.
+
+```graphql
+type Query {
+  posts(first: Int): [Post]
+    @connect(
+      http: { GET: "https://my.api/posts?limit={$args.first}" }
+      selection: "$.results { id title body }"
+    )
+}
+```
+
+Apollo Connectors are available for Enterprise and free GraphOS Trial accounts. Get started with the [Connectors Quickstart](https://go.apollo.dev/connectors/quickstart) and visit the ["connectors" tag on the community forums](https://community.apollographql.com/tag/connectors) to leave feedback during the preview.
+
+### Apollo operation usage reporting via OTLP
+
+The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
+
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a private tracing format. In v1.49.0, we introduced support for using OTEL to perform this reporting. In v1.x, this is controlled using the experimental_otlp_tracing_sampler flag, and it's disabled by default.
+
+Now in v2.x, this flag is renamed to otlp_tracing_sampler, and it's enabled by default.
+
+Learn more about configuring [usage reporting via OTLP](https://www.apollographql.com/docs/graphos/routing/graphos-reporting#usage-reporting-via-opentelemetry-protocol-otlp).
+
+## 📃 Configuration
+
+### Metrics reporting defaults
+
+Default values of some GraphOS reporting metrics have been changed from v1.x to the following in v2.x:
+
+* `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
+* `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
+
+# [1.59.1] - 2025-01-08
+
+## 🐛 Fixes
+
+### Fix transmitted header value for Datadog priority sampling resolution ([PR #6017](https://github.com/apollographql/router/pull/6017))
+
+The router now transmits correct values of `x-datadog-sampling-priority` to downstream services.
+
+Previously, an `x-datadog-sampling-priority` of `-1` was incorrectly converted to `0` for downstream requests, and `2` was incorrectly converted to `1`. When propagating to downstream services, this resulted in values of `USER_REJECT` being incorrectly transmitted as `AUTO_REJECT`.
+
+### Enable accurate Datadog APM metrics ([PR #6017](https://github.com/apollographql/router/pull/6017))
+
+The router supports a new preview feature, the `preview_datadog_agent_sampling` option, to enable sending all spans to the Datadog Agent so APM metrics and views are accurate.
+
+Previously, the sampler option in `telemetry.exporters.tracing.common.sampler` wasn't Datadog-aware. To get accurate Datadog APM metrics, all spans must be sent to the Datadog Agent with a `psr` or `sampling.priority` attribute set appropriately to record the sampling decision.
+
+The `preview_datadog_agent_sampling` option enables accurate Datadog APM metrics. It should be used when exporting to the Datadog Agent, via OTLP or Datadog-native.
+
+```yaml
+telemetry:
+  exporters:
+    tracing:
+      common:
+        # Only 10 percent of spans will be forwarded from the Datadog agent to Datadog. Experiment to find a value that is good for you!
+        sampler: 0.1
+        # Send all spans to the Datadog agent.
+        preview_datadog_agent_sampling: true
+```
+
+Using these options can decrease your Datadog bill, because you will be sending only a percentage of spans from the Datadog Agent to Datadog.
+
+> [!IMPORTANT]
+> - Users must enable `preview_datadog_agent_sampling` to get accurate APM metrics. Users that have been using recent versions of the router will have to modify their configuration to retain full APM metrics.
+> - The router doesn't support [`in-agent` ingestion control](https://docs.datadoghq.com/tracing/trace_pipeline/ingestion_mechanisms/?tab=java#in-the-agent).
+> - Configuring `traces_per_second` in the Datadog Agent won't dynamically adjust the router's sampling rate to meet the target rate.
+> - Sending all spans to the Datadog Agent may require that you tweak the `batch_processor` settings in your exporter config. This applies to both OTLP and Datadog native exporters.
+
+Learn more by reading the [updated Datadog tracing documentation](https://apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog) for more information on configuration options and their implications.
+
+### Fix non-parent sampling ([PR #6481](https://github.com/apollographql/router/pull/6481))
+
+When the user specifies a non-parent sampler the router should ignore the information from upstream and use its own sampling rate.
+
+The following configuration would not work correctly:
+
+```
+  exporters:
+    tracing:
+      common:
+        service_name: router
+        sampler: 0.00001
+        parent_based_sampler: false
+```
+All spans are being sampled.
+This is now fixed and the router will correctly ignore any upstream sampling decision.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6481
+
 # [1.59.0] - 2024-12-17
 
 > [!IMPORTANT]
@@ -263,7 +362,6 @@ The deprecated metrics will continue to work in the 1.x release line.
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6350
 
 
-
 # [1.58.1] - 2024-12-05
 
 > [!IMPORTANT]
@@ -285,8 +383,6 @@ The native query planner now correctly sets two experimental configuration optio
 - `supergraph.query_planning.experimental_paths_limit`
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6316
-
-
 
 # [1.58.0] - 2024-11-27
 
@@ -593,8 +689,6 @@ By [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollogr
 This fixes an issue in progressive override where the override labels were not transmitted to the query planner during cache warmup. Queries were correctly using the overridden fields at first, but after an update, reverted to non overridden fields, and could not recover.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/6108
-
-
 
 # [1.57.0] - 2024-10-22
 
@@ -1962,6 +2056,8 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 ### Support local persisted query manifests for use with offline licenses ([Issue #4587](https://github.com/apollographql/router/issues/4587))
 
 Adds experimental support for passing [persisted query manifests](https://www.apollographql.com/docs/graphos/operations/persisted-queries/#31-generate-persisted-query-manifests) to use instead of the hosted Uplink version.
+
+> Note: this feature is no longer experimental as of `v1.61.0`. As such, the `experimental_` prefix has been removed. 
 
 For example:
 

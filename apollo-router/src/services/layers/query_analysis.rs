@@ -1,3 +1,6 @@
+//! Implements GraphQL parsing/validation/usage counting of requests at the supergraph service
+//! stage.
+
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -26,17 +29,19 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::Query;
+use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
-/// [`Layer`] for QueryAnalysis implementation.
+/// A layer-like type that handles several aspects of query parsing and analysis.
+///
+/// The supergraph layer implementation is in [QueryAnalysisLayer::supergraph_request].
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub(crate) struct QueryAnalysisLayer {
@@ -75,6 +80,8 @@ impl QueryAnalysisLayer {
         }
     }
 
+    // XXX(@goto-bus-stop): This is public because query warmup uses it. I think the reason that
+    // warmup uses this instead of `Query::parse_document` directly is to use the worker pool.
     pub(crate) async fn parse_document(
         &self,
         query: &str,
@@ -104,9 +111,28 @@ impl QueryAnalysisLayer {
         let job = std::panic::AssertUnwindSafe(job);
         compute_job::execute(priority, job)
             .await
+            // `expect()` propagates any panic that potentially happens in the closure, but:
+            //
+            // * We try to avoid such panics in the first place and consider them bugs
+            // * The panic handler in `apollo-router/src/executable.rs` exits the process
+            //   so this error case should never be reached.
             .expect("Query::parse_document panicked")
     }
 
+    /// Parses the GraphQL in the supergraph request and computes Apollo usage references.
+    ///
+    /// This functions similarly to a checkpoint service, short-circuiting the pipeline on error
+    /// (using an `Err()` return value).
+    /// The user of this function is responsible for propagating short-circuiting.
+    ///
+    /// # Context
+    /// This stores values in the request context:
+    /// - [`ParsedDocument`]
+    /// - [`ExtendedReferenceStats`]
+    /// - "operation_name" and "operation_kind"
+    /// - authorization details (required scopes, policies), if any
+    /// - [`Arc`]`<`[`UsageReporting`]`>` if there was an error; normally, this would be populated
+    ///   by the caching query planner, but we do not reach that code if we fail early here.
     pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
@@ -118,14 +144,6 @@ impl QueryAnalysisLayer {
                 .message("Must provide query string.".to_string())
                 .extension_code("MISSING_QUERY_STRING")
                 .build()];
-            u64_counter!(
-                "apollo_router_http_requests_total",
-                "Total number of HTTP requests made.",
-                1,
-                status = StatusCode::BAD_REQUEST.as_u16() as i64,
-                error = "Must provide query string"
-            );
-
             return Err(SupergraphResponse::builder()
                 .errors(errors)
                 .status_code(StatusCode::BAD_REQUEST)
@@ -215,7 +233,7 @@ impl QueryAnalysisLayer {
                     None
                 };
 
-                request.context.extensions().with_lock(|mut lock| {
+                request.context.extensions().with_lock(|lock| {
                     lock.insert::<ParsedDocument>(doc.clone());
                     if let Some(stats) = extended_ref_stats {
                         lock.insert::<ExtendedReferenceStats>(stats);
@@ -228,7 +246,7 @@ impl QueryAnalysisLayer {
                 })
             }
             Err(errors) => {
-                request.context.extensions().with_lock(|mut lock| {
+                request.context.extensions().with_lock(|lock| {
                     lock.insert(Arc::new(UsageReporting {
                         stats_report_key: errors.get_error_key().to_string(),
                         referenced_fields_by_type: HashMap::new(),
@@ -320,7 +338,7 @@ impl Display for ParsedDocumentInner {
 
 impl Hash for ParsedDocumentInner {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash.0.hash(state);
+        self.hash.hash(state);
     }
 }
 

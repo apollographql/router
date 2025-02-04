@@ -5,41 +5,40 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.6.0
+  gh: circleci/github-cli@2.6.2
   slack: circleci/slack@5.1.1
   secops: apollo/circleci-secops-orb@2.0.7
 
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
   amd_linux_helm: &amd_linux_helm_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
       - image: cimg/redis:7.4.1
-      - image: jaegertracing/all-in-one:1.54.0
       - image: openzipkin/zipkin:3.4.3
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
-    resource_class: xlarge
+    resource_class: 2xlarge
     environment:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
-    machine:
-      image: ubuntu-2004:2024.01.1
+    docker:
+      - image: cimg/base:current
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
-    machine:
-      image: ubuntu-2004:2024.01.1
+    docker:
+      - image: cimg/base:current
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
@@ -82,6 +81,10 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
+  # note the cmake version is only used for manual installs, not for installs from a package manager like apt or homebrew
+  cmake_version:
+    type: string
+    default: "3.31.1"
   nightly:
     type: boolean
     default: false
@@ -233,9 +236,29 @@ commands:
                 command: |
                   if [[ ! -d "$HOME/.deb" ]]; then
                     mkdir $HOME/.deb
-                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev
+                    sudo apt-get update
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install build-essential libssl-dev libdw-dev
                   fi
                   sudo dpkg -i $HOME/.deb/*.deb
+
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install CMake
+                command: |
+                  mkdir -p "$HOME/.local"
+                  if [[ ! -f "$HOME/.local/bin/cmake" ]]; then
+                    curl -L https://github.com/Kitware/CMake/releases/download/v<< pipeline.parameters.cmake_version >>/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64.zip  --output cmake.zip
+                    # The zip file has a root directory, so we put it somewhere else first before placing the files in .local
+                    unzip cmake.zip -d /tmp > /dev/null
+                    cp /tmp/cmake-<< pipeline.parameters.cmake_version >>-windows-x86_64/* -R "$HOME/.local"
+                  fi
+
+                  cmake --version
   install_protoc:
     parameters:
       platform:
@@ -483,7 +506,11 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
-          command: xtask test --workspace --locked --features ci,hyper_header_limits
+            # Temporary disable lib backtrace since it crashing on MacOS
+            # TODO: remove this workaround once we update to Xcode >= 15.1.0
+            # See: https://github.com/apollographql/router/pull/5462
+            RUST_LIB_BACKTRACE: 0
+          command: xtask test --workspace --locked --features ci,snapshot
       - run:
           name: Delete large files from cache
           command: |
@@ -696,10 +723,10 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist --target aarch64-apple-darwin --features hyper_header_limits
+                  cargo xtask dist --target aarch64-apple-darwin
             - run:
                 command: >
-                  cargo xtask dist --target x86_64-apple-darwin --features hyper_header_limits
+                  cargo xtask dist --target x86_64-apple-darwin
             - run:
                 command: >
                   mkdir -p artifacts
@@ -759,7 +786,7 @@ jobs:
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
-                  cargo xtask dist --features hyper_header_limits
+                  cargo xtask dist
             - run:
                 command: >
                   mkdir -p artifacts
@@ -902,7 +929,7 @@ jobs:
 
   publish_github_release:
     docker:
-      - image: cimg/base:stable
+      - image: cimg/base:current
     resource_class: small
     environment:
       <<: *common_job_environment
@@ -1192,3 +1219,4 @@ workflows:
             - secops-oidc
             - github-orb
           git-base-revision: <<#pipeline.git.base_revision>><<pipeline.git.base_revision>><</pipeline.git.base_revision >>
+          disabled-signatures: "rules.providers.semgrep.security.javascript.lang.security.detect-insecure-websocket"

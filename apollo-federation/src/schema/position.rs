@@ -624,6 +624,13 @@ impl Debug for ObjectOrInterfaceFieldDefinitionPosition {
 impl ObjectOrInterfaceFieldDefinitionPosition {
     const EXPECTED: &'static str = "an object/interface field";
 
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.type_name,
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => &field.type_name,
+        }
+    }
+
     pub(crate) fn field_name(&self) -> &Name {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.field_name,
@@ -2157,6 +2164,30 @@ impl ObjectFieldArgumentDefinitionPosition {
         Ok(())
     }
 
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Node<Directive>,
+    ) -> Result<(), FederationError> {
+        let argument = self.make_mut(&mut schema.schema)?;
+        if argument
+            .directives
+            .iter()
+            .any(|other_directive| other_directive.ptr_eq(&directive))
+        {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Directive application \"@{}\" already exists on object field argument \"{}\"",
+                    directive.name, self,
+                ),
+            }
+            .into());
+        }
+        let name = directive.name.clone();
+        argument.make_mut().directives.push(directive);
+        self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
@@ -2304,6 +2335,13 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "ObjectFieldArgument({self})")
     }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
+    pub(crate) field: ObjectOrInterfaceFieldDefinitionPosition,
+    pub(crate) directive_name: Name,
+    pub(crate) directive_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -3121,6 +3159,32 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .arguments
             .retain(|other_argument| other_argument.name != self.argument_name);
         Ok(())
+    }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Node<Directive>,
+    ) -> Result<(), FederationError> {
+        let argument = self.make_mut(&mut schema.schema)?;
+        if argument
+            .directives
+            .iter()
+            .any(|other_directive| other_directive.ptr_eq(&directive))
+        {
+            return Err(
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Directive application \"@{}\" already exists on interface field argument \"{}\"",
+                        directive.name,
+                        self,
+                    )
+                }.into()
+            );
+        }
+        let name = directive.name.clone();
+        argument.make_mut().directives.push(directive);
+        self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
     /// Remove a directive application from this position by name.
@@ -4022,6 +4086,30 @@ impl EnumValueDefinitionPosition {
         Ok(())
     }
 
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Node<Directive>,
+    ) -> Result<(), FederationError> {
+        let value = self.make_mut(&mut schema.schema)?;
+        if value
+            .directives
+            .iter()
+            .any(|other_directive| other_directive.ptr_eq(&directive))
+        {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Directive application \"@{}\" already exists on enum value \"{}\"",
+                    directive.name, self,
+                ),
+            }
+            .into());
+        }
+        let name = directive.name.clone();
+        value.make_mut().directives.push(directive);
+        self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
     /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(value) = self.try_make_mut(&mut schema.schema) else {
@@ -4316,7 +4404,6 @@ impl InputObjectTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
-    /// Remove a directive application.
     fn insert_references(
         &self,
         type_: &Node<InputObjectType>,
@@ -4502,6 +4589,30 @@ impl InputObjectFieldDefinitionPosition {
             parent.remove_recursive(schema)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Node<Directive>,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?;
+        if field
+            .directives
+            .iter()
+            .any(|other_directive| other_directive.ptr_eq(&directive))
+        {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Directive application \"@{}\" already exists on input object field \"{}\"",
+                    directive.name, self,
+                ),
+            }
+            .into());
+        }
+        let name = directive.name.clone();
+        field.make_mut().directives.push(directive);
+        self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
     /// Remove a directive application from this position by name.
@@ -4901,6 +5012,30 @@ impl DirectiveArgumentDefinitionPosition {
             .arguments
             .retain(|other_argument| other_argument.name != self.argument_name);
         Ok(())
+    }
+
+    pub(crate) fn insert_directive(
+        &self,
+        schema: &mut FederationSchema,
+        directive: Node<Directive>,
+    ) -> Result<(), FederationError> {
+        let argument = self.make_mut(&mut schema.schema)?;
+        if argument
+            .directives
+            .iter()
+            .any(|other_directive| other_directive.ptr_eq(&directive))
+        {
+            return Err(SingleFederationError::Internal {
+                message: format!(
+                    "Directive application \"@{}\" already exists on directive argument \"{}\"",
+                    directive.name, self,
+                ),
+            }
+            .into());
+        }
+        let name = directive.name.clone();
+        argument.make_mut().directives.push(directive);
+        self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
     /// Remove a directive application from this position by name.

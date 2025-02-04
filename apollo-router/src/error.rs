@@ -343,7 +343,7 @@ impl IntoGraphQLErrors for FederationErrorBridge {
     }
 }
 
-impl IntoGraphQLErrors for Vec<apollo_compiler::execution::GraphQLError> {
+impl IntoGraphQLErrors for Vec<apollo_compiler::response::GraphQLError> {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         Ok(self
             .into_iter()
@@ -495,6 +495,10 @@ pub(crate) enum SchemaError {
     /// Api error(s): {0}
     #[from(ignore)]
     Api(String),
+
+    /// Connector error(s): {0}
+    #[from(ignore)]
+    Connector(FederationError),
 }
 
 /// Collection of schema validation errors.
@@ -550,7 +554,7 @@ impl IntoGraphQLErrors for ParseErrors {
 /// Collection of schema validation errors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ValidationErrors {
-    pub(crate) errors: Vec<apollo_compiler::execution::GraphQLError>,
+    pub(crate) errors: Vec<apollo_compiler::response::GraphQLError>,
 }
 
 impl ValidationErrors {
@@ -626,8 +630,6 @@ impl std::fmt::Display for ValidationErrors {
 pub(crate) enum SubgraphBatchingError {
     /// Sender unavailable
     SenderUnavailable,
-    /// Request does not have a subgraph name
-    MissingSubgraphName,
     /// Requests is empty
     RequestsIsEmpty,
     /// Batch processing failed: {0}
