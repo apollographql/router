@@ -144,7 +144,7 @@ telemetry:
 
 Metrics are measurements of the router's behavior that are collected and often analyzed over time to identify trends. Examples of router metrics include the number of incoming HTTP requests and the time spent processing a request. 
 
-Instruments define _how_ to collect and report metrics. Different kinds of instruments include counters, gauges, and histograms. Given the metric “number of incoming HTTP requests”, different instruments collect a count, histogram, and gauge of this metric.
+Instruments define _how_ to collect and report metrics. Different kinds of instruments include counters, gauges, and histograms. For example, given the metric "number of incoming HTTP requests," a counter records the total number of requests, a histogram captures the distribution of request counts over time, and a gauge provides a snapshot of the current request count at a given moment.
 
 #### Instrument types
 
@@ -159,29 +159,33 @@ Metric instruments fall into three categories:
   </thead>
   <tbody>
     <tr>
-      <td><strong>Router instruments</strong></td>
-      <td>
-        Standard instruments for the router's request life cycle, including:
-        <ul>
-          <li>The number of HTTP requests by HTTP status</li>
-          <li>A histogram of HTTP router request duration</li>
-        </ul>
-      </td>
-    </tr>
-    <tr>
       <td><strong>OTEL instruments</strong></td>
       <td>
         Standard OpenTelemetry instruments around the HTTP lifecycle, including:
         <ul>
+          <li>The number of HTTP requests by HTTP status</li>
+          <li>A histogram of HTTP router request duration</li>
           <li>The number of active requests in flight</li>
           <li>A histogram of request body sizes</li>
         </ul>
       </td>
     </tr>
     <tr>
+      <td><strong>Router instruments</strong></td>
+      <td>
+        Standard instruments for the router request life cycle, including:
+        <ul>
+          <li>Count of GraphQL errors in responses</li>
+          <li>Time spent loading the schema in seconds</li>
+          <li>Number of entries in the router's cache</li>
+          <li>Time spent warming up the query planner queries in seconds</li>
+        </ul>
+      </td>
+    </tr>
+    <tr>
       <td><strong>Custom instrument</strong></td>
       <td>
-        Custom instruments defined in the router's request life cycle.
+        Custom instruments defined in the router request life cycle.
       </td>
     </tr>
   </tbody>
