@@ -908,6 +908,18 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_log_not_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
+        }
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
         let now = Instant::now();
         let mut last_metrics = String::new();
