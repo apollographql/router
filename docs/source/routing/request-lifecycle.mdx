@@ -6,17 +6,16 @@ description: Understand how GraphQL client requests get processed by the request
 
 import RequestLifecycleOverviewDiagram from '../../shared/diagrams/router-request-lifecycle-overview.mdx';
 
-## The request lifecycle
 
-Every client request made to a GraphOS Router goes through its **router request lifecycle**: a multi-stage pipeline of services that processes requests and returns responses.
+Every client request made to a GraphOS Router goes through the **router request lifecycle**: a multi-stage pipeline of services that processes requests and returns responses.
 
 <RequestLifecycleOverviewDiagram />
 
-A client request is processed first by passing it between services along the lifecycle's **request path** to create and send its constituent subgraph requests. Then all the responses from the subgraph requests are gathered into a client response along the lifecycle's **response path**.
+The router processes a client request by first passing it between services along the lifecycle's **request path**. The request path breaks up a request and sends constituent sub-requests to subgraphs. Then along the lifecycle's **response path**, the router gathers all the responses from the subgraph requests into a client response.
 
 ## Request path
 
-In the request path, each request is processed by the request lifecycle services in the following order:
+In the request path, the request lifecycle services process each request in the following order:
 
 * The **Router service** receives the client request from the HTTP server and parses it into a GraphQL operation.
 * The **Supergraph service** receives a GraphQL operation and calls the router's query planner to produce the query plan that most efficiently executes the operation.
@@ -89,7 +88,7 @@ Subgraph responses follow the response path.
 
 ## Response path
 
-In the response path, the subgraph responses are gathered into a client response by the lifecycle services in the following order:
+In the response path, the lifecycle services gather subgraph responses into a client response in the following order:
 
 * The **Execution service** receives and formats all subgraph responses.
 * The **Supergraph service** gathers the content of all subgraph responses into stream.
@@ -222,7 +221,7 @@ flowchart LR;
 
 Additionally, some requests and responses may happen multiple times for the same operation. With subscriptions, for example, a subgraph sends a new `SubgraphResponse` whenever data is updated. Each response object travels through all the services in the response path and interacts with any customizations you've created.
 
-### Request and Response buffering
+### Request and response buffering
 
 <Note>
 
@@ -248,7 +247,7 @@ In general, it's best to avoid buffering where possible. If necessary, it is ok 
 
 To understand the state and health of your router as it services requests, you can add instrumentation to request lifecycle services and collect telemetry. The router's telemetry is based on [OpenTelemetry](https://opentelemetry.io/docs/what-is-opentelemetry/), so you can configure your router's YAML configuration to add traces, metrics, and logs. 
 
-You can instrument the Router, Supergraph, and Subgraph services with [events](/router/configuration/telemetry/instrumentation/events) to capture data points along the request lifecycle. To customize events, you can set[conditions](/router/configuration/telemetry/instrumentation/conditions) to control when events are triggered, and [attributes](/router/configuration/telemetry/instrumentation/events#attributes) and [selectors](/router/configuration/telemetry/instrumentation/selectors) to specify the data attached to events.
+You can instrument the Router, Supergraph, and Subgraph services with [events](/router/configuration/telemetry/instrumentation/events) to capture data points along the request lifecycle. To customize events, you can set [conditions](/router/configuration/telemetry/instrumentation/conditions) to control when events are triggered, and [attributes](/router/configuration/telemetry/instrumentation/events#attributes) and [selectors](/router/configuration/telemetry/instrumentation/selectors) to specify the data attached to events.
 
 To learn more about router observability with telemetry, go to [Router Telemetry](/graphos/routing/observability/telemetry).
 
