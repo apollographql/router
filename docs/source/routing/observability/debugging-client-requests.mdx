@@ -32,7 +32,16 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 ### Telemetry spans and traces
 
-Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces can have spans labeled `router`. These spans contain the HTTP information for a given client request via [OpenTelemetry standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code`.
+Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces can have spans labeled `router`. You can add attributes to include helpful information about the request and response. The following sections show some common patterns.
+
+<Note>
+
+Spans don't include an attribute for the HTTP body text. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or use the [request logging configuration](#request-body-logging).
+</Note>
+
+#### Add OpenTelemetry attributes
+
+You can add [OpenTelemetry (OTel) standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code` to spans with this configuration:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -44,9 +53,55 @@ telemetry:
           error.type: true
 ```
 
-These attributes include helpful information about the request and response. Spans, however, don't include an attribute for the HTTP body text. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or use the other options listed below.
+#### Map GraphQL errors to OTel errors
 
-### Request and response logging
+You can map GraphQL error data to OTel errors with the following configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          error.type: true
+          http.response.status_code: true
+          otel.status_code:
+              static: error
+              condition:
+                eq:
+                - true
+                - on_graphql_error: true
+          otel.status_description:
+            error: reason
+```
+
+#### Add flags for timeouts and rate limits
+
+You can flag rate limits and timeouts on router spans with the following configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          # If it's a timeout error
+          is_timeout:
+            static: true
+            condition:
+              eq:
+              - "request timed out"
+              - error: reason
+          # If it's a rate limit error
+          is_rate_limit:
+            static: true
+            condition:
+              eq:
+              - "your request has been rate limited"
+              - error: reason
+```
+
+### Request body logging
 
 You can include the request body in your telemetry by instrumenting [`events` in the supergraph service](/graphos/reference/router/telemetry/instrumentation/events#event-configuration) like so:
 
