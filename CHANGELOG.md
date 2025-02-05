@@ -4,6 +4,122 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.60.0] - 2025-02-05
+
+## 🚀 Features
+
+### Improve BatchProcessor observability ([Issue #6558](https://github.com/apollographql/router/issues/6558))
+
+A new metric has been introduced to allow observation of how many spans are being dropped by an telemetry batch processor.
+
+- `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
+    - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
+    - `error` = One of `channel closed`, `channel full`.
+
+By observing the number of spans dropped it is possible to estimate what batch processor settings will work for you.
+
+In addition, the log message for dropped spans will now indicate which batch processor is affected.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/6558
+
+## 🐛 Fixes
+
+### Improve performance of query hashing by using a precomputed schema hash ([PR #6622](https://github.com/apollographql/router/pull/6622))
+
+The router now uses a simpler and faster query hashing algorithm with more predictable CPU and memory usage. This improvement is enabled by using a precomputed hash of the entire schema, rather than computing and hashing the subset of types and fields used by each query.
+
+For more details on why these design decisions were made, please see the [PR description](https://github.com/apollographql/router/pull/6622)
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6622
+
+### Truncate invalid error paths ([PR #6359](https://github.com/apollographql/router/pull/6359))
+
+This fix addresses an issue where the router was silently dropping subgraph errors that included invalid paths.
+
+According to the [GraphQL Specification](https://spec.graphql.org/draft/#sel-GAPHRPHCAACCpC8-T) an error path must point to a **response field**:
+> If an error can be associated to a particular field in the GraphQL result, it must contain an entry with the key path that details the path of the response field which experienced the error.
+
+The router now truncates the path to the nearest valid field path if a subgraph error includes a path that can't be matched to a response field,
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6359
+
+### Eagerly init subgraph operation for subscription primary nodes ([PR #6509](https://github.com/apollographql/router/pull/6509))
+
+When subgraph operations are deserialized, typically from a query plan cache, they are not automatically parsed into a full document. Instead, each node needs to initialize its operation(s) prior to execution. With this change, the primary node inside SubscriptionNode is initialized in the same way as other nodes in the plan.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/6509
+
+### Fix increased memory usage in `sysinfo` since Router 1.59.0 ([PR #6634](https://github.com/apollographql/router/pull/6634))
+
+In version 1.59.0, Apollo Router started using the `sysinfo` crate to gather metrics about available CPUs and RAM. By default, that crate uses `rayon` internally to parallelize its handling of system processes. In turn, rayon creates a pool of long-lived threads.
+
+In a particular benchmark on a 32-core Linux server, this caused resident memory use to increase by about 150 MB. This is likely a combination of stack space (which only gets freed when the thread terminates) and per-thread space reserved by the heap allocator to reduce cross-thread synchronization cost.
+
+This regression is now fixed by:
+
+* Disabling `sysinfo`’s use of `rayon`, so the thread pool is not created and system processes information is gathered in a sequential loop.
+* Making `sysinfo` not gather that information in the first place since Router does not use it.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6634
+
+### Optimize demand control lookup ([PR #6450](https://github.com/apollographql/router/pull/6450))
+
+The performance of demand control in the router has been optimized.
+
+Previously, demand control could reduce router throughput due to its extra processing required for scoring.
+
+This fix improves performance by shifting more data to be computed at plugin initialization and consolidating lookup queries:
+
+- Cost directives for arguments are now stored in a map alongside those for field definitions
+- All precomputed directives are bundled into a struct for each field, along with that field's extended schema type. This reduces 5 individual lookups to a single lookup.
+- Response scoring was looking up each field's definition twice. This is now reduced to a single lookup.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/6450
+
+### Fix missing Content-Length header in subgraph requests ([Issue #6503](https://github.com/apollographql/router/issues/6503))
+
+A change in `1.59.0` caused the Router to send requests to subgraphs without a `Content-Length` header, which would cause issues with some GraphQL servers that depend on that header.
+
+This solves the underlying bug and reintroduces the `Content-Length` header.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/6538
+
+## 🛠 Maintenance
+
+### Remove the legacy query planner ([PR #6418](https://github.com/apollographql/router/pull/6418))
+
+The legacy query planner has been removed in this release. In the previous release, router v1.58, it was no longer used by default but was still available through the `experimental_query_planner_mode` configuration key. That key is now removed.
+
+Also removed are configuration keys which were only relevant to the legacy planner:
+
+* `supergraph.query_planning.experimental_parallelism`: the new planner can always use available parallelism.
+* `supergraph.experimental_reuse_query_fragments`: this experimental algorithm that attempted to
+reuse fragments from the original operation while forming subgraph requests is no longer present. Instead, by default new fragment definitions are generated based on the shape of the subgraph operation.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6418
+
+### Migrate various metrics to OTel instruments ([PR #6476](https://github.com/apollographql/router/pull/6476), [PR #6356](https://github.com/apollographql/router/pull/6356), [PR #6539](https://github.com/apollographql/router/pull/6539))
+
+Various metrics using our legacy mechanism based on the `tracing` crate are migrated to OTel instruments.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/6476, https://github.com/apollographql/router/pull/6356, https://github.com/apollographql/router/pull/6539
+
+## 📚 Documentation
+
+### Add instrumentation configuration examples ([PR #6487](https://github.com/apollographql/router/pull/6487))
+
+The docs for router telemetry have new example configurations for common use cases for [selectors](https://www.apollographql.com/docs/graphos/reference/router/telemetry/instrumentation/selectors) and [condition](https://www.apollographql.com/docs/graphos/reference/router/telemetry/instrumentation/conditions).
+
+By [@shorgi](https://github.com/shorgi) in https://github.com/apollographql/router/pull/6487
+
+## 🧪 Experimental
+
+### Remove experimental_retry option ([PR #6338](https://github.com/apollographql/router/pull/6338))
+
+The `experimental_retry` option has been removed due to its limited use and functionality during its experimental phase.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6338
+
 # [1.59.2] - 2025-01-28
 
 > [!IMPORTANT]
@@ -119,7 +235,7 @@ The native query planner achieves better performance for a variety of graphs. In
 
 * 10x median improvement in query planning time (observed via `apollo.router.query_planning.plan.duration`)
 * 2.9x improvement in router’s CPU utilization
-* 2.2x improvement in router’s memory usage 
+* 2.2x improvement in router’s memory usage
 
 > Note: you can expect generated plans and subgraph operations in the native
 query planner to have slight differences when compared to the legacy, JavaScript-based query planner. We've ascertained these differences to be semantically insignificant, based on comparing ~2.5 million known unique user operations in GraphOS as well as
@@ -161,9 +277,9 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 
 ### Add fleet awareness plugin ([PR #6151](https://github.com/apollographql/router/pull/6151))
 
-A new `fleet_awareness` plugin has been added that reports telemetry to Apollo about the configuration and deployment of the router. 
+A new `fleet_awareness` plugin has been added that reports telemetry to Apollo about the configuration and deployment of the router.
 
-The reported telemetry include CPU and memory usage, CPU frequency, and other deployment characteristics such as operating system and cloud provider. For more details, along with a full list of data captured and how to opt out, go to our 
+The reported telemetry include CPU and memory usage, CPU frequency, and other deployment characteristics such as operating system and cloud provider. For more details, along with a full list of data captured and how to opt out, go to our
 [data privacy policy](https://www.apollographql.com/docs/graphos/reference/data-privacy).
 
 By [@jonathanrainer](https://github.com/jonathanrainer), [@nmoutschen](https://github.com/nmoutschen), [@loshz](https://github.com/loshz)
@@ -196,7 +312,7 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 
 ### Fix coprocessor empty body object panic ([PR #6398](https://github.com/apollographql/router/pull/6398))
 
-Previously, the router would panic if a coprocessor responds with an empty body object at the supergraph stage: 
+Previously, the router would panic if a coprocessor responds with an empty body object at the supergraph stage:
 
 ```json
 {
@@ -249,10 +365,10 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 ### Fix telemetry instrumentation using supergraph query selector ([PR #6324](https://github.com/apollographql/router/pull/6324))
 
-Previously, router telemetry instrumentation that used query selectors could log errors with messages such as `this is a bug and should not happen`. 
+Previously, router telemetry instrumentation that used query selectors could log errors with messages such as `this is a bug and should not happen`.
 
 These errors have now been fixed, and configurations with query selectors such as the following work properly:
-  
+
 ```yaml title=router.yaml
 telemetry:
   exporters:
@@ -340,7 +456,7 @@ As part of internal maintenance of the query planner, the
 `catch_unwind` wrapper around the native query planner has been removed. This wrapper served as an extra safeguard for potential panics the native planner could produce. The
 native query planner however no longer has any code paths that could panic. We have also
 not witnessed a panic in the last four months, having processed 560 million real
-user operations through the native planner. 
+user operations through the native planner.
 
 This maintenance work also removes backtrace capture for federation errors, which
 was used for debugging and is no longer necessary as we have the confidence in
@@ -454,7 +570,7 @@ definitions and using them in the operation.
 This change enables `generate_query_fragments` by default while disabling `experimental_reuse_query_fragments`. When enabled, `experimental_reuse_query_fragments` attempts to intelligently reuse the fragment definitions
 from the original operation. However, fragment generation with `generate_query_fragments` is much faster and produces better outputs in most cases.
 
-If you are relying on the shape of fragments in your subgraph operations or tests, you can opt out of the new algorithm with the configuration below. 
+If you are relying on the shape of fragments in your subgraph operations or tests, you can opt out of the new algorithm with the configuration below.
 
 > Note: The subgraph operations generated by the query planner are not guaranteed consistent release over release. We strongly recommend against relying on the shape of planned subgraph operations, as new router features and optimizations will continuously affect it. We plan to remove `experimental_reuse_query_fragments` in a future release.
 
@@ -545,7 +661,7 @@ headers:
     rename: c
 ```
 
-The goal of the original PR was to prevent multiple headers from being mapped to a single target header. However, it did not consider renames and instead prevented multiple mappings from the same source header. 
+The goal of the original PR was to prevent multiple headers from being mapped to a single target header. However, it did not consider renames and instead prevented multiple mappings from the same source header.
 The router now propagates headers properly and ensures that a target header is only propagated to once.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6281
@@ -577,7 +693,7 @@ The size of the thread pool is based on the number of available CPU cores.
 
 The thread pool replaces the router's prior implementation that used Tokio’s [`spawn_blocking`](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html).
 
-`apollo.router.compute_jobs.queued` is a new gauge metric for the number of items in the thread pool's priority queue. 
+`apollo.router.compute_jobs.queued` is a new gauge metric for the number of items in the thread pool's priority queue.
 
 > Note: when the native query planner is enabled, the dedicated queue of the legacy query planner is no longer used, so the `apollo.router.query_planning.queued` metric is no longer emitted.
 
@@ -624,7 +740,7 @@ Then, submitting the query
 ```
 query FetchData(: ArbitraryJson) {
     fetch(args: {
-        json: 
+        json:
     })
 }
 ```
@@ -639,7 +755,7 @@ and variables
 }
 ```
 
-During scoring, the demand control plugin would attempt to convert the variable structure into a GraphQL-compliant structure requiring valid GraphQL names as keys. The dot characters in the keys however would cause a panic. 
+During scoring, the demand control plugin would attempt to convert the variable structure into a GraphQL-compliant structure requiring valid GraphQL names as keys. The dot characters in the keys however would cause a panic.
 
 With this fix, only the GraphQL compliant part of the input object is scored, and the arbitrary JSON marked by the custom scalar is scored as an opaque scalar (similar to how built-ins like `Int` or `String` are processed).
 
@@ -742,7 +858,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Support reading and setting `port` on request URIs using Rhai ([Issue #5437](https://github.com/apollographql/router/issues/5437))
 
-Custom Rhai scripts in the router now support the `request.uri.port` and `request.subgraph.uri.port` functions for reading and setting URI ports. These functions enable you to update the full URI for subgraph fetches. For example: 
+Custom Rhai scripts in the router now support the `request.uri.port` and `request.subgraph.uri.port` functions for reading and setting URI ports. These functions enable you to update the full URI for subgraph fetches. For example:
 
 ```rust
 fn subgraph_service(service, subgraph){
@@ -867,7 +983,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Fix displaying custom event attributes on subscription events ([PR #6033](https://github.com/apollographql/router/pull/6033))
 
-The router now properly displays custom event attributes that are set with selectors at the supergraph level. 
+The router now properly displays custom event attributes that are set with selectors at the supergraph level.
 
 An example configuration:
 
@@ -2063,7 +2179,7 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 Adds experimental support for passing [persisted query manifests](https://www.apollographql.com/docs/graphos/operations/persisted-queries/#31-generate-persisted-query-manifests) to use instead of the hosted Uplink version.
 
-> Note: this feature is no longer experimental as of `v1.61.0`. As such, the `experimental_` prefix has been removed. 
+> Note: this feature is no longer experimental as of `v1.61.0`. As such, the `experimental_` prefix has been removed.
 
 For example:
 
