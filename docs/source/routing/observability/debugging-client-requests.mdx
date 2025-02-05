@@ -22,7 +22,7 @@ GraphOS Studio lets you analyze data from failed requests, such as GraphQL error
 
 ## Enabling additional telemetry
 
-Use the methods below if you need information outside of what's presented in GraphOS Studio to debug client requests.
+You can instrument [router telemetry](/graphos/routing/observability/telemetry) if you need information outside of what's presented in GraphOS Studio to debug client requests.
 
 <Note>
 
@@ -30,14 +30,30 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 </Note>
 
+### Logging GraphQL operations
+
+You can include include GraphQL operations in your telemetry by instrumenting custom [`events` in the supergraph service](/graphos/reference/router/telemetry/instrumentation/events#event-configuration) like so:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      default_attribute_requirement_level: recommended
+      mode: spec_compliant
+    events:
+      supergraph:
+        "req":
+          message: "logged request"
+          level: info
+          on: "request"
+          attributes:
+            graphql.document: true       
+```
+
 ### Telemetry traces and spans
 
-Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces can have spans labeled `router`. You can add attributes to include helpful information about the request and response. The following sections show some common patterns.
-
-<Note>
-
-Spans don't include an attribute for the HTTP body text. If you want to see the GraphQL operation, first check your [GraphOS Insights](/graphos/platform/insights) or use the [request logging configuration](#request-body-logging).
-</Note>
+Traces can contain `router`-labeled spans, where you can add attributes to provide helpful information about the request and response.
+The following sections show some common patterns.
 
 #### Add OpenTelemetry attributes
 
@@ -99,26 +115,6 @@ telemetry:
               eq:
               - "your request has been rate limited"
               - error: reason
-```
-
-### Request body logging
-
-You can include the request body in your telemetry by instrumenting [`events` in the supergraph service](/graphos/reference/router/telemetry/instrumentation/events#event-configuration) like so:
-
-```yaml title="router.yaml"
-telemetry:
-  instrumentation:
-    spans:
-      default_attribute_requirement_level: recommended
-      mode: spec_compliant
-    events:
-      supergraph:
-        "req":
-          message: "logged request"
-          level: info
-          on: "request"
-          attributes:
-            graphql.document: true       
 ```
 
 ### Debugging router logs
