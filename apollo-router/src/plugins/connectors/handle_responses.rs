@@ -182,6 +182,12 @@ impl RawResponse {
             }
         };
 
+        if let MappedResponse::Error { error: ref mapped_error, key: _ } = mapped_response {
+            if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
+                Span::current().record("graphql.error.extensions.code", error_code.as_str());
+            }
+        }
+
         connector::request_service::Response {
             context: context.clone(),
             connector: connector.clone(),

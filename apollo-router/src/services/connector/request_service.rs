@@ -203,6 +203,7 @@ impl ServiceFactory<Request> for ConnectorRequestServiceFactory {
                     CONNECT_REQUEST_SPAN_NAME,
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = tracing::field::Empty,
+                    "graphql.error.extensions.code" = tracing::field::Empty,
                 )
             })
             .service(
