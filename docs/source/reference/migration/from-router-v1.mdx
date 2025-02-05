@@ -12,9 +12,48 @@ GraphOS Router 2.x is available as a [Developer Preview](https://www.apollograph
 
 </Note>
 
-## New configuration in GraphOS Router v2.0.0-preview.x
+Router 2.x includes various breaking changes, including removing deprecated features and renaming public interfaces to be more future-proof.
 
-The router v2.x introduces some new features that can impact the configuration from v1.x.
+<details>
+<summary>Renée Drafting</summary>
+
+- Things you have to do before you upgrade
+- Things you have to do in-step with the upgrade
+  - Changes to metrics
+  - Changes to customization (coprocessors, rhai scripts, and rust plugins)
+  - Changes to rust plugins
+
+Removals:
+- Support for Scaffold
+- `--apollo-uplink-poll-interval`
+- Hot reloading `--supergraph-urls`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+- `--schema`
+- Busy timer for request processing duration
+- Deprecated methods in rust plugins
+  - OneShotAsyncCheckpoint
+  - Emitting metrics in plugins
+  - `subgraph_name`
+- Jaeger tracing
+
+Changes:
+- Supergraph endpoint path
+- Logging requests and responses
+- Renamed metrics
+- Changes to metrics selectors (and custom telemetry in general)
+- Context key names
+- Spec-compliant traces (@TODO figure out what it means)
+
+Validate:
+- Traffic shaping
+- Apollo operation usage reporting via OTLP
+- Introspection depth limit
+- Metrics reporting defaults
+- CORS configuration
+- Header propagation (Should we even mention it if it still works?)
+
+</details>
+
+## New defaults in GraphOS Router v2.0.0-preview.x
 
 ### Apollo operation usage reporting via OTLP
 
@@ -34,14 +73,6 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 - `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
 
 ## Removed features in GraphOS Router v2.x
-
-### Support for Scaffold
-
-<!-- PR: https://github.com/apollographql/router/pull/6274 -->
-
-In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
-
-Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
 
 ### `--apollo-uplink-poll-interval`
 
@@ -71,23 +102,12 @@ to track this information manually. As a result, the following methods and struc
 - `context::BusyTimer` struct
 - `context::BusyTimerGuard` struct
 
-### Deprecated methods in rust plugins
-
-The following deprecated methods are removed from rust plugins' API:
-
-- `services::router::Response::map()`
-- `router::event::schema::SchemaSource::File.delay` field
-- `router::event::configuration::Configuration::File.delay` field
-- `context::extensions::sync::ExtensionsMutex::lock()`. Use `ExtensionsMutex::with_lock()` instead.
-- `test_harness::TestHarness::build()`. Use `TestHarness::build_supergraph()` instead.
-- `PluginInit::new()`. Use `PluginInit::builder()` instead.
-- `PluginInit::try_new()`. Use `PluginInit::try_builder()` instead.
-
 ## Upgrading to GraphOS Router v2.x
 
 Upgrading from GraphOS Router v1.x to v2.x requires the following steps.
 
 ### Configure your Apollo usage reporting protocol
+<!-- This is not breaking --->
 
 If your router v1.x is configured with `experimental_otlp_tracing_sampler`, rename it to `otlp_tracing_sampler`.
 
@@ -96,6 +116,7 @@ To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-
 Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`.
 
 ### Configure metrics reporting defaults
+<!-- This is not breaking --->
 
 If you plan to use the [new metrics reporting defaults](#metrics-reporting-defaults), then no changes are required.
 
@@ -130,7 +151,7 @@ supergraph:
   path: /foo/{*rest}
 ```
 
-### Logging
+### Logging requests and responses
 
 <!-- PR: https://github.com/apollographql/router/pull/6285 -->
 
@@ -211,13 +232,112 @@ limits:
   introspection_max_depth: false # Defaults to true
 ```
 
+### Context Keys
+
+The router request context is used to share data across stages of the request pipeline. The keys have been renamed to prevent conflicts and to better indicate which pipeline stage or plugin populates the data. If you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
+
+- `apollo_authentication::JWT::claims` -> `apollo::authentication::jwt_claims`
+- `apollo_authorization::authenticated::required` -> `apollo::authorization::authentication_required`
+- `apollo_authorization::scopes::required` -> `apollo::authorization::required_scopes`
+- `apollo_authorization::policies::required` -> `apollo::authorization::required_policies`
+- `apollo_operation_id` -> `apollo::supergraph::operation_id`
+- `apollo_override::unresolved_labels` -> `apollo::progressive_override::unresolved_labels`
+- `apollo_override::labels_to_override` -> `apollo::progressive_override::labels_to_override`
+- `apollo_router::supergraph::first_event` -> `apollo::supergraph::first_event`
+- `apollo_telemetry::client_name` -> `apollo::telemetry::client_name`
+- `apollo_telemetry::client_version` -> `apollo::telemetry::client_version`
+- `apollo_telemetry::studio::exclude` -> `apollo::telemetry::studio_exclude`
+- `apollo_telemetry::subgraph_ftv1` -> `apollo::telemetry::subgraph_ftv1`
+- `cost.actual` -> `apollo::demand_control::actual_cost`
+- `cost.estimated` -> `apollo::demand_control::estimated_cost`
+- `cost.result` -> `apollo::demand_control::result`
+- `cost.strategy` -> `apollo::demand_control::strategy`
+- `experimental::expose_query_plan.enabled` -> `apollo::expose_query_plan::enabled`
+- `experimental::expose_query_plan.formatted_plan` -> `apollo::expose_query_plan::formatted_plan`
+- `experimental::expose_query_plan.plan` -> `apollo::expose_query_plan::plan`
+- `operation_kind` -> `apollo::supergraph::operation_kind`
+- `operation_name` -> `apollo::supergraph::operation_name`
+- `persisted_query_hit` -> `apollo::apq::cache_hit`
+- `persisted_query_register` -> `apollo::apq::registered`
+
+### Jaeger Tracing
+
+`jaeger` exporter has been removed as Jaeger fully supports the OTLP format. To use the `otlp` exporter change your router config:
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        jaeger: true
+      otlp:
+        enabled: true
+```
+
+And ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and or `4318` for gRPC and HTTP respectively.
+
+### Enforce CORS configuration
+
+In Router 1.x, invalid values in the CORS configuration, such as malformed regexes, were ignored with an error logged.
+In Router 2.x, such values prevent router startup.
+
+If your Router 2.x fails to start with an error message like this:
+
+```
+could not create router: CORS configuration error:
+```
+
+Check the [CORS configuration documentation](../../routing/security/cors) and fix the problems or delete the invalid values.
+
+### Header propagation
+
+<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+
+[Header propagation](/docs/graphos/routing/header-propagation#insert) lets you select data from a client request body using a JSON path, and pass it to subgraphs in a header.
+
+In 2.x, a spec-compliant [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) path is used, so a `$` is now required to select the root element:
+
+```diff,yaml
+ headers:
+   all:
+     request:
+       - insert:
+           name: from_app_name
+-          path: .extensions.metadata[0].app_name
++          path: $.extensions.metadata[0].app_name
+```
+
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+
+### Traffic Shaping
+
+Traffic shaping has been improved significantly in Router 2.x. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
+
+- [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
+- [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
+
+errors as traffic shaping constraints are enforced.
+
+We recommend that users experiment with their configuration in order to arrive at the right combination of timeout, concurrency and rate limit controls for their particular use case.
+
+For more information about [configuring traffic shaping](../../routing/performance/traffic-shaping.mdx).
+
+<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+
+## Changes affecting telemetry
+
+Over the course of Router 1.x, we have started leaning more heavily on OpenTelemetry, and introduced metrics following OpenTelemetry conventions.
+Additionally, we introduced [Custom Instruments](/docs/graphos/reference/router/telemetry/instrumentation/instruments#custom-instruments) which can better address specific use cases.
+
 ### Traces
 
 - `telemetry.instrumentation.spans.mode` becomes `spec_compliant` by default instead of `deprecated`.
 
 ### Renamed Metrics
 
-Some of the older metrics in the router were not using the most recent `.` naming convention and were instead separated by `_`. For consistency purposes, the following metrics are renamed:
+Some of the Router's older metris were not using the OpenTelemetry `.`-namespaced naming convention and were instead separated by `_`.
+
+In Router 2.x, these metrics are renamed:
 
 | Previous metric | Renamed metric |
 | --------------- | -------------- |
@@ -235,10 +355,13 @@ $_{[1]} `apollo.router.exporter.span.lru.size` now also has an additional `expor
 
 ### Removed metrics
 
-The following metrics have been removed:
+Over the course of Router 1.x, we have introduced many standard OpenTelemetry metrics and added metrics following the OpenTelemetry naming conventions.
 
-- `apollo_router_http_request_retry_total`. This will be supported now by `http.client.request.duration` metrics
-  with the `http.request.resend_count` attribute which is automatically set when `default_requirement_level` is set to `recommended`.
+The following metrics have now been removed:
+
+- `apollo_router_http_request_retry_total`. Use the `http.client.request.duration`
+  metric's `http.request.resend_count` attribute. Set [`default_requirement_level`](/docs/graphos/reference/router/telemetry/instrumentation/instruments#default_requirement_level)
+  to `recommended` to make the Router emit this attribute.
 
 - `apollo_router_timeout`. This metric conflated timed-out requests from client
   to the router, and requests from the router to subgraphs. Timed-out requests
@@ -273,186 +396,104 @@ The following metrics have been removed:
 
 - `apollo_router_deduplicated_subscriptions_total`. Use the
   `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated`
-  attribute
+  attribute.
 
-- `apollo_router_cache_miss_count`. Cache miss count can be derived from `apollo.router.cache.miss.time.count`.
+- `apollo_router_cache_miss_count`. Cache miss count can be derived from `apollo.router.cache.miss.time`.
 
-- `apollo_router_cache_hit_count`. Cache hit count can be derived from `apollo.router.cache.hit.time.count`.
+- `apollo_router_cache_hit_count`. Cache hit count can be derived from `apollo.router.cache.hit.time`.
 
-- Calculating the overhead of injecting the router into your service stack when
-  making multiple downstream calls is a complex task. With that, we are removing
-  the following two misleading metrics and recommending that you instead test your
-  workloads with the router to if the latency meets your requirements:
-  - `apollo_router_span`
-  - `apollo_router_processing_time`
+### Removed processing time
 
-<!-- PR: https://github.com/apollographql/router/pull/6621 -->
+Calculating the overhead of injecting the router into your service stack when
+making multiple downstream calls is a complex task. With that, we are removing
+the following two misleading metrics and recommending that you instead test your
+workloads with the router to if the latency meets your requirements:
+- `apollo_router_span`
+- `apollo_router_processing_time`
 
-- If you used the `subgraph_response_body` selector for telemetry like this:
-
-```yaml
-telemetry:
-  instrumentation:
-    instruments:
-      subgraph:
-        http.client.request.duration:
-          attributes:
-            http.response.status_code:
-              subgraph_response_status: code
-            my_data_value:
-              subgraph_response_body: .data.test
-```
-
-You'll have to migrate the `subgraph_response_body` to `subgraph_response_data` selector (or `subgraph_response_errors` if you want to target errors):
-
-```yaml
-telemetry:
-  instrumentation:
-    instruments:
-      subgraph:
-        http.client.request.duration:
-          attributes:
-            http.response.status_code:
-              subgraph_response_status: code
-            my_data_value:
-              subgraph_response_data: $.test # Heads up, we removed the .data prefix as it's directly targeting data and we added $
-```
-
-### Context Keys
-
-The router request context is used to share data across stages of the request pipeline. The keys have been renamed for consistency and to better indicate which pipeline stage or plugin populates the data. If you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
-
-- `apollo_authentication::JWT::claims` -> `apollo::authentication::jwt_claims`
-- `apollo_authorization::authenticated::required` -> `apollo::authorization::authentication_required`
-- `apollo_authorization::scopes::required` -> `apollo::authorization::required_scopes`
-- `apollo_authorization::policies::required` -> `apollo::authorization::required_policies`
-- `apollo_operation_id` -> `apollo::supergraph::operation_id`
-- `apollo_override::unresolved_labels` -> `apollo::progressive_override::unresolved_labels`
-- `apollo_override::labels_to_override` -> `apollo::progressive_override::labels_to_override`
-- `apollo_router::supergraph::first_event` -> `apollo::supergraph::first_event`
-- `apollo_telemetry::client_name` -> `apollo::telemetry::client_name`
-- `apollo_telemetry::client_version` -> `apollo::telemetry::client_version`
-- `apollo_telemetry::studio::exclude` -> `apollo::telemetry::studio_exclude`
-- `apollo_telemetry::subgraph_ftv1` -> `apollo::telemetry::subgraph_ftv1`
-- `cost.actual` -> `apollo::demand_control::actual_cost`
-- `cost.estimated` -> `apollo::demand_control::estimated_cost`
-- `cost.result` -> `apollo::demand_control::result`
-- `cost.strategy` -> `apollo::demand_control::strategy`
-- `experimental::expose_query_plan.enabled` -> `apollo::expose_query_plan::enabled`
-- `experimental::expose_query_plan.formatted_plan` -> `apollo::expose_query_plan::formatted_plan`
-- `experimental::expose_query_plan.plan` -> `apollo::expose_query_plan::plan`
-- `operation_kind` -> `apollo::supergraph::operation_kind`
-- `operation_name` -> `apollo::supergraph::operation_name`
-- `persisted_query_hit` -> `apollo::apq::cache_hit`
-- `persisted_query_register` -> `apollo::apq::registered`
-
-### Tracing
-
-`jaeger` exporter has been removed as Jaeger fully supports to OTLP format. To use the `otlp` exporter change your router config:
-
-```yaml title="router.yaml"
-telemetry:
-  exporters:
-    tracing:
-      propagation:
-        jaeger: true
-      otlp:
-        enabled: true
-```
-
-And ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and or `4318` for gRPC and HTTP respectively.
-
-### Enforce CORS configuration
-
-In 1.x, invalid values in the CORS configuration, such as malformed regexes, were ignored with an error logged.
-In 2.x, such values prevent router startup.
-
-If your router 2.x does not start with an error message like this:
-
-```
-could not create router: CORS configuration error:
-```
-
-Check the [CORS configuration documentation](../../routing/security/cors) and fix the problems or delete the invalid values.
-
-### Headers propagation
+### Changes to custom instrumentation selectors
 
 <!-- PR: https://github.com/apollographql/router/pull/6621 -->
 
-If you use the ability to get data from request body and insert this data in a subgraph request header, we updated the `path` field type to be [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) compliant
-So if you had this configuration for example:
+The `subgraph_response_body` selector is removed in favor of `subgraph_response_data` and `subgraph_response_errors`.
 
-```yaml
-headers:
-  all:
-    request:
-      - insert:
-          name: from_app_name
-          path: .extensions.metadata[0].app_name
+```diff,yaml
+ telemetry:
+   instrumentation:
+     instruments:
+       subgraph:
+         http.client.request.duration:
+           attributes:
+             http.response.status_code:
+               subgraph_response_status: code
+             my_data_value:
+-              subgraph_response_body: .data.test
++              subgraph_response_data: $.test # The data object is the root object of this selector
+             my_error_code:
+-              subgraph_response_body: .errors[*].extensions.extra_code
++              subgraph_response_errors: $[*].extensions.extra_code # The errors object is the root object of this selector
 ```
 
-You'll have to migrate the `path` field to be JSONPath compliant and just add `$` at the beginning of the `path`, example:
+## Changes affecting Rust plugins
 
-```yaml
-headers:
-  all:
-    request:
-      - insert:
-          name: from_app_name
-          path: $.extensions.metadata[0].app_name
+The architectural improvements in Router 2.x affect most custom Rust plugins. In Router 1.x, a brand new `tower::Service` pipeline was built for every request, and so Rust plugin hooks were called for every request. Now, we the `tower::Service` pipeline is built once, and cloned for every request.
+
+This change means you must carefully audit how your Rust plugins store state in any `tower` services you add to the pipeline.
+
+### Removal of `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async()`
+
+This has been removed because it is incompatible with the architectural optimizations we've made in Router 2.x. You can replace it easily with `AsyncCheckpointLayer` as follows:
+
+Plugin code using `OneShotAsyncCheckpointLayer`
+
+```rust
+OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
+    let request_config = request_config.clone();
+    // ...
+})
+.service(service)
+.boxed()
 ```
 
-### OneShotAsyncCheckpoint
+Replace with `AsyncCheckpointLayer`
 
-This has been removed because it is incompatible with the architectural optimizations we've made in Router 2.0. If you were using this in a Rust Plugin, you can replace it easily with `AsyncCheckpoint` as follows:
+```rust
+use apollo_router::layers::async_checkpoint_layer::AsyncCheckpointLayer;
 
-Plugin code using `OneShotAsyncCheckpoint`
-
-```
-            OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
-                let request_config = request_config.clone();
-                <etc...>
-            }
-            .service(service)
-            .boxed()
-```
-
-Replace with `AsyncCheckpoint`
-
-```
-            AsyncCheckpointLayer::new(move |request: execution::Request| {
-                let request_config = request_config.clone();
-                <etc...>
-            }
-            .buffered()
-            .service(service)
-            .boxed()
+AsyncCheckpointLayer::new(move |request: execution::Request| {
+    let request_config = request_config.clone();
+    // ...
+})
+.buffered()
+.service(service)
+.boxed()
 ```
 
-The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilderExt` trait and ensures that you service may be cloned.
+Similarly, usage of `apollo_router::layers::ServiceBuilderExt::oneshot_checkpoint_async` must be updated to use the `checkpoint_async` method.
 
-<!-- PR: https://github.com/apollographql/router/pull/6486 -->
+The `buffered()` method is provided by the `apollo_router::layers::ServiceBuilderExt` trait and ensures that your service may be cloned.
 
-### Traffic Shaping
+### Removal of deprecated methods
 
-Traffic shaping has been improved significantly in Router 2.0. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
+The following deprecated methods are removed from rust plugins' API:
 
-- [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
-- [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
+- `services::router::Response::map()`
+- `router::event::schema::SchemaSource::File.delay` field
+- `router::event::configuration::Configuration::File.delay` field
+- `context::extensions::sync::ExtensionsMutex::lock()`. Use `ExtensionsMutex::with_lock()` instead.
+- `test_harness::TestHarness::build()`. Use `TestHarness::build_supergraph()` instead.
+- `PluginInit::new()`. Use `PluginInit::builder()` instead.
+- `PluginInit::try_new()`. Use `PluginInit::try_builder()` instead.
 
-errors as traffic shaping constraints are enforced.
+### Changes to structures
 
-We recommend that users experiment with their configuration in order to arrive at the right combination of timeout, concurrency and rate limit controls for their particular use case.
+<!-- TODO(@goto-bus--stop): These properties are not actually public, so it probably doesn't affect users? -->
 
-For more information about [configuring traffic shaping](../../routing/performance/traffic-shaping.mdx).
+These properties are now a `String` type instead of an `Option<String>` type:
+- `services::subgraph::Request::subgraph_name`
+- `services::subgraph::Response::subgraph_name`
 
-<!-- PR: https://github.com/apollographql/router/pull/6486 -->
-
-### Subgraph Request/Response
-
-If, in your Rust plugin, you were using either the subgraph::Request::subgraph_name or the subgraph::Response::subgraph_name, please note that these are no longer `Option`, but are mandatory.
-
-### Emitting metrics in Rust plugins
+### Emitting custom metrics
 
 Previously, Rust plugins could use the Router's internal metrics system using the `tracing` macros. This is no longer supported, and the opentelemetry crates should be used instead.
 
@@ -465,7 +506,23 @@ Previously, Rust plugins could use the Router's internal metrics system using th
 Instead, use the [OpenTelemetry](https://docs.rs/opentelemetry/latest/opentelemetry/) crates.
 You can use the new `apollo_router::metrics::meter_provider()` API to access the router's global meter provider to register your instruments.
 
-### Deploy your router
+The Router now logs an error every time it detects a legacy metric field in a `tracing` event.
+
+### Changes to context keys
+
+Request and response types carry a `Context` value that can be used by different pipeline stages to communicate information with each other.
+Context keys added by the Router have been renamed to prevent collisions with user-provided context keys.
+If you are using any Router-provided context keys in your plugins, see the [context keys section][TODO] of the upgrade guide.
+
+### Support for Scaffold
+
+<!-- PR: https://github.com/apollographql/router/pull/6274 -->
+
+In Router v1.x Scaffold could be used to generate boilerplate source code for a Rust Plugin which extended functionality in a custom Router. This facility has been removed.
+
+Source code generated using Scaffold will continue to compile; so existing Rust plugins will be unaffected by this change.
+
+## Deploy your router
 
 Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
 
