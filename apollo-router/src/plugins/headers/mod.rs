@@ -415,13 +415,14 @@ impl<S> HeadersService<S> {
                         if values.iter().count() == 0 {
                             if let Some(default) = default {
                                 headers.append(target_header, default.clone());
+                                already_propagated.insert(target_header.as_str());
                             }
                         } else {
                             for value in values {
                                 headers.append(target_header, value.clone());
+                                already_propagated.insert(target_header.as_str());
                             }
                         }
-                        already_propagated.insert(target_header.as_str());
                     }
                 }
                 Operation::Propagate(Propagate::Matching { matching }) => {
@@ -471,10 +472,10 @@ mod test {
     use tower::BoxError;
 
     use super::*;
+    use crate::graphql;
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
-    use crate::plugins::headers::Config;
-    use crate::plugins::headers::HeadersLayer;
+    use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
@@ -1107,5 +1108,88 @@ mod test {
 
             true
         }
+    }
+
+    async fn assert_headers(
+        config: &'static str,
+        input: Vec<(&'static str, &'static str)>,
+        output: Vec<(&'static str, &'static str)>,
+    ) {
+        let test_harness = PluginTestHarness::<Headers>::builder()
+            .config(config)
+            .build()
+            .await;
+        let service = test_harness.subgraph_service("test", move |r| {
+            let output = output.clone();
+            async move {
+                // Assert the headers here
+                let headers = r.subgraph_request.headers();
+                for (name, value) in output.iter() {
+                    if let Some(header) = headers.get(*name) {
+                        assert_eq!(header.to_str().unwrap(), *value);
+                    } else {
+                        panic!("missing header {}", name);
+                    }
+                }
+                Ok(subgraph::Response::fake_builder().build())
+            }
+        });
+
+        let mut req = http::Request::builder();
+        for (name, value) in input.iter() {
+            req = req.header(*name, *value);
+        }
+
+        service
+            .call(
+                subgraph::Request::fake_builder()
+                    .supergraph_request(Arc::new(
+                        req.body(graphql::Request::default())
+                            .expect("valid request"),
+                    ))
+                    .build(),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_propagate_passthrough() {
+        assert_headers(
+            include_str!("fixtures/propagate_passthrough.router.yaml"),
+            vec![("a", "av"), ("c", "cv")],
+            vec![("a", "av"), ("b", "av"), ("c", "cv")],
+        )
+        .await;
+
+        assert_headers(
+            include_str!("fixtures/propagate_passthrough.router.yaml"),
+            vec![("b", "bv"), ("c", "cv")],
+            vec![("b", "bv"), ("c", "cv")],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_propagate_passthrough_defaulted() {
+        assert_headers(
+            include_str!("fixtures/propagate_passthrough_defaulted.router.yaml"),
+            vec![("a", "av")],
+            vec![("b", "av")],
+        )
+        .await;
+
+        assert_headers(
+            include_str!("fixtures/propagate_passthrough_defaulted.router.yaml"),
+            vec![("b", "bv")],
+            vec![("b", "bv")],
+        )
+        .await;
+        assert_headers(
+            include_str!("fixtures/propagate_passthrough_defaulted.router.yaml"),
+            vec![("c", "cv")],
+            vec![("b", "defaulted")],
+        )
+        .await;
     }
 }
