@@ -47,12 +47,10 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
-use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::Context;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
-pub(crate) const HTTP_REQUEST_RESEND_COUNT: Key = Key::from_static_str("http.request.resend_count");
 pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
 pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
     Key::from_static_str("subgraph.graphql.operation.name");
@@ -243,10 +241,6 @@ pub(crate) struct SubgraphAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.type")]
     graphql_operation_type: Option<StandardAttribute>,
-
-    /// The number of times the request has been resent
-    #[serde(rename = "http.request.resend_count")]
-    http_request_resend_count: Option<StandardAttribute>,
 }
 
 impl DefaultForLevel for SubgraphAttributes {
@@ -273,9 +267,6 @@ impl DefaultForLevel for SubgraphAttributes {
                 }
                 if self.graphql_operation_type.is_none() {
                     self.graphql_operation_type = Some(StandardAttribute::Bool(true));
-                }
-                if self.http_request_resend_count.is_none() {
-                    self.http_request_resend_count = Some(StandardAttribute::Bool(true));
                 }
             }
             DefaultAttributeRequirementLevel::None => {}
@@ -1145,48 +1136,12 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes
         attrs
     }
 
-    fn on_response(&self, response: &subgraph::Response) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        if let Some(key) = self
-            .http_request_resend_count
-            .as_ref()
-            .and_then(|a| a.key(HTTP_REQUEST_RESEND_COUNT))
-        {
-            if let Some(resend_count) = response
-                .context
-                .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
-                .ok()
-                .flatten()
-            {
-                attrs.push(KeyValue::new(key, resend_count as i64));
-            }
-        }
-
-        attrs
+    fn on_response(&self, _response: &subgraph::Response) -> Vec<KeyValue> {
+        Vec::default()
     }
 
     fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
-    }
-}
-
-/// Key used in context to save number of retries for a subgraph http request
-pub(crate) struct SubgraphRequestResendCountKey<'a> {
-    subgraph_req_id: &'a SubgraphRequestId,
-}
-
-impl<'a> SubgraphRequestResendCountKey<'a> {
-    pub(crate) fn new(subgraph_req_id: &'a SubgraphRequestId) -> Self {
-        Self { subgraph_req_id }
-    }
-}
-
-impl From<SubgraphRequestResendCountKey<'_>> for String {
-    fn from(value: SubgraphRequestResendCountKey) -> Self {
-        format!(
-            "apollo::telemetry::http_request_resend_count_{}",
-            value.subgraph_req_id
-        )
     }
 }
 
