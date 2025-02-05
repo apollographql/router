@@ -191,6 +191,9 @@ To enable batching in an Apollo client, configure `BatchHttpLink`. For details o
 
 If the router receives a query batch from a client, and batching is *not* enabled, the router sends a `BATCHING_NOT_ENABLED` error to the client.
 
+## Query Batching and Paid Plans
+When processing batched operations, the Router will count each entry in the batch as a distinct billable operation that counts towards your graph usage. Even if you send a batch with `N` requests of the same exact operation, that is counted the same as sending `N` of the same non-batched requests. Note that billable plans only track Router operations, so configuring subgraph batching does not impact your graph usage count.
+
 ## Metrics for query batching
 
 Metrics in the GraphOS Router for query batching:
