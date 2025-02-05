@@ -6,9 +6,9 @@ context:
   - telemetry
 ---
 
-By default, the GraphOS Router operates without generating HTTP request logs or exporting telemetry metrics beyond what it sends to GraphOS.  This minimizes potentially high observability costs that can result from high request volumes.
-
-If you need more data than what GraphOS provides by default, you can configure your router to collect and export additional telemetry.
+By default, the GraphOS Router operates [without generating HTTP request logs or exporting telemetry metrics beyond what it sends to GraphOS](/graphos/routing/observability).
+This default minimizes potentially high observability costs that can result from high request volumes.
+If you need more data than the default [GraphOS Insights](/graphos/platform/insights), you can configure your router to collect and export additional telemetry.
 
 ## Using GraphOS Insights
 
@@ -30,7 +30,7 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 </Note>
 
-### Telemetry spans and traces
+### Telemetry traces and spans
 
 Once you enable [router telemetry](/graphos/routing/observability/telemetry), traces can have spans labeled `router`. You can add attributes to include helpful information about the request and response. The following sections show some common patterns.
 
@@ -41,9 +41,9 @@ Spans don't include an attribute for the HTTP body text. If you want to see the 
 
 #### Add OpenTelemetry attributes
 
-You can add [OpenTelemetry (OTel) standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code` to spans with this configuration:
+Add [OpenTelemetry (OTel) standard attributes](/graphos/reference/router/telemetry/instrumentation/standard-attributes#router) such as `error.type` and `http.response.status_code` to spans with this configuration:
 
-```yaml title="router.yaml"
+```yaml title="router.yaml" showLineNumbers=false
 telemetry:
   instrumentation:
     spans:
@@ -55,9 +55,9 @@ telemetry:
 
 #### Map GraphQL errors to OTel errors
 
-You can map GraphQL error data to OTel errors with the following configuration:
+Map GraphQL error data to OTel errors with the following configuration:
 
-```yaml title="router.yaml"
+```yaml title="router.yaml" showLineNumbers=false
 telemetry:
   instrumentation:
     spans:
@@ -77,9 +77,9 @@ telemetry:
 
 #### Add flags for timeouts and rate limits
 
-You can flag rate limits and timeouts on router spans with the following configuration:
+Flag rate limits and timeouts on router spans with the following configuration:
 
-```yaml title="router.yaml"
+```yaml title="router.yaml" showLineNumbers=false
 telemetry:
   instrumentation:
     spans:
@@ -135,9 +135,7 @@ See the Apollo Solutions ["Hello World" coprocessor](https://github.com/apolloso
 
 ## Alternative cloud services
 
-If you are deploying the router to a cloud service, you likely already have access to the raw HTTP logs through other services like load balancers. You should be able to find specific client request logs for a particular operation using the operation hash or trace ID. Refer to the docs for your cloud providers for more information.
-
-Popular cloud provider links are provided below.
+If you are deploying the router to a cloud service, you likely already have access to the raw HTTP logs through other services like load balancers. You should be able to find specific client request logs for a particular operation using the operation hash or trace ID. Refer to the docs for your cloud providers for more information. Popular cloud provider links are provided below.
 
 ### Amazon Web Services
 
