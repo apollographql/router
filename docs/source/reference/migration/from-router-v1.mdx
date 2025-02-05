@@ -297,7 +297,7 @@ Check the [CORS configuration documentation](../../routing/security/cors) and fi
 
 In 2.x, a spec-compliant [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) path is used, so a `$` is now required to select the root element:
 
-```diff,yaml
+```diff
  headers:
    all:
      request:
@@ -417,7 +417,7 @@ workloads with the router to if the latency meets your requirements:
 
 The `subgraph_response_body` selector is removed in favor of `subgraph_response_data` and `subgraph_response_errors`.
 
-```diff,yaml
+```diff
  telemetry:
    instrumentation:
      instruments:
