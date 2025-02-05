@@ -54,6 +54,7 @@ pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 #[derive(Clone, Hash, PartialEq, Eq)]
 // XXX(@goto-bus-stop): I think this probably should not be pub(crate), but right now all fields in
 // the cache keys are pub(crate), which I'm not going to change at this time :)
+
 pub(crate) struct ConfigModeHash(Vec<u8>);
 
 impl std::fmt::Display for ConfigModeHash {
