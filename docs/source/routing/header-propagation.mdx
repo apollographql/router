@@ -42,7 +42,9 @@ You can specify which headers to propagate based on a matching [regex pattern](h
 
 <Note>
 
-The router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
+    The router _never_ propagates so-called [hop-by-hop
+    headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`)
+    when propagating by pattern.
 
 </Note>
 
@@ -169,6 +171,44 @@ headers:
 
 With this ordering, first all headers are added to the propagation list, then the `test` header is removed.
 
+## Rule fallthrough
+
+Headers will only propagate to a target header once via the first matching rule to do so. Ensure that defaulting of headers is done in the last rule so that other rules are not ignored:
+
+<p style="margin-bottom: 0;">❌</p>
+
+```yaml title="bad_configuration.yaml"
+headers:
+  all:
+    request:
+      - propagate:
+          named: "some-header"
+          default: "some default"
+      - propagate:
+          named: "some-other-header"
+          rename: "some-header"
+```
+
+In this example, `some-other-header` will not be propagated to `some-header` because it has already been defaulted by the previous rule.
+
+To correctly have fallthrough of rules make sure that any defaulting is done in the last rule:
+
+<p style="margin-bottom: 0;">✅</p>
+
+```yaml title="good_configuration.yaml"
+headers:
+  all:
+    request:
+      - propagate:
+          named: "some-header"
+      - propagate:
+          named: "some-other-header"
+          rename: "some-header"
+          default: "some default"
+```
+
+With this ordering, the `some-other-header` will be propagated to `some-header` if `some-header` is not present. If no header is present, `some-header` will be set to the default.
+
 ## Example
 
 Here's a complete example showing all the possible configuration options in use:
@@ -211,6 +251,7 @@ headers:
             name: "router-subgraph-name"
             value: "accounts"
 ```
+
 
 ## Response header propagation
 
@@ -258,7 +299,8 @@ fn subgraph_service(service, subgraph) {
 
 <Note>
 
-If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
+    If you require a configuration-based solution for response header propagation, [please leave a comment on our issue
+    tracker](https://github.com/apollographql/router/issues/1284).
 
 </Note>
 
