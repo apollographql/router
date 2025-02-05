@@ -52,13 +52,12 @@ mod test {
                         .variable("a", "b")
                         .build()
                         .expect("expecting valid request"),
-                    |_r| {
+                    |_r| async {
                         tracing::info!("response");
                         supergraph::Response::fake_builder()
                             .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -85,13 +84,12 @@ mod test {
                                 .build(),
                         ))
                         .build(),
-                    |_r| {
+                    |_r| async {
                         tracing::info!("response");
                         subgraph::Response::fake2_builder()
                             .header("custom-header", "val1")
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -119,14 +117,13 @@ mod test {
                         .query("query { foo }")
                         .build()
                         .expect("expecting valid request"),
-                    |_r| {
+                    |_r| async {
                         tracing::info!("response");
                         supergraph::Response::fake_builder()
                             .header("custom-header1", "val1")
                             .header("custom-header2", "val2")
                             .data(serde_json::json!({"data": "res"}))
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await

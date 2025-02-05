@@ -1074,42 +1074,43 @@ mod test {
         input: Vec<(&'static str, &'static str)>,
         output: Vec<(&'static str, &'static str)>,
     ) {
-        let test_harness = PluginTestHarness::<Headers>::builder()
-            .config(config)
-            .build()
-            .await;
-        let service = test_harness.subgraph_service("test", move |r| {
-            let output = output.clone();
-            async move {
-                // Assert the headers here
-                let headers = r.subgraph_request.headers();
-                for (name, value) in output.iter() {
-                    if let Some(header) = headers.get(*name) {
-                        assert_eq!(header.to_str().unwrap(), *value);
-                    } else {
-                        panic!("missing header {}", name);
-                    }
-                }
-                Ok(subgraph::Response::fake_builder().build())
-            }
-        });
-
         let mut req = http::Request::builder();
         for (name, value) in input.iter() {
             req = req.header(*name, *value);
         }
 
-        service
-            .call(
+        let test_harness = PluginTestHarness::<Headers>::builder()
+            .config(config)
+            .build()
+            .await;
+        let response = test_harness
+            .call_subgraph(
                 subgraph::Request::fake_builder()
+                    .subgraph_name("test")
                     .supergraph_request(Arc::new(
                         req.body(graphql::Request::default())
                             .expect("valid request"),
                     ))
                     .build(),
+                move |r| {
+                    let output = output.clone();
+                    async move {
+                        let output = output.clone();
+                        // Assert the headers here
+                        let headers = r.subgraph_request.headers();
+                        for (name, value) in output.iter() {
+                            if let Some(header) = headers.get(*name) {
+                                assert_eq!(header.to_str().unwrap(), *value);
+                            } else {
+                                panic!("missing header {}", name);
+                            }
+                        }
+                        Ok(subgraph::Response::fake_builder().build())
+                    }
+                },
             )
-            .await
-            .unwrap();
+            .await;
+        assert!(response.is_ok());
     }
 
     #[tokio::test]
