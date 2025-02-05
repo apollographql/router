@@ -133,15 +133,22 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[allow(dead_code)]
     pub(crate) async fn call_router<F>(
         &self,
+<<<<<<< HEAD
         request: router::Request,
         response_fn: fn(router::Request) -> F,
     ) -> Result<router::Response, BoxError>
+=======
+        response_fn: impl Fn(router::Request) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<router::Request, router::BoxService>
+>>>>>>> ea7f255a ((fix) Header propagation rule passthrough (#6690))
     where
         F: Future<Output = Result<router::Response, BoxError>> + Send + 'static,
     {
         let service: router::BoxService = router::BoxService::new(
-            ServiceBuilder::new()
-                .service_fn(move |req: router::Request| async move { (response_fn)(req).await }),
+            ServiceBuilder::new().service_fn(move |req: router::Request| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            }),
         );
 
         self.plugin.router_service(service).call(request).await
@@ -149,12 +156,25 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
 
     pub(crate) async fn call_supergraph(
         &self,
+<<<<<<< HEAD
         request: supergraph::Request,
         response_fn: fn(supergraph::Request) -> supergraph::Response,
     ) -> Result<supergraph::Response, BoxError> {
         let service: supergraph::BoxService = supergraph::BoxService::new(
             ServiceBuilder::new()
                 .service_fn(move |req: supergraph::Request| async move { Ok((response_fn)(req)) }),
+=======
+        response_fn: impl Fn(supergraph::Request) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<supergraph::Request, supergraph::BoxService>
+    where
+        F: Future<Output = Result<supergraph::Response, BoxError>> + Send + 'static,
+    {
+        let service: supergraph::BoxService = supergraph::BoxService::new(
+            ServiceBuilder::new().service_fn(move |req: supergraph::Request| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            }),
+>>>>>>> ea7f255a ((fix) Header propagation rule passthrough (#6690))
         );
 
         self.plugin.supergraph_service(service).call(request).await
@@ -163,12 +183,25 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[allow(dead_code)]
     pub(crate) async fn call_execution(
         &self,
+<<<<<<< HEAD
         request: execution::Request,
         response_fn: fn(execution::Request) -> execution::Response,
     ) -> Result<execution::Response, BoxError> {
         let service: execution::BoxService = execution::BoxService::new(
             ServiceBuilder::new()
                 .service_fn(move |req: execution::Request| async move { Ok((response_fn)(req)) }),
+=======
+        response_fn: impl Fn(execution::Request) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<execution::Request, execution::BoxService>
+    where
+        F: Future<Output = Result<execution::Response, BoxError>> + Send + 'static,
+    {
+        let service: execution::BoxService = execution::BoxService::new(
+            ServiceBuilder::new().service_fn(move |req: execution::Request| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            }),
+>>>>>>> ea7f255a ((fix) Header propagation rule passthrough (#6690))
         );
 
         self.plugin.execution_service(service).call(request).await
@@ -177,6 +210,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[allow(dead_code)]
     pub(crate) async fn call_subgraph(
         &self,
+<<<<<<< HEAD
         request: subgraph::Request,
         response_fn: fn(subgraph::Request) -> subgraph::Response,
     ) -> Result<subgraph::Response, BoxError> {
@@ -185,6 +219,59 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             ServiceBuilder::new()
                 .service_fn(move |req: subgraph::Request| async move { Ok((response_fn)(req)) }),
         );
+=======
+        subgraph: &str,
+        response_fn: impl Fn(subgraph::Request) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<subgraph::Request, subgraph::BoxService>
+    where
+        F: Future<Output = Result<subgraph::Response, BoxError>> + Send + 'static,
+    {
+        let service: subgraph::BoxService = subgraph::BoxService::new(
+            ServiceBuilder::new().service_fn(move |req: subgraph::Request| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            }),
+        );
+        ServiceHandle::new(self.plugin.subgraph_service(subgraph, service))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn http_client_service<F>(
+        &self,
+        subgraph: &str,
+        response_fn: impl Fn(http::HttpRequest) -> F + Send + Sync + Clone + 'static,
+    ) -> ServiceHandle<http::HttpRequest, http::BoxService>
+    where
+        F: Future<Output = Result<http::HttpResponse, BoxError>> + Send + 'static,
+    {
+        let service: http::BoxService = http::BoxService::new(ServiceBuilder::new().service_fn(
+            move |req: http::HttpRequest| {
+                let response_fn = response_fn.clone();
+                async move { (response_fn)(req).await }
+            },
+        ));
+
+        ServiceHandle::new(self.plugin.http_client_service(subgraph, service))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn call_connector_request_service(
+        &self,
+        request: connector::request_service::Request,
+        response_fn: impl Fn(connector::request_service::Request) -> connector::request_service::Response
+            + Send
+            + Sync
+            + Clone
+            + 'static,
+    ) -> Result<connector::request_service::Response, BoxError> {
+        let service: connector::request_service::BoxService =
+            connector::request_service::BoxService::new(ServiceBuilder::new().service_fn(
+                move |req: connector::request_service::Request| {
+                    let response_fn = response_fn.clone();
+                    async move { Ok((response_fn)(req)) }
+                },
+            ));
+>>>>>>> ea7f255a ((fix) Header propagation rule passthrough (#6690))
 
         self.plugin
             .subgraph_service(&name.expect("subgraph name must be populated"), service)
