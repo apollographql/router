@@ -1,5 +1,11 @@
-A router's request lifecycle has three major services:
+A router's request lifecycle has three major services that support instrumentation:
 
-* **Router service** - Handles an incoming request before it is parsed. Works within a context of opaque bytes.
-* **Supergraph service** - Handles a request after it has been parsed and before it is sent to the subgraph. Works within a GraphQL context.
-* **Subgraph service** - Handles a request after it has been sent to the subgraph. Works within a GraphQL context.
+* **Router service** - Operates within the context of an HTTP server, handling the opaque bytes of an incoming HTTP request. Does query analysis to parse the GraphQL operation and validate it against schema.
+* **Supergraph service** - Handles a GraphQL request after it's been parsed and validated, and before it's sent to subgraphs. Runs the query planner to produce a query plan to execute.
+* **Subgraph service** - Handles GraphQL subgraph requests that have been executed as part of a query plan. Creates HTTP client requests to subgraphs.
+
+<Note>
+
+The router's **Execution service** that executes query plans doesn't support instrumentation.
+
+</Note>
