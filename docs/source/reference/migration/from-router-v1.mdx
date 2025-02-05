@@ -25,7 +25,7 @@ Router 2.x includes various breaking changes, including removing deprecated feat
 
 Removals:
 - Support for Scaffold
-- `--apollo-uplink-poll-interval`
+- `--apollo-uplink-poll-interval` 
 - Hot reloading `--supergraph-urls`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
 - `--schema`
 - Busy timer for request processing duration
@@ -77,15 +77,27 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 
 ## Removed features in GraphOS Router v2.x
 
-### Busy timer for request processing duration
-Request processing duration is already included as part of the spans sent by the
-router, and there is no need for rust plugin, coprocessor and rhai plugin users
-to track this information manually. As a result, the following methods and structs were removed from `context::Context`:
+Follow the upgrade steps below for each feature of router v1.x that's been removed in router v2.x.
+
+### Removed busy timer for request processing duration
+
+In `context::Context` that's typically used for router customizations, methods and structs related to request processing duration have been removed, because request processing duration is already included as part of spans sent by the
+router. Users customizing the router with Rhai scripts, Rust scripts, or coprocessors don't need to track this information manually. 
+
+**Upgrade step**: remove calls and uses of the following methods and structs from `context::Context`:
 
 - `context::Context::busy_time()`
 - `context::Context::enter_active_request()`
 - `context::BusyTimer` struct
 - `context::BusyTimerGuard` struct
+
+### Removed: `--apollo-uplink-poll-interval`
+
+<!-- PR: https://github.com/apollographql/router/pull/6268 -->
+
+The configurable poll interval of Apollo Uplink has been removed in router v2.x.
+
+**Upgrade step**: remove uses of both the `--apollo-uplink-poll-interval` command-line argument and the `APOLLO_UPLINK_POLL_INTERVAL` environment variable.
 
 ## Upgrading to GraphOS Router v2.x
 
@@ -160,11 +172,7 @@ For more information about [configuring traffic shaping](../../routing/performan
 
 The deprecated `--schema` command-line argument is removed. `router config schema` should be used to print the configuration supergraph instead.
 
-### Removed: `--apollo-uplink-poll-interval`
 
-<!-- PR: https://github.com/apollographql/router/pull/6268 -->
-
-The router no longer uses the `--apollo-uplink-poll-interval` command-line argument, or the `APOLLO_UPLINK_POLL_INTERVAL` environment variable. It already did something unusual in v1.x: the configured interval would only be used for the very first poll, and not any subsequent polls.
 
 ### No hot reloading for `--supergraph-urls`
 
