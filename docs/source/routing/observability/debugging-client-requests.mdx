@@ -30,24 +30,16 @@ If you want to debug client requests in your own environment, Apollo recommends 
 
 </Note>
 
-### Logging GraphQL operations
+### Logging requests
 
-You can include include GraphQL operations in your telemetry by instrumenting custom [`events` in the supergraph service](/graphos/reference/router/telemetry/instrumentation/events#event-configuration) like so:
+You can include include request bodies, including the GraphQL operations, in your telemetry by instrumenting [`events` in the supergraph service](/graphos/reference/router/telemetry/instrumentation/events) like so:
 
 ```yaml title="router.yaml"
 telemetry:
   instrumentation:
-    spans:
-      default_attribute_requirement_level: recommended
-      mode: spec_compliant
     events:
       supergraph:
-        "req":
-          message: "logged request"
-          level: info
-          on: "request"
-          attributes:
-            graphql.document: true       
+        request: info    
 ```
 
 ### Telemetry traces and spans
