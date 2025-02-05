@@ -1,4 +1,4 @@
-### Improved BatchProcessor observability ([Issue #6558](https://github.com/apollographql/router/issues/6558))
+### Improve BatchProcessor observability ([Issue #6558](https://github.com/apollographql/router/issues/6558))
 
 A new metric has been introduced to allow observation of how many spans are being dropped by an telemetry batch processor.
 
