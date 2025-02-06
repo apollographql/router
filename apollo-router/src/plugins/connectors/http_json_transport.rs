@@ -103,7 +103,7 @@ pub(crate) fn make_request(
                 transport.body.as_ref().map(|body| SelectionData {
                     source: body.to_string(),
                     transformed: body.to_string(), // no transformation so this is the same
-                    result: json_body,
+                    result: json_body.clone(),
                     errors: mapping_problems.clone(),
                 }),
             )
@@ -125,6 +125,9 @@ pub(crate) fn make_request(
     Ok((
         TransportRequest::Http(HttpRequest {
             inner: request,
+            // TODO: I kinda hate this but I'm not sure how to get the original body into a format I can
+            // hash without draining the bytes from UnsyncBoxBody<Bytes, Error> which would absolutely break things
+            raw_body: json_body.unwrap_or_default().to_string(),
             debug: debug_request,
         }),
         mapping_problems,

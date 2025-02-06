@@ -144,6 +144,8 @@ impl FetchService {
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
+                        .authorization(fetch_node.authorization.clone())
+                        .operation_kind(fetch_node.operation_kind.clone())
                         .build(),
                 )
                 .await

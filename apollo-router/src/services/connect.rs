@@ -9,6 +9,8 @@ use tower::BoxError;
 
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
+use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::Variables;
 use crate::Context;
 
@@ -21,6 +23,8 @@ pub(crate) struct Request {
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
+    pub(crate) operation_kind: OperationKind,
 }
 
 assert_impl_all!(Response: Send);
@@ -42,6 +46,8 @@ impl Request {
         operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
+        authorization: Arc<CacheKeyMetadata>,
+        operation_kind: OperationKind,
     ) -> Self {
         Self {
             service_name,
@@ -49,6 +55,8 @@ impl Request {
             operation,
             supergraph_request,
             variables,
+            authorization,
+            operation_kind,
         }
     }
 }

@@ -247,7 +247,7 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
             ));
 
         self.plugin
-            .connector_request_service(service)
+            .connector_request_service(service, "my_connector".to_string())
             .call(request)
             .await
     }

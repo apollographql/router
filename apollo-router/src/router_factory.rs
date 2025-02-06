@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io;
 use std::sync::Arc;
 
@@ -423,6 +424,37 @@ pub(crate) async fn create_http_services(
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
         http_services.insert(name.clone(), http_service_factory);
     }
+
+    // Also create client service factories for connector sources
+    let connector_sources: HashSet<String> = schema
+        .connectors
+        .as_ref()
+        .map(|c| {
+            c.by_service_name
+                .iter()
+                .map(|(_, connector)| {
+                    format!(
+                        "{}.{}",
+                        connector.id.subgraph_name.clone(),
+                        connector.id.source_name.clone().unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for name in connector_sources {
+        let http_service = crate::services::http::HttpClientService::from_config(
+            &name,
+            configuration,
+            &tls_root_store,
+            shaping.connector_client_config(&name),
+        )?;
+
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
+        http_services.insert(name.clone(), http_service_factory);
+    }
+
     Ok(http_services)
 }
 

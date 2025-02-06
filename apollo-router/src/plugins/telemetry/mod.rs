@@ -871,6 +871,7 @@ impl PluginPrivate for Telemetry {
     fn connector_request_service(
         &self,
         service: connector::request_service::BoxService,
+        _: String,
     ) -> connector::request_service::BoxService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();

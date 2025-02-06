@@ -7,6 +7,7 @@
 //! * Rate limiting
 //!
 mod deduplication;
+mod connector_deduplication;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -27,13 +28,18 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::connector::request_service::TransportRequest;
 use self::deduplication::QueryDeduplicationLayer;
+use self::connector_deduplication::ConnectorDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
+use crate::plugin::PluginPrivate;
+use crate::services::connector;
+use crate::services::connector::request_service::Error;
+use crate::services::connector::request_service::Request;
+use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;
 use crate::services::router;
 use crate::services::subgraph;
@@ -153,6 +159,8 @@ pub(crate) struct Config {
     all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, SubgraphShaping>,
+    /// Applied on specific subgraphs
+    sources: HashMap<String, SubgraphShaping>,
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
@@ -185,16 +193,18 @@ impl Merge for RateLimitConf {
 pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    rate_limit_sources: Mutex<HashMap<String, RateLimitLayer>>,
 }
 
 #[async_trait::async_trait]
-impl Plugin for TrafficShaping {
+impl PluginPrivate for TrafficShaping {
     type Config = Config;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {
             config: init.config,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
+            rate_limit_sources: Mutex::new(HashMap::new()),
         })
     }
 
@@ -390,6 +400,94 @@ impl Plugin for TrafficShaping {
             service
         }
     }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+        source_name: String,
+    ) -> crate::services::connector::request_service::BoxService {
+        let all_config = self.config.all.as_ref();
+        let source_config = self.config.sources.get(&source_name);
+        let final_config = Self::merge_config(all_config, source_config);
+
+        if let Some(config) = final_config {
+            let rate_limit = config
+                .shaping
+                .global_rate_limit
+                .as_ref()
+                .map(|rate_limit_conf| {
+                    self.rate_limit_sources
+                        .lock()
+                        .entry(source_name.clone())
+                        .or_insert_with(|| {
+                            RateLimitLayer::new(
+                                rate_limit_conf.capacity.into(),
+                                rate_limit_conf.interval,
+                            )
+                        })
+                        .clone()
+                });
+
+            ServiceBuilder::new()
+                .map_future_with_request_data(
+                    |req: &Request| (req.context.clone(), req.connector.clone(), req.key.clone()),
+                    move |(ctx, connector, response_key), future| {
+                        async {
+                            let response: Result<Response, BoxError> = future.await;
+                            match response {
+                                Ok(ok) => Ok(ok),
+                                Err(err) if err.is::<Elapsed>() => {
+                                    let response = Response::error_builder()
+                                        .context(ctx)
+                                        .connector(connector)
+                                        .error(Error::GatewayTimeout)
+                                        .message("Your request has been timed out")
+                                        .response_key(response_key)
+                                        .build();
+                                    Ok(response)
+                                }
+                               Err(err) if err.is::<Overloaded>() => {
+                                    let response = Response::error_builder()
+                                        .context(ctx)
+                                        .connector(connector)
+                                        .error(Error::RateLimited)
+                                        .message("Your request has been rate limited")
+                                        .response_key(response_key)
+                                        .build();
+                                    Ok(response)
+                                }
+                                Err(err) => Err(err),
+                            }
+                        }
+                    },
+                )
+                .load_shed()
+                .layer(TimeoutLayer::new(
+                    config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                ))
+                .option_layer(rate_limit)
+                .option_layer(
+                    config
+                        .shaping
+                        .deduplicate_query
+                        .unwrap_or_default()
+                        .then(ConnectorDeduplicationLayer::default),
+                )
+                .map_request(move |mut req: connector::request_service::Request| {
+                    if let Some(compression) = config.shaping.compression {
+                        let TransportRequest::Http(ref mut http_request) = req.transport_request;
+                        let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
+                        http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
+                    }
+                    req
+                })                
+                .buffered()
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
+    }
 }
 
 impl TrafficShaping {
@@ -415,9 +513,24 @@ impl TrafficShaping {
         })
         .unwrap_or_default()
     }
+
+    pub(crate) fn connector_client_config(
+        &self,
+        source_name: &str,
+    ) -> crate::configuration::shared::Client {
+        Self::merge_config(
+            self.config.all.as_ref(),
+            self.config.sources.get(source_name),
+        )
+        .map(|config| crate::configuration::shared::Client {
+            experimental_http2: config.shaping.experimental_http2,
+            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+        })
+        .unwrap_or_default()
+    }
 }
 
-register_plugin!("apollo", "traffic_shaping", TrafficShaping);
+register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {

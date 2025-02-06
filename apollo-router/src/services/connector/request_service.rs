@@ -1,5 +1,7 @@
 //! Service which makes individual requests to Apollo Connectors over some transport
 
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -10,16 +12,16 @@ use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use static_assertions::assert_impl_all;
+use tower::buffer::Buffer;
 use tower::BoxError;
-use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing::info_span;
 
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Path;
-use crate::layers::ServiceBuilderExt;
+use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::make_requests::ResponseKey;
@@ -35,11 +37,10 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequest;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::EventLevel;
-use crate::plugins::telemetry::consts::CONNECT_REQUEST_SPAN_NAME;
+use crate::query_planner::fetch::OperationKind;
 use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
-use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::Plugins;
@@ -48,6 +49,7 @@ use crate::Context;
 pub(crate) mod transport;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
+pub(crate) type ServiceResult = Result<Response, BoxError>;
 
 assert_impl_all!(Request: Send);
 assert_impl_all!(Response: Send);
@@ -76,6 +78,12 @@ pub(crate) struct Request {
 
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
+
+    /// Authorization metadata for this request
+    pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    /// The graphql operation kind (Query/Mutation/Subscription)
+    pub(crate) operation_kind: OperationKind,
 }
 
 /// Response type for a connector
@@ -97,6 +105,35 @@ pub(crate) struct Response {
     pub(crate) mapped_response: MappedResponse,
 }
 
+#[buildstructor::buildstructor]
+impl Response {
+    #[builder(visibility = "pub")]
+    fn error_new(
+        context: Context,
+        connector: Arc<Connector>,
+        error: Error,
+        message: String,
+        response_key: ResponseKey,
+    ) -> Self {
+        let graphql_error = graphql::Error::builder()
+            .message(message)
+            .extension_code(error.extension_code())
+            .build();
+
+        let mapped_response = MappedResponse::Error {
+            error: graphql_error,
+            key: response_key,
+        };
+
+        Self {
+            context,
+            connector,
+            transport_result: Err(error),
+            mapped_response,
+        }
+    }
+}
+
 /// Request to an underlying transport
 #[derive(Debug)]
 #[non_exhaustive]
@@ -106,7 +143,7 @@ pub(crate) enum TransportRequest {
 }
 
 /// Response from an underlying transport
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub(crate) enum TransportResponse {
     /// A response from an HTTP transport
@@ -132,8 +169,23 @@ pub(crate) enum Error {
     /// Request limit exceeded
     RequestLimitExceeded,
 
+    /// Rate limit exceeded
+    RateLimited,
+
+    /// Timeout
+    GatewayTimeout,
+
     /// {0}
     TransportFailure(#[from] BoxError),
+}
+
+impl Clone for Error {
+    fn clone(&self) -> Self {
+        match self {
+            Self::TransportFailure(err) => Self::TransportFailure(BoxError::from(err.to_string())),
+            err => err.clone(),
+        }
+    }
 }
 
 impl Error {
@@ -170,6 +222,8 @@ impl ErrorExtension for Error {
         match self {
             Self::RequestLimitExceeded => "REQUEST_LIMIT_EXCEEDED",
             Self::TransportFailure(_) => "HTTP_CLIENT_ERROR",
+            Self::RateLimited => "REQUEST_RATE_LIMITED",
+            Self::GatewayTimeout => "GATEWAY_TIMEOUT",
         }
         .to_string()
     }
@@ -177,44 +231,45 @@ impl ErrorExtension for Error {
 
 #[derive(Clone)]
 pub(crate) struct ConnectorRequestServiceFactory {
-    pub(crate) http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
-    pub(crate) plugins: Arc<Plugins>,
+    pub(crate) services: Arc<HashMap<String, Buffer<Request, BoxFuture<'static, ServiceResult>>>>,
 }
 
 impl ConnectorRequestServiceFactory {
     pub(crate) fn new(
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
+        connector_sources: HashSet<String>,
     ) -> Self {
+        let mut map = HashMap::with_capacity(connector_sources.len());
+        for source in connector_sources {
+            let service = Buffer::new(
+                plugins
+                    .iter()
+                    .rev()
+                    .fold(
+                        ConnectorRequestService {
+                            http_client_service_factory: http_client_service_factory.clone(),
+                        }
+                        .boxed(),
+                        |acc, (_, e)| e.connector_request_service(acc, source.clone()),
+                    )
+                    .boxed(),
+                DEFAULT_BUFFER_SIZE,
+            );
+            map.insert(source, service);
+        }
+
         Self {
-            http_client_service_factory,
-            plugins,
+            services: Arc::new(map), //connector_sources,
         }
     }
-}
 
-impl ServiceFactory<Request> for ConnectorRequestServiceFactory {
-    type Service = BoxService;
-
-    fn create(&self) -> Self::Service {
-        ServiceBuilder::new()
-            .instrument(|_| {
-                info_span!(
-                    CONNECT_REQUEST_SPAN_NAME,
-                    "otel.kind" = "INTERNAL",
-                    "otel.status_code" = tracing::field::Empty,
-                )
-            })
-            .service(
-                self.plugins.iter().rev().fold(
-                    ConnectorRequestService {
-                        http_client_service_factory: self.http_client_service_factory.clone(),
-                    }
-                    .boxed(),
-                    |acc, (_, e)| e.connector_request_service(acc),
-                ),
-            )
-            .boxed()
+    pub(crate) fn create(&self, source_name: String) -> BoxService {
+        // Note: We have to box our cloned service to erase the type of the Buffer.
+        self.services
+            .get(&source_name)
+            .map(|svc| svc.clone().boxed())
+            .expect("We should always get a service, even if it is a blank/default one")
     }
 }
 
@@ -281,9 +336,14 @@ impl tower::Service<Request> for ConnectorRequestService {
                         )
                         .await?;
 
-                        if let Some(http_client_service_factory) = http_client_service_factory
-                            .get(&request.service_name)
-                            .cloned()
+                        let source_name = format!(
+                            "{}.{}",
+                            request.connector.id.subgraph_name.to_string(),
+                            request.connector.id.source_name.clone().unwrap_or_default()
+                        );
+
+                        if let Some(http_client_service_factory) =
+                            http_client_service_factory.get(&source_name).cloned()
                         {
                             http_client_service_factory
                                 .create(&original_subgraph_name)
