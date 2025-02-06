@@ -28,7 +28,6 @@ Common metrics configuration contains global settings for all exporters:
 * [Service name](#service_name)
 * [Resource attributes](#resource)
 * [Custom default histogram buckets](#buckets)
-* [`apollo_router_http_requests` attributes](#attributes)
 * [OpenTelemetry views](#views)
 
 ### `service_name`
@@ -165,7 +164,6 @@ telemetry:
 | `service_name`      | `unknown_service:router` | The OpenTelemetry service name.                               |
 | `service_namespace` |                          | The OpenTelemetry namespace.                                  |
 | `resource`          |                          | The OpenTelemetry resource to attach to metrics.              |
-| `attributes`        |                          | Customization for the apollo_router_http_requests instrument. |
 | `views`             |                          | Override default buckets or configuration for metrics (including dropping the metric itself) |
 
 
