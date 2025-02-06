@@ -131,7 +131,7 @@ router. Users customizing the router with Rhai scripts, Rust scripts, or coproce
 - `context::BusyTimer` struct
 - `context::BusyTimerGuard` struct
 
-### Deprecated `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async()`
+### Removed `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async()`
 
 Both `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async() are removed as part of architectural optimizations in router v2.x.  
 
@@ -503,7 +503,6 @@ Removals:
 - Deprecated methods in rust plugins
   - OneShotAsyncCheckpoint
   - Emitting metrics in plugins
-  - `subgraph_name`
 - Jaeger tracing
 
 Changes:
@@ -539,22 +538,6 @@ To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-
 Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`.
 
 <!-- TODO(@goto-bus-stop): what is the behaviour in 1.x? why would someone want to revert to it? -->
-
-### Default GraphOS metrics reporting
-<!-- XXX(@goto-bus-stop) This is not really breaking, should we even say it? --->
-
-Default values of some GraphOS reporting metrics have been changed from v1.x to the following in v2.x:
-
-- `telemetry.apollo.signature_normalization_algorithm` now defaults to `enhanced`. (In v1.x the default is `legacy`.)
-- `telemetry.apollo.metrics_reference_mode` now defaults to `extended`. (In v1.x the default is `standard`.)
-
-### Changes to structures
-
-<!-- TODO(@goto-bus--stop): These properties are not actually public, so it probably doesn't affect users? -->
-
-These properties are now a `String` type instead of an `Option<String>` type:
-- `services::subgraph::Request::subgraph_name`
-- `services::subgraph::Response::subgraph_name`
 
 </details>
 
