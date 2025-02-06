@@ -7,7 +7,6 @@
 //! * Rate limiting
 //!
 mod deduplication;
-mod connector_deduplication;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -30,7 +29,6 @@ use tower::ServiceExt;
 
 use self::connector::request_service::TransportRequest;
 use self::deduplication::QueryDeduplicationLayer;
-use self::connector_deduplication::ConnectorDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -498,13 +496,6 @@ impl PluginPrivate for TrafficShaping {
                     config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
                 .option_layer(rate_limit)
-                .option_layer(
-                    config
-                        .shaping
-                        .deduplicate_query
-                        .unwrap_or_default()
-                        .then(ConnectorDeduplicationLayer::default),
-                )
                 .map_request(move |mut req: connector::request_service::Request| {
                     if let Some(compression) = config.shaping.compression {
                         let TransportRequest::Http(ref mut http_request) = req.transport_request;

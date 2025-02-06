@@ -125,9 +125,6 @@ pub(crate) fn make_request(
     Ok((
         TransportRequest::Http(HttpRequest {
             inner: request,
-            // TODO: I kinda hate this but I'm not sure how to get the original body into a format I can
-            // hash without draining the bytes from UnsyncBoxBody<Bytes, Error> which would absolutely break things
-            raw_body: json_body.unwrap_or_default().to_string(),
             debug: debug_request,
         }),
         mapping_problems,
