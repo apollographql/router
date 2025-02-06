@@ -43,7 +43,7 @@ url = "2"
 either = "1.13.0"
 tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
-shape = "0.5.0"
+shape = "0.5.1"
 
 [dev-dependencies]
 hex.workspace = true
