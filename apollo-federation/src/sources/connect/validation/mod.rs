@@ -643,8 +643,11 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
+                let start_time = std::time::Instant::now();
                 let result = validate(&schema, path.to_str().unwrap());
+                let end_time = std::time::Instant::now();
                 assert_snapshot!(format!("{:#?}", result.errors));
+                assert!(end_time - start_time < std::time::Duration::from_millis(100));
             });
         });
     }
