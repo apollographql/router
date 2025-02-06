@@ -33,6 +33,7 @@ Multiple metrics have been removed in router v2.x as part of evolving towards Op
   `http.server.request.duration` metric for requests from clients to router and
   `http.client.request.duration` for requests from router to subgraphs.
 
+<!-- TODO(@goto-bus-stop): no _bucket? -->
 - `apollo_router_http_request_duration_seconds_bucket`. This is replaced by
   `http.server.request.duration` metric for requests from clients to router and
   `http.client.request.duration` for requests from router to subgraphs.
@@ -311,6 +312,8 @@ The router request context is used to share data across stages of the request pi
 | `persisted_query_hit` | `apollo::apq::cache_hit` |
 | `persisted_query_register` | `apollo::apq::registered` |
 
+<!-- TODO(@goto-bus-stop): list configuration keys that contain context keys? -->
+
 ### Updated syntax for configuring supergraph endpoint path
 
 The syntax for configuring the router to receive GraphQL requests at a specific URL path has been updated:
@@ -540,6 +543,8 @@ Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by set
 <!-- TODO(@goto-bus-stop): what is the behaviour in 1.x? why would someone want to revert to it? -->
 
 </details>
+
+<!-- TODO(@goto-bus-stop): start using the ?live and ?ready things -->
 
 ## Deploy your router
 
