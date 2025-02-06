@@ -948,13 +948,12 @@ mod tests {
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         supergraph::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -983,11 +982,10 @@ mod tests {
                         .context(ctx)
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         supergraph::Response::fake_builder()
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -998,11 +996,10 @@ mod tests {
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         supergraph::Response::fake_builder()
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -1026,7 +1023,7 @@ mod tests {
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         let context_with_error = Context::new();
                         let _ = context_with_error
                             .insert(CONTAINS_GRAPHQL_ERROR, true)
@@ -1037,7 +1034,6 @@ mod tests {
                             .context(context_with_error)
                             .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -1061,13 +1057,12 @@ mod tests {
                         .query("query { foo }")
                         .build()
                         .unwrap(),
-                    |_r| {
+                    |_r| async {
                         supergraph::Response::fake_builder()
                             .header("custom-header", "val1")
                             .header("x-log-response", HeaderValue::from_static("log"))
                             .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -1099,13 +1094,12 @@ mod tests {
                         .subgraph_name("subgraph")
                         .subgraph_request(subgraph_req)
                         .build(),
-                    |_r| {
+                    |_r| async {
                         subgraph::Response::fake2_builder()
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
@@ -1137,14 +1131,13 @@ mod tests {
                         .subgraph_name("subgraph")
                         .subgraph_request(subgraph_req)
                         .build(),
-                    |_r| {
+                    |_r| async {
                         subgraph::Response::fake2_builder()
                             .header("custom-header", "val1")
                             .header("x-log-response", HeaderValue::from_static("log"))
                             .subgraph_name("subgraph")
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
-                            .expect("expecting valid response")
                     },
                 )
                 .await
