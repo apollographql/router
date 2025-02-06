@@ -628,11 +628,10 @@ mod test {
         let resp = plugin
             .call_execution(
                 execution::Request::fake_builder().context(ctx).build(),
-                |req| {
+                |req| async {
                     execution::Response::fake_builder()
                         .context(req.context)
                         .build()
-                        .unwrap()
                 },
             )
             .await
@@ -662,10 +661,10 @@ mod test {
             .build();
         req.executable_document = Some(Arc::new(Valid::assume_valid(ExecutableDocument::new())));
         let resp = plugin
-            .call_subgraph(req, |req| {
-                subgraph::Response::fake_builder()
+            .call_subgraph(req, |req| async {
+                Ok(subgraph::Response::fake_builder()
                     .context(req.context)
-                    .build()
+                    .build())
             })
             .await
             .unwrap();

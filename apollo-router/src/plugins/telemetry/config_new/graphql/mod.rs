@@ -230,7 +230,7 @@ pub(crate) mod test {
                 .await;
 
             harness
-                .call_supergraph(request, |req| {
+                .call_supergraph(request, |req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -239,7 +239,6 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
                 .await
                 .unwrap();
@@ -277,7 +276,7 @@ pub(crate) mod test {
                 .build()
                 .await;
             harness
-                .call_supergraph(request, |req| {
+                .call_supergraph(request, |req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -286,7 +285,6 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
                 .await
                 .unwrap();
@@ -332,7 +330,7 @@ pub(crate) mod test {
                 .await;
 
             harness
-                .call_supergraph(request, |req| {
+                .call_supergraph(request, |req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -341,7 +339,6 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
                 .await
                 .unwrap();
@@ -374,7 +371,7 @@ pub(crate) mod test {
                 .await;
 
             harness
-                .call_supergraph(request, |req| {
+                .call_supergraph(request, |req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -383,7 +380,6 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
                 .await
                 .unwrap();
