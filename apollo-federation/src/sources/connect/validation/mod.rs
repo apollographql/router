@@ -50,6 +50,7 @@ use entity::EntityKeyChecker;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
 use source_name::SourceName;
+use strum::IntoEnumIterator;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 use url::Url;
@@ -109,6 +110,32 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
             schema,
         };
     };
+
+    if let Err(err) = ConnectSpec::try_from(&link.url.version) {
+        let available_versions = ConnectSpec::iter().map(ConnectSpec::as_str).collect_vec();
+        let message = if available_versions.len() == 1 {
+            // TODO: No need to branch here once multiple spec versions are available
+            format!("{err}; should be {version}.", version = ConnectSpec::V0_1)
+        } else {
+            // This won't happen today, but it's prepping for 0.2 so we don't forget
+            format!(
+                "{err}; should be one of {available_versions}.",
+                available_versions = available_versions.join(", "),
+            )
+        };
+        return ValidationResult {
+            errors: vec![Message {
+                code: Code::UnknownConnectorsVersion,
+                message,
+                locations: link_directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }],
+            has_connectors: true,
+            schema,
+        };
+    }
 
     let federation = Link::for_identity(&schema, &Identity::federation_identity());
     let external_directive_name = federation
@@ -609,6 +636,8 @@ pub enum Code {
     UnsupportedVariableType,
     /// A variable is nullable in a location which requires non-null at runtime
     NullabilityMismatch,
+    /// The version set in the connectors `@link` URL is not recognized
+    UnknownConnectorsVersion,
 }
 
 impl Code {
