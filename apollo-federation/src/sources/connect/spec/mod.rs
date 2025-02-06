@@ -30,6 +30,7 @@ pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;
 pub(crate) use schema::ConnectHTTPArguments;
 pub(crate) use schema::SourceHTTPArguments;
+use strum_macros::EnumIter;
 
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use self::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
@@ -43,13 +44,13 @@ use crate::link::Link;
 use crate::schema::FederationSchema;
 
 /// The known versions of the connect spec
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, EnumIter)]
 pub enum ConnectSpec {
     V0_1,
 }
 
 impl ConnectSpec {
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",
         }
