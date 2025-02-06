@@ -133,6 +133,38 @@ impl Merge for SubgraphShaping {
     }
 }
 
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ConnectorShaping {
+    /// Enable compression for connectors (available compressions are deflate, br, gzip)
+    compression: Option<Compression>,
+    /// Enable global rate limiting
+    global_rate_limit: Option<RateLimitConf>,
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// Enable timeout for connectors requests
+    timeout: Option<Duration>,
+    /// Enable HTTP2 for connectors
+    experimental_http2: Option<Http2Config>,
+    /// DNS resolution strategy for connectors
+    dns_resolution_strategy: Option<DnsResolutionStrategy>,
+}
+
+impl From<ConnectorShaping> for SubgraphShaping {
+    fn from(value: ConnectorShaping) -> Self {
+        SubgraphShaping {
+            shaping: Shaping {
+                deduplicate_query: None,
+                compression: value.compression,
+                global_rate_limit: value.global_rate_limit,
+                timeout: value.timeout,
+                experimental_http2: value.experimental_http2,
+                dns_resolution_strategy: value.dns_resolution_strategy
+            }
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 struct RouterShaping {
@@ -160,7 +192,7 @@ pub(crate) struct Config {
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
-    sources: HashMap<String, SubgraphShaping>,
+    sources: HashMap<String, ConnectorShaping>,
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
@@ -407,8 +439,8 @@ impl PluginPrivate for TrafficShaping {
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
         let all_config = self.config.all.as_ref();
-        let source_config = self.config.sources.get(&source_name);
-        let final_config = Self::merge_config(all_config, source_config);
+        let source_config = self.config.sources.get(&source_name).map(|connector_config|connector_config.clone().into());
+        let final_config = Self::merge_config(all_config, source_config.as_ref());
 
         if let Some(config) = final_config {
             let rate_limit = config
@@ -518,9 +550,10 @@ impl TrafficShaping {
         &self,
         source_name: &str,
     ) -> crate::configuration::shared::Client {
+        let source_config = self.config.sources.get(source_name).map(|connector_config|connector_config.clone().into());
         Self::merge_config(
             self.config.all.as_ref(),
-            self.config.sources.get(source_name),
+            source_config.as_ref(),
         )
         .map(|config| crate::configuration::shared::Client {
             experimental_http2: config.shaping.experimental_http2,
