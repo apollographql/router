@@ -1401,7 +1401,7 @@ async fn test_interface_object() {
             .method("POST")
             .path("/graphql")
             .body(serde_json::json!({
-              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ..._generated_onItf3_0 } } fragment _generated_onItf3_0 on Itf { __typename ... on T1 { a } ... on T2 { b } }"#,
+              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
               "variables": {
                 "representations": [
                   { "__typename": "Itf", "id": 1 },
