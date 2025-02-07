@@ -196,6 +196,7 @@ version = "2.0.0-preview.6"
 dependencies = [
  "apollo-compiler",
  "derive_more",
+ "dhat",
  "either",
  "hashbrown 0.15.2",
  "hex",
