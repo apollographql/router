@@ -9,8 +9,6 @@ use tower::BoxError;
 
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
-use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::OperationKind;
 use crate::query_planner::fetch::Variables;
 use crate::Context;
 

@@ -626,7 +626,7 @@ async fn subscription_task(
                         .map(|c| {
                             c.by_service_name
                                 .iter()
-                                .map(|(_, connector)| format!("{}.{}", connector.id.subgraph_name.clone(), connector.id.source_name.clone().unwrap_or_default()))
+                                .map(|(_, connector)| connector.source_config_key())
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -935,13 +935,7 @@ impl PluggableSupergraphServiceBuilder {
             .map(|c| {
                 c.by_service_name
                     .iter()
-                    .map(|(_, connector)| {
-                        format!(
-                            "{}.{}",
-                            connector.id.subgraph_name.clone(),
-                            connector.id.source_name.clone().unwrap_or_default(),
-                        )
-                    })
+                    .map(|(_, connector)| connector.source_config_key())
                     .collect()
             })
             .unwrap_or_default();

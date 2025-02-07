@@ -330,11 +330,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                         )
                         .await?;
 
-                        let source_name = format!(
-                            "{}.{}",
-                            request.connector.id.subgraph_name.to_string(),
-                            request.connector.id.source_name.clone().unwrap_or_default()
-                        );
+                        let source_name = request.connector.source_config_key();
 
                         if let Some(http_client_service_factory) =
                             http_client_service_factory.get(&source_name).cloned()

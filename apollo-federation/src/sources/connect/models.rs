@@ -231,6 +231,16 @@ impl Connector {
             .map_err(|_| internal_error!("Failed to create key for connector {}", self.id.label)),
         }
     }
+
+    /// Create an identifier for this connector that can be used for configuration and service identification
+    pub fn source_config_key(&self) -> String {
+        let source_name = self
+            .id
+            .source_name
+            .clone()
+            .unwrap_or("anonymous".to_string());
+        format!("{}.{}", self.id.subgraph_name, source_name)
+    }
 }
 
 fn make_label(

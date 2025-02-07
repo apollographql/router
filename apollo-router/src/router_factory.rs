@@ -432,13 +432,7 @@ pub(crate) async fn create_http_services(
         .map(|c| {
             c.by_service_name
                 .iter()
-                .map(|(_, connector)| {
-                    format!(
-                        "{}.{}",
-                        connector.id.subgraph_name.clone(),
-                        connector.id.source_name.clone().unwrap_or_default(),
-                    )
-                })
+                .map(|(_, connector)| connector.source_config_key())
                 .collect()
         })
         .unwrap_or_default();

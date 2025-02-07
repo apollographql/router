@@ -178,11 +178,7 @@ async fn execute(
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
-    let source_name = format!(
-        "{}.{}",
-        connector.id.subgraph_name.clone(),
-        connector.id.source_name.clone().unwrap_or_default(),
-    );
+    let source_name = connector.source_config_key();
     let debug = &context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
