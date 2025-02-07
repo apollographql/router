@@ -130,6 +130,7 @@ const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
+pub(crate) const GRAPHQL_ERROR_EXT_CODE: &str = "graphql.error.extensions.code";
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
 const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
@@ -178,6 +179,9 @@ const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
     APOLLO_CONNECTOR_SOURCE_DETAIL,
 ];
 
+/// Attributes on events to include when sending to the OTLP protocol.
+const OTLP_EXT_INCLUDE_EVENT_ATTRS: [Key; 1] = [Key::from_static_str(GRAPHQL_ERROR_EXT_CODE)];
+
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     PARALLEL_SPAN_NAME,
     SEQUENCE_SPAN_NAME,
@@ -216,6 +220,13 @@ pub(crate) enum Error {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LightSpanEventData {
+    pub(crate) timestamp: SystemTime,
+    pub(crate) name: Cow<'static, str>,
+    pub(crate) attributes: HashMap<Key, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
     pub(crate) trace_id: TraceId,
     pub(crate) span_id: SpanId,
@@ -227,12 +238,17 @@ pub(crate) struct LightSpanData {
     pub(crate) attributes: HashMap<Key, Value>,
     pub(crate) status: Status,
     pub(crate) droppped_attribute_count: u32,
+    pub(crate) events: Vec<LightSpanEventData>,
 }
 
 impl LightSpanData {
     /// Convert from a full Span into a lighter more memory-efficient span for caching purposes.
     /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
-    fn from_span_data(value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
+    fn from_span_data(
+        value: SpanData,
+        include_attr_names: &Option<HashSet<Key>>,
+        include_attr_event_names: &Option<HashSet<Key>>,
+    ) -> Self {
         let filtered_attributes = match include_attr_names {
             None => value
                 .attributes
@@ -251,6 +267,33 @@ impl LightSpanData {
                 })
                 .collect(),
         };
+
+        let filtered_events = match include_attr_event_names {
+            None => vec![],
+            Some(event_names) => value
+                .events
+                .into_iter()
+                .map(|event| {
+                    LightSpanEventData {
+                        timestamp: event.timestamp,
+                        name: event.name,
+                        attributes: event
+                            .attributes
+                            .into_iter()
+                            .filter_map(|kv| {
+                                if event_names.contains(&kv.key) {
+                                    Some((kv.key, kv.value))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect(),
+                    }
+                })
+                .filter(|event| !event.attributes.is_empty())
+                .collect(),
+        };
+
         Self {
             trace_id: value.span_context.trace_id(),
             span_id: value.span_context.span_id(),
@@ -262,6 +305,7 @@ impl LightSpanData {
             attributes: filtered_attributes,
             status: value.status,
             droppped_attribute_count: value.dropped_attributes_count,
+            events: filtered_events,
         }
     }
 }
@@ -326,6 +370,7 @@ pub(crate) struct Exporter {
     use_legacy_request_span: bool,
     include_span_names: HashSet<&'static str>,
     include_attr_names: Option<HashSet<Key>>,
+    include_attr_event_names: Option<HashSet<Key>>,
 }
 
 #[derive(Debug)]
@@ -434,6 +479,11 @@ impl Exporter {
                 ))
             } else {
                 Some(HashSet::from(REPORTS_INCLUDE_ATTRS))
+            },
+            include_attr_event_names: if otlp_tracing_ratio > 0f64 {
+                Some(HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS))
+            } else {
+                None
             },
         })
     }
@@ -1098,8 +1148,11 @@ impl SpanExporter for Exporter {
                     .iter()
                     .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
             {
-                let root_span: LightSpanData =
-                    LightSpanData::from_span_data(span, &self.include_attr_names);
+                let root_span: LightSpanData = LightSpanData::from_span_data(
+                    span,
+                    &self.include_attr_names,
+                    &self.include_attr_event_names,
+                );
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
                     if let Some(trace) = self
@@ -1148,7 +1201,11 @@ impl SpanExporter for Exporter {
                     .expect("capacity of cache was zero")
                     .push(
                         len,
-                        LightSpanData::from_span_data(span, &self.include_attr_names),
+                        LightSpanData::from_span_data(
+                            span,
+                            &self.include_attr_names,
+                            &self.include_attr_event_names,
+                        ),
                     );
             }
         }
@@ -1660,6 +1717,7 @@ mod test {
             attributes: HashMap::with_capacity(10),
             status: Default::default(),
             droppped_attribute_count: 0,
+            events: Default::default(),
         };
 
         span.attributes

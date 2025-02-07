@@ -25,10 +25,11 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventResponse;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
-use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
+use crate::plugins::telemetry::tracing::apollo_telemetry::GRAPHQL_ERROR_EXT_CODE;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::connector::request_service::transport::http::HttpResponse;
@@ -193,7 +194,7 @@ impl RawResponse {
             if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
                 event!(
                     Level::ERROR,
-                    graphql.error.extensions.code = error_code.as_str(),
+                    { GRAPHQL_ERROR_EXT_CODE } = error_code.as_str(),
                     { EVENT_ATTRIBUTE_OMIT_LOG } = true,
                     "Connector error occurred"
                 );
