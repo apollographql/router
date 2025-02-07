@@ -56,3 +56,7 @@ dhat = "0.3.3"
 
 [[test]]
 name = "main"
+
+[[test]]
+name = "isolated_connectors_validation"
+path = "tests/connectors/validation.rs"
