@@ -70,6 +70,14 @@ While cloud routers are hosted in the cloud, GraphQL subgraph servers are still 
 
 </Note>
 
+<Caution>
+
+Cloud routers running with the Free plan are rate limited to 60 requests per minute. 
+
+For requests in excess of this limit, the router returns an HTTP 429 (Too Many Requests) response.
+
+</Caution>
+
 ### Self-hosted routers
 
 You can choose to manage the runtime infrastructure for your routers by yourself. Using container images of router, you can host and deploy your router instances from your own infrastructure. These _self-hosted router_ instances allow you full control over their deployment.
