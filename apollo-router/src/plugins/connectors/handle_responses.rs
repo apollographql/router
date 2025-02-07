@@ -7,6 +7,8 @@ use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use tracing::event;
+use tracing::Level;
 use tracing::Span;
 
 use crate::graphql;
@@ -26,6 +28,7 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::connector::request_service::transport::http::HttpResponse;
@@ -182,9 +185,18 @@ impl RawResponse {
             }
         };
 
-        if let MappedResponse::Error { error: ref mapped_error, key: _ } = mapped_response {
+        if let MappedResponse::Error {
+            error: ref mapped_error,
+            key: _,
+        } = mapped_response
+        {
             if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
-                Span::current().record("graphql.error.extensions.code", error_code.as_str());
+                event!(
+                    Level::ERROR,
+                    graphql.error.extensions.code = error_code.as_str(),
+                    { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+                    "Connector error occurred"
+                );
             }
         }
 
