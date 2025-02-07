@@ -1,7 +1,0 @@
----
-source: apollo-router/src/services/layers/persisted_queries/mod.rs
-assertion_line: 1016
-expression: yaml
-snapshot_kind: text
----
-[]

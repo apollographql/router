@@ -2099,6 +2099,49 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "ContextConf": {
+      "description": "Configures the context",
+      "oneOf": [
+        {
+          "description": "Send all context keys to coprocessor",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Don't send any context keys to coprocessor",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
+          "enum": [
+            "deprecated"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -2848,9 +2891,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -2885,9 +2927,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -5108,9 +5149,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -5150,9 +5190,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6198,9 +6237,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6245,9 +6283,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6953,9 +6990,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6990,9 +7026,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
