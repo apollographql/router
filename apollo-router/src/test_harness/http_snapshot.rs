@@ -69,6 +69,7 @@ use hyper::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use indexmap::IndexMap;
 use parking_lot::Mutex;
+use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -118,7 +119,8 @@ pub struct SnapshotServer {
 struct SnapshotServerState {
     client: HttpClientService,
     base_url: Uri,
-    snapshots: Arc<Mutex<BTreeMap<String, Snapshot>>>,
+    snapshots_by_key: Arc<Mutex<BTreeMap<String, Snapshot>>>,
+    snapshots_by_regex: Arc<Mutex<Vec<Snapshot>>>,
     snapshot_file: Box<Path>,
     offline: bool,
     update: bool,
@@ -217,6 +219,7 @@ async fn handle(
                     request: Request {
                         method: Some(method.to_string()),
                         path: Some(path),
+                        regex: None,
                         body: request_json_body,
                     },
                     response: Response {
@@ -232,9 +235,14 @@ async fn handle(
                     },
                 };
                 {
-                    let mut snapshots = state.snapshots.lock();
-                    snapshots.insert(key, snapshot.clone());
-                    if let Err(e) = save(state.snapshot_file, &mut snapshots) {
+                    let mut snapshots_by_key = state.snapshots_by_key.lock();
+                    let mut snapshots_by_regex = state.snapshots_by_regex.lock();
+                    snapshots_by_key.insert(key, snapshot.clone());
+                    if let Err(e) = save(
+                        state.snapshot_file,
+                        &mut snapshots_by_key,
+                        &mut snapshots_by_regex,
+                    ) {
                         error!(
                             url = %uri,
                             method = %method,
@@ -263,23 +271,37 @@ fn response_from_snapshot(
     method: &Method,
     key: &String,
 ) -> Option<http::Response<RouterBody>> {
-    let mut snapshots = state.snapshots.lock();
+    let mut snapshots_by_key = state.snapshots_by_key.lock();
+    let snapshots_by_regex = state.snapshots_by_regex.lock();
     if state.update {
-        snapshots.remove(key);
+        snapshots_by_key.remove(key);
         None
     } else {
-        snapshots.get(key).and_then(|snapshot| {
-            debug!(
-                url = %uri,
-                method = %method,
-                "Found existing snapshot"
-            );
-            snapshot
-                .clone()
-                .into_response()
-                .map_err(|e| error!("Unable to convert snapshot into HTTP response: {:?}", e))
-                .ok()
-        })
+        snapshots_by_key
+            .get(key)
+            .or_else(|| {
+                // Look up snapshot using regex
+                for snapshot in snapshots_by_regex.iter() {
+                    if let Some(regex) = &snapshot.request.regex {
+                        if regex.is_match(uri) {
+                            return Some(snapshot);
+                        }
+                    }
+                }
+                None
+            })
+            .and_then(|snapshot| {
+                debug!(
+                    url = %uri,
+                    method = %method,
+                    "Found existing snapshot"
+                );
+                snapshot
+                    .clone()
+                    .into_response()
+                    .map_err(|e| error!("Unable to convert snapshot into HTTP response: {:?}", e))
+                    .ok()
+            })
     }
 }
 
@@ -320,24 +342,37 @@ fn map_headers<F: Fn(&str) -> bool>(
 
 fn save<P: AsRef<Path>>(
     path: P,
-    snapshots: &mut BTreeMap<String, Snapshot>,
+    snapshots_by_key: &mut BTreeMap<String, Snapshot>,
+    snapshots_by_regex: &mut [Snapshot],
 ) -> Result<(), SnapshotError> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let snapshots = snapshots.values().cloned().collect::<Vec<_>>();
+    let snapshots = snapshots_by_key
+        .values()
+        .cloned()
+        .chain(snapshots_by_regex.iter().cloned())
+        .collect::<Vec<_>>();
     std::fs::write(path, serde_json::to_string_pretty(&snapshots)?).map_err(Into::into)
 }
 
-fn load<P: AsRef<Path>>(path: P) -> Result<BTreeMap<String, Snapshot>, SnapshotError> {
+fn load<P: AsRef<Path>>(
+    path: P,
+) -> Result<(BTreeMap<String, Snapshot>, Vec<Snapshot>), SnapshotError> {
     let str = std::fs::read_to_string(path)?;
     let snapshots: Vec<Snapshot> = serde_json::from_str(&str)?;
     info!("Loaded {} snapshots", snapshots.len());
-    Ok(snapshots
-        .into_iter()
-        .map(|snapshot| (snapshot.key(), snapshot))
-        .collect())
+    let mut snapshots_by_key: BTreeMap<String, Snapshot> = Default::default();
+    let mut snapshots_by_regex: Vec<Snapshot> = Default::default();
+    for snapshot in snapshots.into_iter() {
+        if snapshot.request.regex.is_some() {
+            snapshots_by_regex.push(snapshot);
+        } else {
+            snapshots_by_key.insert(snapshot.key(), snapshot);
+        }
+    }
+    Ok((snapshots_by_key, snapshots_by_regex))
 }
 
 impl SnapshotServer {
@@ -412,11 +447,11 @@ impl SnapshotServer {
 
         let snapshot_file = snapshot_path.as_ref();
 
-        let snapshots = load(snapshot_file).unwrap_or_else(|_| {
+        let (snapshots_by_key, snapshots_by_regex) = load(snapshot_file).unwrap_or_else(|_| {
             if offline {
                 warn!("Unable to load snapshot file in offline mode - all requests will fail");
             }
-            BTreeMap::default()
+            (BTreeMap::default(), vec![])
         });
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -436,7 +471,8 @@ impl SnapshotServer {
             .with_state(SnapshotServerState {
                 client: http_service,
                 base_url: base_url.clone(),
-                snapshots: Arc::new(Mutex::new(snapshots.clone())),
+                snapshots_by_key: Arc::new(Mutex::new(snapshots_by_key)),
+                snapshots_by_regex: Arc::new(Mutex::new(snapshots_by_regex)),
                 snapshot_file: Box::from(snapshot_file),
                 offline,
                 update,
@@ -533,6 +569,8 @@ fn snapshot_key(method: Option<&str>, path: Option<&str>, body: &Value) -> Strin
 struct Request {
     method: Option<String>,
     path: Option<String>,
+    #[serde(with = "serde_regex", skip_serializing_if = "Option::is_none", default)]
+    regex: Option<Regex>,
     body: Value,
 }
 
