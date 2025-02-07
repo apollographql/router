@@ -23,8 +23,6 @@ pub(crate) struct Request {
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
-    pub(crate) authorization: Arc<CacheKeyMetadata>,
-    pub(crate) operation_kind: OperationKind,
 }
 
 assert_impl_all!(Response: Send);
@@ -46,8 +44,6 @@ impl Request {
         operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
-        authorization: Arc<CacheKeyMetadata>,
-        operation_kind: OperationKind,
     ) -> Self {
         Self {
             service_name,
@@ -55,8 +51,6 @@ impl Request {
             operation,
             supergraph_request,
             variables,
-            authorization,
-            operation_kind,
         }
     }
 }

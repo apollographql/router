@@ -78,12 +78,6 @@ pub(crate) struct Request {
 
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
-
-    /// Authorization metadata for this request
-    pub(crate) authorization: Arc<CacheKeyMetadata>,
-
-    /// The graphql operation kind (Query/Mutation/Subscription)
-    pub(crate) operation_kind: OperationKind,
 }
 
 /// Response type for a connector

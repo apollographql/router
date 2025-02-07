@@ -222,8 +222,6 @@ fn request_params_to_requests(
             transport_request,
             key: response_key,
             mapping_problems,
-            authorization: original_request.authorization.clone(),
-            operation_kind: original_request.operation_kind,
         });
     }
 
