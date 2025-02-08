@@ -37,6 +37,9 @@ pub fn compare_operations(
 ) -> Result<(), CorrectnessError> {
     let this_rs = response_shape::compute_response_shape_for_operation(this, schema)?;
     let other_rs = response_shape::compute_response_shape_for_operation(other, schema)?;
+    tracing::debug!(
+        "compare_operations:\nResponse shape (left): {this_rs}\nResponse shape (right): {other_rs}"
+    );
     Ok(response_shape_compare::compare_response_shapes(
         &this_rs, &other_rs,
     )?)
@@ -56,9 +59,8 @@ pub fn check_plan(
     let operation_doc = operation_doc
         .validate(api_schema.schema())
         .map_err(|e| FederationError::from(e))?;
-    let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
-    tracing::debug!("Operation response shape: {op_rs}");
 
+    let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&operation_doc)?;
     let plan_rs = query_plan_analysis::interpret_query_plan(supergraph_schema, &root_type, plan)
         .map_err(|e| {
@@ -66,7 +68,9 @@ pub fn check_plan(
                 "Failed to compute the response shape from query plan:\n{e}"
             ))
         })?;
-    tracing::debug!("Query plan response shape: {plan_rs}");
+    tracing::debug!(
+        "check_plan:\nOperation response shape: {op_rs}\nQuery plan response shape: {plan_rs}"
+    );
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
     compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs)?;
