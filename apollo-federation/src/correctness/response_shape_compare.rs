@@ -10,9 +10,28 @@ use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
-use super::CheckFailure;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
+
+pub struct ComparisonError {
+    description: String,
+}
+
+impl ComparisonError {
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub fn new(description: String) -> ComparisonError {
+        ComparisonError { description }
+    }
+
+    fn add_description(self: ComparisonError, description: &str) -> ComparisonError {
+        ComparisonError {
+            description: format!("{}\n{}", self.description, description),
+        }
+    }
+}
 
 macro_rules! check_match_eq {
     ($a:expr, $b:expr) => {
@@ -24,12 +43,12 @@ macro_rules! check_match_eq {
                 $a,
                 $b,
             );
-            return Err(CheckFailure::new(message));
+            return Err(ComparisonError::new(message));
         }
     };
 }
 
-// Path-specific type constraints on top of GraphQL type conditions.
+/// Path-specific type constraints on top of GraphQL type conditions.
 pub(crate) trait PathConstraint
 where
     Self: Sized,
@@ -38,7 +57,7 @@ where
     fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self;
 
     /// Returns a new path constraint for field's response shape.
-    fn for_field(&self, representative_field: &Field) -> Result<Self, CheckFailure>;
+    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError>;
 
     /// Is `ty` allowed under the path constraint?
     fn allows(&self, _ty: &ObjectTypeDefinitionPosition) -> bool;
@@ -54,7 +73,7 @@ impl PathConstraint for DummyPathConstraint {
         DummyPathConstraint
     }
 
-    fn for_field(&self, _representative_field: &Field) -> Result<Self, CheckFailure> {
+    fn for_field(&self, _representative_field: &Field) -> Result<Self, ComparisonError> {
         Ok(DummyPathConstraint)
     }
 
@@ -71,7 +90,7 @@ impl PathConstraint for DummyPathConstraint {
 pub fn compare_response_shapes(
     this: &ResponseShape,
     other: &ResponseShape,
-) -> Result<(), CheckFailure> {
+) -> Result<(), ComparisonError> {
     compare_response_shapes_with_constraint(&DummyPathConstraint, this, other)
 }
 
@@ -81,7 +100,7 @@ pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &ResponseShape,
     other: &ResponseShape,
-) -> Result<(), CheckFailure> {
+) -> Result<(), ComparisonError> {
     // Note: `default_type_condition` is for display.
     //       Only response key and definitions are compared.
     this.iter().try_for_each(|(key, this_def)| {
@@ -90,7 +109,7 @@ pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint>(
             if !path_constraint.allows_any(this_def) {
                 return Ok(());
             }
-            return Err(CheckFailure::new(format!("missing response key: {key}")));
+            return Err(ComparisonError::new(format!("missing response key: {key}")));
         };
         compare_possible_definitions(path_constraint, this_def, other_def)
             .map_err(|e| e.add_description(&format!("mismatch for response key: {key}")))
@@ -101,7 +120,7 @@ pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint>(
 fn collect_definitions_for_type_condition(
     defs: &PossibleDefinitions,
     filter_cond: &NormalizedTypeCondition,
-) -> Result<PossibleDefinitionsPerTypeCondition, CheckFailure> {
+) -> Result<PossibleDefinitionsPerTypeCondition, ComparisonError> {
     let mut result: Option<PossibleDefinitionsPerTypeCondition> = None;
     for (type_cond, def) in defs.iter() {
         if filter_cond.implies(type_cond) {
@@ -110,7 +129,7 @@ fn collect_definitions_for_type_condition(
                 .iter()
                 .try_for_each(|variant| result.insert_variant(variant.clone()))
                 .map_err(|e| {
-                    CheckFailure::new(format!(
+                    ComparisonError::new(format!(
                         "collect_definitions_for_type_condition failed for {filter_cond}\ntype_cond: {type_cond}\nerror: {e}",
                     ))
                 })?;
@@ -119,7 +138,7 @@ fn collect_definitions_for_type_condition(
     if let Some(result) = result {
         Ok(result)
     } else {
-        Err(CheckFailure::new(format!(
+        Err(ComparisonError::new(format!(
             "no definitions found for type condition: {filter_cond}"
         )))
     }
@@ -150,7 +169,7 @@ fn compare_possible_definitions<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
-) -> Result<(), CheckFailure> {
+) -> Result<(), ComparisonError> {
     this.iter().try_for_each(|(this_cond, this_def)| {
         if !path_constraint_allows_type_condition(path_constraint, this_cond) {
             // Skip `this_cond` since it's not satisfiable under the path constraint.
@@ -186,7 +205,7 @@ fn compare_possible_definitions<'a, T: PathConstraint>(
                     if this_cond.ground_set().len() == 1 {
                         // Single object type has no other option. Stop and report the error.
                         let detail = detail_single_object_type_condition(this_cond);
-                        return Err(CheckFailure::new(format!(
+                        return Err(ComparisonError::new(format!(
                             "mismatch for type condition: {this_cond}{detail}\n{}",
                             err.description()
                         )));
@@ -226,7 +245,7 @@ fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
-) -> Result<(), CheckFailure> {
+) -> Result<(), ComparisonError> {
     compare_field_selection_key(this.field_selection_key(), other.field_selection_key()).map_err(
         |e| {
             e.add_description(
@@ -250,7 +269,7 @@ fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint>(
                     }
                 })?;
             if !found {
-                Err(CheckFailure::new(
+                Err(ComparisonError::new(
                     format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\nexpected clause: {}\ntarget definitions:\n{}",
                             this_def.boolean_clause(),
                             other,
@@ -266,7 +285,7 @@ fn compare_definition_variant<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &DefinitionVariant,
     other: &DefinitionVariant,
-) -> Result<(), CheckFailure> {
+) -> Result<(), ComparisonError> {
     compare_representative_field(this.representative_field(), other.representative_field())
         .map_err(|e| e.add_description("mismatch in field display under definition variant"))?;
     check_match_eq!(this.boolean_clause(), other.boolean_clause());
@@ -287,7 +306,7 @@ fn compare_definition_variant<'a, T: PathConstraint>(
                 },
             )
         }
-        _ => Err(CheckFailure::new(
+        _ => Err(ComparisonError::new(
             "mismatch in compare_definition_variant".to_string(),
         )),
     }
@@ -296,24 +315,24 @@ fn compare_definition_variant<'a, T: PathConstraint>(
 fn compare_field_selection_key(
     this: &FieldSelectionKey,
     other: &FieldSelectionKey,
-) -> Result<(), CheckFailure> {
+) -> Result<(), ComparisonError> {
     check_match_eq!(this.name, other.name);
     // Note: Arguments are expected to be normalized.
     check_match_eq!(this.arguments, other.arguments);
     Ok(())
 }
 
-fn compare_representative_field(this: &Field, other: &Field) -> Result<(), CheckFailure> {
+fn compare_representative_field(this: &Field, other: &Field) -> Result<(), ComparisonError> {
     check_match_eq!(this.name, other.name);
     // Note: Arguments and directives are NOT normalized.
     if !same_ast_arguments(&this.arguments, &other.arguments) {
-        return Err(CheckFailure::new(format!(
+        return Err(ComparisonError::new(format!(
             "mismatch in representative field arguments: {:?} vs {:?}",
             this.arguments, other.arguments
         )));
     }
     if !same_directives(&this.directives, &other.directives) {
-        return Err(CheckFailure::new(format!(
+        return Err(ComparisonError::new(format!(
             "mismatch in representative field directives: {:?} vs {:?}",
             this.directives, other.directives
         )));

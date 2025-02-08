@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::internal_error;
@@ -291,10 +292,11 @@ fn cmd_plan(
         &subgraphs_by_name,
         &query_doc,
         &query_plan,
-    )?;
+    );
     match result {
-        None => Ok(()),
-        Some(e) => Err(internal_error!(
+        Ok(_) => Ok(()),
+        Err(CorrectnessError::FederationError(e)) => Err(e),
+        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!(
             "Response shape from query plan does not match response shape from input operation:\n{}",
             e.description()
         )),

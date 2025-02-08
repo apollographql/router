@@ -8,8 +8,8 @@ use apollo_compiler::executable::Field;
 
 use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
+use super::response_shape_compare::ComparisonError;
 use super::response_shape_compare::PathConstraint;
-use super::CheckFailure;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -124,11 +124,14 @@ impl<'a> PathConstraint for SubgraphConstraint<'a> {
         }
     }
 
-    fn for_field(&self, representative_field: &Field) -> Result<Self, CheckFailure> {
+    fn for_field(&self, representative_field: &Field) -> Result<Self, ComparisonError> {
         self.subgraph_types_for_field(&representative_field.name)
             .map_err(|e| {
-                CheckFailure::new(format!(
-                    "failed to compute subgraph types for {} on {:?}.\n{e}",
+                // Note: This is an internal federation error, not a comparison error.
+                //       But, we are only allowed to return `ComparisonError` to keep the
+                //       response_shape_compare module free from internal errors.
+                ComparisonError::new(format!(
+                    "failed to compute subgraph types for {} on {:?} due to an error:\n{e}",
                     representative_field.name, self.subgraph_types,
                 ))
             })
