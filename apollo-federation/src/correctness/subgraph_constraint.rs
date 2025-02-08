@@ -115,7 +115,7 @@ impl<'a> SubgraphConstraint<'a> {
     }
 }
 
-impl<'a> PathConstraint for SubgraphConstraint<'a> {
+impl PathConstraint for SubgraphConstraint<'_> {
     fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
         SubgraphConstraint {
             subgraphs_by_name: self.subgraphs_by_name,

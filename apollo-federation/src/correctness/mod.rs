@@ -63,7 +63,7 @@ pub fn check_plan(
     coerce_executable_values(api_schema.schema(), &mut operation_doc);
     let operation_doc = operation_doc
         .validate(api_schema.schema())
-        .map_err(|e| FederationError::from(e))?;
+        .map_err(FederationError::from)?;
 
     let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&operation_doc)?;

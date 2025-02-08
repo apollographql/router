@@ -1079,7 +1079,7 @@ pub fn compute_response_shape_for_operation(
     operation_doc: &Valid<ExecutableDocument>,
     schema: &ValidFederationSchema,
 ) -> Result<ResponseShape, FederationError> {
-    let (operation, fragment_defs) = get_operation_and_fragment_definitions(&operation_doc)?;
+    let (operation, fragment_defs) = get_operation_and_fragment_definitions(operation_doc)?;
 
     // Start a new root context and process the root selection set.
     // - Not using `process_selection_set` because there is no parent context.

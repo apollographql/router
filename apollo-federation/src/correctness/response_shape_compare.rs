@@ -96,7 +96,7 @@ pub fn compare_response_shapes(
 
 // Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
 // type conditions in `other`.
-pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint>(
+pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
     path_constraint: &T,
     this: &ResponseShape,
     other: &ResponseShape,
@@ -144,7 +144,7 @@ fn collect_definitions_for_type_condition(
     Ok(digest)
 }
 
-fn path_constraint_allows_type_condition<'a, T: PathConstraint>(
+fn path_constraint_allows_type_condition<T: PathConstraint>(
     path_constraint: &T,
     type_cond: &NormalizedTypeCondition,
 ) -> bool {
@@ -165,7 +165,7 @@ fn detail_single_object_type_condition(type_cond: &NormalizedTypeCondition) -> S
     }
 }
 
-fn compare_possible_definitions<'a, T: PathConstraint>(
+fn compare_possible_definitions<T: PathConstraint>(
     path_constraint: &T,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
@@ -241,7 +241,7 @@ fn compare_possible_definitions<'a, T: PathConstraint>(
     })
 }
 
-fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint>(
+fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
     path_constraint: &T,
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
@@ -281,7 +281,7 @@ fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint>(
         })
 }
 
-fn compare_definition_variant<'a, T: PathConstraint>(
+fn compare_definition_variant<T: PathConstraint>(
     path_constraint: &T,
     this: &DefinitionVariant,
     other: &DefinitionVariant,
