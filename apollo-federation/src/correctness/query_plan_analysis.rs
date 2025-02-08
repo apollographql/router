@@ -1,6 +1,7 @@
 // Analyze a QueryPlan and compute its overall response shape
 
 use apollo_compiler::executable::Name;
+use itertools::Itertools;
 
 use super::response_shape::compute_response_shape_for_entity_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
@@ -270,10 +271,7 @@ fn rename_at_path(
                             let Some(sub_state) = variant.sub_selection_response_shape() else {
                                 return Err(format!(
                                     "No sub-selection at path: {}",
-                                    path.iter()
-                                        .map(|p| p.to_string())
-                                        .collect::<Vec<_>>()
-                                        .join(".")
+                                    path.iter().join(".")
                                 ));
                             };
                             let updated_sub_state = rename_at_path(

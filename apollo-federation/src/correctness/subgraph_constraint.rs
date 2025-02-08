@@ -15,6 +15,7 @@ use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::utils::FallibleIterator;
 use crate::ValidFederationSchema;
 
 pub(crate) struct SubgraphConstraint<'a> {
@@ -37,16 +38,12 @@ fn is_resolvable(
     let federation_spec_definition = get_federation_spec_definition_from_subgraph(schema)?;
     let key_directive_definition = federation_spec_definition.key_directive_definition(schema)?;
     let ty_def = ty_pos.get(schema.schema())?;
-    let mut resolvable_key_applications = Vec::new();
-    for directive in ty_def.directives.get_all(&key_directive_definition.name) {
-        let key_directive_application =
-            federation_spec_definition.key_directive_arguments(directive)?;
-        if !key_directive_application.resolvable {
-            continue;
-        }
-        resolvable_key_applications.push(key_directive_application);
-    }
-    Ok(!resolvable_key_applications.is_empty())
+    ty_def
+        .directives
+        .get_all(&key_directive_definition.name)
+        .map(|directive| federation_spec_definition.key_directive_arguments(directive))
+        .find_ok(|key_directive_application| key_directive_application.resolvable)
+        .map(|result| result.is_some())
 }
 
 impl<'a> SubgraphConstraint<'a> {
@@ -118,7 +115,7 @@ impl<'a> SubgraphConstraint<'a> {
     }
 }
 
-impl<'a> PathConstraint<'a> for SubgraphConstraint<'a> {
+impl<'a> PathConstraint for SubgraphConstraint<'a> {
     fn under_type_condition(&self, type_cond: &NormalizedTypeCondition) -> Self {
         SubgraphConstraint {
             subgraphs_by_name: self.subgraphs_by_name,

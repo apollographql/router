@@ -30,7 +30,7 @@ macro_rules! check_match_eq {
 }
 
 // Path-specific type constraints on top of GraphQL type conditions.
-pub(crate) trait PathConstraint<'a>
+pub(crate) trait PathConstraint
 where
     Self: Sized,
 {
@@ -49,7 +49,7 @@ where
 
 struct DummyPathConstraint;
 
-impl PathConstraint<'_> for DummyPathConstraint {
+impl PathConstraint for DummyPathConstraint {
     fn under_type_condition(&self, _type_cond: &NormalizedTypeCondition) -> Self {
         DummyPathConstraint
     }
@@ -77,7 +77,7 @@ pub fn compare_response_shapes(
 
 // Check if `this` is a subset of `other`, but also use the `PathConstraint` to ignore infeasible
 // type conditions in `other`.
-pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint<'a>>(
+pub(crate) fn compare_response_shapes_with_constraint<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &ResponseShape,
     other: &ResponseShape,
@@ -125,7 +125,7 @@ fn collect_definitions_for_type_condition(
     }
 }
 
-fn path_constraint_allows_type_condition<'a, T: PathConstraint<'a>>(
+fn path_constraint_allows_type_condition<'a, T: PathConstraint>(
     path_constraint: &T,
     type_cond: &NormalizedTypeCondition,
 ) -> bool {
@@ -146,7 +146,7 @@ fn detail_single_object_type_condition(type_cond: &NormalizedTypeCondition) -> S
     }
 }
 
-fn compare_possible_definitions<'a, T: PathConstraint<'a>>(
+fn compare_possible_definitions<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &PossibleDefinitions,
     other: &PossibleDefinitions,
@@ -222,7 +222,7 @@ fn compare_possible_definitions<'a, T: PathConstraint<'a>>(
     })
 }
 
-fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint<'a>>(
+fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &PossibleDefinitionsPerTypeCondition,
     other: &PossibleDefinitionsPerTypeCondition,
@@ -262,7 +262,7 @@ fn compare_possible_definitions_per_type_condition<'a, T: PathConstraint<'a>>(
         })
 }
 
-fn compare_definition_variant<'a, T: PathConstraint<'a>>(
+fn compare_definition_variant<'a, T: PathConstraint>(
     path_constraint: &T,
     this: &DefinitionVariant,
     other: &DefinitionVariant,
