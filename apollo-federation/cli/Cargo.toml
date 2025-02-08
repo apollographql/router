@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 apollo-compiler.workspace = true
-apollo-federation = { path = ".." }
+apollo-federation = { path = "..", features = ["correctness"] }
 clap = { version = "4.5.1", features = ["derive"] }
 
 [dev-dependencies]
