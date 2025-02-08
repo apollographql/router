@@ -121,27 +121,27 @@ fn collect_definitions_for_type_condition(
     defs: &PossibleDefinitions,
     filter_cond: &NormalizedTypeCondition,
 ) -> Result<PossibleDefinitionsPerTypeCondition, ComparisonError> {
-    let mut result: Option<PossibleDefinitionsPerTypeCondition> = None;
-    for (type_cond, def) in defs.iter() {
-        if filter_cond.implies(type_cond) {
-            let result = result.get_or_insert_with(|| def.clone());
-            def.conditional_variants()
-                .iter()
-                .try_for_each(|variant| result.insert_variant(variant.clone()))
-                .map_err(|e| {
-                    ComparisonError::new(format!(
-                        "collect_definitions_for_type_condition failed for {filter_cond}\ntype_cond: {type_cond}\nerror: {e}",
-                    ))
-                })?;
-        }
-    }
-    if let Some(result) = result {
-        Ok(result)
-    } else {
-        Err(ComparisonError::new(format!(
+    let mut filter_iter = defs
+        .iter()
+        .filter(|(type_cond, _)| filter_cond.implies(type_cond));
+    let Some((_type_cond, first)) = filter_iter.next() else {
+        return Err(ComparisonError::new(format!(
             "no definitions found for type condition: {filter_cond}"
-        )))
-    }
+        )));
+    };
+    let mut digest = first.clone();
+    // Merge the rest of filter_iter into digest.
+    filter_iter.try_for_each(|(type_cond, def)|
+        def.conditional_variants()
+            .iter()
+            .try_for_each(|variant| digest.insert_variant(variant.clone()))
+            .map_err(|e| {
+                ComparisonError::new(format!(
+                    "collect_definitions_for_type_condition failed for {filter_cond}\ntype_cond: {type_cond}\nerror: {e}",
+                ))
+            })
+    )?;
+    Ok(digest)
 }
 
 fn path_constraint_allows_type_condition<'a, T: PathConstraint>(
