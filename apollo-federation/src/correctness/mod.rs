@@ -25,11 +25,13 @@ use crate::FederationError;
 
 #[derive(derive_more::From)]
 pub enum CorrectnessError {
-    FederationError(FederationError), // Correctness checker's own error
-    ComparisonError(ComparisonError), // Error in the input that is subject to checking
+    /// Correctness checker's own error
+    FederationError(FederationError),
+    /// Error in the input that is subject to comparison
+    ComparisonError(ComparisonError),
 }
 
-// Check if `this`'s response shape is a subset of `other`'s response shape.
+/// Check if `this`'s response shape is a subset of `other`'s response shape.
 pub fn compare_operations(
     schema: &ValidFederationSchema,
     this: &Valid<ExecutableDocument>,
@@ -45,6 +47,9 @@ pub fn compare_operations(
     )?)
 }
 
+/// Check the correctness of the query plan against the schema and input operation by comparing
+/// the response shape of the input operation and the response shape of the query plan.
+/// - The input operation's response shape is supposed to be a subset of the input operation's.
 pub fn check_plan(
     api_schema: &ValidFederationSchema,
     supergraph_schema: &ValidFederationSchema,
