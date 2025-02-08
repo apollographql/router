@@ -1,15 +1,34 @@
 use std::collections::HashSet;
 
 use apollo_federation::sources::connect::expand::Connectors;
+use apq::APQIncompatPlugin;
 use authentication::AuthIncompatPlugin;
+use batching::BatchingIncompatPlugin;
+use coprocessor::CoprocessorIncompatPlugin;
+use entity_cache::EntityCacheIncompatPlugin;
 use headers::HeadersIncompatPlugin;
+use rhai::RhaiIncompatPlugin;
+use telemetry::TelemetryIncompatPlugin;
+use tls::TlsIncompatPlugin;
+use traffic_shaping::TrafficShapingIncompatPlugin;
+use url_override::UrlOverrideIncompatPlugin;
 
 use crate::Configuration;
 
+mod apq;
 mod authentication;
+mod batching;
+mod coprocessor;
+mod entity_cache;
 mod headers;
+mod rhai;
+mod telemetry;
+mod tls;
+mod traffic_shaping;
+mod url_override;
 
 /// Pair of explicitly configured subgraphs for a plugin
+#[derive(Default)]
 struct ConfiguredSubgraphs<'a> {
     /// Subgraphs which are explicitly enabled
     enabled: HashSet<&'a String>,
@@ -28,9 +47,6 @@ struct ConfiguredSubgraphs<'a> {
 /// Note: Care should be taken to not spam the end-user with warnings that
 /// either cannot be resolved or are not applicable in all circumstances.
 trait IncompatiblePlugin {
-    /// Whether or not this plugin is currently enabled
-    fn is_enabled(&self) -> bool;
-
     /// Whether the plugin is currently configured to apply to all subgraphs
     fn is_applied_to_all(&self) -> bool;
 
@@ -71,19 +87,23 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         };
     }
     let incompatible_plugins: Vec<Box<dyn IncompatiblePlugin>> = vec![
+        APQIncompatPlugin::from_config(config).map(boxify!()),
         AuthIncompatPlugin::from_config(config).map(boxify!()),
+        BatchingIncompatPlugin::from_config(config).map(boxify!()),
+        CoprocessorIncompatPlugin::from_config(config).map(boxify!()),
+        EntityCacheIncompatPlugin::from_config(config).map(boxify!()),
         HeadersIncompatPlugin::from_config(config).map(boxify!()),
+        RhaiIncompatPlugin::from_config(config).map(boxify!()),
+        TelemetryIncompatPlugin::from_config(config).map(boxify!()),
+        TlsIncompatPlugin::from_config(config).map(boxify!()),
+        TrafficShapingIncompatPlugin::from_config(config).map(boxify!()),
+        UrlOverrideIncompatPlugin::from_config(config).map(boxify!()),
     ]
     .into_iter()
     .flatten()
     .collect();
 
     for plugin in incompatible_plugins {
-        // If the plugin is not enabled, no need to process it
-        if !plugin.is_enabled() {
-            continue;
-        }
-
         // Grab all of the configured subgraphs for this plugin
         let ConfiguredSubgraphs { enabled, disabled } = plugin.configured_subgraphs();
 

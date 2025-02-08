@@ -18,11 +18,12 @@ use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::subgraph;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
-use bench::BenchOutput;
 use clap::Parser;
+use tracing_subscriber::prelude::*;
 
 mod bench;
 use bench::run_bench;
+use bench::BenchOutput;
 
 #[derive(Parser)]
 struct QueryPlannerArgs {
@@ -142,7 +143,20 @@ impl From<QueryPlannerArgs> for QueryPlannerConfig {
     }
 }
 
+/// Set up the tracing subscriber
+fn init_tracing() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .without_time()
+        .with_target(false);
+    let filter_layer = tracing_subscriber::EnvFilter::from_default_env();
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(filter_layer)
+        .init();
+}
+
 fn main() -> ExitCode {
+    init_tracing();
     let args = Args::parse();
     let result = match args.command {
         Command::Api {

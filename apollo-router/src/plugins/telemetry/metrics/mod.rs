@@ -16,7 +16,6 @@ pub(crate) mod apollo;
 pub(crate) mod local_type_stats;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
-pub(crate) mod span_metrics_exporter;
 
 pub(crate) struct MetricsBuilder {
     pub(crate) public_meter_provider_builder: opentelemetry_sdk::metrics::MeterProviderBuilder,

@@ -35,6 +35,7 @@ use crate::services::supergraph;
 use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
 use crate::spec::Schema;
+#[cfg(test)]
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -306,16 +307,11 @@ impl<'a> TestHarness<'a> {
                 None,
                 None,
                 Some(builder.extra_plugins),
+                Default::default(),
             )
             .await?;
 
         Ok((config, supergraph_creator))
-    }
-
-    /// Builds the supergraph service
-    #[deprecated = "use build_supergraph instead"]
-    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        self.build_supergraph().await
     }
 
     /// Builds the supergraph service
@@ -345,7 +341,7 @@ impl<'a> TestHarness<'a> {
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
             let span = PropagatingMakeSpan {
-                license: LicenseState::default(),
+                license: Default::default(),
                 span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);
@@ -371,11 +367,7 @@ impl<'a> TestHarness<'a> {
 
         let web_endpoints = router_creator.web_endpoints();
 
-        let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let routers = make_axum_router(
-            live,
-            ready,
             router_creator,
             &config,
             web_endpoints,

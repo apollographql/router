@@ -99,14 +99,14 @@ impl Storage {
 pub(crate) struct Config {
     /// Enable or disable the entity caching feature
     #[serde(default)]
-    enabled: bool,
+    pub(crate) enabled: bool,
 
     #[serde(default)]
     /// Expose cache keys in context
     expose_keys_in_context: bool,
 
     /// Configure invalidation per subgraph
-    subgraph: SubgraphConfiguration<Subgraph>,
+    pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
@@ -870,7 +870,7 @@ async fn cache_lookup_root(
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(control));
+                    .with_lock(|lock| lock.insert(control));
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
@@ -1046,7 +1046,7 @@ async fn cache_lookup_entities(
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {

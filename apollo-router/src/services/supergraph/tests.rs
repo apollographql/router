@@ -1277,28 +1277,13 @@ async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "
-                    { ..._generated_onQuery1_0 }
-
-                    fragment _generated_onQuery1_0 on Query {
-                      currentUser { activeOrganization { __typename id} }
-                    }
-                ",
+                "query": "{ ... on Query { currentUser { activeOrganization { __typename id } } } }",
             }},
             serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
         ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "
-                    query($representations: [_Any!]!) {
-                      _entities(representations: $representations) {
-                        ..._generated_onOrganization1_0
-                      }
-                    }
-                    fragment _generated_onOrganization1_0 on Organization {
-                      suborga { id name }
-                    }
-                ",
+                "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { suborga { id name } } } }",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
@@ -1854,7 +1839,7 @@ async fn reconstruct_deferred_query_under_interface() {
 
 fn subscription_context() -> Context {
     let context = Context::new();
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         lock.insert(ClientRequestAccepts {
             multipart_subscription: true,
             ..Default::default()
@@ -1866,7 +1851,7 @@ fn subscription_context() -> Context {
 
 fn defer_context() -> Context {
     let context = Context::new();
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         lock.insert(ClientRequestAccepts {
             multipart_defer: true,
             ..Default::default()

@@ -44,6 +44,9 @@ async fn test_metrics_reloading() {
 
         router.touch_config().await;
         router.assert_reloaded().await;
+        router
+            .assert_log_not_contained("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down")
+            .await;
     }
 
     let metrics = router
@@ -56,11 +59,11 @@ async fn test_metrics_reloading() {
 
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
+        r#"apollo_router_cache_hit_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
     );
     check_metrics_contains(
         &metrics,
-        r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
+        r#"apollo_router_cache_miss_time_count{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
     );
     check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
     check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);

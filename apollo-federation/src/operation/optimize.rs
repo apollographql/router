@@ -37,10 +37,11 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::executable;
 use apollo_compiler::Name;
 
+use super::FieldSelection;
 use super::Fragment;
 use super::FragmentSpreadSelection;
 use super::HasSelectionKey;
@@ -48,15 +49,15 @@ use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
+use super::SelectionId;
 use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
 use crate::operation::FragmentSpread;
-use crate::operation::SelectionValue;
-
+use crate::schema::position::CompositeTypeDefinitionPosition;
 //=============================================================================
-// Selection/SelectionSet intersection/minus operations
+// Selection/SelectionSet minus operation
 
 impl Selection {
     // PORT_NOTE: The definition of `minus` and `intersection` functions when either `self` or
@@ -107,7 +108,6 @@ impl SelectionSet {
     }
 }
 
-// Note: `retain_fragments` methods may return a selection or a selection set.
 impl From<SelectionOrSet> for SelectionMapperReturn {
     fn from(value: SelectionOrSet) -> Self {
         match value {
@@ -121,219 +121,311 @@ impl From<SelectionOrSet> for SelectionMapperReturn {
     }
 }
 
-//=============================================================================
-// `reuse_fragments` methods (putting everything together)
-
-/// Return type for `InlineFragmentSelection::reuse_fragments`.
-#[derive(derive_more::From)]
-enum FragmentSelection {
-    // Note: Enum variants are named to match those of `Selection`.
-    InlineFragment(InlineFragmentSelection),
-    FragmentSpread(FragmentSpreadSelection),
-}
-
-impl From<FragmentSelection> for Selection {
-    fn from(value: FragmentSelection) -> Self {
-        match value {
-            FragmentSelection::InlineFragment(inline_fragment) => inline_fragment.into(),
-            FragmentSelection::FragmentSpread(fragment_spread) => fragment_spread.into(),
-        }
-    }
-}
-
 impl Operation {
-    /// Optimize the parsed size of the operation by generating fragments based on the selections
-    /// in the operation.
+    /// Optimize the parsed size of the operation by generating fragments from selection sets that
+    /// occur multiple times in the operation.
     pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
-        // Currently, this method simply pulls out every inline fragment into a named fragment. If
-        // multiple inline fragments are the same, they use the same named fragment.
-        //
-        // This method can generate named fragments that are only used once. It's not ideal, but it
-        // also doesn't seem that bad. Avoiding this is possible but more work, and keeping this
-        // as simple as possible is a big benefit for now.
-        //
-        // When we have more advanced correctness testing, we can add more features to fragment
-        // generation, like factoring out partial repeated slices of selection sets or only
-        // introducing named fragments for patterns that occur more than once.
-        let mut generator = FragmentGenerator::default();
-        generator.visit_selection_set(&mut self.selection_set)?;
+        let mut generator = FragmentGenerator::new(&self.selection_set);
+        let minified_selection = generator.minify(&self.selection_set)?;
         self.named_fragments = generator.into_inner();
+        self.selection_set = minified_selection;
         Ok(())
     }
 }
 
-#[derive(Debug, Default)]
-struct FragmentGenerator {
-    fragments: NamedFragments,
-    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-    names: IndexMap<(String, usize), usize>,
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct SelectionCountKey<'a> {
+    type_position: &'a CompositeTypeDefinitionPosition,
+    selection_set: &'a SelectionSet,
 }
 
-impl FragmentGenerator {
-    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-    // In the future, we will just use `.next_name()`.
-    fn generate_name(&mut self, frag: &InlineFragmentSelection) -> Name {
-        use std::fmt::Write as _;
+struct SelectionCountValue {
+    selection_id: SelectionId,
+    count: usize,
+}
 
-        let type_condition = frag
-            .inline_fragment
-            .type_condition_position
-            .as_ref()
-            .map_or_else(
-                || "undefined".to_string(),
-                |condition| condition.to_string(),
-            );
-        let selections = frag.selection_set.selections.len();
-        let mut name = format!("_generated_on{type_condition}{selections}");
+impl SelectionCountValue {
+    fn new() -> Self {
+        SelectionCountValue {
+            selection_id: SelectionId::new(),
+            count: 0,
+        }
+    }
+}
 
-        let key = (type_condition, selections);
-        let index = self
-            .names
-            .entry(key)
-            .and_modify(|index| *index += 1)
-            .or_default();
-        _ = write!(&mut name, "_{index}");
+#[derive(Default)]
+struct FragmentGenerator<'a> {
+    selection_counts: HashMap<SelectionCountKey<'a>, SelectionCountValue>,
+    minimized_fragments: IndexMap<SelectionId, Fragment>,
+}
 
-        Name::new_unchecked(&name)
+/// Returns a consistent GraphQL name for the given index.
+fn fragment_name(mut index: usize) -> Name {
+    /// https://spec.graphql.org/draft/#NameContinue
+    const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    /// https://spec.graphql.org/draft/#NameStart
+    const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+
+    if index < NAME_START_CHARS.len() {
+        Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
+    } else {
+        let mut s = String::new();
+
+        let i = index % NAME_START_CHARS.len();
+        s.push(NAME_START_CHARS.as_bytes()[i].into());
+        index /= NAME_START_CHARS.len();
+
+        while index > 0 {
+            let i = index % NAME_CHARS.len();
+            s.push(NAME_CHARS.as_bytes()[i].into());
+            index /= NAME_CHARS.len();
+        }
+
+        Name::new_unchecked(&s)
+    }
+}
+
+impl<'a> FragmentGenerator<'a> {
+    fn next_name(&self) -> Name {
+        fragment_name(self.minimized_fragments.len())
     }
 
-    /// Is a selection set worth using for a newly generated named fragment?
-    fn is_worth_using(selection_set: &SelectionSet) -> bool {
-        let mut iter = selection_set.iter();
-        let Some(first) = iter.next() else {
-            // An empty selection is not worth using (and invalid!)
-            return false;
-        };
-        let Selection::Field(field) = first else {
-            return true;
-        };
-        // If there's more than one selection, or one selection with a subselection,
-        // it's probably worth using
-        iter.next().is_some() || field.selection_set.is_some()
+    fn new(selection_set: &'a SelectionSet) -> Self {
+        let mut generator = FragmentGenerator::default();
+        generator.collect_selection_usages(selection_set);
+        generator
     }
 
-    /// Modify the selection set so that eligible inline fragments are moved to named fragment spreads.
-    fn visit_selection_set(
-        &mut self,
-        selection_set: &mut SelectionSet,
-    ) -> Result<(), FederationError> {
+    fn increment_selection_count(&mut self, selection_set: &'a SelectionSet) {
+        let selection_key = SelectionCountKey {
+            type_position: &selection_set.type_position,
+            selection_set,
+        };
+        let entry = self
+            .selection_counts
+            .entry(selection_key)
+            .or_insert(SelectionCountValue::new());
+        entry.count += 1;
+    }
+
+    /// Recursively iterate over all selections to capture counts of how many times given selection
+    /// occurs within the operation.
+    fn collect_selection_usages(&mut self, selection_set: &'a SelectionSet) {
+        for selection in selection_set.selections.values() {
+            match selection {
+                Selection::Field(field) => {
+                    if let Some(field_selection_set) = &field.selection_set {
+                        self.increment_selection_count(field_selection_set);
+                        self.collect_selection_usages(field_selection_set);
+                    }
+                }
+                Selection::InlineFragment(frag) => {
+                    self.increment_selection_count(&frag.selection_set);
+                    self.collect_selection_usages(&frag.selection_set);
+                }
+                Selection::FragmentSpread(_) => {
+                    // nothing to do here as it is already a fragment spread
+                    // NOTE: there shouldn't be any fragment spreads in selections at this time
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Recursively iterates over all selections to check if their selection sets are used multiple
+    /// times within the operation. Every selection set that is used more than once will be extracted
+    /// as a named fragment.
+    fn minify(&mut self, selection_set: &SelectionSet) -> Result<SelectionSet, FederationError> {
         let mut new_selection_set = SelectionSet::empty(
             selection_set.schema.clone(),
             selection_set.type_position.clone(),
         );
 
-        for selection in Arc::make_mut(&mut selection_set.selections).values_mut() {
+        for selection in selection_set.selections.values() {
             match selection {
-                SelectionValue::Field(mut field) => {
-                    if let Some(selection_set) = field.get_selection_set_mut() {
-                        self.visit_selection_set(selection_set)?;
-                    }
+                Selection::Field(field) => {
+                    let minified_field_selection = self.minify_field_selection(field)?;
+                    let new_field = field.with_updated_selection_set(minified_field_selection);
                     new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::clone(field.get())))?;
+                        .add_local_selection(&Selection::Field(Arc::new(new_field)))?;
                 }
-                SelectionValue::FragmentSpread(frag) => {
+                Selection::FragmentSpread(frag) => {
+                    // already a fragment spread so just copy it over
                     new_selection_set
-                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag.get())))?;
+                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag)))?;
                 }
-                SelectionValue::InlineFragment(frag)
-                    if !Self::is_worth_using(&frag.get().selection_set) =>
-                {
-                    new_selection_set
-                        .add_local_selection(&Selection::InlineFragment(Arc::clone(frag.get())))?;
-                }
-                SelectionValue::InlineFragment(mut candidate) => {
-                    self.visit_selection_set(candidate.get_selection_set_mut())?;
-
-                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-                    // JS federation does not consider fragments without a type condition.
-                    if candidate
-                        .get()
-                        .inline_fragment
-                        .type_condition_position
-                        .is_none()
-                    {
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(candidate.get()),
-                        ))?;
-                        continue;
-                    }
-
-                    let directives = &candidate.get().inline_fragment.directives;
-                    let skip_include = directives
-                        .iter()
-                        .map(|directive| match directive.name.as_str() {
-                            "skip" | "include" => Ok(directive.clone()),
-                            _ => Err(()),
-                        })
-                        .collect::<Result<executable::DirectiveList, _>>();
-
-                    // If there are any directives *other* than @skip and @include,
-                    // we can't just transfer them to the generated fragment spread,
-                    // so we have to keep this inline fragment.
-                    let Ok(skip_include) = skip_include else {
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(candidate.get()),
-                        ))?;
-                        continue;
-                    };
-
-                    // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-                    // JS does not special-case @skip and @include. It never extracts a fragment if
-                    // there's any directives on it. This code duplicates the body from the
-                    // previous condition so it's very easy to remove when we're ready :)
-                    if !skip_include.is_empty() {
-                        new_selection_set.add_local_selection(&Selection::InlineFragment(
-                            Arc::clone(candidate.get()),
-                        ))?;
-                        continue;
-                    }
-
-                    let existing = self.fragments.iter().find(|existing| {
-                        existing.type_condition_position
-                            == candidate.get().inline_fragment.casted_type()
-                            && existing.selection_set == candidate.get().selection_set
-                    });
-
-                    let existing = if let Some(existing) = existing {
-                        existing
-                    } else {
-                        // XXX(@goto-bus-stop): This is temporary to support mismatch testing with JS!
-                        // This should be reverted to `self.next_name();` when we're ready.
-                        let name = self.generate_name(candidate.get());
-                        self.fragments.insert(Fragment {
-                            schema: selection_set.schema.clone(),
-                            name: name.clone(),
-                            type_condition_position: candidate.get().inline_fragment.casted_type(),
-                            directives: Default::default(),
-                            selection_set: candidate.get().selection_set.clone(),
-                        });
-                        self.fragments.get(&name).unwrap()
-                    };
-                    new_selection_set.add_local_selection(&Selection::from(
-                        FragmentSpreadSelection {
-                            spread: FragmentSpread {
-                                schema: selection_set.schema.clone(),
-                                fragment_name: existing.name.clone(),
-                                type_condition_position: existing.type_condition_position.clone(),
-                                directives: skip_include.into(),
-                                fragment_directives: existing.directives.clone(),
-                                selection_id: crate::operation::SelectionId::new(),
-                            },
-                            selection_set: existing.selection_set.clone(),
-                        },
-                    ))?;
+                Selection::InlineFragment(inline_fragment) => {
+                    let minified_selection =
+                        self.minify_inline_fragment_selection(inline_fragment)?;
+                    new_selection_set.add_local_selection(&minified_selection)?;
                 }
             }
         }
 
-        *selection_set = new_selection_set;
+        Ok(new_selection_set)
+    }
 
-        Ok(())
+    fn minify_field_selection(
+        &mut self,
+        field: &Arc<FieldSelection>,
+    ) -> Result<Option<SelectionSet>, FederationError> {
+        if let Some(field_selection_set) = &field.selection_set {
+            let selection_key = SelectionCountKey {
+                type_position: &field_selection_set.type_position,
+                selection_set: field_selection_set,
+            };
+            let minified_selection_set = match self.selection_counts.get(&selection_key) {
+                Some(count_entry) if count_entry.count > 1 => {
+                    // extract named fragment OR use one that already exists
+                    let unique_fragment_id = count_entry.selection_id;
+                    let fragment =
+                        if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
+                            existing
+                        } else {
+                            self.create_new_fragment(
+                                unique_fragment_id,
+                                field_selection_set,
+                                &field_selection_set.type_position,
+                            )?
+                        };
+
+                    // create new field selection set with just a fragment spread
+                    let mut new_field_selection_set = SelectionSet::empty(
+                        field_selection_set.schema.clone(),
+                        field_selection_set.type_position.clone(),
+                    );
+                    new_field_selection_set.add_local_selection(&Selection::from(
+                        FragmentSpreadSelection {
+                            spread: FragmentSpread {
+                                schema: fragment.schema.clone(),
+                                fragment_name: fragment.name.clone(),
+                                type_condition_position: fragment.type_condition_position.clone(),
+                                directives: Default::default(),
+                                fragment_directives: fragment.directives.clone(),
+                                selection_id: SelectionId::new(),
+                            },
+                            selection_set: fragment.selection_set.clone(),
+                        },
+                    ))?;
+                    new_field_selection_set
+                }
+                _ => {
+                    // minify current sub selection as it cannot be updated with a fragment reference
+                    self.minify(field_selection_set)?
+                }
+            };
+            Ok(Some(minified_selection_set))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn minify_inline_fragment_selection(
+        &mut self,
+        inline_fragment: &Arc<InlineFragmentSelection>,
+    ) -> Result<Selection, FederationError> {
+        let selection_key = SelectionCountKey {
+            type_position: &inline_fragment.selection_set.type_position,
+            selection_set: &inline_fragment.selection_set,
+        };
+        let minified_selection = match self.selection_counts.get(&selection_key) {
+            Some(count_entry) if count_entry.count > 1 => {
+                // extract named fragment OR use one that already exists
+                let unique_fragment_id = count_entry.selection_id;
+                let fragment =
+                    if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
+                        existing
+                    } else {
+                        self.create_new_fragment(
+                            unique_fragment_id,
+                            &inline_fragment.selection_set,
+                            &inline_fragment.inline_fragment.casted_type(),
+                        )?
+                    };
+
+                let directives = &inline_fragment.inline_fragment.directives;
+                let skip_include_only = directives
+                    .iter()
+                    .all(|d| matches!(d.name.as_str(), "skip" | "include"));
+
+                if skip_include_only {
+                    // convert inline fragment selection to a fragment spread
+                    Selection::from(FragmentSpreadSelection {
+                        spread: FragmentSpread {
+                            schema: fragment.schema.clone(),
+                            fragment_name: fragment.name.clone(),
+                            type_condition_position: fragment.type_condition_position.clone(),
+                            directives: directives.clone(),
+                            fragment_directives: fragment.directives.clone(),
+                            selection_id: SelectionId::new(),
+                        },
+                        selection_set: fragment.selection_set.clone(),
+                    })
+                } else {
+                    // cannot lift out inline selection directly as it has directives
+                    // extract named fragment from inline fragment selections
+                    let fragment_spread_selection = Selection::from(FragmentSpreadSelection {
+                        spread: FragmentSpread {
+                            schema: fragment.schema.clone(),
+                            fragment_name: fragment.name.clone(),
+                            type_condition_position: fragment.type_condition_position.clone(),
+                            directives: Default::default(),
+                            fragment_directives: fragment.directives.clone(),
+                            selection_id: SelectionId::new(),
+                        },
+                        selection_set: fragment.selection_set.clone(),
+                    });
+
+                    let mut new_inline_selection_set = SelectionSet::empty(
+                        fragment.schema.clone(),
+                        fragment.type_condition_position.clone(),
+                    );
+                    new_inline_selection_set.add_local_selection(&fragment_spread_selection)?;
+                    let new_inline_fragment =
+                        inline_fragment.with_updated_selection_set(new_inline_selection_set);
+                    Selection::from(new_inline_fragment)
+                }
+            }
+            _ => {
+                // inline fragment is only used once so we should keep it
+                // still need to minify its sub selections
+                let new_inline_selection_set = self.minify(&inline_fragment.selection_set)?;
+                let new_fragment_selection =
+                    inline_fragment.with_updated_selection_set(new_inline_selection_set);
+                Selection::from(new_fragment_selection)
+            }
+        };
+        Ok(minified_selection)
+    }
+
+    fn create_new_fragment(
+        &mut self,
+        unique_fragment_id: SelectionId,
+        selection_set: &SelectionSet,
+        type_condition_position: &CompositeTypeDefinitionPosition,
+    ) -> Result<&Fragment, FederationError> {
+        // minify current selection set and extract named fragment
+        let minified_selection_set = self.minify(selection_set)?;
+        let new_fragment = Fragment {
+            schema: minified_selection_set.schema.clone(),
+            name: self.next_name(),
+            type_condition_position: type_condition_position.clone(),
+            directives: Default::default(),
+            selection_set: minified_selection_set,
+        };
+
+        self.minimized_fragments
+            .insert(unique_fragment_id, new_fragment);
+        Ok(self.minimized_fragments.get(&unique_fragment_id).unwrap())
     }
 
     /// Consumes the generator and returns the fragments it generated.
     fn into_inner(self) -> NamedFragments {
-        self.fragments
+        let mut named_fragments = NamedFragments::default();
+        for (_, fragment) in &self.minimized_fragments {
+            named_fragments.insert(fragment.clone());
+        }
+        named_fragments
     }
 }
 
@@ -344,32 +436,6 @@ impl FragmentGenerator {
 mod tests {
     use super::*;
     use crate::operation::tests::*;
-
-    /// Returns a consistent GraphQL name for the given index.
-    fn fragment_name(mut index: usize) -> Name {
-        /// https://spec.graphql.org/draft/#NameContinue
-        const NAME_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-        /// https://spec.graphql.org/draft/#NameStart
-        const NAME_START_CHARS: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
-
-        if index < NAME_START_CHARS.len() {
-            Name::new_static_unchecked(&NAME_START_CHARS[index..index + 1])
-        } else {
-            let mut s = String::new();
-
-            let i = index % NAME_START_CHARS.len();
-            s.push(NAME_START_CHARS.as_bytes()[i].into());
-            index /= NAME_START_CHARS.len();
-
-            while index > 0 {
-                let i = index % NAME_CHARS.len();
-                s.push(NAME_CHARS.as_bytes()[i].into());
-                index /= NAME_CHARS.len();
-            }
-
-            Name::new_unchecked(&s)
-        }
-    }
 
     #[test]
     fn generated_fragment_names() {
@@ -587,6 +653,661 @@ mod tests {
                     expected
                 );
             }
+        }
+    }
+
+    mod fragment_generation {
+        use crate::operation::tests::parse_and_expand;
+        use crate::operation::tests::parse_schema;
+
+        #[test]
+        fn extracts_common_selections() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    c
+                  }
+                  t2 {
+                    a
+                    b
+                    c
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on T {
+              a
+              b
+              c
+            }
+
+            {
+              t1 {
+                ...a
+              }
+              t2 {
+                ...a
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn extracts_common_order_independent_selections() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    c
+                  }
+                  t2 {
+                    c
+                    b
+                    a
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on T {
+              a
+              b
+              c
+            }
+
+            {
+              t1 {
+                ...a
+              }
+              t2 {
+                ...a
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn does_not_extract_different_sub_selections() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                  }
+                  t2 {
+                    a
+                    b
+                    c
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("no fragments were generated");
+            insta::assert_snapshot!(query, @r###"
+            {
+              t1 {
+                a
+                b
+              }
+              t2 {
+                a
+                b
+                c
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn does_not_extract_selections_on_different_types() {
+            let schema_doc = r#"
+              type Query {
+                t1: T1
+                t2: T2
+              }
+
+              type T1 {
+                a: String
+                b: String
+                c: Int
+              }
+
+              type T2 {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    c
+                  }
+                  t2 {
+                    a
+                    b
+                    c
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("no fragments were generated");
+            insta::assert_snapshot!(query, @r###"
+            {
+              t1 {
+                a
+                b
+                c
+              }
+              t2 {
+                a
+                b
+                c
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn extracts_common_inline_fragment_selections() {
+            let schema_doc = r#"
+              type Query {
+                i1: I
+                i2: I
+              }
+
+              interface I {
+                a: String
+              }
+
+              type T implements I {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  i1 {
+                    ... on T {
+                      a
+                      b
+                      c
+                    }
+                  }
+                  i2 {
+                    ... on T {
+                      a
+                      b
+                      c
+                    }
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on T {
+              a
+              b
+              c
+            }
+
+            fragment b on I {
+              ...a
+            }
+
+            {
+              i1 {
+                ...b
+              }
+              i2 {
+                ...b
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn extracts_common_field_and_inline_fragment_selections() {
+            let schema_doc = r#"
+              type Query {
+                i: I
+                t: T
+              }
+
+              interface I {
+                a: String
+              }
+
+              type T implements I {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  i {
+                    ... on T {
+                      a
+                      b
+                      c
+                    }
+                  }
+                  t {
+                    a
+                    b
+                    c
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on T {
+              a
+              b
+              c
+            }
+
+            {
+              i {
+                ...a
+              }
+              t {
+                ...a
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn extracts_common_sub_selections() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+                v: V
+              }
+
+              type V {
+                x: String
+                y: String
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    v {
+                      x
+                      y
+                    }
+                  }
+                  t2 {
+                    a
+                    b
+                    c
+                    v {
+                      x
+                      y
+                    }
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on V {
+              x
+              y
+            }
+
+            {
+              t1 {
+                a
+                b
+                v {
+                  ...a
+                }
+              }
+              t2 {
+                a
+                b
+                c
+                v {
+                  ...a
+                }
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn extracts_common_complex_selections() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+                v: V
+              }
+
+              type V {
+                x: String
+                y: String
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    c
+                    v {
+                      x
+                      y
+                    }
+                  }
+                  t2 {
+                    a
+                    b
+                    c
+                    v {
+                      ...FragmentV
+                    }
+                  }
+                }
+
+                fragment FragmentV on V {
+                  x
+                  y
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on V {
+              x
+              y
+            }
+
+            fragment b on T {
+              a
+              b
+              c
+              v {
+                ...a
+              }
+            }
+
+            {
+              t1 {
+                ...b
+              }
+              t2 {
+                ...b
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn handles_include_skip() {
+            let schema_doc = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+
+              type T {
+                a: String
+                b: String
+                c: Int
+                v: V
+              }
+
+              type V {
+                x: String
+                y: String
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  t1 {
+                    a
+                    b
+                    c
+                    v @include(if: true) {
+                      x
+                      y
+                    }
+                  }
+                  t2 {
+                    a
+                    b
+                    c
+                    v {
+                      ...FragmentV @skip(if: false)
+                    }
+                  }
+                }
+
+                fragment FragmentV on V {
+                  x
+                  y
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on V {
+              x
+              y
+            }
+
+            {
+              t1 {
+                a
+                b
+                c
+                v @include(if: true) {
+                  ...a
+                }
+              }
+              t2 {
+                a
+                b
+                c
+                v {
+                  ...a @skip(if: false)
+                }
+              }
+            }
+            "###);
+        }
+
+        #[test]
+        fn handles_skip_on_inline_fragments() {
+            let schema_doc = r#"
+              type Query {
+                i1: I
+                i2: I
+              }
+
+              interface I {
+                a: String
+              }
+
+              type T implements I {
+                a: String
+                b: String
+                c: Int
+              }
+            "#;
+            let schema = parse_schema(schema_doc);
+            let mut query = parse_and_expand(
+                &schema,
+                r#"
+                query {
+                  i1 {
+                    ... on T @skip(if: false) {
+                      a
+                      b
+                      c
+                    }
+                  }
+                  i2 {
+                    ... on T {
+                      a
+                      b
+                      c
+                    }
+                  }
+                }
+                "#,
+            )
+            .expect("query is valid");
+
+            query
+                .generate_fragments()
+                .expect("successfully generated fragments");
+            insta::assert_snapshot!(query, @r###"
+            fragment a on T {
+              a
+              b
+              c
+            }
+
+            {
+              i1 {
+                ...a @skip(if: false)
+              }
+              i2 {
+                ...a
+              }
+            }
+            "###);
         }
     }
 }

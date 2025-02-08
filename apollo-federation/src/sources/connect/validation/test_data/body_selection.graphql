@@ -25,7 +25,7 @@ type Query {
     @connect(
         http: {
             POST: "http://127.0.0.1",
-            body: "$({ userid: 'foo' })" # Could be valid, but currently not allowed
+            body: "$({ userid: 'foo' })" # VALID
         }
         selection: "$"
     )
@@ -37,27 +37,19 @@ type Query {
         }
         selection: "$"
     )
-    stringLiteral: String
+    invalidArrowMethod(userid: ID!): String
     @connect(
         http: {
             POST: "http://127.0.0.1",
-            body: "$('foo')" # INVALID - output is not valid JSON
+            body: "$({ userid: $args.userid })->no_such_method" # INVALID - no such method
         }
         selection: "$"
     )
-    stringLiteralWithVariable(userid: ID!): String
+    invalidVariable(userid: ID!): String
     @connect(
         http: {
             POST: "http://127.0.0.1",
-            body: "$($args.userid)" # INVALID, but currently allowed - output is not valid JSON
-        }
-        selection: "$"
-    )
-    numericLiteral(userid: ID!): String
-    @connect(
-        http: {
-            POST: "http://127.0.0.1",
-            body: "$(1)" # INVALID - output is not valid JSON
+            body: "$({ userid: $nosuchvariable })" # INVALID - no such variable
         }
         selection: "$"
     )

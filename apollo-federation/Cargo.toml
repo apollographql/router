@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.0.0-preview.4"
+version = "2.0.0-preview.6"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
@@ -45,7 +45,7 @@ url = "2"
 either = "1.13.0"
 tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
-shape = "0.4.1"
+shape = "0.5.1"
 
 [dev-dependencies]
 hex.workspace = true
@@ -54,6 +54,11 @@ sha1.workspace = true
 tempfile.workspace = true
 pretty_assertions = "1.4.0"
 rstest = "0.22.0"
+dhat = "0.3.3"
 
 [[test]]
 name = "main"
+
+[[test]]
+name = "isolated_connectors_validation"
+path = "tests/connectors/validation.rs"

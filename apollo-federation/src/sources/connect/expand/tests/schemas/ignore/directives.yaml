@@ -4,9 +4,10 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.8", import: [
+          @link(url: "https://specs.apollo.dev/federation/v2.10", import: [
               "@override", "@inaccessible", "@tag",
               "@authenticated", "@requiresScopes", "@policy",
+              "@cost", "@listSize",
               "@composeDirective"
             ]
           )
@@ -28,7 +29,7 @@ subgraphs:
         }
 
         type T @custom2 {
-          field: String @custom3
+          field: String @custom3 @cost(weight: 5)
         }
 
         # bug fix: if a customer tries to define @defer this way, it should be ignored
@@ -49,7 +50,7 @@ subgraphs:
         directive @weird on FIELD | FIELD_DEFINITION
 
         extend type Query {
-          weird: String @weird
+          weird: [String] @weird @listSize(assumedSize: 99)
         }
   two:
     routing_url: none
