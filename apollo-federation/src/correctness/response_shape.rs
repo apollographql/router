@@ -17,7 +17,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use crate::bail;
-use crate::compat::coerce_executable_values;
 use crate::display_helpers;
 use crate::ensure;
 use crate::internal_error;
@@ -1081,11 +1080,6 @@ pub fn compute_response_shape_for_operation(
     operation_doc: &Valid<ExecutableDocument>,
     schema: &ValidFederationSchema,
 ) -> Result<ResponseShape, FederationError> {
-    // Coerce constant expressions since query planner does it for subgraph fetch operations.
-    let mut operation_doc = operation_doc.clone().into_inner();
-    coerce_executable_values(schema.schema(), &mut operation_doc);
-    let operation_doc = operation_doc.validate(schema.schema())?;
-
     let (operation, fragment_defs) = get_operation_and_fragment_definitions(&operation_doc)?;
 
     // Start a new root context and process the root selection set.

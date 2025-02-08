@@ -13,6 +13,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 
+use crate::compat::coerce_executable_values;
 use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::query_plan::QueryPlan;
 use crate::schema::ValidFederationSchema;
@@ -65,10 +66,15 @@ pub fn check_plan(
     operation_doc: &Valid<ExecutableDocument>,
     plan: &QueryPlan,
 ) -> Result<Option<CheckFailure>, FederationError> {
-    let op_rs = response_shape::compute_response_shape_for_operation(operation_doc, api_schema)?;
+    // Coerce constant expressions in the input operation document since query planner does it for
+    // subgraph fetch operations. But, this may be unnecessary in the future (see ROUTER-816).
+    let mut operation_doc = operation_doc.clone().into_inner();
+    coerce_executable_values(api_schema.schema(), &mut operation_doc);
+    let operation_doc = operation_doc.validate(api_schema.schema())?;
+    let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
     tracing::debug!("Operation response shape: {op_rs}");
 
-    let root_type = response_shape::compute_the_root_type_condition_for_operation(operation_doc)?;
+    let root_type = response_shape::compute_the_root_type_condition_for_operation(&operation_doc)?;
     let plan_rs =
         match query_plan_analysis::interpret_query_plan(supergraph_schema, &root_type, plan) {
             Ok(rs) => rs,
