@@ -7,7 +7,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Fragment;
 use apollo_compiler::executable::FragmentMap;
-use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
@@ -1144,28 +1143,6 @@ pub fn compute_response_shape_for_entity_fetch_operation(
     let mut response_shape = ResponseShape::new(parent_type);
     context.process_selection_set_within(&mut response_shape, &field.selection_set)?;
     Ok(response_shape)
-}
-
-/// Used for fetch-requires handling
-pub fn compute_response_shape_for_inline_fragment(
-    inline: &InlineFragment,
-    schema: &ValidFederationSchema,
-) -> Result<ResponseShape, FederationError> {
-    let Some(type_condition) = &inline.type_condition else {
-        bail!("Requires inline fragment must have a type condition")
-    };
-    let normalized_type_condition =
-        NormalizedTypeCondition::from_type_name(type_condition.clone(), schema)?;
-    let context = ResponseShapeContext {
-        schema: schema.clone(),
-        fragment_defs: Default::default(), // empty
-        parent_type: type_condition.clone(),
-        type_condition: normalized_type_condition,
-        inherited_clause: Clause::default(), // empty
-        current_clause: Clause::default(),   // empty
-        skip_introspection: false,           // false by default
-    };
-    context.process_selection_set(&inline.selection_set)
 }
 
 //==================================================================================================

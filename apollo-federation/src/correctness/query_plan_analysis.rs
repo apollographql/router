@@ -356,22 +356,6 @@ fn interpret_fetch_node(
 ) -> Result<ResponseShape, String> {
     let mut result = if let Some(_requires) = &fetch.requires {
         // TODO: check requires
-        // for required_selection in requires {
-        //     let Selection::InlineFragment(inline) = required_selection else {
-        //         return Err(internal_error!(
-        //             "Inline fragment is expected in requires, but got: {required_selection:#?}"
-        //         ));
-        //     };
-        //     let rs = compute_response_shape_for_inline_fragment(inline, schema)?;
-        //     if let Err(e) = compare_response_shapes(&rs, state) {
-        //         return Err(internal_error!(
-        //             "Unsatisfied requires:\n{}\nstate:\n{}\nrequires (as response shape):\n{}\nfetch node: {fetch}",
-        //             e.description(),
-        //             state,
-        //             rs
-        //         ));
-        //     }
-        // }
         compute_response_shape_for_entity_fetch_operation(&fetch.operation_document, schema)
             .map(|rs| rs.add_boolean_conditions(conditions))
     } else {
