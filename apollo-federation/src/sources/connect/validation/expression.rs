@@ -481,25 +481,27 @@ mod tests {
     #[rstest]
     #[case::array("$([])")]
     #[case::object("$({\"a\": 1})")]
-    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
-    #[case::echo_invalid_constants("$->echo([])")]
-    #[case::map_scalar("$(1)->map(@)")]
-    #[case::map_array("$([])->map(@)")]
+    #[case::missing_property_of_object("$({\"a\": 1}).b")]
+    #[case::missing_property_of_in_array("$([{\"a\": 1}]).b")]
     #[case::last("$([1, 2])")]
-    #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
-    #[case::slice_of_array("$([])->slice(0, 2)")]
-    #[case::entries("$config.something->entries")]
     #[case::unknown_var("$args.unknown")]
     #[case::arg_is_array("$args.array")]
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
-    #[case::map_array("$args.array->map(@)")]
-    #[case::slice_array("$args.array->slice(0, 2)")]
-    #[case::entries_scalar("$args.int->entries")]
-    #[case::first("$args.array->first")]
-    #[case::last("$args.array->last")]
     #[case::this_on_query("$this.something")]
     #[case::bare_field_no_var("something")]
+    // TODO: Re-enable these tests when method type checking is back
+    // #[case::echo_invalid_constants("$->echo([])")]
+    // #[case::map_scalar("$(1)->map(@)")]
+    // #[case::map_array("$([])->map(@)")]
+    // #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
+    // #[case::slice_of_array("$([])->slice(0, 2)")]
+    // #[case::entries("$config.something->entries")]
+    // #[case::map_array("$args.array->map(@)")]
+    // #[case::slice_array("$args.array->slice(0, 2)")]
+    // #[case::entries_scalar("$args.int->entries")]
+    // #[case::first("$args.array->first")]
+    // #[case::last("$args.array->last")]
     fn invalid_expressions(#[case] selection: &str) {
         let err = validate_with_context(selection, scalars());
         assert!(err.is_err());
@@ -582,6 +584,42 @@ mod tests {
         assert!(
             err.locations
                 .contains(&location_of_expression("$blahblahblah", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn subselection_of_literal_with_missing_field() {
+        let selection = r#"$({"a": 1}) { b }"#;
+        let err = validate_with_context(selection, Shape::unknown([]))
+            .expect_err("invalid property is an error");
+        assert!(
+            err.message.contains("`b`"),
+            "{} didn't reference variable",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("b", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn subselection_of_literal_in_array_with_missing_field() {
+        let selection = r#"$([{"a": 1}]) { b }"#;
+        let err = validate_with_context(selection, Shape::unknown([]))
+            .expect_err("invalid property is an error");
+        assert!(
+            err.message.contains("`b`"),
+            "{} didn't reference variable",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("b", selection)),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );

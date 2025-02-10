@@ -1814,6 +1814,12 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                         ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
                         return;
                     }
+
+                    // TODO: We should be able to remove this after upgrading to 0.26.0, which addresses the double-shutdown
+                    // called out in https://github.com/open-telemetry/opentelemetry-rust/issues/1661
+                    if msg == "metrics provider already shut down" {
+                        return;
+                    }
                 }
                 ::tracing::error!(parent: None, "OpenTelemetry metric error occurred: {}", err);
             }

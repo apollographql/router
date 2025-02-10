@@ -95,6 +95,7 @@ macro_rules! impl_arrow_method {
     };
 }
 
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 pub(super) trait ArrowMethodImpl {
     fn apply(
         &self,
