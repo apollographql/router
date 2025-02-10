@@ -20,24 +20,24 @@ const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
 fn thread_pool_size() -> usize {
     // This environment variable is intentionally undocumented.
     // See also APOLLO_ROUTER_IO_THREADS in apollo-router/src/executable.rs
-    if let Some(size) = std::env::var("APOLLO_ROUTER_COMPUTE_THREADS")
+    if let Some(threads) = std::env::var("APOLLO_ROUTER_COMPUTE_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
-        tracing::debug!("Compute thread pool size: $APOLLO_ROUTER_COMPUTE_THREADS = {size}");
-        size
+        tracing::info!(threads, type="compute", source="env", "thread pool");
+        threads
     } else {
-        let size = std::thread::available_parallelism()
+        let threads = std::thread::available_parallelism()
             .expect("available_parallelism() failed")
             .get();
-        tracing::debug!("Compute thread pool size: available_parallelism() = {size}");
-        size
+        tracing::info!(threads, type="compute", source="available_parallelism", "thread pool");
+        threads
     }
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
-fn queue() -> &'static AgeingPriorityQueue<Job> {
+pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
     QUEUE.get_or_init(|| {
         let pool_size = thread_pool_size();
