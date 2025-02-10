@@ -4,6 +4,14 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.0.0]
+
+## 🚀 Features
+
+### General availability of Apollo Connectors
+
+Apollo Connectors is now [generally available](https://www.apollographql.com/docs/graphos/reference/feature-launch-stages#general-availability). See the [connectors changelog](https://www.apollographql.com/docs/graphos/schema-design/connectors/changelog) for instructions on how to migrate preview router configuration.
+
 # [2.0.0-preview.0] - 2024-10-01
 
 Learn more about [migrating from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1).
