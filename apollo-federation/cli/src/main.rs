@@ -6,8 +6,10 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
@@ -288,11 +290,31 @@ fn cmd_plan(
 
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
-    print!(
-        "{}",
-        planner.build_query_plan(&query_doc, None, Default::default())?
+    let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
+    println!("{query_plan}");
+
+    // Check the query plan
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    let result = apollo_federation::correctness::check_plan(
+        planner.api_schema(),
+        &supergraph.schema,
+        &subgraphs_by_name,
+        &query_doc,
+        &query_plan,
     );
-    Ok(())
+    match result {
+        Ok(_) => Ok(()),
+        Err(CorrectnessError::FederationError(e)) => Err(e),
+        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!(
+            "Response shape from query plan does not match response shape from input operation:\n{}",
+            e.description()
+        )),
+    }
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {

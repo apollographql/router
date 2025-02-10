@@ -32,3 +32,6 @@ dockerfiles/federation2-demo
 
 # macOS
 .DS_Store
+
+# dhat
+dhat-heap.json
