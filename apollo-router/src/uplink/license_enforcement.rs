@@ -74,15 +74,9 @@ pub(crate) struct Claims {
     pub(crate) sub: String,
     pub(crate) aud: OneOrMany<Audience>,
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "warnAt")]
-    /// When to warn the user about an expiring license that must be renewed to avoid halting the
-    /// router
     pub(crate) warn_at: SystemTime,
     #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
-    /// When to halt the router because of an expired license
     pub(crate) halt_at: SystemTime,
-    /// TPS limits. These may not exist in a Licnese; if not, no limits apply
-    #[serde(rename = "throughputLimit")]
-    pub(crate) tps: Option<TpsLimit>,
 }
 
 fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
@@ -91,14 +85,6 @@ where
 {
     let seconds = i32::deserialize(deserializer)?;
     Ok(UNIX_EPOCH + Duration::from_secs(seconds as u64))
-}
-
-fn deserialize_ms_into_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let seconds = i32::deserialize(deserializer)?;
-    Ok(Duration::from_millis(seconds as u64))
 }
 
 #[derive(Debug)]
@@ -605,60 +591,26 @@ impl Display for LicenseEnforcementReport {
     }
 }
 
-/// Claims extracted from the License, including ways Apollo limits the router's usage. It must be constructed from a base64 encoded JWT
+/// License controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
 #[derive(Debug, Clone, Default)]
 pub struct License {
     pub(crate) claims: Option<Claims>,
 }
 
-/// Transactions Per Second limits. We talk as though this will be in seconds, but the Duration
-/// here is actually given to us in milliseconds via the License's JWT's claims
-#[derive(Builder, Copy, Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct TpsLimit {
-    pub(crate) capacity: usize,
-
-    #[serde(
-        deserialize_with = "deserialize_ms_into_duration",
-        rename = "durationMs"
-    )]
-    pub(crate) interval: Duration,
-}
-
-/// LicenseLimits represent what can be done with a router based on the claims in the License. You
-/// might have a certain tier be limited in its capacity for transactions over a certain duration,
-/// as an example
-#[derive(Debug, Builder, Copy, Clone, Default, Eq, PartialEq)]
-pub struct LicenseLimits {
-    /// Transaction Per Second limits. If none are found in the License's claims, there are no
-    /// limits to apply
-    pub(crate) tps: Option<TpsLimit>,
-}
-
 /// Licenses are converted into a stream of license states by the expander
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Default, Display)]
-pub enum LicenseState {
+pub(crate) enum LicenseState {
     /// licensed
-    Licensed { limits: Option<LicenseLimits> },
+    Licensed,
     /// warn
-    LicensedWarn { limits: Option<LicenseLimits> },
+    LicensedWarn,
     /// halt
-    LicensedHalt { limits: Option<LicenseLimits> },
+    LicensedHalt,
 
     /// unlicensed
     #[default]
     Unlicensed,
-}
-
-impl LicenseState {
-    pub(crate) fn get_limits(&self) -> Option<&LicenseLimits> {
-        match self {
-            LicenseState::Licensed { limits }
-            | LicenseState::LicensedWarn { limits }
-            | LicenseState::LicensedHalt { limits } => limits.as_ref(),
-            _ => None,
-        }
-    }
 }
 
 impl Display for License {
@@ -897,7 +849,6 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
             }),
         );
     }
@@ -913,7 +864,6 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
                 halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
-                tps: Default::default()
             }),
         );
     }

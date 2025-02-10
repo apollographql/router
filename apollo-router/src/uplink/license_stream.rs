@@ -23,8 +23,6 @@ use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
 use tokio_util::time::DelayQueue;
 
-use super::license_enforcement::LicenseLimits;
-use super::license_enforcement::TpsLimit;
 use crate::router::Event;
 use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::Claims;
@@ -178,17 +176,6 @@ fn reset_checks_for_licenses(
     // We got a new claim, so clear the previous checks.
     checks.clear();
     let claims = license.claims.as_ref().expect("claims is gated, qed");
-    // Router limitations based on claims
-    let limits = claims.tps.map(|tps_limit| {
-        LicenseLimits::builder()
-            .tps(
-                TpsLimit::builder()
-                    .capacity(tps_limit.capacity)
-                    .interval(tps_limit.interval)
-                    .build(),
-            )
-            .build()
-    });
     let halt_at = to_positive_instant(claims.halt_at);
     let warn_at = to_positive_instant(claims.warn_at);
     let now = Instant::now();
@@ -196,30 +183,24 @@ fn reset_checks_for_licenses(
     if halt_at > now {
         // Only add halt if it isn't immediately going to be triggered.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedHalt { limits }),
+            Event::UpdateLicense(LicenseState::LicensedHalt),
             (halt_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt {
-            limits,
-        })));
+        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedHalt)));
     }
     if warn_at > now {
         // Only add warn if it isn't immediately going to be triggered and halt is not already set.
         // Something that is halted is by definition also warn.
         checks.insert_at(
-            Event::UpdateLicense(LicenseState::LicensedWarn { limits }),
+            Event::UpdateLicense(LicenseState::LicensedWarn),
             (warn_at).into(),
         );
     } else {
-        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn {
-            limits,
-        })));
+        return Poll::Ready(Some(Event::UpdateLicense(LicenseState::LicensedWarn)));
     }
 
-    Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed {
-        limits,
-    })))
+    Poll::Ready(Some(Event::UpdateLicense(LicenseState::Licensed)))
 }
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
@@ -493,7 +474,6 @@ mod test {
                 aud: OneOrMany::One(Audience::SelfHosted),
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
-                tps: Default::default(),
             }),
         }
     }
@@ -523,12 +503,8 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
-                Event::UpdateLicense(LicenseState::LicensedHalt { limits: _ }) => {
-                    SimpleEvent::HaltLicense
-                }
-                Event::UpdateLicense(LicenseState::LicensedWarn { limits: _ }) => {
-                    SimpleEvent::WarnLicense
-                }
+                Event::UpdateLicense(LicenseState::LicensedHalt) => SimpleEvent::HaltLicense,
+                Event::UpdateLicense(LicenseState::LicensedWarn) => SimpleEvent::WarnLicense,
                 Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,
                 Event::NoMoreLicense => SimpleEvent::NoMoreLicense,
                 Event::Reload => SimpleEvent::ForcedHotReload,
@@ -547,7 +523,6 @@ mod test {
                     aud: OneOrMany::One(Audience::Offline),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -568,7 +543,6 @@ mod test {
                     aud: OneOrMany::One(Audience::SelfHosted),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -589,7 +563,6 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::Offline]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])
@@ -610,7 +583,6 @@ mod test {
                     aud: OneOrMany::Many(vec![Audience::SelfHosted, Audience::SelfHosted]),
                     warn_at: SystemTime::now(),
                     halt_at: SystemTime::now(),
-                    tps: Default::default()
                 }),
             }))
             .validate_audience([Audience::Offline, Audience::Cloud])

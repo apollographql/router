@@ -732,7 +732,6 @@ mod tests {
     use crate::services::router::body;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::uplink::license_enforcement::LicenseState;
     use crate::Notify;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -901,7 +900,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
                     .build(),
             )
             .await
@@ -991,7 +989,6 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
-                    .license(LicenseState::default())
                     .build(),
             )
             .await

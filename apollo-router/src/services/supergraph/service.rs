@@ -81,7 +81,6 @@ use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 use crate::Context;
 use crate::Notify;
@@ -99,7 +98,6 @@ pub(crate) struct SupergraphService {
     execution_service: execution::BoxCloneService,
     schema: Arc<Schema>,
     notify: Notify<String, graphql::Response>,
-    license: LicenseState,
 }
 
 #[buildstructor::buildstructor]
@@ -110,7 +108,6 @@ impl SupergraphService {
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
         notify: Notify<String, graphql::Response>,
-        license: LicenseState,
     ) -> Self {
         let execution_service: execution::BoxCloneService = ServiceBuilder::new()
             .buffered()
@@ -123,7 +120,6 @@ impl SupergraphService {
             execution_service,
             schema,
             notify,
-            license,
         }
     }
 }
@@ -160,7 +156,6 @@ impl Service<SupergraphRequest> for SupergraphService {
             schema,
             req,
             self.notify.clone(),
-            self.license,
         )
         .or_else(|error: BoxError| async move {
             let errors = vec![crate::error::Error {
@@ -192,7 +187,6 @@ async fn service_call(
     schema: Arc<Schema>,
     req: SupergraphRequest,
     notify: Notify<String, graphql::Response>,
-    license: LicenseState,
 ) -> Result<SupergraphResponse, BoxError> {
     let context = req.context;
     let body = req.supergraph_request.body();
@@ -353,7 +347,6 @@ async fn service_call(
                             subs_rx,
                             notify,
                             cloned_supergraph_req,
-                            license,
                         )
                         .await;
                     });
@@ -453,7 +446,6 @@ pub struct SubscriptionTaskParams {
     pub(crate) stream_rx: ReceiverStream<BoxGqlStream>,
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn subscription_task(
     mut execution_service_factory: ExecutionServiceFactory,
     execution_service: execution::BoxCloneService,
@@ -462,7 +454,6 @@ async fn subscription_task(
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
-    license: LicenseState,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -589,7 +580,7 @@ async fn subscription_task(
                             .map(|(k, v)| (k.clone(), v.schema.clone()))
                             .collect(),
                     );
-                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None, license).await {
+                    let plugins = match create_plugins(&conf, &execution_service_factory.schema, subgraph_schemas, None, None).await {
                         Ok(plugins) => Arc::new(plugins),
                         Err(err) => {
                             tracing::error!("cannot re-create plugins with the new configuration (closing existing subscription): {err:?}");
@@ -824,7 +815,6 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
     planner: QueryPlannerService,
-    license: LicenseState,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -835,7 +825,6 @@ impl PluggableSupergraphServiceBuilder {
             http_service_factory: Default::default(),
             configuration: None,
             planner,
-            license: Default::default(),
         }
     }
 
@@ -873,14 +862,6 @@ impl PluggableSupergraphServiceBuilder {
         configuration: Arc<Configuration>,
     ) -> PluggableSupergraphServiceBuilder {
         self.configuration = Some(configuration);
-        self
-    }
-
-    pub(crate) fn with_license(
-        mut self,
-        license: LicenseState,
-    ) -> PluggableSupergraphServiceBuilder {
-        self.license = license;
         self
     }
 
@@ -954,7 +935,6 @@ impl PluggableSupergraphServiceBuilder {
             })
             .schema(schema.clone())
             .notify(configuration.notify.clone())
-            .license(self.license)
             .build();
 
         let supergraph_service =

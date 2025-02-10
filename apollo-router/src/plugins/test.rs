@@ -24,7 +24,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 use crate::Notify;
 
@@ -74,11 +73,7 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
-    pub(crate) async fn new<'a, 'b>(
-        config: Option<&'a str>,
-        schema: Option<&'b str>,
-        license: Option<LicenseState>,
-    ) -> Self {
+    pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
         let factory = crate::plugin::plugins()
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");
@@ -125,7 +120,6 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
                     .collect(),
             ))
             .notify(Notify::default())
-            .license(license.unwrap_or_default())
             .build();
 
         let plugin = factory

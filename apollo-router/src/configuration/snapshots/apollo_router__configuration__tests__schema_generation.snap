@@ -5131,9 +5131,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "RouterLimitsConfig": {
-      "type": "object"
-    },
     "RouterRequestConf": {
       "additionalProperties": false,
       "description": "What information is passed to a router request/response stage",
@@ -8778,10 +8775,6 @@ expression: "&schema"
     "rhai": {
       "$ref": "#/definitions/Conf7",
       "description": "#/definitions/Conf7"
-    },
-    "router_limits": {
-      "$ref": "#/definitions/RouterLimitsConfig",
-      "description": "#/definitions/RouterLimitsConfig"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
