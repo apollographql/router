@@ -165,7 +165,7 @@ impl DemandControlledSchema {
                 ExtendedType::Interface(ty) => {
                     let type_fields = output_field_definitions
                         .entry(type_name.clone())
-                        .or_default();
+                        .or_insert_with(|| HashMap::with_capacity(ty.fields.len()));
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
@@ -176,7 +176,7 @@ impl DemandControlledSchema {
                 ExtendedType::Object(ty) => {
                     let type_fields = output_field_definitions
                         .entry(type_name.clone())
-                        .or_default();
+                        .or_insert_with(|| HashMap::with_capacity(ty.fields.len()));
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
@@ -187,7 +187,7 @@ impl DemandControlledSchema {
                 ExtendedType::InputObject(ty) => {
                     let type_fields = input_field_definitions
                         .entry(type_name.clone())
-                        .or_default();
+                        .or_insert_with(|| HashMap::with_capacity(ty.fields.len()));
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
