@@ -36,8 +36,6 @@ pub(crate) trait HttpServerFactory {
     ) -> Self::Future
     where
         RF: RouterFactory;
-    fn live(&self, live: bool);
-    fn ready(&self, ready: bool);
 }
 
 type ExtraListeners = Vec<(ListenAddr, Listener)>;

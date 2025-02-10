@@ -1232,8 +1232,8 @@ expression: "&schema"
           "nullable": true
         },
         "subgraph": {
-          "$ref": "#/definitions/Config4",
-          "description": "#/definitions/Config4",
+          "$ref": "#/definitions/Config5",
+          "description": "#/definitions/Config5",
           "nullable": true
         }
       },
@@ -1334,8 +1334,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config9",
-          "description": "#/definitions/Config9"
+          "$ref": "#/definitions/Config10",
+          "description": "#/definitions/Config10"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1349,6 +1349,276 @@ expression: "&schema"
       "type": "object"
     },
     "Config": {
+      "additionalProperties": false,
+      "description": "Configuration options pertaining to the health component.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Set to false to disable the health check",
+          "type": "boolean"
+        },
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "default": "/health",
+          "description": "Optionally set a custom healthcheck path Defaults to /health",
+          "type": "string"
+        },
+        "readiness": {
+          "$ref": "#/definitions/ReadinessConfig",
+          "description": "#/definitions/ReadinessConfig"
+        }
+      },
+      "type": "object"
+    },
+    "Config10": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "buffer_size": {
+          "default": 10000,
+          "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
+          "format": "uint",
+          "minimum": 1.0,
+          "type": "integer"
+        },
+        "client_name_header": {
+          "default": "apollographql-client-name",
+          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
+          "nullable": true,
+          "type": "string"
+        },
+        "client_version_header": {
+          "default": "apollographql-client-version",
+          "description": "The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.",
+          "nullable": true,
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "https://usage-reporting.api.apollographql.com/api/ingress/traces",
+          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "type": "string"
+        },
+        "errors": {
+          "$ref": "#/definitions/ErrorsConfiguration",
+          "description": "#/definitions/ErrorsConfiguration"
+        },
+        "experimental_local_field_metrics": {
+          "default": false,
+          "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
+          "type": "boolean"
+        },
+        "experimental_otlp_endpoint": {
+          "default": "https://usage-reporting.api.apollographql.com/",
+          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+          "type": "string"
+        },
+        "experimental_otlp_tracing_protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "field_level_instrumentation_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
+        },
+        "metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
+        "otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
+        },
+        "send_headers": {
+          "$ref": "#/definitions/ForwardHeaders",
+          "description": "#/definitions/ForwardHeaders"
+        },
+        "send_variable_values": {
+          "$ref": "#/definitions/ForwardValues",
+          "description": "#/definitions/ForwardValues"
+        },
+        "signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
+        }
+      },
+      "type": "object"
+    },
+    "Config11": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enabled": {
+          "description": "Enable otlp",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        },
+        "grpc": {
+          "$ref": "#/definitions/GrpcExporter",
+          "description": "#/definitions/GrpcExporter"
+        },
+        "http": {
+          "$ref": "#/definitions/HttpExporter",
+          "description": "#/definitions/HttpExporter"
+        },
+        "protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "temporality": {
+          "$ref": "#/definitions/Temporality",
+          "description": "#/definitions/Temporality"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config12": {
+      "additionalProperties": false,
+      "description": "Prometheus configuration",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Set to true to enable",
+          "type": "boolean"
+        },
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "default": "/metrics",
+          "description": "The path where prometheus will be exposed",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Config13": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enabled": {
+          "description": "Enable zipkin",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config14": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enable_span_mapping": {
+          "default": true,
+          "description": "Enable datadog span mapping for span name and resource name.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Enable datadog",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        },
+        "fixed_span_names": {
+          "default": true,
+          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
+          "type": "boolean"
+        },
+        "resource_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
+          "type": "object"
+        },
+        "span_metrics": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {
+            "connect": true,
+            "connect_request": true,
+            "execution": true,
+            "http_request": true,
+            "parse_query": true,
+            "query_planning": true,
+            "request": true,
+            "router": true,
+            "subgraph": true,
+            "subgraph_request": true,
+            "supergraph": true
+          },
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config15": {
+      "additionalProperties": false,
+      "description": "Configuration for the experimental traffic shaping plugin",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/SubgraphShaping",
+          "description": "#/definitions/SubgraphShaping",
+          "nullable": true
+        },
+        "deduplicate_variables": {
+          "default": null,
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "router": {
+          "$ref": "#/definitions/RouterShaping",
+          "description": "#/definitions/RouterShaping",
+          "nullable": true
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphShaping",
+            "description": "#/definitions/SubgraphShaping"
+          },
+          "description": "Applied on specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config2": {
       "additionalProperties": false,
       "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
       "properties": {
@@ -1432,176 +1702,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config10": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enabled": {
-          "description": "Enable otlp",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "grpc": {
-          "$ref": "#/definitions/GrpcExporter",
-          "description": "#/definitions/GrpcExporter"
-        },
-        "http": {
-          "$ref": "#/definitions/HttpExporter",
-          "description": "#/definitions/HttpExporter"
-        },
-        "protocol": {
-          "$ref": "#/definitions/Protocol",
-          "description": "#/definitions/Protocol"
-        },
-        "temporality": {
-          "$ref": "#/definitions/Temporality",
-          "description": "#/definitions/Temporality"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config11": {
-      "additionalProperties": false,
-      "description": "Prometheus configuration",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Set to true to enable",
-          "type": "boolean"
-        },
-        "listen": {
-          "$ref": "#/definitions/ListenAddr",
-          "description": "#/definitions/ListenAddr"
-        },
-        "path": {
-          "default": "/metrics",
-          "description": "The path where prometheus will be exposed",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "Config12": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enabled": {
-          "description": "Enable zipkin",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config13": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enable_span_mapping": {
-          "default": true,
-          "description": "Enable datadog span mapping for span name and resource name.",
-          "type": "boolean"
-        },
-        "enabled": {
-          "description": "Enable datadog",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "fixed_span_names": {
-          "default": true,
-          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
-          "type": "boolean"
-        },
-        "resource_mapping": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
-          "type": "object"
-        },
-        "span_metrics": {
-          "additionalProperties": {
-            "type": "boolean"
-          },
-          "default": {
-            "connect": true,
-            "connect_request": true,
-            "execution": true,
-            "http_request": true,
-            "parse_query": true,
-            "query_planning": true,
-            "request": true,
-            "router": true,
-            "subgraph": true,
-            "subgraph_request": true,
-            "supergraph": true
-          },
-          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
-          "type": "object"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config14": {
-      "additionalProperties": false,
-      "description": "Configuration for the experimental traffic shaping plugin",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/SubgraphShaping",
-          "description": "#/definitions/SubgraphShaping",
-          "nullable": true
-        },
-        "deduplicate_variables": {
-          "default": null,
-          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "router": {
-          "$ref": "#/definitions/RouterShaping",
-          "description": "#/definitions/RouterShaping",
-          "nullable": true
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphShaping",
-            "description": "#/definitions/SubgraphShaping"
-          },
-          "description": "Applied on specific subgraphs",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config2": {
+    "Config3": {
       "description": "This is a broken plugin for testing purposes only.",
       "properties": {
         "enabled": {
@@ -1614,7 +1715,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config3": {
+    "Config4": {
       "description": "Restricted plugin (for testing purposes only)",
       "properties": {
         "enabled": {
@@ -1627,7 +1728,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config4": {
+    "Config5": {
       "additionalProperties": false,
       "description": "Configure subgraph authentication",
       "properties": {
@@ -1648,7 +1749,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config5": {
+    "Config6": {
       "additionalProperties": false,
       "description": "Configuration for header propagation",
       "properties": {
@@ -1668,7 +1769,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config6": {
+    "Config7": {
       "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
@@ -1688,7 +1789,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1721,84 +1822,8 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config8": {
-      "description": "Configuration for the progressive override plugin",
-      "type": "object"
-    },
     "Config9": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "buffer_size": {
-          "default": 10000,
-          "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
-          "format": "uint",
-          "minimum": 1.0,
-          "type": "integer"
-        },
-        "client_name_header": {
-          "default": "apollographql-client-name",
-          "description": "The name of the header to extract from requests when populating 'client name' for traces and metrics in Apollo Studio.",
-          "nullable": true,
-          "type": "string"
-        },
-        "client_version_header": {
-          "default": "apollographql-client-version",
-          "description": "The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.",
-          "nullable": true,
-          "type": "string"
-        },
-        "endpoint": {
-          "default": "https://usage-reporting.api.apollographql.com/api/ingress/traces",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
-          "type": "string"
-        },
-        "errors": {
-          "$ref": "#/definitions/ErrorsConfiguration",
-          "description": "#/definitions/ErrorsConfiguration"
-        },
-        "experimental_local_field_metrics": {
-          "default": false,
-          "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
-          "type": "boolean"
-        },
-        "experimental_otlp_endpoint": {
-          "default": "https://usage-reporting.api.apollographql.com/",
-          "description": "The Apollo Studio endpoint for exporting traces and metrics.",
-          "type": "string"
-        },
-        "experimental_otlp_tracing_protocol": {
-          "$ref": "#/definitions/Protocol",
-          "description": "#/definitions/Protocol"
-        },
-        "field_level_instrumentation_sampler": {
-          "$ref": "#/definitions/SamplerOption",
-          "description": "#/definitions/SamplerOption"
-        },
-        "metrics_reference_mode": {
-          "$ref": "#/definitions/ApolloMetricsReferenceMode",
-          "description": "#/definitions/ApolloMetricsReferenceMode"
-        },
-        "otlp_tracing_sampler": {
-          "$ref": "#/definitions/SamplerOption",
-          "description": "#/definitions/SamplerOption"
-        },
-        "send_headers": {
-          "$ref": "#/definitions/ForwardHeaders",
-          "description": "#/definitions/ForwardHeaders"
-        },
-        "send_variable_values": {
-          "$ref": "#/definitions/ForwardValues",
-          "description": "#/definitions/ForwardValues"
-        },
-        "signature_normalization_algorithm": {
-          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
-          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
-        }
-      },
+      "description": "Configuration for the progressive override plugin",
       "type": "object"
     },
     "ConnectorAttributes": {
@@ -3396,27 +3421,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "HealthCheck": {
-      "additionalProperties": false,
-      "description": "Configuration options pertaining to the http server component.",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "Set to false to disable the health check",
-          "type": "boolean"
-        },
-        "listen": {
-          "$ref": "#/definitions/ListenAddr",
-          "description": "#/definitions/ListenAddr"
-        },
-        "path": {
-          "default": "/health",
-          "description": "Optionally set a custom healthcheck path Defaults to /health",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
     "HeartbeatInterval": {
       "anyOf": [
         {
@@ -4165,12 +4169,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config10",
-          "description": "#/definitions/Config10"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config11",
           "description": "#/definitions/Config11"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         }
       },
       "type": "object"
@@ -4463,8 +4467,8 @@ expression: "&schema"
           "description": "#/definitions/MyTestPluginConfig"
         },
         "experimental.broken": {
-          "$ref": "#/definitions/Config2",
-          "description": "#/definitions/Config2"
+          "$ref": "#/definitions/Config3",
+          "description": "#/definitions/Config3"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig",
@@ -4475,8 +4479,8 @@ expression: "&schema"
           "description": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config3",
-          "description": "#/definitions/Config3"
+          "$ref": "#/definitions/Config4",
+          "description": "#/definitions/Config4"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf",
@@ -4788,6 +4792,43 @@ expression: "&schema"
         "capacity",
         "interval"
       ],
+      "type": "object"
+    },
+    "ReadinessConfig": {
+      "additionalProperties": false,
+      "description": "Configuration options pertaining to the readiness health sub-component.",
+      "properties": {
+        "allowed": {
+          "default": 100,
+          "description": "How many rejections are allowed in an interval (default: 100) If this number is exceeded, the router will start to report unready.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "interval": {
+          "$ref": "#/definitions/ReadinessIntervalConfig",
+          "description": "#/definitions/ReadinessIntervalConfig"
+        }
+      },
+      "type": "object"
+    },
+    "ReadinessIntervalConfig": {
+      "additionalProperties": false,
+      "description": "Configuration options pertaining to the readiness health interval sub-component.",
+      "properties": {
+        "sampling": {
+          "default": "0s",
+          "description": "The sampling interval (default: 5s)",
+          "nullable": true,
+          "type": "string"
+        },
+        "unready": {
+          "default": null,
+          "description": "The unready interval (default: 2 * sampling interval)",
+          "nullable": true,
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "RecordConfig": {
@@ -7550,24 +7591,24 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config10",
-          "description": "#/definitions/Config10"
+          "$ref": "#/definitions/Config11",
+          "description": "#/definitions/Config11"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         }
       },
       "type": "object"
@@ -8722,24 +8763,24 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config5",
-      "description": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6",
+      "description": "#/definitions/Config6"
     },
     "health_check": {
-      "$ref": "#/definitions/HealthCheck",
-      "description": "#/definitions/HealthCheck"
+      "$ref": "#/definitions/Config",
+      "description": "#/definitions/Config"
     },
     "homepage": {
       "$ref": "#/definitions/Homepage",
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config6",
-      "description": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "limits": {
-      "$ref": "#/definitions/Config",
-      "description": "#/definitions/Config"
+      "$ref": "#/definitions/Config2",
+      "description": "#/definitions/Config2"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf6",
@@ -8758,16 +8799,16 @@ expression: "&schema"
       "description": "#/definitions/ConnectorsConfig"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -8798,8 +8839,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config14",
-      "description": "#/definitions/Config14"
+      "$ref": "#/definitions/Config15",
+      "description": "#/definitions/Config15"
     }
   },
   "title": "Configuration",

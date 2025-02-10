@@ -261,8 +261,11 @@ impl ApolloExporter {
         let retries = if has_traces { 5 } else { 1 };
 
         for i in 0..retries {
-            // We know these requests can be cloned
-            let task_req = req.try_clone().expect("requests must be clone-able");
+            let task_req = req.try_clone().ok_or_else(|| {
+                ApolloExportError::ServerError(
+                    "Tried to clone a request that cannot be cloned".to_string(),
+                )
+            })?;
             match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();

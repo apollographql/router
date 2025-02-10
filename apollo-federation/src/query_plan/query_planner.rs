@@ -54,9 +54,8 @@ use crate::Supergraph;
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
-    /// If enabled, the query planner will extract inline fragments into fragment
-    /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs.
+    /// If enabled, the query planner will attempt to extract common subselections into named
+    /// fragments. This can significantly reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
@@ -485,6 +484,10 @@ impl QueryPlanner {
     /// Get Query Planner's API Schema.
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
+    }
+
+    pub fn supergraph_schema(&self) -> &ValidFederationSchema {
+        &self.supergraph_schema
     }
 }
 
