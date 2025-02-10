@@ -149,8 +149,9 @@ coprocessor:
     request:
       headers: true
       context: # It will only send these 2 context keys to your coprocessor
-        - apollo::supergraph::operation_name
-        - apollo::demand_control::actual_cost
+        selective:
+          - apollo::supergraph::operation_name
+          - apollo::demand_control::actual_cost
       body: true
     response:
       headers: true

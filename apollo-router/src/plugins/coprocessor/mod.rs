@@ -355,9 +355,24 @@ struct Conf {
 }
 
 /// Configures the context
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields, untagged)]
+pub(super) enum ContextConf {
+    /// Deprecated configuration using a boolean
+    Deprecated(bool),
+    NewContextConf(NewContextConf),
+}
+
+impl Default for ContextConf {
+    fn default() -> Self {
+        Self::NewContextConf(NewContextConf::default())
+    }
+}
+
+/// Configures the context
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(super) enum ContextConf {
+pub(super) enum NewContextConf {
     /// Send all context keys to coprocessor
     All,
     #[default]
@@ -372,8 +387,8 @@ pub(super) enum ContextConf {
 impl ContextConf {
     pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
         match self {
-            Self::All => Some(ctx.clone()),
-            Self::Deprecated => {
+            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
+            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
                 let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
                     (
                         context_key_to_deprecated(elt.key().clone()),
@@ -384,7 +399,7 @@ impl ContextConf {
 
                 Some(new_ctx)
             }
-            Self::Selective(context_keys) => {
+            Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
                 let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
                     if context_keys.contains(elt.key()) {
                         Some((elt.key().clone(), elt.value().clone()))
@@ -396,7 +411,7 @@ impl ContextConf {
 
                 Some(new_ctx)
             }
-            Self::None => None,
+            Self::NewContextConf(NewContextConf::None) | Self::Deprecated(false) => None,
         }
     }
 }
@@ -805,7 +820,9 @@ where
 
         if let Some(context) = co_processor_output.context {
             for (mut key, value) in context.try_into_iter()? {
-                if let ContextConf::Deprecated = &request_config.context {
+                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                    &request_config.context
+                {
                     key = context_key_from_deprecated(key);
                 }
                 res.context.upsert_json_value(key, move |_current| value);
@@ -828,7 +845,8 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &request_config.context {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -943,7 +961,9 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &response_config.context {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
                 key = context_key_from_deprecated(key);
             }
             response
@@ -1015,7 +1035,9 @@ where
 
                 if let Some(context) = co_processor_output.context {
                     for (mut key, value) in context.try_into_iter()? {
-                        if let ContextConf::Deprecated = &context_conf {
+                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                            &context_conf
+                        {
                             key = context_key_from_deprecated(key);
                         }
                         generator_map_context.upsert_json_value(key, move |_current| value);
@@ -1158,7 +1180,9 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::Deprecated = &request_config.context {
+                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                        &request_config.context
+                    {
                         key = context_key_from_deprecated(key);
                     }
                     subgraph_response
@@ -1185,7 +1209,8 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &request_config.context {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -1289,7 +1314,9 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &response_config.context {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
                 key = context_key_from_deprecated(key);
             }
             response

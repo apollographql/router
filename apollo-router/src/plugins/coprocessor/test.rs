@@ -102,7 +102,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: false,
@@ -164,7 +164,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: false,
@@ -226,7 +226,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: false,
@@ -486,9 +486,9 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::Selective(Arc::new(
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                )),
+                ))),
                 ..Default::default()
             },
             response: Default::default(),
@@ -645,7 +645,7 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::Deprecated,
+                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 ..Default::default()
             },
             response: Default::default(),
@@ -1140,9 +1140,9 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::Selective(Arc::new(
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                )),
+                ))),
                 ..Default::default()
             },
         };
@@ -1287,7 +1287,7 @@ mod tests {
                 condition: Default::default(),
                 body: true,
                 subgraph_request_id: true,
-                context: ContextConf::Deprecated,
+                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 ..Default::default()
             },
         };
@@ -1561,7 +1561,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::None,
+                context: ContextConf::NewContextConf(NewContextConf::None),
                 body: true,
                 status_code: false,
                 sdl: false,
@@ -1623,9 +1623,9 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Selective(Arc::new(
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                )),
+                ))),
                 body: true,
                 status_code: false,
                 sdl: false,
@@ -1727,7 +1727,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::Deprecated,
+                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
                 body: true,
                 status_code: false,
                 sdl: false,
@@ -1825,7 +1825,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -1948,9 +1948,9 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::Selective(Arc::new(
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
                     ["this-is-a-test-context".to_string()].into(),
-                )),
+                ))),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2115,7 +2115,7 @@ mod tests {
                 ])
                 .into(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2224,7 +2224,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2357,7 +2357,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2452,7 +2452,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -2538,7 +2538,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,

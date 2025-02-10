@@ -286,7 +286,9 @@ where
 
             if let Some(context) = co_processor_output.context {
                 for (mut key, value) in context.try_into_iter()? {
-                    if let ContextConf::Deprecated = &request_config.context {
+                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                        &request_config.context
+                    {
                         key = context_key_from_deprecated(key);
                     }
                     supergraph_response
@@ -313,7 +315,8 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &request_config.context {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
                 key = context_key_from_deprecated(key);
             }
             request
@@ -417,7 +420,9 @@ where
 
     if let Some(context) = co_processor_output.context {
         for (mut key, value) in context.try_into_iter()? {
-            if let ContextConf::Deprecated = &response_config.context {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
                 key = context_key_from_deprecated(key);
             }
             response
@@ -491,7 +496,9 @@ where
 
                 if let Some(context) = co_processor_output.context {
                     for (mut key, value) in context.try_into_iter()? {
-                        if let ContextConf::Deprecated = &response_config_context {
+                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                            &response_config_context
+                        {
                             key = context_key_from_deprecated(key);
                         }
                         generator_map_context.upsert_json_value(key, move |_current| value);
@@ -597,7 +604,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::None,
+                context: ContextConf::NewContextConf(NewContextConf::None),
                 body: true,
                 sdl: false,
                 method: false,
@@ -739,7 +746,7 @@ mod tests {
                 ])
                 .into(),
                 headers: false,
-                context: ContextConf::None,
+                context: ContextConf::NewContextConf(NewContextConf::None),
                 body: true,
                 sdl: false,
                 method: false,
@@ -874,7 +881,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -1009,7 +1016,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -1129,7 +1136,7 @@ mod tests {
                 ])
                 .into(),
                 headers: true,
-                context: ContextConf::All,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,

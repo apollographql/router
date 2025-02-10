@@ -2125,47 +2125,17 @@ expression: "&schema"
       "type": "object"
     },
     "ContextConf": {
-      "description": "Configures the context",
-      "oneOf": [
+      "anyOf": [
         {
-          "description": "Send all context keys to coprocessor",
-          "enum": [
-            "all"
-          ],
-          "type": "string"
+          "description": "Deprecated configuration using a boolean",
+          "type": "boolean"
         },
         {
-          "description": "Don't send any context keys to coprocessor",
-          "enum": [
-            "none"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
-          "enum": [
-            "deprecated"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Only send the list of context keys to coprocessor",
-          "properties": {
-            "selective": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array",
-              "uniqueItems": true
-            }
-          },
-          "required": [
-            "selective"
-          ],
-          "type": "object"
+          "$ref": "#/definitions/NewContextConf",
+          "description": "#/definitions/NewContextConf"
         }
-      ]
+      ],
+      "description": "Configures the context"
     },
     "Cors": {
       "additionalProperties": false,
@@ -4299,6 +4269,49 @@ expression: "&schema"
     "MyTestPluginConfig": {
       "description": "Config for the test plugin",
       "type": "object"
+    },
+    "NewContextConf": {
+      "description": "Configures the context",
+      "oneOf": [
+        {
+          "description": "Send all context keys to coprocessor",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Don't send any context keys to coprocessor",
+          "enum": [
+            "none"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
+          "enum": [
+            "deprecated"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Operation": {
       "oneOf": [
