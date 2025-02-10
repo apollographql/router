@@ -5997,11 +5997,6 @@ expression: "&schema"
     "SubgraphAttributes": {
       "additionalProperties": false,
       "properties": {
-        "http.request.resend_count": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8023,11 +8018,6 @@ expression: "&schema"
         "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
       },
       "properties": {
-        "http.request.resend_count": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
@@ -8057,11 +8047,6 @@ expression: "&schema"
         "description": "#/definitions/SubgraphSelector"
       },
       "properties": {
-        "http.request.resend_count": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
         "subgraph.graphql.document": {
           "$ref": "#/definitions/StandardAttribute",
           "description": "#/definitions/StandardAttribute",
