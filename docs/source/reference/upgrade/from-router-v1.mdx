@@ -346,6 +346,36 @@ The router request context is used to share data across stages of the request pi
 - `persisted_query_hit` -> `apollo::apq::cache_hit`
 - `persisted_query_register` -> `apollo::apq::registered`
 
+### Coprocessor
+
+As we renamed several context keys it could impact your coprocessor logic and you might need to update the codebase. In order to smoothly migrate to the new context keys we changed the `context` configuration on coprocessors.
+So by default if you didn't specify the `context` configuration nothing will change. But you can now specify either if you have to still use the deprecated names (`deprecated`) or the new ones (`all`).
+We also added a new configuration, if you specify an array in `context` you'll have to specify only the context keys you want to send to your coprocessors. It will lower the body size of the request/response and then improve performances.
+
+Example:
+
+```yaml
+coprocessor:
+  url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  supergraph:
+    request:
+      headers: true
+      context: # It will only send these 2 context keys to your coprocessor
+        - apollo::supergraph::operation_name
+        - apollo::demand_control::actual_cost
+      body: true
+    response:
+      headers: true
+      context: all # It will send all context keys with new names (2.x version)
+      body: true
+  subgraph:
+    all:
+      request:
+        context: deprecated # It will send all the context keys with deprecated names (1.x version)
+```
+
+So if you don't want to change anything in your coprocessor you can switch `context: true` to `context: deprecated`. And if it was `context: false` it will be `context: none`.
+
 ### Tracing
 
 `jaeger` exporter has been removed as Jaeger fully supports to OTLP format. To use the `otlp` exporter change your router config:
