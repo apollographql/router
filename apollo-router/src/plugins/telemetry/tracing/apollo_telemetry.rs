@@ -35,6 +35,7 @@ use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use tracing::Level;
 use url::Url;
 
 use crate::metrics::meter_provider;
@@ -70,6 +71,7 @@ use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ACTUAL;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ESTIMATED;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_STRATEGY;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
@@ -201,6 +203,15 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
+pub(crate) fn emit_error_event(error_code: &str, error_description: &str) {
+    tracing::event!(
+        Level::ERROR,
+        { GRAPHQL_ERROR_EXT_CODE } = error_code,
+        { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+        error_description
+    );
+}
+
 #[derive(Error, Debug)]
 pub(crate) enum Error {
     #[error("subgraph protobuf decode error")]
@@ -273,22 +284,20 @@ impl LightSpanData {
             Some(event_names) => value
                 .events
                 .into_iter()
-                .map(|event| {
-                    LightSpanEventData {
-                        timestamp: event.timestamp,
-                        name: event.name,
-                        attributes: event
-                            .attributes
-                            .into_iter()
-                            .filter_map(|kv| {
-                                if event_names.contains(&kv.key) {
-                                    Some((kv.key, kv.value))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect(),
-                    }
+                .map(|event| LightSpanEventData {
+                    timestamp: event.timestamp,
+                    name: event.name,
+                    attributes: event
+                        .attributes
+                        .into_iter()
+                        .filter_map(|kv| {
+                            if event_names.contains(&kv.key) {
+                                Some((kv.key, kv.value))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
                 })
                 .filter(|event| !event.attributes.is_empty())
                 .collect(),
