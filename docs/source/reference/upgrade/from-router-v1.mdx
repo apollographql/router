@@ -8,7 +8,7 @@ Learn how to upgrade your GraphOS Router deployment from version 1.x to 2.x.
 
 <Note>
 
-GraphOS Router 2.x is available as a [Developer Preview](https://www.apollographql.com/docs/graphos/reference/router-release-lifecycle#developer-preview). The most recent version is **[v2.0.0-preview.1](https://github.com/apollographql/router/releases/tag/v2.0.0-preview.1)**. This upgrade guide will be updated throughout the Developer Preview and will have additions after each release.
+GraphOS Router 2.x is available as a [Developer Preview](https://www.apollographql.com/docs/graphos/reference/router-release-lifecycle#developer-preview). The most recent version is **{products.router.version("connectors").version}**. This upgrade guide will be updated throughout the Developer Preview and will have additions after each release.
 
 </Note>
 
@@ -456,7 +456,7 @@ You can use the new `apollo_router::metrics::meter_provider()` API to access the
 
 ### Deploy your router
 
-Make sure that you are referencing the correct router release: **v2.0.0-preview.0**
+Make sure that you are referencing the correct router release: **{products.router.version("connectors").version}**
 
 During upgrade, carefully monitor logs and resource consumption to ensure that your router has successfully upgraded and that your router has enough resources to perform as expected. The router will automatically migrate required configuration changes, but it is good practice to review the steps above and decide if you want to change your configuration.
 

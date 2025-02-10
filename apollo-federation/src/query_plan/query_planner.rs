@@ -485,6 +485,10 @@ impl QueryPlanner {
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
     }
+
+    pub fn supergraph_schema(&self) -> &ValidFederationSchema {
+        &self.supergraph_schema
+    }
 }
 
 fn compute_root_serial_dependency_graph(

@@ -192,10 +192,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.0.0-preview.5"
+version = "2.0.0-preview.6"
 dependencies = [
  "apollo-compiler",
  "derive_more",
+ "dhat",
  "either",
  "hashbrown 0.15.2",
  "hex",
@@ -253,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.0.0-preview.5"
+version = "2.0.0-preview.6"
 dependencies = [
  "ahash",
  "anyhow",
@@ -424,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.0.0-preview.5"
+version = "2.0.0-preview.6"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -6366,9 +6367,9 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7972158d973c49bb15d99b3a9e02fd17a6036e1b27144b395d96e7430ba9ca70"
+checksum = "27e114fc498dd1dcc20b12a9571a7b9b78396760e44b7a9024afa3a04ce26763"
 dependencies = [
  "apollo-compiler",
  "indexmap 2.7.0",
