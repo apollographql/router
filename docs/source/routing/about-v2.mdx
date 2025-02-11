@@ -15,6 +15,24 @@ As an [active](/graphos/reference/router-release-lifecycle#active) release:
 - Breaking changes may be required in extenuating circumstances.
 - [Support](https://www.apollographql.com/enterprise/support) is provided via paid support plans until end-of-life. 
 
+## Key highlights of router 2.x
+
+### Simplified integration and API orchestration of REST services using Apollo Connectors
+
+The router introduces **Apollo Connectors for REST** to enable the router to directly call REST APIs alongside traditional GraphQL subgraphs. It improves the interoperability of the router with existing API architectures without the need to write tedious API integration code.
+
+> Follow the [REST API quickstart](/graphos/get-started/guides/rest-quickstart) to orchestrate your first API with Apollo Connectors.
+
+### Improved query planner performance
+
+The router is powered by a new **Native Query Planner** that achieves performance at scale with demonstrable improvement in CPU and memory utilization. It's written in Rust and replaces the legacy query planner written in JavaScript, thereby utilizing a simplified architecture and ensuring more efficient and performant query execution.
+
+> Learn more about the [native query planner](graphos/routing/query-planning/native-query-planner).
+
+### Predictable resource utilization and availability with backpressure management
+
+The router introduces **backpressure management** that enables more predictable memory and CPU consumption. It's especially beneficial for Kubernetes deployments, where the router can now provide timely signals to trigger Horizontal Pod Autoscaling (HPA) and maintain availability. 
+
 ## Upgrading to router 2.x
 
-To upgrade to router v{products.router.version("lts_2_latest").version}, follow the [router 1.x to 2.x upgrade guide](/graphos/reference/upgrade/from-router-v1).
+To upgrade to router v{products.router.version("lts_2_latest").version}, including resolving breaking changes and using new capabilities, follow the [router 1.x to 2.x upgrade guide](/graphos/reference/upgrade/from-router-v1).
