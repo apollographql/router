@@ -9,6 +9,7 @@ use tracing::trace;
 use super::fetch_dependency_graph::FetchIdGenerator;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
@@ -417,14 +418,21 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 no_followups = true;
                 break;
             }
+
+            // capture options in statistics
+            let options_count = &self.parameters.statistics.evaluated_plan_options;
+            options_count.set(options_count.get() + followups_for_option.len());
+
             new_options.extend(followups_for_option);
             if let Some(options_limit) = self.parameters.config.debug.paths_limit {
                 if new_options.len() > options_limit as usize {
-                    // TODO: Create a new error code for this error kind.
-                    return Err(FederationError::internal(format!(
-                        "Too many options generated for {}, reached the limit of {}.",
-                        selection, options_limit,
-                    )));
+                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                        message: format!(
+                            "Too many options generated for {}, reached the limit of {}.",
+                            selection, options_limit,
+                        ),
+                    }
+                    .into());
                 }
             }
         }
