@@ -23,14 +23,11 @@ fn thread_pool_size() -> usize {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
-        tracing::info!(threads, type="compute", source="env", "thread pool");
         threads
     } else {
-        let threads = std::thread::available_parallelism()
+        std::thread::available_parallelism()
             .expect("available_parallelism() failed")
-            .get();
-        tracing::info!(threads, type="compute", source="available_parallelism", "thread pool");
-        threads
+            .get()
     }
 }
 
