@@ -683,7 +683,6 @@ pub(crate) async fn create_plugins(
     // plugin in this list *that adds a router service hook*. Other plugins can be before the
     // telemetry plugin if they must do work *before* telemetry at specific services.
     add_mandatory_apollo_plugin!("include_subgraph_errors");
-    add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
@@ -697,10 +696,11 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("health_check");
     // TODO: Introduce a CORS plugin here
     add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("limits");
+    add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
     add_mandatory_apollo_plugin!("router_limits");
 

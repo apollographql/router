@@ -100,6 +100,7 @@ impl Plugin for Csrf {
         })
     }
 
+    // TODO: this should be a router_service hook
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
