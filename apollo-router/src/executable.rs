@@ -681,11 +681,6 @@ impl Executable {
             }
         };
 
-        let threads = tokio::runtime::Handle::current().metrics().num_workers();
-        tracing::info!(threads, type="io", "thread pool");
-        // Initialize the compute thread poll and log its size now
-        crate::compute_job::queue();
-
         // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
         let user_plugins_present = plugins().filter(|p| !p.is_apollo()).count() > 0;
         let rust_log_set = std::env::var("RUST_LOG").is_ok();

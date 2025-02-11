@@ -3,12 +3,6 @@ source: apollo-router/src/services/layers/persisted_queries/mod.rs
 expression: yaml
 ---
 - fields:
-    source: available_parallelism
-    threads: 14
-    type: compute
-  level: INFO
-  message: thread pool
-- fields:
     operation_body: "query SomeQuery { me { id } }"
   level: WARN
   message: unknown operation
