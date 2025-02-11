@@ -12,12 +12,6 @@ use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::subgraph;
-<<<<<<< HEAD
-use bench::BenchOutput;
-=======
-use apollo_federation::ApiSchemaOptions;
-use apollo_federation::Supergraph;
->>>>>>> ecdf1a07 (test(federation-cli): enable log printing from apollo-federation-cli (#6717))
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
