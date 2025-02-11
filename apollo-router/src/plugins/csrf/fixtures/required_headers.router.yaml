@@ -1,0 +1,3 @@
+csrf:
+  required_headers:
+    - X-MY-CSRF-Token
