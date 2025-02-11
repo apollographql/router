@@ -337,6 +337,7 @@ mod tests {
     use crate::sources::connect::json_selection::location::new_span;
     use crate::sources::connect::json_selection::MethodArgs;
     use crate::sources::connect::json_selection::PathList;
+    use crate::sources::connect::json_selection::PrettyPrintable;
 
     #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {
@@ -687,8 +688,22 @@ mod tests {
 
     #[test]
     fn test_literal_methods() {
-        check_parse(
-            "$('a')->first",
+        #[track_caller]
+        fn check_parse_and_print(input: &str, expected: LitExpr) {
+            let expected_pretty = expected.pretty_print();
+            match LitExpr::parse(new_span(input)) {
+                Ok((remainder, parsed)) => {
+                    assert!(span_is_all_spaces_or_comments(remainder));
+                    assert_eq!(parsed.strip_ranges(), WithRange::new(expected, None));
+                    assert_eq!(parsed.pretty_print(), input);
+                    assert_eq!(expected_pretty, input);
+                }
+                Err(e) => panic!("Failed to parse '{}': {:?}", input, e),
+            };
+        }
+
+        check_parse_and_print(
+            "$(\"a\")->first",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::String("a".to_string()).into_with_range(),
@@ -703,8 +718,8 @@ mod tests {
             }),
         );
 
-        check_parse(
-            "$('a'->first)",
+        check_parse_and_print(
+            "$(\"a\"->first)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::LitPath(
@@ -723,7 +738,7 @@ mod tests {
             }),
         );
 
-        check_parse(
+        check_parse_and_print(
             "$(1234)->add(1111)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
@@ -744,7 +759,7 @@ mod tests {
             }),
         );
 
-        check_parse(
+        check_parse_and_print(
             "$(1234->add(1111))",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
@@ -768,7 +783,7 @@ mod tests {
             }),
         );
 
-        check_parse(
+        check_parse_and_print(
             "$(value->mul(10))",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
@@ -795,7 +810,7 @@ mod tests {
             }),
         );
 
-        check_parse(
+        check_parse_and_print(
             "$(value.key->typeof)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
@@ -822,7 +837,7 @@ mod tests {
             }),
         );
 
-        check_parse(
+        check_parse_and_print(
             "$(value.key)->typeof",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
@@ -849,8 +864,8 @@ mod tests {
             }),
         );
 
-        check_parse(
-            "$([1,2,3])->last",
+        check_parse_and_print(
+            "$([1, 2, 3])->last",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::Array(vec![
@@ -870,8 +885,8 @@ mod tests {
             }),
         );
 
-        check_parse(
-            "$([1,2,3]->last)",
+        check_parse_and_print(
+            "$([1, 2, 3]->last)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::LitPath(
@@ -895,8 +910,8 @@ mod tests {
             }),
         );
 
-        check_parse(
-            "$({ a: 'ay', b: 1 }).a",
+        check_parse_and_print(
+            "$({ a: \"ay\", b: 1 }).a",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::Object({
@@ -922,8 +937,8 @@ mod tests {
             }),
         );
 
-        check_parse(
-            "$({ a: 'ay', b: 2 }.a)",
+        check_parse_and_print(
+            "$({ a: \"ay\", b: 2 }.a)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
                     LitExpr::LitPath(
