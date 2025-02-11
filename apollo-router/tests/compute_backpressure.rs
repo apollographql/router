@@ -35,7 +35,7 @@ async fn test_compute_backpressure() {
             __typename: Query
     "###);
 
-    let duration = std::time::Duration::from_secs(1);
+    let duration = std::time::Duration::from_secs(3);
     // Keep all compute threads busy for a while
     for _ in 0..std::thread::available_parallelism().unwrap().get() {
         apollo_router::_private::compute_job_execute(move || std::thread::sleep(duration));
