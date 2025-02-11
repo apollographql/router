@@ -789,6 +789,9 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 (Some(JSON::Array(output)), errors)
             }
             LitExpr::Path(path) => path.apply_to_path(data, vars, input_path),
+            LitExpr::LitPath(literal, subpath) => literal
+                .apply_to_path(data, vars, input_path)
+                .and_then_collecting_errors(|value| subpath.apply_to_path(value, vars, input_path)),
         }
     }
 
@@ -847,6 +850,21 @@ impl ApplyToInternal for WithRange<LitExpr> {
 
             LitExpr::Path(path) => {
                 path.compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id)
+            }
+
+            LitExpr::LitPath(literal, subpath) => {
+                let literal_shape = literal.compute_output_shape(
+                    input_shape,
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                    source_id,
+                );
+                subpath.compute_output_shape(
+                    literal_shape,
+                    dollar_shape,
+                    named_var_shapes,
+                    source_id,
+                )
             }
         }
     }
@@ -2774,6 +2792,83 @@ mod tests {
                 ],
             })),
             (Some(json!("string")), vec![]),
+        );
+    }
+
+    #[test]
+    fn test_lit_paths() {
+        let data = json!({
+            "value": {
+                "key": 123,
+            },
+        });
+
+        assert_eq!(
+            selection!("$(\"a\")->first").apply_to(&data),
+            (Some(json!("a")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$('asdf'->last)").apply_to(&data),
+            (Some(json!("f")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(1234)->add(1111)").apply_to(&data),
+            (Some(json!(2345)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(1234->add(1111))").apply_to(&data),
+            (Some(json!(2345)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(value.key->mul(10))").apply_to(&data),
+            (Some(json!(1230)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(value.key)->mul(10)").apply_to(&data),
+            (Some(json!(1230)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(value.key->typeof)").apply_to(&data),
+            (Some(json!("number")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$(value.key)->typeof").apply_to(&data),
+            (Some(json!("number")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$([1, 2, 3])->last").apply_to(&data),
+            (Some(json!(3)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$([1, 2, 3]->first)").apply_to(&data),
+            (Some(json!(1)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$({ a: 'ay', b: 1 }).a").apply_to(&data),
+            (Some(json!("ay")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$({ a: 'ay', b: 2 }.a)").apply_to(&data),
+            (Some(json!("ay")), vec![]),
+        );
+
+        assert_eq!(
+            // Note that the -> has lower precedence than the -, so -1 is parsed
+            // as a completed expression before applying the ->add(10) method,
+            // giving 9 instead of -11.
+            selection!("$(-1->add(10))").apply_to(&data),
+            (Some(json!(9)), vec![]),
         );
     }
 
