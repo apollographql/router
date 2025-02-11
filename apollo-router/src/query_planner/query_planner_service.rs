@@ -180,7 +180,8 @@ impl QueryPlannerService {
             formatted_query_plan: Some(Arc::new(plan.to_string())),
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
-            evaluated_plan_options: plan.statistics.evaluated_plan_options.clone().into_inner() as u64,
+            evaluated_plan_options: plan.statistics.evaluated_plan_options.clone().into_inner()
+                as u64,
         })
     }
 

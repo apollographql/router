@@ -489,7 +489,9 @@ impl SingleFederationError {
                 ErrorCode::InterfaceKeyMissingImplementationType
             }
             SingleFederationError::DeferredSubscriptionUnsupported => ErrorCode::Internal,
-            SingleFederationError::QueryPlanComplexityExceeded { .. } => ErrorCode::QueryPlanComplexityExceededError,
+            SingleFederationError::QueryPlanComplexityExceeded { .. } => {
+                ErrorCode::QueryPlanComplexityExceededError
+            }
         }
     }
 }
