@@ -315,10 +315,30 @@ where
                 operation: operation_name.clone(),
                 hash: doc.hash.clone(),
                 schema_id: self.schema.schema_id.clone(),
-                metadata,
-                plan_options,
+                metadata: metadata.clone(),
+                plan_options: plan_options.clone(),
                 config_mode_hash: self.config_mode_hash.clone(),
             };
+
+            tracing::info!(
+                r#"Planner generated cache key as part of pre-warming: 
+            key: {}
+            
+            query: {}
+            operation: {:?}
+            hash: {}
+            metadata: {:?}
+            plan_options: {:?}
+            config_mode_hash: {}
+                            "#,
+                caching_key,
+                query,
+                operation_name,
+                doc.hash,
+                metadata,
+                plan_options,
+                self.config_mode_hash
+            );
 
             if experimental_reuse_query_plans {
                 // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
@@ -506,10 +526,30 @@ where
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
             schema_id: self.schema.schema_id.clone(),
-            metadata,
-            plan_options,
+            metadata: metadata.clone(),
+            plan_options: plan_options.clone(),
             config_mode_hash: self.config_mode_hash.clone(),
         };
+
+        tracing::info!(
+            r#"Planner generated cache key on the fly: 
+        key: {}
+        
+        query: {}
+        operation: {:?}
+        hash: {}
+        metadata: {:?}
+        plan_options: {:?}
+        config_mode_hash: {}
+                        "#,
+            caching_key,
+            request.query,
+            request.operation_name,
+            doc.hash,
+            metadata,
+            plan_options,
+            self.config_mode_hash
+        );
 
         let context = request.context.clone();
         let entry = self
