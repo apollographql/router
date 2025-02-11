@@ -628,9 +628,62 @@ async fn call_websocket(
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
-        reason: format!("cannot connect websocket to subgraph: {err}"),
+    .map_err(|err| {
+        let error_details = match &err {
+            tokio_tungstenite::tungstenite::Error::Utf8 => {
+                if let Some(utf8_err) = err
+                    .source()
+                    .and_then(|e| e.downcast_ref::<std::str::Utf8Error>())
+                {
+                    let pos = utf8_err.valid_up_to();
+                    let bytes = utf8_err.as_bytes();
+                    if pos < bytes.len() {
+                        let bad_byte = bytes[pos];
+                        format!("invalid UTF-8 at position {pos}, byte = 0x{bad_byte:02X}")
+                    } else {
+                        format!(
+                            "invalid UTF-8 at position {pos}, but 'pos' is beyond the available bytes ({})",
+                            bytes.len()
+                        )
+                    }
+                } else {
+                    "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
+                }
+            }
+
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                let status = response.status();
+                let headers = response
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| {
+                        format!("\n    {}: {}", k, v.to_str().unwrap_or("<invalid UTF-8>"))
+                    })
+                    .collect::<String>();
+
+                format!(
+                    "WebSocket upgrade failed.\nStatus: {status}\nHeaders:{headers}"
+                )
+            }
+
+            tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
+                format!("WebSocket protocol error: {proto_err}")
+            }
+
+            other_error => format!("{other_error}"),
+        };
+
+        tracing::warn!(
+            error.type   = "websocket_connection_failed",
+            error.details= %error_details,
+            error.source = %std::any::type_name_of_val(&err),
+            "WebSocket connection failed"
+        );
+
+        FetchError::SubrequestWsError {
+            service: service_name.clone(),
+            reason: format!("cannot connect websocket to subgraph: {error_details}"),
+        }
     })?;
 
     let gql_socket = GraphqlWebSocket::new(
