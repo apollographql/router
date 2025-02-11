@@ -365,6 +365,12 @@ name = "samples"
 path = "tests/samples_tests.rs"
 harness = false
 
+[[test]]
+# This test is separated because it needs to run in a dedicated process.
+# nextest does this by default, but using a separate [[test]] also makes it work with `cargo test`.
+name = "compute_backpressure"
+path = "tests/compute_backpressure.rs"
+
 [[bin]]
 name = "snapshot"
 path = "src/test_harness/http_snapshot_main.rs"

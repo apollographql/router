@@ -64,7 +64,7 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
-fn queue() -> &'static AgeingPriorityQueue<Job> {
+pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
     QUEUE.get_or_init(|| {
         let pool_size = thread_pool_size();

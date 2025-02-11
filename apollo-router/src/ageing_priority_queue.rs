@@ -37,7 +37,7 @@ where
     inner_queues:
         [(crossbeam_channel::Sender<T>, crossbeam_channel::Receiver<T>); INNER_QUEUES_COUNT],
     queued_count: AtomicUsize,
-    capacity: usize,
+    pub(crate) capacity: usize,
 }
 
 pub(crate) struct Receiver<'a, T>

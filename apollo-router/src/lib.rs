@@ -121,4 +121,15 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+
+    pub fn compute_job_queue_capacity() -> usize {
+        crate::compute_job::queue().capacity
+    }
+
+    pub fn compute_job_execute<F>(job: F)
+    where
+        F: FnOnce() + Send + std::panic::UnwindSafe + 'static,
+    {
+        let _ = crate::compute_job::execute(crate::compute_job::Priority::P1, job);
+    }
 }
