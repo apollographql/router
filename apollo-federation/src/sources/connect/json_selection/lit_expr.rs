@@ -29,6 +29,7 @@ use super::parser::Key;
 use super::parser::PathSelection;
 use super::ExternalVarPaths;
 use super::ParseResult;
+use super::PathList;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -42,18 +43,66 @@ pub(crate) enum LitExpr {
 }
 
 impl LitExpr {
-    // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
+    // LitExpr ::= LitPath | LitPrimitive | LitObject | LitArray | PathSelection
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
-        alt((
-            Self::parse_primitive,
-            Self::parse_object,
-            Self::parse_array,
-            map(PathSelection::parse, |p| {
-                let range = p.range();
-                WithRange::new(Self::Path(p), range)
+
+        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input) {
+            Ok((suffix, initial_literal)) => {
+                // If we parsed an initial literal expression, it may be the
+                // entire result, but we also want to greedily parse one or more
+                // PathStep items that follow it, according to the rule
+                //
+                //    LitPath ::= (LitPrimitive | LitObject | LitArray) PathStep+
+                //
+                // This allows paths beginning with literal values without the
+                // initial $(...) expression wrapper, so you can write
+                // $(123->add(111)) instead of $($(123)->add(111)) when you're
+                // already in a LitExpr parsing context.
+                match PathList::parse_with_depth(suffix, 1) {
+                    Ok((remainder, subpath)) => {
+                        if matches!(subpath.as_ref(), PathList::Empty) {
+                            return Ok((remainder, initial_literal));
+                        }
+                        let full_range = merge_ranges(initial_literal.range(), subpath.range());
+                        Ok((
+                            remainder,
+                            WithRange::new(
+                                Self::Path(PathSelection {
+                                    // We use the same PathList::Expr variant to
+                                    // represent LitPath and ExprPath, which
+                                    // means LitPath is effectively syntax sugar
+                                    // for ExprPath (which is also legal within
+                                    // a LitExpr parsing context).
+                                    //
+                                    // The cost of this reuse is that naively
+                                    // pretty-printing a LitPath will include
+                                    // the $(...) wrapper, though we could track
+                                    // the selection/expression context during
+                                    // pretty printing to enable printing
+                                    // PathList::Expr without the $(...) in an
+                                    // expression context.
+                                    path: WithRange::new(
+                                        PathList::Expr(initial_literal, subpath),
+                                        full_range.clone(),
+                                    ),
+                                }),
+                                full_range.clone(),
+                            ),
+                        ))
+                    }
+                    // If we failed to parse a path, return initial_literal as-is.
+                    Err(_) => Ok((suffix, initial_literal)),
+                }
+            }
+
+            // If we failed to parse a primitive, object, or array, try parsing
+            // a PathSelection (which cannot be a LitPath).
+            Err(_) => PathSelection::parse(input).map(|(remainder, path)| {
+                let range = path.range();
+                (remainder, WithRange::new(Self::Path(path), range))
             }),
-        ))(input)
+        }
     }
 
     // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
@@ -285,6 +334,7 @@ mod tests {
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
+    use crate::sources::connect::json_selection::MethodArgs;
     use crate::sources::connect::json_selection::PathList;
 
     #[track_caller]
@@ -632,5 +682,286 @@ mod tests {
                 expected.clone(),
             );
         }
+    }
+
+    #[test]
+    fn test_literal_methods() {
+        check_parse(
+            "$('a')->first",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::String("a".to_string()).into_with_range(),
+                    PathList::Method(
+                        WithRange::new("first".to_string(), None),
+                        None,
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$('a'->first)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Expr(
+                            LitExpr::String("a".to_string()).into_with_range(),
+                            PathList::Method(
+                                WithRange::new("first".to_string(), None),
+                                None,
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$(1234)->add(1111)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Number(serde_json::Number::from(1234)).into_with_range(),
+                    PathList::Method(
+                        WithRange::new("add".to_string(), None),
+                        Some(MethodArgs {
+                            args: vec![
+                                LitExpr::Number(serde_json::Number::from(1111)).into_with_range()
+                            ],
+                            range: None,
+                        }),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$(1234->add(1111))",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Expr(
+                            LitExpr::Number(serde_json::Number::from(1234)).into_with_range(),
+                            PathList::Method(
+                                WithRange::new("add".to_string(), None),
+                                Some(MethodArgs {
+                                    args: vec![LitExpr::Number(serde_json::Number::from(1111))
+                                        .into_with_range()],
+                                    range: None,
+                                }),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$(value->mul(10))",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("value").into_with_range(),
+                            PathList::Method(
+                                WithRange::new("mul".to_string(), None),
+                                Some(MethodArgs {
+                                    args: vec![LitExpr::Number(serde_json::Number::from(10))
+                                        .into_with_range()],
+                                    range: None,
+                                }),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$(value.key->typeof)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("value").into_with_range(),
+                            PathList::Key(
+                                Key::field("key").into_with_range(),
+                                PathList::Method(
+                                    WithRange::new("typeof".to_string(), None),
+                                    None,
+                                    PathList::Empty.into_with_range(),
+                                )
+                                .into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$(value.key)->typeof",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Key(
+                            Key::field("value").into_with_range(),
+                            PathList::Key(
+                                Key::field("key").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Method(
+                        WithRange::new("typeof".to_string(), None),
+                        None,
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$([1,2,3])->last",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Array(vec![
+                        LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                        LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                        LitExpr::Number(serde_json::Number::from(3)).into_with_range(),
+                    ])
+                    .into_with_range(),
+                    PathList::Method(
+                        WithRange::new("last".to_string(), None),
+                        None,
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$([1,2,3]->last)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Expr(
+                            LitExpr::Array(vec![
+                                LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                                LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                                LitExpr::Number(serde_json::Number::from(3)).into_with_range(),
+                            ])
+                            .into_with_range(),
+                            PathList::Method(
+                                WithRange::new("last".to_string(), None),
+                                None,
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$({ a: 'ay', b: 1 }).a",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Object({
+                        let mut map = IndexMap::default();
+                        map.insert(
+                            Key::field("a").into_with_range(),
+                            LitExpr::String("ay".to_string()).into_with_range(),
+                        );
+                        map.insert(
+                            Key::field("b").into_with_range(),
+                            LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                        );
+                        map
+                    })
+                    .into_with_range(),
+                    PathList::Key(
+                        Key::field("a").into_with_range(),
+                        PathList::Empty.into_with_range(),
+                    )
+                    .into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
+
+        check_parse(
+            "$({ a: 'ay', b: 2 }.a)",
+            LitExpr::Path(PathSelection {
+                path: PathList::Expr(
+                    LitExpr::Path(PathSelection {
+                        path: PathList::Expr(
+                            LitExpr::Object({
+                                let mut map = IndexMap::default();
+                                map.insert(
+                                    Key::field("a").into_with_range(),
+                                    LitExpr::String("ay".to_string()).into_with_range(),
+                                );
+                                map.insert(
+                                    Key::field("b").into_with_range(),
+                                    LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                                );
+                                map
+                            })
+                            .into_with_range(),
+                            PathList::Key(
+                                Key::field("a").into_with_range(),
+                                PathList::Empty.into_with_range(),
+                            )
+                            .into_with_range(),
+                        )
+                        .into_with_range(),
+                    })
+                    .into_with_range(),
+                    PathList::Empty.into_with_range(),
+                )
+                .into_with_range(),
+            }),
+        );
     }
 }
