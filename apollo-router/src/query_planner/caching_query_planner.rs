@@ -327,9 +327,7 @@ where
                             });
                             continue 'all_cache_keys_loop;
                         }
-                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError(
-                            _,
-                        ))) => {
+                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             // try again
                         }
@@ -367,9 +365,7 @@ where
                             });
                             break;
                         }
-                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError(
-                            _,
-                        ))) => {
+                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
                             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                             // try again
                         }

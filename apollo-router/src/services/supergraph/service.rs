@@ -217,7 +217,11 @@ async fn service_call(
     {
         Ok(resp) => resp,
         Err(err) => {
-            let status = StatusCode::BAD_REQUEST;
+            let status = match &err {
+                CacheResolverError::Backpressure(_) => StatusCode::SERVICE_UNAVAILABLE,
+                CacheResolverError::RetrievalError(_) |
+                CacheResolverError::BatchingError(_) => StatusCode::BAD_REQUEST,
+            };
             match err.into_graphql_errors() {
                 Ok(gql_errors) => {
                     return Ok(SupergraphResponse::infallible_builder()

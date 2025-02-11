@@ -24,16 +24,9 @@ fn thread_pool_size() -> usize {
         .get()
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum ComputeJobKind {
-    ParsingAndValidation,
-    QueryPlanning,
-    Introspection,
-}
-
 /// Compute job queue is full
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone)]
-pub(crate) struct ComputeBackPressureError(pub(crate) ComputeJobKind);
+pub(crate) struct ComputeBackPressureError;
 
 #[derive(Debug)]
 pub(crate) enum MaybeBackPressureError<E> {
@@ -97,7 +90,6 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
     priority: Priority,
-    job_kind: ComputeJobKind,
     job: F,
 ) -> Result<impl Future<Output = std::thread::Result<T>>, ComputeBackPressureError>
 where
@@ -111,7 +103,7 @@ where
     });
     queue()
         .send(priority, job)
-        .map_err(|QueueIsFullError| ComputeBackPressureError(job_kind))?;
+        .map_err(|QueueIsFullError| ComputeBackPressureError)?;
     Ok(async { rx.await.expect("channel disconnected") })
 }
 
@@ -136,7 +128,7 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, ComputeJobKind::Introspection, || {
+        let job_thread = execute(Priority::P4, || {
             std::thread::current().id()
         })
         .unwrap()
@@ -151,12 +143,12 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, ComputeJobKind::Introspection, || {
+        let one = execute(Priority::P8, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         })
         .unwrap();
-        let two = execute(Priority::P8, ComputeJobKind::Introspection, || {
+        let two = execute(Priority::P8, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         })

@@ -111,20 +111,16 @@ impl QueryAnalysisLayer {
         };
         // TODO: is this correct?
         let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(
-            priority,
-            compute_job::ComputeJobKind::ParsingAndValidation,
-            job,
-        )
-        .map_err(MaybeBackPressureError::TemporaryError)?
-        .await
-        // `expect()` propagates any panic that potentially happens in the closure, but:
-        //
-        // * We try to avoid such panics in the first place and consider them bugs
-        // * The panic handler in `apollo-router/src/executable.rs` exits the process
-        //   so this error case should never be reached.
-        .expect("Query::parse_document panicked")
-        .map_err(MaybeBackPressureError::PermanentError)
+        compute_job::execute(priority, job)
+            .map_err(MaybeBackPressureError::TemporaryError)?
+            .await
+            // `expect()` propagates any panic that potentially happens in the closure, but:
+            //
+            // * We try to avoid such panics in the first place and consider them bugs
+            // * The panic handler in `apollo-router/src/executable.rs` exits the process
+            //   so this error case should never be reached.
+            .expect("Query::parse_document panicked")
+            .map_err(MaybeBackPressureError::PermanentError)
     }
 
     /// Parses the GraphQL in the supergraph request and computes Apollo usage references.
