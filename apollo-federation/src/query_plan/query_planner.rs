@@ -167,7 +167,7 @@ impl Default for QueryPlannerDebugConfig {
 #[derive(Debug, PartialEq, Default, Serialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
-    pub evaluated_plan_options: Cell<usize>,
+    pub evaluated_plan_paths: Cell<usize>,
 }
 
 #[derive(Debug, Default, Clone)]
