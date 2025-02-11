@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [2.0.0] - 2025-02-19
 
-This is a major release of the router containing significant new functionality and improvements to behaviour. This changelog entry summarises the work, but for details please refer to:
+This is a major release of the router containing significant new functionality and improvements to behavior. This changelog entry summarises the work, but for details please refer to:
 
 Learn more about [upgrading from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
 Learn more about [what's new in 2.0(TBD)](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
@@ -42,11 +42,6 @@ Many external dependencies (crates) have been updated to modern versions where p
  - redis
 
 Keeping these crates up to date helps to keep the router secure and stable. As the Rust ecosystem evolves, so does the Router.
-
-## 📚 Documentation
-
-Learn more about [upgrading from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
-Learn more about [what's new in 2.0(TBD)](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
 
 # [2.0.0-preview.0] - 2024-10-01
 
