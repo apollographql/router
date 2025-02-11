@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use tower::Service as _;
 use tower::ServiceExt as _;
 
@@ -5,7 +7,7 @@ use tower::ServiceExt as _;
 // nextest does this by default, but using a separate [[test]] also makes it work with `cargo test`.
 
 #[tokio::test]
-async fn test_compute_backpressure() {
+async fn test_compute_backpressure_response() {
     let mut harness = apollo_router::TestHarness::builder()
         .build_router()
         .await
@@ -35,15 +37,7 @@ async fn test_compute_backpressure() {
             __typename: Query
     "###);
 
-    let duration = std::time::Duration::from_secs(3);
-    // Keep all compute threads busy for a while
-    for _ in 0..std::thread::available_parallelism().unwrap().get() {
-        apollo_router::_private::compute_job_execute(move || std::thread::sleep(duration));
-    }
-    // Fill the queue with no-op jobs
-    for _ in 0..apollo_router::_private::compute_job_queue_capacity() {
-        apollo_router::_private::compute_job_execute(|| {});
-    }
+    apollo_router::_private::compute_job_queued_count().fetch_add(1_000_000, Ordering::Relaxed);
 
     // Slightly different query so parsing isn’t cached and "compute" is needed.
     // When the queue is full we quickly return an error
@@ -64,8 +58,7 @@ async fn test_compute_backpressure() {
                 code: REQUEST_CONCURRENCY_LIMITED
     "###);
 
-    // Wait for the queue to drain
-    tokio::time::sleep(duration * 2).await;
+    apollo_router::_private::compute_job_queued_count().fetch_sub(1_000_000, Ordering::Relaxed);
 
     // Router gracefully recovers
     insta::assert_yaml_snapshot!(call!("{__typename} # 3"), @r###"

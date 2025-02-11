@@ -211,7 +211,6 @@ or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_dis
 or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_enabled) )
 or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_enabled_generate_query_fragments) )
 or ( binary_id(=apollo-router::type_conditions) & test(=test_type_conditions_enabled_list_of_list) )
-or ( binary_id(=apollo-router::compute_backpressure) & test(=test_compute_backpressure) )
 '''
 
 [profile.ci]
