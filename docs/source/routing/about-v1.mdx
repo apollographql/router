@@ -1,0 +1,26 @@
+---
+title: GraphOS Router v1.x
+---
+
+GraphOS Router, version 1.x LTS (Long Term Support) is a **Maintenance** release with latest version {products.router.version("lts_1_latest").version}.
+
+| Current Status | Release Date | Latest Minor | Active Date    | Maintenance Date | End of Life Date |
+| -------------- | ------------ | ------------ | -------------- | ---------------- | ---------------- |
+| Maintenance    | August 2022  | v{products.router.version("lts_1_latest").version}  | September 2022 | February 2025     | Planned February 2026       |
+
+As a [maintenance](/graphos/reference/router-release-lifecycle#maintenance) release:
+
+- Only the latest minor version ({products.router.version("lts_1_latest").version}) receives security patches and critical bug fixes. 
+    - If a bug fix requires incrementing the minor version to conform to semantic versioning, subsequent fixes and patches would be applied to this latest incremented minor version.
+
+- No features are added or are under development.
+
+- [Support](https://www.apollographql.com/enterprise/support) is provided via paid support plans until end of life of v1.x (planned for February 2026). 
+
+## Upgrading to router v1.x
+
+Upgrading to v{products.router.version("lts_1_latest").version} requires the following:
+
+- **Upgrade your supergraphs to Federation v2**. 
+
+   Federation v2.10 will be the last supported federation version for router 1.x.
