@@ -15,19 +15,22 @@ Before entering the router service, we have some layers on our axum Router. Thes
   - This one is from `tower-http`!
 - CorsLayer
   - This one is from `tower-http`!
+  - This layer enables web browser clients to see response bodies. It is important that this layer has access to error responses from traffic shaping, otherwise a browser client can't know about that.
 - "License handler"
   - Logs a warning if the commercial licence is expired
   - Rejects requests if the commercial licence is "halted" (expired + a grace period)
   - This is using `axum::middleware::from_fn`, so it is functioning properly as a tower layer.
 - RequestDecompressionLayer
   - This one is from `tower-http`!
+  - This replaces the body type with a streaming decompression body type based on the Accept-Encoding header.
+  - The body is not read in this layer. Decompression happens as-needed when the body is read further down the stack.
 
 Now, we enter `handle_graphql`.
 
-- Compression
+- Response Compression
   - This is manually written inside `handle_graphql`, but could conceptually be considered a layer.
   - I don't see an obvious reason for why this could not use a standard tower-http compression layer.
-- Then we create a router service and oneshot it.
+- Then we create (clone) a router service and oneshot it.
 
 ## Router service
 The router service consists of some layers in "front" of the service "proper", and of several layers *inside the router service*, which we appear to call manually.
@@ -44,7 +47,7 @@ Front (`RouterCreator`):
 Plugins:
 - Telemetry: InstrumentLayer
   - Only used with `SpanMode::Deprecated`
-  - Maybe a candidate for removal in 2.0?
+  - Maybe a candidate for removal in 3.0?
 - Telemetry: other work
   - A lot of stuff is happening inside a `map_future` layer. I haven't checked this out but I think it's fine from a backpressure/pipeline perspective.
   - This would be easier to understand in a named layer, potentially.
@@ -124,7 +127,6 @@ Front (`SupergraphCreator`):
   - This layer sets the Content-Type header on the response.
 - AllowOnlyHttpPostMutationsLayer is the final step before going into the supergraph service proper.
 
-Plugin layers happen here or in between somewhere, TBD.
 Plugins:
 - CSRF
   - This is a checkpoint layer.
