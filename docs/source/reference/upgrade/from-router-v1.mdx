@@ -276,7 +276,7 @@ Various metrics in router 2.x have been renamed to conform to the OpenTelemetry 
 
 ### Changed trace default
 
-In router v2.x, the trace `telemetry.instrumentation.spans.mode` has a default value of `spec_compliant`. Previously in router 1.x, its default value was `deprecated`.
+In router v2.x, the trace [`telemetry.instrumentation.spans.mode`](/graphos/reference/router/telemetry/instrumentation/spans#mode) has a default value of `spec_compliant`. Previously in router 1.x, its default value was `deprecated`.
 
 ### Changed defaults of GraphOS reporting metrics
 
@@ -505,44 +505,6 @@ could not create router: CORS configuration error:
 ```
 
 **Upgrade step****: Validate your CORS configuration. For details, go to [CORS configuration documentation](/graphos/routing/security/cors).
-
-<details>
-<summary>Renée Drafting</summary>
-
-- Things you have to do before you upgrade
-- Things you have to do in-step with the upgrade
-  - Changes to metrics
-  - Changes to customization (coprocessors, rhai scripts, and rust plugins)
-  - Changes to rust plugins
-
-Removals:
-- Support for Scaffold
-- `--apollo-uplink-poll-interval` 
-- Hot reloading `--supergraph-urls`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
-- `--schema`
-- Busy timer for request processing duration
-- Deprecated methods in rust plugins
-  - OneShotAsyncCheckpoint
-  - Emitting metrics in plugins
-- Jaeger tracing
-
-Changes:
-- Supergraph endpoint path
-- Logging requests and responses
-- Renamed metrics
-- Changes to metrics selectors (and custom telemetry in general)
-- Context key names
-- Spec-compliant traces (@TODO figure out what it means)
-
-Validate:
-- Traffic shaping
-- Apollo operation usage reporting via OTLP
-- Introspection depth limit
-- Metrics reporting defaults
-- CORS configuration
-- Header propagation (Should we even mention it if it still works?)
-
-</details>
 
 <details>
 <summary>Unsorted items (TODO)</summary>
