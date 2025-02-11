@@ -348,9 +348,11 @@ The router request context is used to share data across stages of the request pi
 
 ### Coprocessor
 
-As we renamed several context keys it could impact your coprocessor logic and you might need to update the codebase. In order to smoothly migrate to the new context keys we changed the `context` configuration on coprocessors.
-So by default if you didn't specify the `context` configuration nothing will change. But you can now specify either if you have to still use the deprecated names (`deprecated`) or the new ones (`all`).
-We also added a new configuration, if you specify an array in `context` you'll have to specify only the context keys you want to send to your coprocessors. It will lower the body size of the request/response and then improve performances.
+We have renamed several context keys which could impact your coprocessor logic. If you don't specify the `context` configuration nothing will change. If, however, you rely on any of the impacted keys. You should update your coprocessor logic to reflect the change. If this is difficult, you can postpone this migration by relying on a new context configuration feature for coprocessors.
+
+Prior to this change, context was a boolean argument indicating that all of context (true) or no context (false) should be passed to the coprocessor. Now it can take one of several values indicating which names, deprecated or new, you wish to pass to your coprocessor.
+
+Finally, if you specify an array in `context` you'll have to specify only the context keys you want to send to your coprocessors. This will lower the body size of the request/response and may improve performance.
 
 Example:
 
