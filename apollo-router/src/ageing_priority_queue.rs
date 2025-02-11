@@ -97,17 +97,19 @@ impl<T> Receiver<'_, T>
 where
     T: Send + 'static,
 {
-    pub(crate) fn blocking_recv(&mut self) -> Result<T, crossbeam_channel::RecvError> {
+    pub(crate) fn blocking_recv(&mut self) -> T {
         // Because we used `Select::new_biased` above,
         // `select()` will not shuffle receivers as it would with `Select::new` (for fairness)
         // but instead will try each one in priority order.
         let selected = self.select.select();
         let index = selected.index();
         let (_tx, rx) = &self.shared.inner_queues[index];
-        let item = selected.recv(rx)?;
+        // This `expect` can never panic because this channel can never be disconnected
+        // because its sender is right here in `_tx`.
+        let item = selected.recv(rx).expect("disconnected channel");
         self.shared.queued_count.fetch_sub(1, Ordering::Relaxed);
         self.age(index);
-        Ok(item)
+        item
     }
 
     // Promote some messages from priorities lower (higher indices) than `message_consumed_at_index`
@@ -116,9 +118,11 @@ where
             let [higher_priority, lower_priority] = window else {
                 panic!("expected windows of length 2")
             };
-            let (higher_priority_sender, _) = higher_priority;
+            let (higher_priority_sender, _higher_priority_receiver) = higher_priority;
             let (_, lower_priority_receiver) = lower_priority;
             if let Ok(message) = lower_priority_receiver.try_recv() {
+                // This `expect` can never panic because this channel can never be disconnected
+                // because its sender is right here in `_higher_priority_receiver`.
                 higher_priority_sender
                     .send(message)
                     .expect("disconnected channel")
@@ -142,9 +146,9 @@ fn test_priorities() {
     assert_eq!(queue.queued_count(), 4);
 
     let mut receiver = queue.receiver();
-    assert_eq!(receiver.blocking_recv().unwrap(), "p3");
-    assert_eq!(receiver.blocking_recv().unwrap(), "p2");
-    assert_eq!(receiver.blocking_recv().unwrap(), "p2 again");
-    assert_eq!(receiver.blocking_recv().unwrap(), "p1");
+    assert_eq!(receiver.blocking_recv(), "p3");
+    assert_eq!(receiver.blocking_recv(), "p2");
+    assert_eq!(receiver.blocking_recv(), "p2 again");
+    assert_eq!(receiver.blocking_recv(), "p1");
     assert_eq!(queue.queued_count(), 0);
 }

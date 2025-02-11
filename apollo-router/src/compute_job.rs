@@ -78,10 +78,7 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
                 let mut receiver = queue.receiver();
                 loop {
-                    // This `expect` never panics because this channel can never be disconnect:
-                    // the sender is owned by `queue` which we can access here:
-                    let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
-                    let job = receiver.blocking_recv().expect("disconnected channel");
+                    let job = receiver.blocking_recv();
                     job();
                 }
             });
