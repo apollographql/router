@@ -30,6 +30,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use url::Url;
 
 use crate::configuration::shared::Client;
 use crate::error::Error;
@@ -260,6 +261,9 @@ pub(super) struct RouterRequestConf {
     pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
 
 /// What information is passed to a router request/response stage
@@ -279,7 +283,11 @@ pub(super) struct RouterResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
 }
+
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
@@ -299,6 +307,9 @@ pub(super) struct SubgraphRequestConf {
     pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
     /// Send the subgraph request id
     pub(super) subgraph_request_id: bool,
 }
@@ -320,6 +331,9 @@ pub(super) struct SubgraphResponseConf {
     pub(super) service_name: bool,
     /// Send the http status
     pub(super) status_code: bool,
+    /// The url you'd like to offload processing to
+    #[schemars(with = "String")]
+    pub(super) url: Option<Url>,
     /// Send the subgraph request id
     pub(super) subgraph_request_id: bool,
 }
@@ -329,7 +343,8 @@ pub(super) struct SubgraphResponseConf {
 #[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
-    url: String,
+    #[schemars(with = "String")]
+    url: Url,
     client: Option<Client>,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -377,7 +392,7 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         sdl: Arc<String>,
     ) -> router::BoxService
     where
@@ -393,7 +408,10 @@ impl RouterStage {
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
@@ -436,7 +454,10 @@ impl RouterStage {
             let response_config = self.response.clone();
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
-                let coprocessor_url = coprocessor_url.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let http_client = http_client.clone();
                 let response_config = response_config.clone();
 
@@ -516,7 +537,7 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        coprocessor_url: String,
+        coprocessor_url: Url,
         service_name: String,
     ) -> subgraph::BoxService
     where
@@ -533,7 +554,10 @@ impl SubgraphStage {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
             let http_client = http_client.clone();
-            let coprocessor_url = coprocessor_url.clone();
+            let coprocessor_url = request_config
+                .url
+                .clone()
+                .unwrap_or_else(|| coprocessor_url.clone());
             let service_name = service_name.clone();
             AsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
@@ -575,8 +599,11 @@ impl SubgraphStage {
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
-                let coprocessor_url = coprocessor_url.clone();
                 let response_config = response_config.clone();
+                let coprocessor_url = response_config
+                    .url
+                    .clone()
+                    .unwrap_or_else(|| coprocessor_url.clone());
                 let service_name = service_name.clone();
 
                 async move {
@@ -633,7 +660,7 @@ impl SubgraphStage {
 // -----------------------------------------------------------------------------------------
 async fn process_router_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut request: router::Request,
     mut request_config: RouterRequestConf,
@@ -789,7 +816,7 @@ where
 
 async fn process_router_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     sdl: Arc<String>,
     mut response: router::Response,
     response_config: RouterResponseConf,
@@ -983,7 +1010,7 @@ where
 
 async fn process_subgraph_request_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut request: subgraph::Request,
     mut request_config: SubgraphRequestConf,
@@ -1138,7 +1165,7 @@ where
 
 async fn process_subgraph_response_stage<C>(
     http_client: C,
-    coprocessor_url: String,
+    coprocessor_url: Url,
     service_name: String,
     mut response: subgraph::Response,
     response_config: SubgraphResponseConf,
