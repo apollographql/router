@@ -8,7 +8,7 @@ use tokio::sync::oneshot;
 
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
-use crate::ageing_priority_queue::QueueIsFullError;
+use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
@@ -78,7 +78,10 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
                 let mut receiver = queue.receiver();
                 loop {
-                    let job = receiver.blocking_recv();
+                    // This `expect` never panics because this channel can never be disconnect:
+                    // the sender is owned by `queue` which we can access here:
+                    let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
+                    let job = receiver.blocking_recv().expect("disconnected channel");
                     job();
                 }
             });
@@ -101,10 +104,23 @@ where
         // Ignore the error if the oneshot receiver was dropped
         let _ = tx.send(std::panic::catch_unwind(job));
     });
-    queue()
-        .send(priority, job)
-        .map_err(|QueueIsFullError| ComputeBackPressureError)?;
-    Ok(async { rx.await.expect("channel disconnected") })
+    let queue = queue();
+    queue.send(priority, job).map_err(|e| match e {
+        SendError::QueueIsFull => ComputeBackPressureError,
+        SendError::Disconnected => {
+            // This never panics because this channel can never be disconnect:
+            // the receiver is owned by `queue` which we can access here:
+            let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
+            unreachable!()
+        }
+    })?;
+    Ok(async move {
+        // This `expect` never panics because this oneshot channel can never be disconnect:
+        // the sender is owned by `job` which, if we reach here, was successfully sent to the queue.
+        // The queue or thread pool never drop a job without executing it.
+        // When executing, `catch_unwind` ensures that the sender cannot be dropped without sending.
+        rx.await.expect("channel disconnected")
+    })
 }
 
 pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {

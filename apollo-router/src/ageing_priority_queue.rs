@@ -15,7 +15,10 @@ pub(crate) enum Priority {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct QueueIsFullError;
+pub(crate) enum SendError {
+    QueueIsFull,
+    Disconnected,
+}
 
 const INNER_QUEUES_COUNT: usize = Priority::P8 as usize - Priority::P1 as usize + 1;
 
@@ -66,15 +69,16 @@ where
     }
 
     /// Panics if `priority` is not in `AVAILABLE_PRIORITIES`
-    pub(crate) fn send(&self, priority: Priority, message: T) -> Result<(), QueueIsFullError> {
+    pub(crate) fn send(&self, priority: Priority, message: T) -> Result<(), SendError> {
         self.queued_count
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |previous_count| {
                 (previous_count < self.capacity).then_some(previous_count + 1)
             })
-            .map_err(|_| QueueIsFullError)?;
+            .map_err(|_| SendError::QueueIsFull)?;
         let (inner_sender, _) = &self.inner_queues[index_from_priority(priority)];
-        inner_sender.send(message).expect("disconnected channel");
-        Ok(())
+        inner_sender
+            .send(message)
+            .map_err(|crossbeam_channel::SendError(_)| SendError::Disconnected)
     }
 
     pub(crate) fn receiver(&self) -> Receiver<'_, T> {
@@ -93,17 +97,17 @@ impl<T> Receiver<'_, T>
 where
     T: Send + 'static,
 {
-    pub(crate) fn blocking_recv(&mut self) -> T {
+    pub(crate) fn blocking_recv(&mut self) -> Result<T, crossbeam_channel::RecvError> {
         // Because we used `Select::new_biased` above,
         // `select()` will not shuffle receivers as it would with `Select::new` (for fairness)
         // but instead will try each one in priority order.
         let selected = self.select.select();
         let index = selected.index();
         let (_tx, rx) = &self.shared.inner_queues[index];
-        let item = selected.recv(rx).expect("disconnected channel");
+        let item = selected.recv(rx)?;
         self.shared.queued_count.fetch_sub(1, Ordering::Relaxed);
         self.age(index);
-        item
+        Ok(item)
     }
 
     // Promote some messages from priorities lower (higher indices) than `message_consumed_at_index`
@@ -138,9 +142,9 @@ fn test_priorities() {
     assert_eq!(queue.queued_count(), 4);
 
     let mut receiver = queue.receiver();
-    assert_eq!(receiver.blocking_recv(), "p3");
-    assert_eq!(receiver.blocking_recv(), "p2");
-    assert_eq!(receiver.blocking_recv(), "p2 again");
-    assert_eq!(receiver.blocking_recv(), "p1");
+    assert_eq!(receiver.blocking_recv().unwrap(), "p3");
+    assert_eq!(receiver.blocking_recv().unwrap(), "p2");
+    assert_eq!(receiver.blocking_recv().unwrap(), "p2 again");
+    assert_eq!(receiver.blocking_recv().unwrap(), "p1");
     assert_eq!(queue.queued_count(), 0);
 }
