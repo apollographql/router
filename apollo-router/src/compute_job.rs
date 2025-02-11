@@ -106,7 +106,14 @@ where
     });
     let queue = queue();
     queue.send(priority, job).map_err(|e| match e {
-        SendError::QueueIsFull => ComputeBackPressureError,
+        SendError::QueueIsFull => {
+            u64_counter!(
+                "apollo.router.compute_jobs.queue_is_full",
+                "Number of requests rejected because the queue for compute jobs is full",
+                1u64
+            );
+            ComputeBackPressureError
+        }
         SendError::Disconnected => {
             // This never panics because this channel can never be disconnect:
             // the receiver is owned by `queue` which we can access here:
