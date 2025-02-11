@@ -96,11 +96,14 @@ impl LitExpr {
                         );
 
                         let mut s = String::new();
-                        let int_str = int.fragment();
+
                         // Remove leading zeros to avoid failing the stricter
                         // number.parse() below, but allow a single zero.
-                        if let Some(first_non_zero) = int_str.chars().position(|c| c != '0') {
-                            s.push_str(&int_str[first_non_zero..]);
+                        let mut int_chars_without_leading_zeros =
+                            int.fragment().chars().skip_while(|c| *c == '0');
+                        if let Some(first_non_zero) = int_chars_without_leading_zeros.next() {
+                            s.push(first_non_zero);
+                            s.extend(int_chars_without_leading_zeros);
                         } else {
                             s.push('0');
                         }
@@ -342,7 +345,33 @@ mod tests {
             LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
         );
         check_parse("001", LitExpr::Number(serde_json::Number::from(1)));
+        check_parse(
+            "00.1",
+            LitExpr::Number(serde_json::Number::from_f64(0.1).unwrap()),
+        );
         check_parse("0010", LitExpr::Number(serde_json::Number::from(10)));
+        check_parse(
+            "00.10",
+            LitExpr::Number(serde_json::Number::from_f64(0.1).unwrap()),
+        );
+        check_parse("-001 ", LitExpr::Number(serde_json::Number::from(-1)));
+        check_parse(
+            "-00.1",
+            LitExpr::Number(serde_json::Number::from_f64(-0.1).unwrap()),
+        );
+        check_parse(" - 0010 ", LitExpr::Number(serde_json::Number::from(-10)));
+        check_parse(
+            "- 00.10",
+            LitExpr::Number(serde_json::Number::from_f64(-0.1).unwrap()),
+        );
+        check_parse(
+            "007.",
+            LitExpr::Number(serde_json::Number::from_f64(7.0).unwrap()),
+        );
+        check_parse(
+            "-007.",
+            LitExpr::Number(serde_json::Number::from_f64(-7.0).unwrap()),
+        );
 
         check_parse("true", LitExpr::Bool(true));
         check_parse(" true ", LitExpr::Bool(true));
