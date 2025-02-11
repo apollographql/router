@@ -419,9 +419,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 break;
             }
 
-            // capture options in statistics
-            let options_count = &self.parameters.statistics.evaluated_plan_options;
-            options_count.set(options_count.get() + followups_for_option.len());
+            let evaluated_options_count = &self.parameters.statistics.evaluated_plan_options;
+            let simultaneous_indirect_path_count =
+                followups_for_option.iter().map(|p| p.len()).sum();
+            evaluated_options_count
+                .set(evaluated_options_count.get() + simultaneous_indirect_path_count);
 
             new_options.extend(followups_for_option);
             if let Some(options_limit) = self.parameters.config.debug.paths_limit {
