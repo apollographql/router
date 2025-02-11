@@ -40,6 +40,20 @@ pub(crate) enum LitExpr {
     Object(IndexMap<WithRange<Key>, WithRange<LitExpr>>),
     Array(Vec<WithRange<LitExpr>>),
     Path(PathSelection),
+
+    // Whereas the LitExpr::Path variant wraps a PathSelection that obeys the
+    // parsing rules of the outer selection syntax (i.e. default JSONSelection
+    // syntax, not LitExpr syntax), this LitExpr::LitPath variant can be parsed
+    // only as part of a LitExpr, and allows the value at the root of the path
+    // to be any LitExpr literal expression, without needing a $(...) wrapper,
+    // allowing you to write "asdf"->slice(0, 2) when you're already in an
+    // expression parsing context, rather than $(asdf)->slice(0, 2).
+    //
+    // The WithRange<LitExpr> argument is the root expression (never a
+    // LitExpr::Path), and the WithRange<PathList> argument represents the rest
+    // of the path, which is never PathList::Empty, because that would mean the
+    // LitExpr could stand on its own, using one of the other variants.
+    LitPath(WithRange<LitExpr>, WithRange<PathList>),
 }
 
 impl LitExpr {
@@ -59,6 +73,10 @@ impl LitExpr {
                 // initial $(...) expression wrapper, so you can write
                 // $(123->add(111)) instead of $($(123)->add(111)) when you're
                 // already in a LitExpr parsing context.
+                //
+                // We begin parsing the path at depth 1 rather than 0 because
+                // we've already parsed the initial literal at depth 0, so the
+                // subpath should obey the parsing rules for for depth > 0.
                 match PathList::parse_with_depth(suffix, 1) {
                     Ok((remainder, subpath)) => {
                         if matches!(subpath.as_ref(), PathList::Empty) {
@@ -67,28 +85,7 @@ impl LitExpr {
                         let full_range = merge_ranges(initial_literal.range(), subpath.range());
                         Ok((
                             remainder,
-                            WithRange::new(
-                                Self::Path(PathSelection {
-                                    // We use the same PathList::Expr variant to
-                                    // represent LitPath and ExprPath, which
-                                    // means LitPath is effectively syntax sugar
-                                    // for ExprPath (which is also legal within
-                                    // a LitExpr parsing context).
-                                    //
-                                    // The cost of this reuse is that naively
-                                    // pretty-printing a LitPath will include
-                                    // the $(...) wrapper, though we could track
-                                    // the selection/expression context during
-                                    // pretty printing to enable printing
-                                    // PathList::Expr without the $(...) in an
-                                    // expression context.
-                                    path: WithRange::new(
-                                        PathList::Expr(initial_literal, subpath),
-                                        full_range.clone(),
-                                    ),
-                                }),
-                                full_range.clone(),
-                            ),
+                            WithRange::new(Self::LitPath(initial_literal, subpath), full_range),
                         ))
                     }
                     // If we failed to parse a path, return initial_literal as-is.
@@ -320,6 +317,10 @@ impl ExternalVarPaths for LitExpr {
             }
             Self::Path(path) => {
                 paths.extend(path.external_var_paths());
+            }
+            Self::LitPath(literal, subpath) => {
+                paths.extend(literal.external_var_paths());
+                paths.extend(subpath.external_var_paths());
             }
         }
         paths
@@ -706,18 +707,15 @@ mod tests {
             "$('a'->first)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Expr(
-                            LitExpr::String("a".to_string()).into_with_range(),
-                            PathList::Method(
-                                WithRange::new("first".to_string(), None),
-                                None,
-                                PathList::Empty.into_with_range(),
-                            )
-                            .into_with_range(),
+                    LitExpr::LitPath(
+                        LitExpr::String("a".to_string()).into_with_range(),
+                        PathList::Method(
+                            WithRange::new("first".to_string(), None),
+                            None,
+                            PathList::Empty.into_with_range(),
                         )
                         .into_with_range(),
-                    })
+                    )
                     .into_with_range(),
                     PathList::Empty.into_with_range(),
                 )
@@ -750,22 +748,19 @@ mod tests {
             "$(1234->add(1111))",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Expr(
-                            LitExpr::Number(serde_json::Number::from(1234)).into_with_range(),
-                            PathList::Method(
-                                WithRange::new("add".to_string(), None),
-                                Some(MethodArgs {
-                                    args: vec![LitExpr::Number(serde_json::Number::from(1111))
-                                        .into_with_range()],
-                                    range: None,
-                                }),
-                                PathList::Empty.into_with_range(),
-                            )
-                            .into_with_range(),
+                    LitExpr::LitPath(
+                        LitExpr::Number(serde_json::Number::from(1234)).into_with_range(),
+                        PathList::Method(
+                            WithRange::new("add".to_string(), None),
+                            Some(MethodArgs {
+                                args: vec![LitExpr::Number(serde_json::Number::from(1111))
+                                    .into_with_range()],
+                                range: None,
+                            }),
+                            PathList::Empty.into_with_range(),
                         )
                         .into_with_range(),
-                    })
+                    )
                     .into_with_range(),
                     PathList::Empty.into_with_range(),
                 )
@@ -879,23 +874,20 @@ mod tests {
             "$([1,2,3]->last)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Expr(
-                            LitExpr::Array(vec![
-                                LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
-                                LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
-                                LitExpr::Number(serde_json::Number::from(3)).into_with_range(),
-                            ])
-                            .into_with_range(),
-                            PathList::Method(
-                                WithRange::new("last".to_string(), None),
-                                None,
-                                PathList::Empty.into_with_range(),
-                            )
-                            .into_with_range(),
+                    LitExpr::LitPath(
+                        LitExpr::Array(vec![
+                            LitExpr::Number(serde_json::Number::from(1)).into_with_range(),
+                            LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                            LitExpr::Number(serde_json::Number::from(3)).into_with_range(),
+                        ])
+                        .into_with_range(),
+                        PathList::Method(
+                            WithRange::new("last".to_string(), None),
+                            None,
+                            PathList::Empty.into_with_range(),
                         )
                         .into_with_range(),
-                    })
+                    )
                     .into_with_range(),
                     PathList::Empty.into_with_range(),
                 )
@@ -934,29 +926,26 @@ mod tests {
             "$({ a: 'ay', b: 2 }.a)",
             LitExpr::Path(PathSelection {
                 path: PathList::Expr(
-                    LitExpr::Path(PathSelection {
-                        path: PathList::Expr(
-                            LitExpr::Object({
-                                let mut map = IndexMap::default();
-                                map.insert(
-                                    Key::field("a").into_with_range(),
-                                    LitExpr::String("ay".to_string()).into_with_range(),
-                                );
-                                map.insert(
-                                    Key::field("b").into_with_range(),
-                                    LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
-                                );
-                                map
-                            })
-                            .into_with_range(),
-                            PathList::Key(
+                    LitExpr::LitPath(
+                        LitExpr::Object({
+                            let mut map = IndexMap::default();
+                            map.insert(
                                 Key::field("a").into_with_range(),
-                                PathList::Empty.into_with_range(),
-                            )
-                            .into_with_range(),
+                                LitExpr::String("ay".to_string()).into_with_range(),
+                            );
+                            map.insert(
+                                Key::field("b").into_with_range(),
+                                LitExpr::Number(serde_json::Number::from(2)).into_with_range(),
+                            );
+                            map
+                        })
+                        .into_with_range(),
+                        PathList::Key(
+                            Key::field("a").into_with_range(),
+                            PathList::Empty.into_with_range(),
                         )
                         .into_with_range(),
-                    })
+                    )
                     .into_with_range(),
                     PathList::Empty.into_with_range(),
                 )

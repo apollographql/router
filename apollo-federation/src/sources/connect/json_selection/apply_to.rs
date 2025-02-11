@@ -761,6 +761,9 @@ impl ApplyToInternal for WithRange<LitExpr> {
                 (Some(JSON::Array(output)), errors)
             }
             LitExpr::Path(path) => path.apply_to_path(data, vars, input_path),
+            LitExpr::LitPath(literal, subpath) => literal
+                .apply_to_path(data, vars, input_path)
+                .and_then_collecting_errors(|value| subpath.apply_to_path(value, vars, input_path)),
         }
     }
 
@@ -819,6 +822,21 @@ impl ApplyToInternal for WithRange<LitExpr> {
 
             LitExpr::Path(path) => {
                 path.compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id)
+            }
+
+            LitExpr::LitPath(literal, subpath) => {
+                let literal_shape = literal.compute_output_shape(
+                    input_shape.clone(),
+                    dollar_shape.clone(),
+                    named_var_shapes,
+                    source_id,
+                );
+                subpath.compute_output_shape(
+                    literal_shape,
+                    dollar_shape,
+                    named_var_shapes,
+                    source_id,
+                )
             }
         }
     }
