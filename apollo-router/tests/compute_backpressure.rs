@@ -50,6 +50,11 @@ async fn test_compute_backpressure() {
     let start = std::time::Instant::now();
     let response = call!("{__typename} # 2");
     let latency = start.elapsed();
+    assert!(
+        latency < std::time::Duration::from_millis(100),
+        "latency = {latency:?}, status = {:?}",
+        &response["status"]
+    );
     insta::assert_yaml_snapshot!(response, @r###"
         status: 503
         body:
@@ -58,10 +63,6 @@ async fn test_compute_backpressure() {
               extensions:
                 code: REQUEST_CONCURRENCY_LIMITED
     "###);
-    assert!(
-        latency < std::time::Duration::from_millis(100),
-        "{latency:?}"
-    );
 
     // Wait for the queue to drain
     tokio::time::sleep(duration * 2).await;
