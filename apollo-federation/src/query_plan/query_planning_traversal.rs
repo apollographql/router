@@ -421,7 +421,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
             let evaluated_options_count = &self.parameters.statistics.evaluated_plan_options;
             let simultaneous_indirect_path_count =
-                followups_for_option.iter().map(|p| p.len()).sum();
+                followups_for_option.iter().map(|p| p.paths.0.len()).sum();
             evaluated_options_count
                 .set(evaluated_options_count.get() + simultaneous_indirect_path_count);
 
