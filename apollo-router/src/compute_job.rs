@@ -19,7 +19,6 @@ const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
 /// as the kernel’s scheduler distributes time to it or Tokio or other threads.
 fn thread_pool_size() -> usize {
     // This environment variable is intentionally undocumented.
-    // See also APOLLO_ROUTER_IO_THREADS in apollo-router/src/executable.rs
     if let Some(threads) = std::env::var("APOLLO_ROUTER_COMPUTE_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
@@ -37,7 +36,7 @@ fn thread_pool_size() -> usize {
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 
-pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
+fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
     QUEUE.get_or_init(|| {
         let pool_size = thread_pool_size();
