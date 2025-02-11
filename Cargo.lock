@@ -3084,9 +3084,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-proto"
-version = "0.24.1"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07698b8420e2f0d6447a436ba999ec85d8fbf2a398bbd737b82cac4a2e96e512"
+checksum = "2ad3d6d98c648ed628df039541a5577bee1a7c83e9e16fe3dbedeea4cdfeb971"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -3095,7 +3095,7 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "idna 0.4.0",
+ "idna",
  "ipnet",
  "once_cell",
  "rand 0.8.5",
@@ -3491,16 +3491,6 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "idna"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d20d6b07bfbc108882d88ed8e37d39636dcc260e15e30c45e6ba089610b917c"
-dependencies = [
- "unicode-bidi",
- "unicode-normalization",
-]
-
-[[package]]
-name = "idna"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
@@ -3863,12 +3853,17 @@ version = "0.16.2+1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee4126d8b4ee5c9d9ea891dd875cfdc1e9d0950437179104b183d7d8a74d24e8"
 dependencies = [
+<<<<<<< HEAD
  "cc",
  "libc",
  "libssh2-sys",
  "libz-sys",
  "openssl-sys",
  "pkg-config",
+=======
+ "cfg-if",
+ "windows-targets 0.48.5",
+>>>>>>> 85976da3 (fix: fixed the compliance error (RUSTSEC-2025-0006) (#6756))
 ]
 
 [[package]]
@@ -5101,11 +5096,26 @@ version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
+<<<<<<< HEAD
  "anyhow",
  "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+=======
+ "heck 0.4.1",
+ "itertools 0.13.0",
+ "log",
+ "multimap 0.10.0",
+ "once_cell",
+ "petgraph",
+ "prettyplease",
+ "prost 0.13.4",
+ "prost-types 0.13.4",
+ "regex",
+ "syn 2.0.90",
+ "tempfile",
+>>>>>>> 85976da3 (fix: fixed the compliance error (RUSTSEC-2025-0006) (#6756))
 ]
 
 [[package]]
@@ -7122,18 +7132,22 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "unicode-bidi"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08f95100a766bf4f8f28f90d77e0a5461bbdb219042e7679bebe79004fed8d75"
 
 [[package]]
+=======
+>>>>>>> 85976da3 (fix: fixed the compliance error (RUSTSEC-2025-0006) (#6756))
 name = "unicode-ident"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3354b9ac3fae1ff6755cb6db53683adb661634f67557942dea4facebec0fee4b"
 
 [[package]]
+<<<<<<< HEAD
 name = "unicode-normalization"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7143,6 +7157,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> 85976da3 (fix: fixed the compliance error (RUSTSEC-2025-0006) (#6756))
 name = "unicode-width"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7170,7 +7186,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32f8b686cadd1473f4bd0117a5d28d36b1ade384ea9b5069a1c40aefed7fda60"
 dependencies = [
  "form_urlencoded",
- "idna 1.0.3",
+ "idna",
  "percent-encoding",
  "serde",
 ]
