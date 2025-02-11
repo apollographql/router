@@ -96,7 +96,14 @@ impl LitExpr {
                         );
 
                         let mut s = String::new();
-                        s.push_str(int.fragment());
+                        let int_str = int.fragment();
+                        // Remove leading zeros to avoid failing the stricter
+                        // number.parse() below, but allow a single zero.
+                        if let Some(first_non_zero) = int_str.chars().position(|c| c != '0') {
+                            s.push_str(&int_str[first_non_zero..]);
+                        } else {
+                            s.push('0');
+                        }
 
                         let full_range = if let Some((_, dot, _, frac)) = frac {
                             let frac_range = merge_ranges(
@@ -277,6 +284,7 @@ mod tests {
     use crate::sources::connect::json_selection::location::new_span;
     use crate::sources::connect::json_selection::PathList;
 
+    #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {
         match LitExpr::parse(new_span(input)) {
             Ok((remainder, parsed)) => {
@@ -317,6 +325,24 @@ mod tests {
             "-123.",
             LitExpr::Number(serde_json::Number::from_f64(-123.0).unwrap()),
         );
+        check_parse("00", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            "-00",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse("0", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            "-0",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse(" 00 ", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(" 0 ", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            " - 0 ",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse("001", LitExpr::Number(serde_json::Number::from(1)));
+        check_parse("0010", LitExpr::Number(serde_json::Number::from(10)));
 
         check_parse("true", LitExpr::Bool(true));
         check_parse(" true ", LitExpr::Bool(true));
