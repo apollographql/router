@@ -3,6 +3,8 @@ This document is an investigation and overview of our tower layers, and layer-li
 
 This is ordered from the point of view of a request to the router, starting at the outer boundary and going "deeper" into the layer onion.
 
+Keep in mind that plugins can add hooks at various points of the pipeline. So a single plugin can have several entries in the list below. Also, requests flow from top to bottom, but responses flow bottom to top.
+
 Still missing are the execution and subgraph client parts of the onion, and layers added by plugins.
 
 ## Axum
@@ -29,7 +31,7 @@ Now, we enter `handle_graphql`.
 
 - Response Compression
   - This is manually written inside `handle_graphql`, but could conceptually be considered a layer.
-  - I don't see an obvious reason for why this could not use a standard tower-http compression layer.
+  - I don't see an obvious reason for why this could not use a standard tower-http compression layer?
 - Then we create (clone) a router service and oneshot it.
 
 ## Router service
