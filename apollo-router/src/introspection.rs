@@ -160,10 +160,9 @@ impl IntrospectionCache {
         let schema = schema.clone();
         let doc = doc.clone();
         let priority = compute_job::Priority::P1; // Low priority
-        let response = compute_job::execute(
-            priority,
-            move || Self::execute_introspection(max_depth, &schema, &doc),
-        )?
+        let response = compute_job::execute(priority, move || {
+            Self::execute_introspection(max_depth, &schema, &doc)
+        })?
         // `expect()` propagates any panic that potentially happens in the closure, but:
         //
         // * We try to avoid such panics in the first place and consider them bugs

@@ -128,12 +128,10 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, || {
-            std::thread::current().id()
-        })
-        .unwrap()
-        .await
-        .unwrap();
+        let job_thread = execute(Priority::P4, || std::thread::current().id())
+            .unwrap()
+            .await
+            .unwrap();
         assert_ne!(job_thread, test_thread)
     }
 
