@@ -530,7 +530,7 @@ where
                                     });
                                 } else {
                                     tokio::spawn(async move {
-                                        entry.send(Ok(content)).await;
+                                        entry.send(Ok(Ok(content))).await;
                                     });
                                 }
                             }
