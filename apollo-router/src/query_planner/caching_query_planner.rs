@@ -21,6 +21,7 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
+use crate::cache::EntryError;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
@@ -602,10 +603,11 @@ where
                 )))
             })?
         } else {
-            let res = entry
-                .get()
-                .await
-                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
+            let res = entry.get().await.map_err(|e| match e {
+                EntryError::IsFirst | // IsFirst should be unreachable
+                EntryError::RecvError => QueryPlannerError::UnhandledPlannerResult.into(),
+                EntryError::UncachedError(e) => CacheResolverError::Backpressure(e),
+            })?;
 
             match res {
                 Ok(content) => {
