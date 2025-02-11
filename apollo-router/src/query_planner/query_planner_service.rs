@@ -327,7 +327,7 @@ impl QueryPlannerService {
                 evaluated_plan_count
             );
             u64_histogram!(
-                "apollo.router.query_planning.plan.evaluated_options",
+                "apollo.router.query_planning.plan.evaluated_paths",
                 "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
                 evaluated_plan_paths
             );
