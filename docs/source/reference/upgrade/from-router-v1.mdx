@@ -16,12 +16,12 @@ Before making any changes, auto-upgrade your configuration. This will remove opt
 
 Check the changes that will be applied using:
 ```bash
-router config upgrade --diff --config-path router.yaml
+router config upgrade --diff router.yaml
 ```
 
 Then apply the changes using:
 ```bah
-router config upgrade --config-path router.yaml > router.next.yaml
+router config upgrade router.yaml > router.next.yaml
 mv router.next.yaml router.yaml
 ```
 
