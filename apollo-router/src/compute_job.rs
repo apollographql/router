@@ -14,13 +14,21 @@ use crate::metrics::meter_provider;
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
 const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
 
-/// Let this thread pool use all available resources if it can.
+/// By default, let this thread pool use all available resources if it can.
 /// In the worst case, we’ll have moderate context switching cost
 /// as the kernel’s scheduler distributes time to it or Tokio or other threads.
 fn thread_pool_size() -> usize {
-    std::thread::available_parallelism()
-        .expect("available_parallelism() failed")
-        .get()
+    // This environment variable is intentionally undocumented.
+    if let Some(threads) = std::env::var("APOLLO_ROUTER_COMPUTE_THREADS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        threads
+    } else {
+        std::thread::available_parallelism()
+            .expect("available_parallelism() failed")
+            .get()
+    }
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
