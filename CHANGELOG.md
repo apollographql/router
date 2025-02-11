@@ -4,6 +4,50 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.0.0] - 2025-02-19
+
+This is a major release of the router containing significant new functionality and improvements to behaviour. This changelog entry summarises the work, but for details please refer to:
+
+Learn more about [upgrading from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+Learn more about [what's new in 2.0(TBD)](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+
+## ❗ BREAKING ❗
+
+There are a number of breaking improvements to the router in this major release. Most of them are in the areas of configuration and observability and details are available in the upgrade guide.
+
+## 🚀 Features
+
+This release of the router includes many new features, including:
+
+ - Simplified integration of REST services using Apollo Connectors
+ - Predictable Resource Utilization and Availability with Back Pressure 
+ - Apollo operation usage reporting now defaults to using OpenTelemetry
+ - Metrics now all follow OpenTelemetry naming conventions.
+ - Improved validation of CORS configurations, preventing silent failures.
+ - Documentation for Context keys, improving usability for advanced customers.
+
+More details about any of these new features can be found in the What's New guide.
+
+## 📃 Configuration
+
+Configuration changes have been minimised, however there are a number of changes in this release. Breaking changes to configuration are documented in the upgrade guide. Configuration for new features can be found from the What's New guide.
+
+## 🛠 Maintenance
+
+Many external dependencies (crates) have been updated to modern versions where possible. Major upgrades include:
+ - axum
+ - http
+ - hyper
+ - opentelemetry
+ - redis
+
+Keeping these crates up to date helps to keep the router secure and stable. As the Rust ecosystem evolves, so does the Router.
+
+## 📚 Documentation
+
+Learn more about [upgrading from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+Learn more about [what's new in 2.0(TBD)](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+
 # [2.0.0-preview.0] - 2024-10-01
 
 Learn more about [migrating from 1.x to 2.0](https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1).
