@@ -205,6 +205,8 @@ impl From<QueryPlannerError> for FetchError {
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
+    /// {0}
+    Backpressure(crate::compute_job::ComputeBackPressureError),
     /// batch processing failed: {0}
     BatchingError(String),
 }
@@ -217,6 +219,7 @@ impl IntoGraphQLErrors for CacheResolverError {
                 .clone()
                 .into_graphql_errors()
                 .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
+            CacheResolverError::Backpressure(e) => Ok(vec![e.to_graphql_error()]),
             CacheResolverError::BatchingError(msg) => Ok(vec![Error::builder()
                 .message(msg)
                 .extension_code("BATCH_PROCESSING_FAILED")

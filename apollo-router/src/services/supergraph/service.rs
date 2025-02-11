@@ -216,16 +216,19 @@ async fn service_call(
     .await
     {
         Ok(resp) => resp,
-        Err(err) => match err.into_graphql_errors() {
-            Ok(gql_errors) => {
-                return Ok(SupergraphResponse::infallible_builder()
-                    .context(context)
-                    .errors(gql_errors)
-                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                    .build());
+        Err(err) => {
+            let status = StatusCode::BAD_REQUEST;
+            match err.into_graphql_errors() {
+                Ok(gql_errors) => {
+                    return Ok(SupergraphResponse::infallible_builder()
+                        .context(context)
+                        .errors(gql_errors)
+                        .status_code(status) // If it's a graphql error we return a status code 400
+                        .build());
+                }
+                Err(err) => return Err(err.into()),
             }
-            Err(err) => return Err(err.into()),
-        },
+        }
     };
 
     if !errors.is_empty() {

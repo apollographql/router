@@ -8,6 +8,7 @@ use tokio::sync::oneshot;
 
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
+use crate::ageing_priority_queue::QueueIsFullError;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
@@ -21,6 +22,51 @@ fn thread_pool_size() -> usize {
     std::thread::available_parallelism()
         .expect("available_parallelism() failed")
         .get()
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ComputeJobKind {
+    ParsingAndValidation,
+    QueryPlanning,
+    Introspection,
+}
+
+/// Compute job queue is full
+#[derive(thiserror::Error, Debug, displaydoc::Display, Clone)]
+pub(crate) struct ComputeBackPressureError(pub(crate) ComputeJobKind);
+
+#[derive(Debug)]
+pub(crate) enum MaybeBackPressureError<E> {
+    /// Doing the same request again later would result in the same error (e.g. invalid query).
+    ///
+    /// This error can be cached.
+    PermanentError(E),
+
+    /// Doing the same request again later might work.
+    ///
+    /// This error must not be cached.
+    TemporaryError(ComputeBackPressureError),
+}
+
+impl<E> From<E> for MaybeBackPressureError<E> {
+    fn from(error: E) -> Self {
+        Self::PermanentError(error)
+    }
+}
+
+impl ComputeBackPressureError {
+    pub(crate) fn to_graphql_error(&self) -> crate::graphql::Error {
+        crate::graphql::Error::builder()
+            .message("Your request has been concurrency limited during query processing")
+            .extension_code("REQUEST_CONCURRENCY_LIMITED")
+            .build()
+    }
+}
+
+impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
+    fn into_graphql_errors(self) -> Result<Vec<crate::graphql::Error>, Self> {
+        Ok(vec![self.to_graphql_error()])
+    }
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
@@ -44,15 +90,16 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 }
             });
         }
-        AgeingPriorityQueue::soft_bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
+        AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
 }
 
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
     priority: Priority,
+    job_kind: ComputeJobKind,
     job: F,
-) -> impl Future<Output = std::thread::Result<T>>
+) -> Result<impl Future<Output = std::thread::Result<T>>, ComputeBackPressureError>
 where
     F: FnOnce() -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
@@ -62,12 +109,10 @@ where
         // Ignore the error if the oneshot receiver was dropped
         let _ = tx.send(std::panic::catch_unwind(job));
     });
-    queue().send(priority, job);
-    async { rx.await.expect("channel disconnected") }
-}
-
-pub(crate) fn is_full() -> bool {
-    queue().is_full()
+    queue()
+        .send(priority, job)
+        .map_err(|QueueIsFullError| ComputeBackPressureError(job_kind))?;
+    Ok(async { rx.await.expect("channel disconnected") })
 }
 
 pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
@@ -91,9 +136,12 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, || std::thread::current().id())
-            .await
-            .unwrap();
+        let job_thread = execute(Priority::P4, ComputeJobKind::Introspection, || {
+            std::thread::current().id()
+        })
+        .unwrap()
+        .await
+        .unwrap();
         assert_ne!(job_thread, test_thread)
     }
 
@@ -103,14 +151,16 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, || {
+        let one = execute(Priority::P8, ComputeJobKind::Introspection, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1
-        });
-        let two = execute(Priority::P8, || {
+        })
+        .unwrap();
+        let two = execute(Priority::P8, ComputeJobKind::Introspection, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
-        });
+        })
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
         assert_eq!(one.await.unwrap(), 1);
         assert_eq!(two.await.unwrap(), 2);
