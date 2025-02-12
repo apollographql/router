@@ -42,7 +42,6 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
-use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
@@ -549,7 +548,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
     }
 }
 
