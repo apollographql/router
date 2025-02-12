@@ -20,7 +20,7 @@ use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
-
+use tracing::Instrument;
 use super::subgraph::SubgraphRequestId;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
@@ -28,6 +28,7 @@ use crate::query_planner::QueryPlan;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::Context;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -299,14 +300,41 @@ where
             .header(CONTENT_TYPE, "application/json")
             .body(router::body::from_bytes(serde_json::to_vec(&self)?))?;
 
+        let schema_uri = request.uri();
+        let host = schema_uri.host().unwrap_or_default();
+        let port = schema_uri.port_u16().unwrap_or_else(|| {
+            let scheme = schema_uri.scheme_str();
+            if scheme == Some("https") {
+                443
+            } else if scheme == Some("http") {
+                80
+            } else {
+                0
+            }
+        });
+        let path = schema_uri.path();
+
+        let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
+            "otel.kind" = "CLIENT",
+            "net.peer.name" = %host,
+            "net.peer.port" = %port,
+            "http.route" = %path,
+            "http.url" = %schema_uri,
+            "net.transport" = "ip_tcp",
+            //"apollo.subgraph.name" = %service_name,
+            //"graphql.operation.name" = %operation_name,
+        );
+
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &prepare_context(tracing::span::Span::current().context()),
+                &prepare_context(http_req_span.context()),
                 &mut crate::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 
-        let response = client.call(request).await.map_err(BoxError::from)?;
+        let response = client.call(request)
+            .instrument(http_req_span)
+            .await.map_err(BoxError::from)?;
         router::body::into_bytes(response.into_body())
             .await
             .map_err(BoxError::from)
