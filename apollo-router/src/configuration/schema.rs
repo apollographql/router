@@ -244,7 +244,7 @@ pub(crate) fn validate_yaml_configuration(
         }
 
         if !errors.is_empty() {
-            tracing::warn!("Configuration had errors. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1");
+            tracing::warn!("Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1");
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "configuration had errors",
                 error: format!("\n{errors}"),
@@ -276,7 +276,7 @@ pub(crate) fn validate_yaml_configuration(
         // It might mean you forgot to update
         // `impl<'de> serde::Deserialize<'de> for Configuration
         // In `/apollo-router/src/configuration/mod.rs`
-        tracing::warn!("Configuration had errors. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1");
+        tracing::warn!("Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1");
         return Err(ConfigurationError::InvalidConfiguration {
             message: "unknown fields",
             error: format!(
