@@ -1,14 +1,12 @@
 ---
 title: What's New in GraphOS Router 1.x
 subtitle: ""
-description: Learn about Apollo GraphOS Router v1.x Long Term Support (LTS) 
+description: Learn about Apollo GraphOS Router 1.x, including its Long-Term Support (LTS) release status, new features, and how to upgrade to it
 ---
-
-GraphOS Router v{products.router.version("lts_1_latest").version} is the Apollo runtime platform.
 
 ## Release status of router 1.x
 
-GraphOS Router v1.x is in **Maintenance** with latest version {products.router.version("lts_1_latest").version}.
+GraphOS Router v1.x is in [**Maintenance**](/graphos/reference/router-release-lifecycle#maintenance) with latest version {products.router.version("lts_1_latest").version}.
 
 | Current Status | Release Date | Latest Minor | Active Date    | Maintenance Date | End of Life Date |
 | -------------- | ------------ | ------------ | -------------- | ---------------- | ---------------- |
@@ -31,10 +29,14 @@ Refer to the [v{products.router.version("lts_1_latest").version} changelog](http
 
 If you are upgrading to v{products.router.version("lts_1_latest").version} requires the following:
 
-- **Upgrade your supergraphs to Federation v2**. 
+- **Upgrade your supergraphs to Federation v2**. Follow the steps in the [Federation 2 upgrade guide](/graphos/reference/migration/to-federation-version-2). 
 
-   Federation v2.10 will be the last supported federation version for router 1.x LTS.
+<Note>
+
+Federation v2.10 is planned to be the last supported federation version for router v1.x. 
+
+</Note>
 
 ## Upgrading to latest router
 
-The latest router version is v{products.router.version("lts_1_latest").version}. To upgrade to v{products.router.version("lts_1_latest").version}, follow the [upgrade guide from router 1.x to 2.x](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+The latest router version is v{products.router.version("lts_2_latest").version}. To upgrade to v{products.router.version("lts_2_latest").version}, follow the [upgrade guide from router 1.x to 2.x](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
