@@ -136,7 +136,7 @@ coprocessor:
 
 ### Context configuration
 
-You can configure what you want to send from the context to your coprocessor. By default it's disabled (`none`) and doesn't send any context keys to the coprocessor. You now have the ability to give an array
+You can configure what you want to send from the context to your coprocessor. By default it's disabled (`false`) and doesn't send any context keys to the coprocessor. You now have the ability to give an array
 containing all the context keys you want to send to your coprocessor. Sending only a selective list of context keys will increase the performances because it will lower the size of payloads between the router and coprocessor.
 You can also set `context: deprecated` if you still want to use deprecated context key names from router 1.x. If you want to pass all context keys with new naming just set `context: all`.
 
@@ -145,6 +145,9 @@ Example:
 ```yaml title="router.yaml"
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
+  router:
+    request:
+      context: false # Do not send any context entries
   supergraph:
     request:
       headers: true

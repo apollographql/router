@@ -361,6 +361,9 @@ coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
   supergraph:
     request:
+      context: false # Do not send any context entries
+  supergraph:
+    request:
       headers: true
       context: # It will only send these 2 context keys to your coprocessor
         selective:
@@ -377,7 +380,7 @@ coprocessor:
         context: deprecated # It will send all the context keys with deprecated names (1.x version)
 ```
 
-So if you don't want to change anything in your coprocessor you can switch `context: true` to `context: deprecated`. And if it was `context: false` it will be `context: none`.
+So if you don't want to change anything in your coprocessor you can switch `context: true` to `context: deprecated`.
 
 <Note>
     If you use the `selective` configuration, you'll have to specify new context key names (>=2.x) it doesn't work with deprecated keys. So for example if you try to specify `operation_name` instead of `apollo::supergraph::operation_name` it won't map to the new context key.

@@ -365,19 +365,16 @@ pub(super) enum ContextConf {
 
 impl Default for ContextConf {
     fn default() -> Self {
-        Self::NewContextConf(NewContextConf::default())
+        Self::Deprecated(false)
     }
 }
 
 /// Configures the context
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Default)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(super) enum NewContextConf {
     /// Send all context keys to coprocessor
     All,
-    #[default]
-    /// Don't send any context keys to coprocessor
-    None,
     /// Send all context keys using deprecated names (from router 1.x) to coprocessor
     Deprecated,
     /// Only send the list of context keys to coprocessor
@@ -411,7 +408,7 @@ impl ContextConf {
 
                 Some(new_ctx)
             }
-            Self::NewContextConf(NewContextConf::None) | Self::Deprecated(false) => None,
+            Self::Deprecated(false) => None,
         }
     }
 }

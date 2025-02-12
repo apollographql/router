@@ -577,7 +577,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::None),
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
@@ -711,7 +711,7 @@ mod tests {
         let execution_stage = ExecutionStage {
             request: ExecutionRequestConf {
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::None),
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,

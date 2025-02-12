@@ -604,7 +604,7 @@ mod tests {
             request: SupergraphRequestConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::None),
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
@@ -746,7 +746,7 @@ mod tests {
                 ])
                 .into(),
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::None),
+                context: ContextConf::Deprecated(false),
                 body: true,
                 sdl: false,
                 method: false,
