@@ -8,9 +8,15 @@ context:
 
 ## Standard metric instruments
 
-GraphOS Router and Apollo Router Core provide a set of non-configurable metric instruments that expose detailed information about the router's request lifecycle.
+GraphOS Router and Apollo Router Core provide a set of standard router instruments that expose detailed information about the router's request lifecycle. You can consume the metrics they capture by configuring a [metrics exporter](/router/configuration/telemetry/exporters/metrics/overview).
 
-These instruments can be consumed by configuring a [metrics exporter](/router/configuration/telemetry/exporters/metrics/overview).
+Standard router instruments are different than OpenTelemetry (OTel) instruments or custom instruments:
+
+- Router instruments provide standard metrics about the router request lifeycle and have names starting with `apollo.router` or `apollo_router`.
+- OTel instruments provide metrics about the HTTP lifecycle and have names starting with `http`.
+- Custom instruments provide customized metrics about the router request lifecycle.
+
+The rest of this reference lists the available standard router instruments.
 
 ### GraphQL
 
