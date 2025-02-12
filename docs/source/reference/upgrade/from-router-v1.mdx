@@ -302,7 +302,13 @@ Learn more about configuring [usage reporting via OTLP](/router/configuration/te
 
 The router request context is used to share data across stages of the request pipeline. The keys have been renamed to prevent conflicts and to better indicate which pipeline stage or plugin populates the data. 
 
-**Upgrade step**: if you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, update your context keys to account for the new names:
+<Note>
+
+You can continue using deprecated context key names from router 1.x if you configure `context: deprecated` in your router. For details, see [Context configuration](/graphos/routing/customization/coprocessor#context-configuration).
+
+</Note>
+
+**Upgrade step**: if you access context entries in a custom plugin, Rhai script, coprocessor, or telemetry selector, you can update your context keys to account for the new names:
 
 | Previous context key name | New context key name |
 | ------------------------- | -------------------- |
