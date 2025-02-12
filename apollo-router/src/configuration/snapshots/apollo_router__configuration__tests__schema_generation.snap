@@ -2125,6 +2125,19 @@ snapshot_kind: text
       },
       "type": "object"
     },
+    "ContextConf": {
+      "anyOf": [
+        {
+          "description": "Deprecated configuration using a boolean",
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/NewContextConf",
+          "description": "#/definitions/NewContextConf"
+        }
+      ],
+      "description": "Configures the context"
+    },
     "Cors": {
       "additionalProperties": false,
       "description": "Cross origin request configuration.",
@@ -2874,9 +2887,8 @@ snapshot_kind: text
           "type": "boolean"
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -2911,9 +2923,8 @@ snapshot_kind: text
           "type": "boolean"
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -3951,6 +3962,9 @@ snapshot_kind: text
       ],
       "type": "object"
     },
+    "LicenseEnforcementConfig": {
+      "type": "object"
+    },
     "ListLength": {
       "oneOf": [
         {
@@ -4259,6 +4273,42 @@ snapshot_kind: text
     "MyTestPluginConfig": {
       "description": "Config for the test plugin",
       "type": "object"
+    },
+    "NewContextConf": {
+      "description": "Configures the context",
+      "oneOf": [
+        {
+          "description": "Send all context keys to coprocessor",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
+          "enum": [
+            "deprecated"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Operation": {
       "oneOf": [
@@ -5132,9 +5182,6 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "RouterLimitsConfig": {
-      "type": "object"
-    },
     "RouterRequestConf": {
       "additionalProperties": false,
       "description": "What information is passed to a router request/response stage",
@@ -5150,9 +5197,8 @@ snapshot_kind: text
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -5192,9 +5238,8 @@ snapshot_kind: text
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6240,9 +6285,8 @@ snapshot_kind: text
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6287,9 +6331,8 @@ snapshot_kind: text
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6995,9 +7038,8 @@ snapshot_kind: text
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -7032,9 +7074,8 @@ snapshot_kind: text
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -8744,6 +8785,10 @@ snapshot_kind: text
       "$ref": "#/definitions/Config7",
       "description": "#/definitions/Config7"
     },
+    "license_enforcement": {
+      "$ref": "#/definitions/LicenseEnforcementConfig",
+      "description": "#/definitions/LicenseEnforcementConfig"
+    },
     "limits": {
       "$ref": "#/definitions/Config2",
       "description": "#/definitions/Config2"
@@ -8779,10 +8824,6 @@ snapshot_kind: text
     "rhai": {
       "$ref": "#/definitions/Conf7",
       "description": "#/definitions/Conf7"
-    },
-    "router_limits": {
-      "$ref": "#/definitions/RouterLimitsConfig",
-      "description": "#/definitions/RouterLimitsConfig"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",

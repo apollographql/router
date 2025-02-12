@@ -27,7 +27,6 @@ use super::Configuration;
 use super::ConfigurationError;
 use super::APOLLO_PLUGIN_PREFIX;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
-pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
@@ -76,15 +75,6 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     schema
 }
 
-#[derive(Eq, PartialEq)]
-pub(crate) enum Mode {
-    Upgrade,
-
-    // This is used only in testing to ensure that we don't allow old config in our tests.
-    #[cfg(test)]
-    NoUpgrade,
-}
-
 /// Validate config yaml against the generated json schema.
 /// This is a tricky problem, and the solution here is by no means complete.
 /// In the case that validation cannot be performed then it will let serde validate as normal. The
@@ -102,7 +92,6 @@ pub(crate) enum Mode {
 pub(crate) fn validate_yaml_configuration(
     raw_yaml: &str,
     expansion: Expansion,
-    migration: Mode,
 ) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
         "plugins:".to_string()
@@ -110,7 +99,7 @@ pub(crate) fn validate_yaml_configuration(
         raw_yaml.to_string()
     };
 
-    let mut yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+    let yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
@@ -132,16 +121,6 @@ pub(crate) fn validate_yaml_configuration(
             }
         }
     });
-
-    if migration == Mode::Upgrade {
-        let upgraded = upgrade_configuration(&yaml, true)?;
-        let expanded_yaml = expansion.expand(&upgraded)?;
-        if schema.validate(&expanded_yaml).is_ok() {
-            yaml = upgraded;
-        } else {
-            tracing::warn!("Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1")
-        }
-    }
 
     let expanded_yaml = expansion.expand(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
@@ -265,6 +244,7 @@ pub(crate) fn validate_yaml_configuration(
         }
 
         if !errors.is_empty() {
+            tracing::warn!("Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1");
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "configuration had errors",
                 error: format!("\n{errors}"),
@@ -296,6 +276,7 @@ pub(crate) fn validate_yaml_configuration(
         // It might mean you forgot to update
         // `impl<'de> serde::Deserialize<'de> for Configuration
         // In `/apollo-router/src/configuration/mod.rs`
+        tracing::warn!("Configuration had errors. It may be possible to update your configuration automatically. Execute 'router config upgrade --help' for more details. If you previously used this configuration with Router 1.x, please refer to the upgrade guide: https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1");
         return Err(ConfigurationError::InvalidConfiguration {
             message: "unknown fields",
             error: format!(
