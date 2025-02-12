@@ -1,5 +1,6 @@
 ---
-title: GraphOS Router v2.x
+title: GraphOS Router v2.x Release Notes
+description: About Apollo GraphOS Router version 2.x, including Long Term Release (LTS) status, key features, and how to upgrade
 ---
 
 GraphOS Router, version 2.x is an **Active** release with latest version {products.router.version("lts_2_latest").version}.
@@ -15,15 +16,17 @@ As an [active](/graphos/reference/router-release-lifecycle#active) release:
 - Breaking changes may be required in extenuating circumstances.
 - [Support](https://www.apollographql.com/enterprise/support) is provided via paid support plans until end-of-life. 
 
-## Key highlights of router 2.x
+## What's new in router v2.x
 
-The new, improved, and updated capabilities of router v2.x include the following key highlights.
+The new and updated capabilities of router v2.x include the following highlights.
+
+> For detailed descriptions of updates in router v2.x, go to the [router 1.x to 2.x upgrade guide](/graphos/reference/upgrade/from-router-v1). 
 
 ### Simplified integration and API orchestration of REST services using Apollo Connectors
 
 The router introduces **Apollo Connectors for REST** to enable the router to directly call REST APIs alongside traditional GraphQL subgraphs. It improves the interoperability of the router with existing API architectures without the need to write tedious API integration code.
 
-> Follow the [REST API quickstart](/graphos/get-started/guides/rest-quickstart) to orchestrate your first API with Apollo Connectors.
+> Follow the [quickstart](/graphos/get-started/guides/rest-quickstart) to orchestrate your first REST API calls with Apollo Connectors.
 
 ### Improved query planner performance
 
@@ -41,8 +44,6 @@ The router depends on various external libraries, or crates, in the Rust ecosyst
 
 Updated crates include `axum`, `http`, `hyper`, `opentelemetry`, and `redis`. Note that some updates may cause breaking changes.
 
-> To learn more, go to the [router 1.x to 2.x upgrade guide](/graphos/reference/upgrade/from-router-v1).
-
 ### Improvements for consistency and usability 
 
 Several smaller but significant changes have been introduced to reduce or eliminate inconsistencies in observability and configuration:
@@ -52,9 +53,9 @@ Several smaller but significant changes have been introduced to reduce or elimin
 - Improved validation of CORS configurations, preventing silent failures
 - Added documentation for context keys, improving usability for advanced customers
 
-### Removals and deprecations
+## Removals and deprecations
 
-Several configuration options, interfaces, and metrics were deprecated or removed in router v2.x, including the following:
+Several configuration options, interfaces, and metrics were deprecated or removed in router v2.x, including:
 
 - Removed the `--apollo-uplink-poll-interval` flag due to its ineffectiveness
 - Removed various metrics as part of evolving towards OpenTelemetry metrics and conventions 
