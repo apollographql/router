@@ -23,7 +23,7 @@ trait SchemaBlueprint {
     fn on_missing_directive_definition(
         _schema: &Schema,
         _directive: &Directive,
-    ) -> Result<DirectiveDefinition, FederationError>;
+    ) -> Result<Option<DirectiveDefinition>, FederationError>;
 
     fn on_directive_definition_and_schema_parsed(_: &Schema) -> Option<FederationError>;
 
@@ -47,13 +47,24 @@ trait SchemaBlueprint {
 }
 
 #[allow(dead_code)]
-struct FederationBlueprint {}
+struct FederationBlueprint {
+    with_root_type_renaming: bool,
+}
+
+#[allow(dead_code)]
+impl FederationBlueprint {
+    fn new(with_root_type_renaming: bool) -> Self {
+        Self {
+            with_root_type_renaming,
+        }
+    }
+}
 
 impl SchemaBlueprint for FederationBlueprint {
     fn on_missing_directive_definition(
         _schema: &Schema,
         _directive: &Directive,
-    ) -> Result<DirectiveDefinition, FederationError> {
+    ) -> Result<Option<DirectiveDefinition>, FederationError> {
         todo!()
     }
 
