@@ -35,6 +35,16 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 
 ## Removed features in GraphOS Router v2.x
 
+### Automatically updating configuration at runtime
+
+The ability to automatically upgrade configurations at runtime is removed. Previously, during configuration parsing/validation, the router 'upgrade migrations' would be applied automatically to generate a valid runtime representation of a config for the life of the executing process.
+
+This can be problematic, since it makes support more complex.
+
+We want to retain the ability to upgrade a configuration using migrations, but we don't want to automatically do this during runtime. It should be the user's decision to make an explicit upgrade using the `router config upgrade` command.
+
+<!-- PR: https://github.com/apollographql/router/pull/6777 -->
+
 ### Support for Scaffold
 
 <!-- PR: https://github.com/apollographql/router/pull/6274 -->
