@@ -87,6 +87,8 @@ use crate::Context;
 use crate::Notify;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
+pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
+    "apollo_router::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
