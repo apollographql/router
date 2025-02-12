@@ -1164,57 +1164,6 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1272,57 +1221,6 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1482,57 +1380,6 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1590,57 +1437,6 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
