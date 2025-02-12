@@ -4,6 +4,70 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.60.1] - 2025-02-12
+
+## 🐛 Fixes
+
+### Header propagation rules passthrough ([PR #6690](https://github.com/apollographql/router/pull/6690))
+
+Header propagation contains logic to prevent headers from being propagated more than once. This was broken
+in https://github.com/apollographql/router/pull/6281 which always considered a header propagated regardless if a rule
+actually matched.
+
+This PR alters the logic so that only when a header is populated then the header is marked as fixed.
+
+The following will now work again:
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
+```
+
+Note that defaulting a head WILL populate a header, so make sure to include your defaults last in your propagation
+rules.
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+          default: defaulted # This will prevent any further rule evaluation for header `b`
+      - propagate:
+          named: b
+```
+
+Instead, make sure that your headers are defaulted last:
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
+          default: defaulted # OK
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6690
+
+### Entity cache: fix directive conflicts in cache-control header ([Issue #6441](https://github.com/apollographql/router/issues/6441))
+
+Unnecessary cache-control directives are created in cache-control header.  The router will now filter out unnecessary values from the `cache-control` header when the request resolves. So if there's `max-age=10, no-cache, must-revalidate, no-store`, the expected value for the cache-control header would simply be `no-store`. Please see the MDN docs for justification of this reasoning: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6543
+
+
+
 # [1.60.0] - 2025-02-05
 
 ## 🚀 Features
