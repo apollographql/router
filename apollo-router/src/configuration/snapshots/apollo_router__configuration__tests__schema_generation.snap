@@ -4281,13 +4281,6 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Don't send any context keys to coprocessor",
-          "enum": [
-            "none"
-          ],
-          "type": "string"
-        },
-        {
           "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
           "enum": [
             "deprecated"
