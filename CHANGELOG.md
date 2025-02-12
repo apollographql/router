@@ -6,7 +6,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [2.0.0] - 2025-02-19
 
-This is a major release of the router containing significant new functionality and improvements to behavior.
+This is a major release of the router containing significant new functionality and improvements to behaviour, resulting in more predicatble resource utilisation and decreased latency.
+
+Router 2.0.0 introduces general availability of Apollo Connectors, helping integrate REST services in router deployments.
 
 This entry summarizes the changes in router 2.0.0. To learn more details, go to the [What's New in router v2.x](https://www.apollographql.com/docs/graphos/routing/about-v2) page.
 
@@ -14,20 +16,21 @@ To upgrade to this version, follow the [upgrading from router 1.x to 2.x](https:
 
 ## ❗ BREAKING CHANGES ❗
 
-There are a number of breaking improvements to the router in this major release. Most are in the areas of configuration and observability.  For details, refer to the [upgrade guide](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+In order to make structural improvements in the router and upgrade some of our key dependencies, some breaking changes were introcued in this major release. Most of the breaking changes are in the areas of configuration and observability. All details on what's been removed and changed can be found in the [upgrade guide](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
 
 ## 🚀 Features
 
-This release of the router includes many new features, including:
+Router 2.0.0 comes with many new features and improvements. While all the details can be found in the [What's New guide](https://www.apollographql.com/docs/graphos/routing/about-v2), the following features are the ones we are most excited about.
 
-- Simplified integration of REST services using Apollo Connectors
-- Predictable resource utilization and availability with back pressure
-- Apollo operation usage reporting now defaults to using OpenTelemetry
-- Metrics now all follow OpenTelemetry naming conventions
-- Improved validation of CORS configurations, preventing silent failures
-- Documentation for context keys, improving usability for advanced customers
+**Simplified integration of REST services using Apollo Connectors.** Apollo Connectors are a declarative programming model for GraphQL, allowing you to plug your existing REST services directly into your graph. Once integrated, client developers gain all the benefits of GraphQL, and API owners gain all the benefits of GraphOS, including incorporation into a supergraph for a comprehensive, unified view of your organization's data and services. [This detailed guide](https://www.apollographql.com/docs/graphos/schema-design/connectors/router) outlines how to configure connectors with the router.
 
-For details, go to the features can be found in the [What's New guide](https://www.apollographql.com/docs/graphos/routing/about-v2).
+**Predictable resource utilization and availability with back pressure.** Back pressure was not maintained in router 1.x, which resulted in _all_ requests being accepted by the router. This resulted in issues for routers which were accepting high levels of traffic. We are now improving the handling of back pressure so that traffic shaping measures are more effective and integration with telemetry is improved. This allows for significant improvements in traffic shaping, which improves router's ability to observe timeout and traffic shaping restrictions correctly. With traffic shaping mechanisms enabled, in our testing we were able to observe many cases p99 latency with router 2.x taking only 5% of the p99 latency with router 1.x, going from 60s to 3s. You can read about traffic shaping changes in [this section of the upgrade guide](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1#traffic-shaping).
+
+**Metrics now all follow OpenTelemetry naming conventions.** Some of router's earlier metrics were created before the introduction of OpenTelemetry to the router, so some of the metric names were inconsistent, making it difficult to reason about. Along with standardising metrics to OpenTelemetry, Apollo operation usage reporting now also defaults to using OpenTelemetry.
+
+**Improved validation of CORS configurations, preventing silent failures.**
+**Documentation for context keys, improving usability for advanced customers.**
+
 
 ## 📃 Configuration
 
