@@ -3950,6 +3950,9 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "LicenseEnforcementConfig": {
+      "type": "object"
+    },
     "ListLength": {
       "oneOf": [
         {
@@ -5129,9 +5132,6 @@ expression: "&schema"
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
         }
       },
-      "type": "object"
-    },
-    "RouterLimitsConfig": {
       "type": "object"
     },
     "RouterRequestConf": {
@@ -8743,6 +8743,10 @@ expression: "&schema"
       "$ref": "#/definitions/Config7",
       "description": "#/definitions/Config7"
     },
+    "license_enforcement": {
+      "$ref": "#/definitions/LicenseEnforcementConfig",
+      "description": "#/definitions/LicenseEnforcementConfig"
+    },
     "limits": {
       "$ref": "#/definitions/Config2",
       "description": "#/definitions/Config2"
@@ -8778,10 +8782,6 @@ expression: "&schema"
     "rhai": {
       "$ref": "#/definitions/Conf7",
       "description": "#/definitions/Conf7"
-    },
-    "router_limits": {
-      "$ref": "#/definitions/RouterLimitsConfig",
-      "description": "#/definitions/RouterLimitsConfig"
     },
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
