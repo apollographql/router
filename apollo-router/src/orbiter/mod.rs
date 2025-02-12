@@ -316,6 +316,7 @@ mod test {
     use serde_json::json;
     use serde_json::Value;
 
+    use crate::configuration::ConfigurationError;
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
@@ -362,20 +363,13 @@ mod test {
 
     #[test]
     fn test_visit_config_that_needed_upgrade() {
-        let config: Configuration =
+        let result: ConfigurationError =
             Configuration::from_str("supergraph:\n  preview_defer_support: true")
-                .expect("config must be valid");
-        let mut usage = HashMap::new();
-        visit_config(
-            &mut usage,
-            config
-                .validated_yaml
-                .as_ref()
-                .expect("config should have had validated_yaml"),
-        );
-        insta::with_settings!({sort_maps => true}, {
-            assert_yaml_snapshot!(usage);
-        });
+                .expect_err("expected an error");
+        // Note: Can't implement PartialEq on ConfigurationError, so...
+        let err_message = "configuration had errors";
+        let err_error = "\n1. at line 2\n\n  supergraph:\n┌   preview_defer_support: true\n└-----> Additional properties are not allowed ('preview_defer_support' was unexpected)\n\n".to_string();
+        matches!(result, ConfigurationError::InvalidConfiguration {message, error} if err_message == message && err_error == error);
     }
 
     #[test]

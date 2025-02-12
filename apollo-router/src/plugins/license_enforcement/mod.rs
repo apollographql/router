@@ -27,7 +27,7 @@ use crate::services::RouterResponse;
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// The limits placed on a router in virtue of what's in a user's license
-pub(crate) struct RouterLimits {
+pub(crate) struct LicenseEnforcement {
     /// Transactions per second allowed based on license tier
     pub(crate) tps: Option<TpsLimitConf>,
 }
@@ -45,11 +45,11 @@ pub(crate) struct TpsLimitConf {
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
-pub(crate) struct RouterLimitsConfig {}
+pub(crate) struct LicenseEnforcementConfig {}
 
 #[async_trait::async_trait]
-impl PluginPrivate for RouterLimits {
-    type Config = RouterLimitsConfig;
+impl PluginPrivate for LicenseEnforcement {
+    type Config = LicenseEnforcementConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let tps = init.license.get_limits().and_then(|limits| {
@@ -102,7 +102,7 @@ impl PluginPrivate for RouterLimits {
     }
 }
 
-register_private_plugin!("apollo", "router_limits", RouterLimits);
+register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
@@ -127,7 +127,7 @@ mod test {
             }),
         };
 
-        let test_harness: PluginTestHarness<RouterLimits> =
+        let test_harness: PluginTestHarness<LicenseEnforcement> =
             PluginTestHarness::builder().license(license).build().await;
 
         let service = test_harness.router_service(|_req| async {
@@ -179,7 +179,7 @@ mod test {
                 }),
             };
 
-            let test_harness: PluginTestHarness<RouterLimits> =
+            let test_harness: PluginTestHarness<LicenseEnforcement> =
                 PluginTestHarness::builder().license(license).build().await;
 
             let service = test_harness.router_service(|_req| async {
