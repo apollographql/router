@@ -1,5 +1,8 @@
 # Simple config for testing file uploads
 
+csrf:
+  required_headers:
+    - x-my-header
 preview_file_uploads:
   enabled: true
   protocols:
