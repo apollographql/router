@@ -4,7 +4,13 @@
 //! * TPS Rate Limiting: a certain threshold, set via License claim, for how many operations over a certain interval can be serviced
 
 use std::num::NonZeroU64;
+use std::ops::ControlFlow;
+use std::ops::Sub;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -15,33 +21,37 @@ use tower::load_shed::error::Overloaded;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing::Span;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::count_graphql_error;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::services::router;
 use crate::services::RouterResponse;
+use crate::uplink::license_enforcement::LicenseState;
+use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(PartialEq, Debug, Clone)]
 /// The limits placed on a router in virtue of what's in a user's license
 pub(crate) struct LicenseEnforcement {
     /// Transactions per second allowed based on license tier
-    pub(crate) tps: Option<TpsLimitConf>,
+    tps: Option<TpsLimitConf>,
+
+    license: Arc<LicenseState>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(PartialEq, Debug, Clone)]
 /// Configuration for transactions per second
 pub(crate) struct TpsLimitConf {
     /// The number of operations allowed during a certain interval
-    pub(crate) capacity: NonZeroU64,
+    capacity: NonZeroU64,
     /// The interval as specied in the user's license; this is in milliseconds
-    #[serde(deserialize_with = "humantime_serde::deserialize")]
-    #[schemars(with = "String")]
-    pub(crate) interval: Duration,
+    interval: Duration,
 }
 
 #[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
@@ -61,11 +71,32 @@ impl PluginPrivate for LicenseEnforcement {
             })
         });
 
-        Ok(Self { tps })
+        Ok(Self {
+            tps,
+            license: Arc::new(init.license),
+        })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        let license = self.license.clone();
+        // Start from 1 second ago so that we get the first log message
+        let start_log_tracking = Instant::now().sub(Duration::from_secs(1));
         ServiceBuilder::new()
+            .checkpoint(move |req: router::Request| {
+                Self::set_span_state(&license);
+                Self::maybe_log(&start_log_tracking, &license);
+
+                if matches!(license.as_ref(), LicenseState::LicensedHalt { limits: _ }) {
+                    Ok(ControlFlow::Break(router::Response::builder()
+                        .context(req.context)
+                        .status_code(StatusCode::INTERNAL_SERVER_ERROR)
+                        .build()
+                        .expect("response must be valid")
+                    ))
+                } else {
+                    Ok(ControlFlow::Continue(req))
+                }
+            })
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| async {
@@ -102,13 +133,61 @@ impl PluginPrivate for LicenseEnforcement {
     }
 }
 
+impl LicenseEnforcement {
+    fn set_span_state(license: &LicenseState) {
+        if matches!(
+            license,
+            LicenseState::LicensedWarn { limits: _ } | LicenseState::LicensedHalt { limits: _ }
+        ) {
+            let span = Span::current();
+            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+            span.record("apollo_router.license", LICENSE_EXPIRED_SHORT_MESSAGE);
+        }
+    }
+
+    fn maybe_log(start: &Instant, license: &LicenseState) {
+        static DELTA: AtomicU64 = AtomicU64::new(0);
+        if matches!(
+            license,
+            LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
+        ) {
+            // This will rate limit logs about license to 1 a second.
+            // The way it works is storing the delta in seconds from a starting instant.
+            // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+            // If not successful some other thread will have logged.
+            let last_elapsed_seconds = DELTA.load(Ordering::SeqCst);
+            let elapsed_seconds = start.elapsed().as_secs();
+            if elapsed_seconds > last_elapsed_seconds
+                && DELTA
+                    .compare_exchange(
+                        last_elapsed_seconds,
+                        elapsed_seconds,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    )
+                    .is_ok()
+            {
+                ::tracing::error!(
+                    code = APOLLO_ROUTER_LICENSE_EXPIRED,
+                    LICENSE_EXPIRED_SHORT_MESSAGE
+                );
+            }
+        }
+    }
+}
+
 register_private_plugin!("apollo", "license_enforcement", LicenseEnforcement);
 
 #[cfg(test)]
 mod test {
+    use http_body_util::BodyExt;
+    use tracing::instrument::WithSubscriber;
+
     use super::*;
+    use crate::assert_snapshot_subscriber;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::test::PluginTestHarness;
+    use crate::services::router::Response;
     use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::TpsLimit;
@@ -206,5 +285,79 @@ mod test {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_license_warn() {
+        async {
+            let license = LicenseState::LicensedWarn {
+                limits: Some(LicenseLimits { tps: None }),
+            };
+
+            let test_harness: PluginTestHarness<LicenseEnforcement> =
+                PluginTestHarness::builder().license(license).build().await;
+
+            let service = test_harness.router_service(|_req| async {
+                Ok(router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .build()
+                    .unwrap())
+            });
+            // There should be one log message only
+            let resp = service.call_default().await;
+            assert_eq!(
+                get_body(resp).await,
+                r#"{"data":{"data":{"field":"value"}}}"#
+            );
+            let resp = service.call_default().await;
+            assert_eq!(
+                get_body(resp).await,
+                r#"{"data":{"data":{"field":"value"}}}"#
+            );
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_license_halt() {
+        async {
+            let license = LicenseState::LicensedHalt {
+                limits: Some(LicenseLimits { tps: None }),
+            };
+
+            let test_harness: PluginTestHarness<LicenseEnforcement> =
+                PluginTestHarness::builder().license(license).build().await;
+
+            let service = test_harness.router_service(|_req| async {
+                Ok(router::Response::fake_builder()
+                    .data(serde_json::json!({"data": {"field": "value"}}))
+                    .header("x-custom-header", "test-value")
+                    .build()
+                    .unwrap())
+            });
+            // There should be one log message only
+            let resp = service.call_default().await;
+            assert_eq!(get_body(resp).await, r#"{}"#);
+            let resp = service.call_default().await;
+            assert_eq!(get_body(resp).await, r#"{}"#);
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
+    }
+
+    async fn get_body(resp: Result<Response, BoxError>) -> String {
+        String::from_utf8_lossy(
+            resp.expect("ok response")
+                .response
+                .into_body()
+                .collect()
+                .await
+                .expect("body")
+                .to_bytes()
+                .as_ref(),
+        )
+        .to_string()
     }
 }

@@ -14,7 +14,6 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::uplink::license_enforcement::LicenseState;
 
 /// Factory for creating the http server component.
 ///
@@ -31,7 +30,6 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: ExtraListeners,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
@@ -127,7 +125,6 @@ impl HttpServerHandle {
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -151,7 +148,6 @@ impl HttpServerHandle {
                 Some(main_listener),
                 extra_listeners,
                 web_endpoints,
-                license,
                 all_connections_stopped_sender,
             )
             .await?;

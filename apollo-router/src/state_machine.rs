@@ -387,7 +387,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         Default::default(),
                         Default::default(),
                         web_endpoints,
-                        effective_license,
                         all_connections_stopped_sender,
                     )
                     .await?
@@ -399,7 +398,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         router_service_factory.clone(),
                         configuration.clone(),
                         web_endpoints,
-                        effective_license,
                     )
                     .await?
             }
@@ -1201,8 +1199,6 @@ mod tests {
             main_listener: Option<Listener>,
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
-
-            _license: LicenseState,
             _all_connections_stopped_sender: mpsc::Sender<()>,
         ) -> Self::Future
         where

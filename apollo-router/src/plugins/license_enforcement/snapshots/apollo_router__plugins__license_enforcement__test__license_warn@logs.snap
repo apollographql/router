@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/plugins/license_enforcement/mod.rs
+expression: yaml
+---
+- fields:
+    LICENSE_EXPIRED_SHORT_MESSAGE: "Apollo license expired https://go.apollo.dev/o/elp"
+    code: APOLLO_ROUTER_LICENSE_EXPIRED
+  level: ERROR
+  message: ~

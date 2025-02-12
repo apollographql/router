@@ -8,15 +8,10 @@ use tower_http::trace::MakeSpan;
 use tower_service::Service;
 use tracing::Span;
 
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::SpanMode;
-use crate::uplink::license_enforcement::LicenseState;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
-    pub(crate) license: LicenseState,
     pub(crate) span_mode: SpanMode,
 }
 
@@ -38,25 +33,18 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
             if use_legacy_request_span {
-                self.span_mode.create_request(request, self.license)
+                self.span_mode.create_request(request)
             } else {
                 self.span_mode.create_router(request)
             }
         } else {
             // No remote span, we can go ahead and create the span without context.
             if use_legacy_request_span {
-                self.span_mode.create_request(request, self.license)
+                self.span_mode.create_request(request)
             } else {
                 self.span_mode.create_router(request)
             }
         };
-        if matches!(
-            self.license,
-            LicenseState::LicensedWarn { limits: _ } | LicenseState::LicensedHalt { limits: _ }
-        ) {
-            span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
-            span.record("apollo_router.license", LICENSE_EXPIRED_SHORT_MESSAGE);
-        }
 
         span
     }

@@ -4,10 +4,8 @@ use std::pin::Pin;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 
 use axum::extract::Extension;
-use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::middleware::Next;
@@ -60,9 +58,6 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::license_enforcement::LicenseState;
-use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::Context;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
@@ -111,7 +106,6 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    license: LicenseState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -126,7 +120,6 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
-        license,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -153,15 +146,13 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        license: LicenseState,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory,
     {
         Box::pin(async move {
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
+            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
 
             // serve main router
 
@@ -343,7 +334,6 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    license: LicenseState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -364,17 +354,11 @@ where
         .deflate(true);
     let mut main_route = main_router::<RF>(configuration)
         .layer(decompression)
-        .layer(middleware::from_fn_with_state(
-            (license, Instant::now(), Arc::new(AtomicU64::new(0))),
-            license_handler,
-        ))
         .layer(Extension(service_factory))
         .layer(cors)
         // Telemetry layers MUST be last. This means that they will be hit first during execution of the pipeline
         // Adding layers after telemetry will cause us to lose metrics and spans.
-        .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { license, span_mode }),
-        )
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { span_mode }))
         .layer(middleware::from_fn(metrics_handler));
 
     if let Some(main_endpoint_layer) = ENDPOINT_CALLBACK.get() {
@@ -405,48 +389,6 @@ async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Resp
         "http.response.status_code" = resp.status().as_u16() as i64
     );
     resp
-}
-
-async fn license_handler(
-    State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
-    request: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
-    if matches!(
-        license,
-        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
-    ) {
-        // This will rate limit logs about license to 1 a second.
-        // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
-        // If not successful some other thread will have logged.
-        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
-        let elapsed_seconds = start.elapsed().as_secs();
-        if elapsed_seconds > last_elapsed_seconds
-            && delta
-                .compare_exchange(
-                    last_elapsed_seconds,
-                    elapsed_seconds,
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
-                .is_ok()
-        {
-            ::tracing::error!(
-                code = APOLLO_ROUTER_LICENSE_EXPIRED,
-                LICENSE_EXPIRED_SHORT_MESSAGE
-            );
-        }
-    }
-
-    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
-        http::Response::builder()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(axum::body::Body::default())
-            .expect("canned response must be valid")
-    } else {
-        next.run(request).await
-    }
 }
 
 #[derive(Clone)]
