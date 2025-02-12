@@ -304,6 +304,7 @@ impl Default for Context {
 }
 
 /// Convert context key to the deprecated context key (mainly useful for coprocessor/rhai)
+/// If the context key is not part of a deprecated one it just returns the original one because it doesn't have to be renamed
 pub(crate) fn context_key_to_deprecated(key: String) -> String {
     match key.as_str() {
         OPERATION_NAME => DEPRECATED_OPERATION_NAME.to_string(),
@@ -334,6 +335,7 @@ pub(crate) fn context_key_to_deprecated(key: String) -> String {
 }
 
 /// Convert context key from deprecated to new one (mainly useful for coprocessor/rhai)
+/// If the context key is not part of a deprecated one it just returns the original one because it doesn't have to be renamed
 pub(crate) fn context_key_from_deprecated(key: String) -> String {
     match key.as_str() {
         DEPRECATED_OPERATION_NAME => OPERATION_NAME.to_string(),
