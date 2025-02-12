@@ -17,16 +17,17 @@ use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::router;
 
-/// CSRF Configuration.
+/// CSRF protection configuration.
+///
+/// See <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct CSRFConfig {
-    /// The CSRF plugin is enabled by default;
-    /// set unsafe_disabled = true to disable the plugin behavior
-    /// Note that setting this to true is deemed unsafe.
-    /// See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.
-    /// TODO rename this to enabled. This is in line with the other plugins and will be less confusing.
+    /// The CSRF plugin is enabled by default.
+    ///
+    /// Setting `unsafe_disabled: true` *disables* CSRF protection.
+    // TODO rename this to enabled. This is in line with the other plugins and will be less confusing.
     unsafe_disabled: bool,
     /// Override the headers to check for by setting
     /// custom_headers
