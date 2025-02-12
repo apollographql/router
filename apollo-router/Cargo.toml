@@ -11,6 +11,7 @@ license = "Elastic-2.0"
 rust-version = "1.83.0"
 edition = "2021"
 build = "build/main.rs"
+default-run = "router"
 
 [[bin]]
 name = "router"

@@ -296,6 +296,8 @@ pub enum SingleFederationError {
     InterfaceKeyMissingImplementationType { message: String },
     #[error("@defer is not supported on subscriptions")]
     DeferredSubscriptionUnsupported,
+    #[error("{message}")]
+    QueryPlanComplexityExceeded { message: String },
 }
 
 impl SingleFederationError {
@@ -487,6 +489,9 @@ impl SingleFederationError {
                 ErrorCode::InterfaceKeyMissingImplementationType
             }
             SingleFederationError::DeferredSubscriptionUnsupported => ErrorCode::Internal,
+            SingleFederationError::QueryPlanComplexityExceeded { .. } => {
+                ErrorCode::QueryPlanComplexityExceededError
+            }
         }
     }
 }
@@ -1453,6 +1458,15 @@ static UNSUPPORTED_FEDERATION_DIRECTIVE: LazyLock<ErrorCodeDefinition> = LazyLoc
     )
 });
 
+static QUERY_PLAN_COMPLEXITY_EXCEEDED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "QUERY_PLAN_COMPLEXITY_EXCEEDED".to_owned(),
+        "Indicates that provided query has too many possible ways to generate a plan and cannot be planned in a reasonable amount of time"
+            .to_owned(),
+        None,
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1534,6 +1548,7 @@ pub enum ErrorCode {
     InterfaceKeyMissingImplementationType,
     UnsupportedFederationVersion,
     UnsupportedFederationDirective,
+    QueryPlanComplexityExceededError,
 }
 
 impl ErrorCode {
@@ -1633,6 +1648,7 @@ impl ErrorCode {
             }
             ErrorCode::UnsupportedFederationVersion => &UNSUPPORTED_FEDERATION_VERSION,
             ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
+            ErrorCode::QueryPlanComplexityExceededError => &QUERY_PLAN_COMPLEXITY_EXCEEDED,
         }
     }
 }
