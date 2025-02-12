@@ -17,6 +17,7 @@ use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::compute_job;
+use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
@@ -33,6 +34,7 @@ use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::Configuration;
 use crate::Context;
 
@@ -79,7 +81,7 @@ impl QueryAnalysisLayer {
         &self,
         query: &str,
         operation_name: Option<&str>,
-    ) -> Result<ParsedDocument, SpecError> {
+    ) -> Result<ParsedDocument, MaybeBackPressureError<SpecError>> {
         let query = query.to_string();
         let operation_name = operation_name.map(|o| o.to_string());
         let schema = self.schema.clone();
@@ -102,9 +104,10 @@ impl QueryAnalysisLayer {
         };
         // TODO: is this correct?
         let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
+        Ok(compute_job::execute(priority, job)
+            .map_err(MaybeBackPressureError::TemporaryError)?
             .await
-            .expect("Query::parse_document panicked")
+            .expect("Query::parse_document panicked")?)
     }
 
     pub(crate) async fn supergraph_request(
@@ -153,15 +156,17 @@ impl QueryAnalysisLayer {
 
         let res = match entry {
             None => match self.parse_document(&query, op_name.as_deref()).await {
-                Err(errors) => {
-                    (*self.cache.lock().await).put(
-                        QueryAnalysisKey {
-                            query,
-                            operation_name: op_name.clone(),
-                        },
-                        Err(errors.clone()),
-                    );
-                    Err(errors)
+                Err(e) => {
+                    if let MaybeBackPressureError::PermanentError(errors) = &e {
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name.clone(),
+                            },
+                            Err(errors.clone()),
+                        );
+                    }
+                    Err(e)
                 }
                 Ok(doc) => {
                     let context = Context::new();
@@ -194,7 +199,7 @@ impl QueryAnalysisLayer {
                     Ok((context, doc))
                 }
             },
-            Some(c) => c,
+            Some(cached_result) => cached_result.map_err(MaybeBackPressureError::PermanentError),
         };
 
         match res {
@@ -227,7 +232,7 @@ impl QueryAnalysisLayer {
                     context: request.context,
                 })
             }
-            Err(errors) => {
+            Err(MaybeBackPressureError::PermanentError(errors)) => {
                 request.context.extensions().with_lock(|mut lock| {
                     lock.insert(Arc::new(UsageReporting {
                         stats_report_key: errors.get_error_key().to_string(),
@@ -244,6 +249,20 @@ impl QueryAnalysisLayer {
                 Err(SupergraphResponse::builder()
                     .errors(errors)
                     .status_code(StatusCode::BAD_REQUEST)
+                    .context(request.context)
+                    .build()
+                    .expect("response is valid"))
+            }
+            Err(MaybeBackPressureError::TemporaryError(error)) => {
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert(Arc::new(UsageReporting {
+                        stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
+                        referenced_fields_by_type: HashMap::new(),
+                    }))
+                });
+                Err(SupergraphResponse::builder()
+                    .error(error.to_graphql_error())
+                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
                     .context(request.context)
                     .build()
                     .expect("response is valid"))

@@ -7,6 +7,7 @@ use serde_json_bytes::json;
 
 use crate::cache::storage::CacheStorage;
 use crate::compute_job;
+use crate::compute_job::ComputeBackPressureError;
 use crate::graphql;
 use crate::query_planner::QueryKey;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -52,19 +53,19 @@ impl IntrospectionCache {
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
         doc: &ParsedDocument,
-    ) -> ControlFlow<graphql::Response, ()> {
+    ) -> ControlFlow<Result<graphql::Response, ComputeBackPressureError>, ()> {
         Self::maybe_lone_root_typename(schema, doc)?;
         if doc.operation.is_query() {
             if doc.has_schema_introspection {
                 if doc.has_explicit_root_fields {
-                    ControlFlow::Break(Self::mixed_fields_error())?;
+                    ControlFlow::Break(Ok(Self::mixed_fields_error()))?;
                 } else {
                     ControlFlow::Break(self.cached_introspection(schema, key, doc).await)?
                 }
             } else if !doc.has_explicit_root_fields {
                 // root __typename only, probably a small query
                 // Execute it without caching:
-                ControlFlow::Break(Self::execute_introspection(schema, doc))?
+                ControlFlow::Break(Ok(Self::execute_introspection(schema, doc)))?
             }
         }
         ControlFlow::Continue(())
@@ -78,7 +79,7 @@ impl IntrospectionCache {
     fn maybe_lone_root_typename(
         schema: &Arc<spec::Schema>,
         doc: &ParsedDocument,
-    ) -> ControlFlow<graphql::Response, ()> {
+    ) -> ControlFlow<Result<graphql::Response, ComputeBackPressureError>, ()> {
         if doc.operation.selection_set.selections.len() == 1 {
             if let Selection::Field(field) = &doc.operation.selection_set.selections[0] {
                 if field.name == "__typename" && field.directives.is_empty() {
@@ -91,7 +92,7 @@ impl IntrospectionCache {
                         .expect("validation should have caught undefined root operation")
                         .as_str();
                     let data = json!({key: object_type_name});
-                    ControlFlow::Break(graphql::Response::builder().data(data).build())?
+                    ControlFlow::Break(Ok(graphql::Response::builder().data(data).build()))?
                 }
             }
         }
@@ -116,7 +117,7 @@ impl IntrospectionCache {
         schema: &Arc<spec::Schema>,
         key: &QueryKey,
         doc: &ParsedDocument,
-    ) -> graphql::Response {
+    ) -> Result<graphql::Response, ComputeBackPressureError> {
         let storage = match self {
             IntrospectionCache::Enabled { storage } => storage,
             IntrospectionCache::Disabled => {
@@ -124,7 +125,7 @@ impl IntrospectionCache {
                     .message(String::from("introspection has been disabled"))
                     .extension_code("INTROSPECTION_DISABLED")
                     .build();
-                return graphql::Response::builder().error(error).build();
+                return Ok(graphql::Response::builder().error(error).build());
             }
         };
         let query = key.filtered_query.clone();
@@ -133,17 +134,17 @@ impl IntrospectionCache {
         // https://github.com/apollographql/router/issues/3831
         let cache_key = query;
         if let Some(response) = storage.get(&cache_key, |_| unreachable!()).await {
-            return response;
+            return Ok(response);
         }
         let schema = schema.clone();
         let doc = doc.clone();
         let priority = compute_job::Priority::P1; // Low priority
         let response =
-            compute_job::execute(priority, move || Self::execute_introspection(&schema, &doc))
+            compute_job::execute(priority, move || Self::execute_introspection(&schema, &doc))?
                 .await
                 .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;
-        response
+        Ok(response)
     }
 
     fn execute_introspection(schema: &spec::Schema, doc: &ParsedDocument) -> graphql::Response {
