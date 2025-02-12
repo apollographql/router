@@ -1561,7 +1561,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: ContextConf::NewContextConf(NewContextConf::None),
+                context: ContextConf::Deprecated(false),
                 body: true,
                 status_code: false,
                 sdl: false,
