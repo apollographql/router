@@ -671,8 +671,16 @@ pub(crate) async fn create_plugins(
         }
     }
     add_mandatory_apollo_plugin!("limits");
+<<<<<<< HEAD
     add_mandatory_apollo_plugin!("traffic_shaping");
     add_mandatory_apollo_plugin!("fleet_detector");
+=======
+    add_mandatory_apollo_plugin!("license_enforcement");
+    add_mandatory_apollo_plugin!("health_check");
+    add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("fleet_detector");
+
+>>>>>>> f69c98ed (Change RouterLimits to LicenseEnforcement (#6778))
     add_optional_apollo_plugin!("forbid_mutations");
     add_optional_apollo_plugin!("subscription");
     add_optional_apollo_plugin!("override_subgraph_url");

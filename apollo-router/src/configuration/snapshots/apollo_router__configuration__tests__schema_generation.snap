@@ -3724,6 +3724,9 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "LicenseEnforcementConfig": {
+      "type": "object"
+    },
     "ListLength": {
       "oneOf": [
         {
@@ -8306,6 +8309,10 @@ expression: "&schema"
     "include_subgraph_errors": {
       "$ref": "#/definitions/Config6",
       "description": "#/definitions/Config6"
+    },
+    "license_enforcement": {
+      "$ref": "#/definitions/LicenseEnforcementConfig",
+      "description": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
       "$ref": "#/definitions/Config",

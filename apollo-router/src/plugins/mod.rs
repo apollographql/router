@@ -32,6 +32,7 @@ mod fleet_detector;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;
+pub(crate) mod license_enforcement;
 pub(crate) mod limits;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
