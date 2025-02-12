@@ -27,7 +27,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
-        let span = if context.span().span_context().is_valid()
+        if context.span().span_context().is_valid()
             || context.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
@@ -44,9 +44,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
             } else {
                 self.span_mode.create_router(request)
             }
-        };
-
-        span
+        }
     }
 }
 
