@@ -260,6 +260,19 @@ mod csrf_tests {
     }
 
     #[tokio::test]
+    async fn it_rejects_preflighted_multipart_form_data() {
+        let with_preflight_content_type = router::Request::fake_builder()
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=842705fe5c26bcc3-e1302903b7efd762-d3aeccc8154e83c9-2ac7e6d91c6a7fdc")
+            .build()
+            .unwrap();
+        assert_rejected(
+            include_str!("fixtures/default.router.yaml"),
+            with_preflight_content_type,
+        )
+        .await;
+    }
+
+    #[tokio::test]
     async fn it_rejects_non_preflighted_headers_request() {
         let mut non_preflighted_request = router::Request::fake_builder().build().unwrap();
         // fake_builder defaults to `Content-Type: application/json`,
