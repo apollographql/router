@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/services/layers/persisted_queries/mod.rs
 expression: yaml
-snapshot_kind: text
 ---
 - fields:
     operation_body: "query SomeQuery { me { id } }"
