@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::Write as _; // for write! macro
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
@@ -649,10 +650,11 @@ async fn call_websocket(
                 let headers = response
                     .headers()
                     .iter()
-                    .map(|(k, v)| {
-                        format!("\n    {}: {}", k, v.to_str().unwrap_or("<invalid UTF-8>"))
-                    })
-                    .collect::<String>();
+                    .fold(String::new(), |mut acc, (k, v)| {
+                        let header_value = v.to_str().unwrap_or("HTTP Error");
+                        write!(acc, "\n    {}: {}", k, header_value).unwrap();
+                        acc
+                    });
 
                 format!("WebSocket upgrade failed.\nStatus: {status}\nHeaders:{headers}")
             }
