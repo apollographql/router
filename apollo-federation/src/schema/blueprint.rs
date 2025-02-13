@@ -37,6 +37,10 @@ trait SchemaBlueprint {
 
     fn on_validation(_schema: &Schema) -> Option<FederationError>;
 
+    fn on_apollo_rs_validation_error(
+        _error: apollo_compiler::validation::WithErrors<Schema>,
+    ) -> FederationError;
+
     fn on_unknown_directive_validation_error(
         _schema: &Schema,
         _unknown_directive_name: &str,
@@ -89,6 +93,12 @@ impl SchemaBlueprint for FederationBlueprint {
     }
 
     fn on_validation(_schema: &Schema) -> Option<FederationError> {
+        todo!()
+    }
+
+    fn on_apollo_rs_validation_error(
+        _error: apollo_compiler::validation::WithErrors<Schema>,
+    ) -> FederationError {
         todo!()
     }
 
