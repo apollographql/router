@@ -70,20 +70,16 @@ impl ApolloOtlpExporter {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let mut otlp_exporter = match protocol {
-            Protocol::Grpc => {
-                let span_exporter = SpanExporterBuilder::from(
-                    opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_tls_config(ClientTlsConfig::new().with_native_roots())
-                        .with_timeout(batch_config.max_export_timeout)
-                        .with_endpoint(endpoint.to_string())
-                        .with_metadata(metadata)
-                        .with_compression(opentelemetry_otlp::Compression::Gzip),
-                )
-                .build_span_exporter()?;
-
-                span_exporter
-            }
+            Protocol::Grpc => SpanExporterBuilder::from(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+                    .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                    .with_timeout(batch_config.max_export_timeout)
+                    .with_endpoint(endpoint.to_string())
+                    .with_metadata(metadata)
+                    .with_compression(opentelemetry_otlp::Compression::Gzip),
+            )
+            .build_span_exporter()?,
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
             Protocol::Http => SpanExporterBuilder::from(
                 opentelemetry_otlp::new_exporter()
