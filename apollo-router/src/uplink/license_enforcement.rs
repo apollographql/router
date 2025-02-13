@@ -659,6 +659,15 @@ impl LicenseState {
             _ => None,
         }
     }
+
+    pub(crate) fn get_name(&self) -> String {
+        match self {
+            Self::Licensed { limits: _ } => "Licensed".to_string(),
+            Self::LicensedWarn { limits: _ } => "LicensedWarn".to_string(),
+            Self::LicensedHalt { limits: _ } => "LicensedHalt".to_string(),
+            Self::Unlicensed => "Unlicensed".to_string(),
+        }
+    }
 }
 
 impl Display for License {
