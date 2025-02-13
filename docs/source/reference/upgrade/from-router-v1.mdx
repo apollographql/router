@@ -24,7 +24,7 @@ router config upgrade --diff router.yaml
 ```
 
 Then apply the changes using:
-```bah
+```bash
 router config upgrade router.yaml > router.next.yaml
 mv router.next.yaml router.yaml
 ```
@@ -511,26 +511,6 @@ could not create router: CORS configuration error:
 ```
 
 **Upgrade step****: Validate your CORS configuration. For details, go to [CORS configuration documentation](/graphos/routing/security/cors).
-
-<details>
-<summary>Unsorted items (TODO)</summary>
-
-## TBD
-
-### Default Apollo usage reporting protocol
-<!-- XXX(@goto-bus-stop) This is not really breaking, should we even say it? --->
-
-If your router v1.x is configured with `experimental_otlp_tracing_sampler`, rename it to `otlp_tracing_sampler`.
-
-To [report operation usage metrics to GraphOS via OTLP](#apollo-operation-usage-reporting-via-otlp), you can either remove your configuration of `otlp_tracing_sampler` and use its default value, or you can explicitly enable it by setting it to [`always_on` or a sampling ratio](/router/configuration/telemetry/apollo-telemetry#configuring-usage-reporting-via-otlp).
-
-Otherwise, to use the behavior of v1.x, turn off usage reporting via OTLP by setting `otlp_tracing_sampler` to `always_off`.
-
-<!-- TODO(@goto-bus-stop): what is the behaviour in 1.x? why would someone want to revert to it? -->
-
-</details>
-
-<!-- TODO(@goto-bus-stop): start using the ?live and ?ready things -->
 
 ## Deploy your router
 
