@@ -81,7 +81,7 @@ impl PluginPrivate for RouterLimits {
                                 .extension_code(extension_code)
                                 .build();
                             Ok(RouterResponse::error_builder()
-                                .status_code(StatusCode::TOO_MANY_REQUESTS)
+                                .status_code(StatusCode::SERVICE_UNAVAILABLE)
                                 .error(error)
                                 .context(ctx)
                                 .build()
@@ -158,7 +158,7 @@ mod test {
         // * the third, delayed req succeeds
 
         assert!(r1.is_ok_and(|resp| resp.response.status().is_success()));
-        assert!(r2.is_ok_and(|resp| resp.response.status() == StatusCode::TOO_MANY_REQUESTS));
+        assert!(r2.is_ok_and(|resp| resp.response.status() == StatusCode::SERVICE_UNAVAILABLE));
         assert!(r3
             .await
             .is_ok_and(|resp| resp.response.status().is_success()));
