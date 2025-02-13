@@ -4,6 +4,80 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.60.1] - 2025-02-12
+
+## 🐛 Fixes
+
+### Header propagation rules passthrough ([PR #6690](https://github.com/apollographql/router/pull/6690))
+
+Header propagation contains logic to prevent headers from being propagated more than once. This was broken
+in https://github.com/apollographql/router/pull/6281 which always considered a header propagated regardless if a rule
+actually matched.
+
+This PR alters the logic so that only when a header is populated then the header is marked as fixed.
+
+The following will now work again:
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
+```
+
+Note that defaulting a head WILL populate a header, so make sure to include your defaults last in your propagation
+rules.
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+          default: defaulted # This will prevent any further rule evaluation for header `b`
+      - propagate:
+          named: b
+```
+
+Instead, make sure that your headers are defaulted last:
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
+          default: defaulted # OK
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6690
+
+### Entity cache: fix directive conflicts in cache-control header ([Issue #6441](https://github.com/apollographql/router/issues/6441))
+
+Unnecessary cache-control directives are created in cache-control header.  The router will now filter out unnecessary values from the `cache-control` header when the request resolves. So if there's `max-age=10, no-cache, must-revalidate, no-store`, the expected value for the cache-control header would simply be `no-store`. Please see the MDN docs for justification of this reasoning: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6543
+
+### Resolve regressions in fragment compression for certain operations ([PR #6651](https://github.com/apollographql/router/pull/6651))
+
+In v1.58.0 we introduced a new compression strategy for subgraph GraphQL operations to replace an older, more complicated algorithm.
+
+While we were able to validate improvements for a majority of cases, some regressions still surfaced.  To address this, we are extending it to compress more operations with the following outcomes:
+
+* The P99 overhead of running the new compression algorithm on the largest operations in our corpus is now just **10ms**
+* In case of _better_ compression, at P99 it shrinks the operations by **50Kb** when compared to the old algorithm
+* In case of _worse_ compression, at P99 it only adds an additional 108 _bytes_ compared to the old algorithm, which was an acceptable trade-off versus added complexity
+
+By [@dariuszkuc](https://github.com/dariuszkuc) in https://github.com/apollographql/router/pull/6651
+
 # [1.60.0] - 2025-02-05
 
 ## 🚀 Features
