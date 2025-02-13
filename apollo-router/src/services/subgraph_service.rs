@@ -2723,10 +2723,10 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Websocket fetch failed from 'test': cannot connect websocket to subgraph: HTTP error: 400 Bad Request".to_string()
-        );
+
+        let err_str = err.to_string();
+        assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed.\nStatus: 400 Bad Request\nHeaders:\n    content-type: text/plain; charset=utf-8\n    content-length: 11\n    date: "));
+        assert!(err_str.ends_with(" GMT"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
