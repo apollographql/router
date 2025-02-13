@@ -399,8 +399,8 @@ fn detect_cpu_count(system: &System) -> u64 {
 
     let system_cpus = system.cpus().len() as u64;
     // Grab the contents of /proc/filesystems
-    match detect_cgroup_version(&fs::read_to_string("/proc/filesystems")).unwrap_or_default() {
-        CGroupVersion::CGroup2 => {
+    match fs::read_to_string("/proc/filesystems").map(|fs| detect_cgroup_version(&fs)) {
+        Ok(CGroupVersion::CGroup2) => {
             // If we're looking at cgroup2 then we need to look in `cpu.max`
             match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
                 Ok(readings) => {
@@ -421,7 +421,7 @@ fn detect_cpu_count(system: &System) -> u64 {
                 Err(_) => system_cpus,
             }
         }
-        CGroupVersion::CGroup => {
+        Ok(CGroupVersion::CGroup) => {
             // If we're in cgroup v1 then we need to read from two separate files
             let quota = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
                 .map(|s| String::from(s.trim()))
@@ -442,7 +442,8 @@ fn detect_cpu_count(system: &System) -> u64 {
                 _ => system_cpus,
             }
         }
-        CGroupVersion::None => system_cpus,
+        // Error reading the file or no cgroup support
+        _ => system_cpus,
     }
 }
 
