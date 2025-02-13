@@ -395,63 +395,83 @@ fn detect_cpu_count(system: &System) -> u64 {
 // raw number of processors. Hence, the extra logic including below.
 #[cfg(target_os = "linux")]
 fn detect_cpu_count(system: &System) -> u64 {
-    use std::collections::HashSet;
     use std::fs;
 
     let system_cpus = system.cpus().len() as u64;
     // Grab the contents of /proc/filesystems
-    let fses: HashSet<String> = match fs::read_to_string("/proc/filesystems") {
-        Ok(content) => content
-            .lines()
-            .map(|x| x.split_whitespace().next().unwrap_or("").to_string())
-            .filter(|x| x.contains("cgroup"))
-            .collect(),
-        Err(_) => return system_cpus,
-    };
-
-    if fses.contains("cgroup2") {
-        // If we're looking at cgroup2 then we need to look in `cpu.max`
-        match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
-            Ok(readings) => {
-                // The format of the file lists the quota first, followed by the period,
-                // but the quota could also be max which would mean there are no restrictions.
-                if readings.starts_with("max") {
-                    system_cpus
-                } else {
-                    // If it's not max then divide the two to get an integer answer
-                    match readings.split_once(' ') {
-                        None => system_cpus,
-                        Some((quota, period)) => {
-                            calculate_cpu_count_with_default(system_cpus, quota, period)
+    match detect_cgroup_version(&fs::read_to_string("/proc/filesystems")) {
+        CGroupVersion::CGroup2 => {
+            // If we're looking at cgroup2 then we need to look in `cpu.max`
+            match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
+                Ok(readings) => {
+                    // The format of the file lists the quota first, followed by the period,
+                    // but the quota could also be max which would mean there are no restrictions.
+                    if readings.starts_with("max") {
+                        system_cpus
+                    } else {
+                        // If it's not max then divide the two to get an integer answer
+                        match readings.split_once(' ') {
+                            None => system_cpus,
+                            Some((quota, period)) => {
+                                calculate_cpu_count_with_default(system_cpus, quota, period)
+                            }
                         }
                     }
                 }
+                Err(_) => system_cpus,
             }
-            Err(_) => system_cpus,
         }
-    } else if fses.contains("cgroup") {
-        // If we're in cgroup v1 then we need to read from two separate files
-        let quota = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
-            .map(|s| String::from(s.trim()))
-            .ok();
-        let period = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
-            .map(|s| String::from(s.trim()))
-            .ok();
-        match (quota, period) {
-            (Some(quota), Some(period)) => {
-                // In v1 quota being -1 indicates no restrictions so return the maximum (all
-                // system CPUs) otherwise divide the two.
-                if quota == "-1" {
-                    system_cpus
-                } else {
-                    calculate_cpu_count_with_default(system_cpus, &quota, &period)
+        CGroupVersion::CGroup => {
+            // If we're in cgroup v1 then we need to read from two separate files
+            let quota = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+                .map(|s| String::from(s.trim()))
+                .ok();
+            let period = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+                .map(|s| String::from(s.trim()))
+                .ok();
+            match (quota, period) {
+                (Some(quota), Some(period)) => {
+                    // In v1 quota being -1 indicates no restrictions so return the maximum (all
+                    // system CPUs) otherwise divide the two.
+                    if quota == "-1" {
+                        system_cpus
+                    } else {
+                        calculate_cpu_count_with_default(system_cpus, &quota, &period)
+                    }
                 }
+                _ => system_cpus,
             }
-            _ => system_cpus,
         }
-    } else {
-        system_cpus
+        None => system_cpus,
     }
+}
+
+/// Detect the cgroup version supported in Linux based on the content of the `/proc/filesystems`
+/// file
+#[allow(unused)]
+fn detect_cgroup_version(filesystems: &str) -> CGroupVersion {
+    use std::collections::HashSet;
+    let versions: HashSet<_> = filesystems
+        .lines()
+        .flat_map(|line: &str| line.split_whitespace())
+        .filter(|x| x.contains("cgroup"))
+        .collect();
+
+    if versions.contains("cgroup2") {
+        CGroupVersion::CGroup2
+    } else if versions.contains("cgroup") {
+        CGroupVersion::CGroup
+    } else {
+        CGroupVersion::None
+    }
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CGroupVersion {
+    CGroup2,
+    CGroup,
+    None,
 }
 
 #[cfg(target_os = "linux")]
@@ -846,5 +866,41 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[test]
+    fn test_detect_cgroup_version_2() {
+        const PROC_FILESYSTEMS_CGROUP2: &str = "nodev   proc
+nodev   cgroup
+nodev   cgroup2
+        ext3
+        ext2
+        ext4";
+
+        let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
+        assert_eq!(res, CGroupVersion::CGroup2)
+    }
+
+    #[test]
+    fn test_detect_cgroup_version_1() {
+        const PROC_FILESYSTEMS_CGROUP2: &str = "nodev   proc
+nodev   cgroup
+        ext3
+        ext2
+        ext4";
+
+        let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
+        assert_eq!(res, CGroupVersion::CGroup)
+    }
+
+    #[test]
+    fn test_detect_cgroup_version_none() {
+        const PROC_FILESYSTEMS_CGROUP2: &str = "nodev   proc
+        ext3
+        ext2
+        ext4";
+
+        let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
+        assert_eq!(res, CGroupVersion::None)
     }
 }
