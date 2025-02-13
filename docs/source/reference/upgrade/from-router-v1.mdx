@@ -308,6 +308,7 @@ Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by
 
 Learn more about configuring [usage reporting via OTLP](/router/configuration/telemetry/apollo-telemetry#usage-reporting-via-opentelemetry-protocol-otlp).
 
+<a id="Renamed-context-keys"></a>
 ### Renamed context keys
 
 The router request context is used to share data across stages of the request pipeline. The keys have been renamed to prevent conflicts and to better indicate which pipeline stage or plugin populates the data. 
@@ -348,44 +349,46 @@ You can continue using deprecated context key names from router 1.x if you confi
 
 <!-- TODO(@goto-bus-stop): list configuration keys that contain context keys? -->
 
-### Coprocessor
+### Context Keys for Coprocessors
 
-We have renamed several context keys which could impact your coprocessor logic. If you don't specify the `context` configuration nothing will change. If, however, you rely on any of the impacted keys. You should update your coprocessor logic to reflect the change. If this is difficult, you can postpone this migration by relying on a new context configuration feature for coprocessors.
+The [context key renames](#Renamed-context-keys) may impact your coprocessor logic. It can be tricky to update all context key usage together with the Router upgrade. To aid this, the `context` option for Coprocessors has been extended.
 
-Prior to this change, context was a boolean argument indicating that all of context (true) or no context (false) should be passed to the coprocessor. Now it can take one of several values indicating which names, deprecated or new, you wish to pass to your coprocessor.
+You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
 
-Finally, if you specify an array in `context` you'll have to specify only the context keys you want to send to your coprocessors. This will lower the body size of the request/response and may improve performance.
+You can now also specify exactly which context keys you wish to send to a coprocessor by listing them under the `selective` key. This will reduce the size of the request/response and may improve performance.
+
+**Upgrade step**: Either upgrade your coprocessor to use the new context keys, or add `context: deprecated` to your coprocessor configuration.
 
 Example:
 
 ```yaml
 coprocessor:
   url: http://127.0.0.1:3000 # mandatory URL which is the address of the coprocessor
-  supergraph:
+  router:
     request:
       context: false # Do not send any context entries
   supergraph:
     request:
       headers: true
-      context: # It will only send these 2 context keys to your coprocessor
+      context: # Send only these 2 context keys to your coprocessor
         selective:
           - apollo::supergraph::operation_name
           - apollo::demand_control::actual_cost
       body: true
     response:
       headers: true
-      context: all # It will send all context keys with new names (2.x version)
+      context: all # Send all context keys with new names (2.x version)
       body: true
   subgraph:
     all:
       request:
-        context: deprecated # It will send all the context keys with deprecated names (1.x version)
+        context: deprecated # Send all the context keys with deprecated names (1.x version)
 ```
 
-So if you don't want to change anything in your coprocessor you can switch `context: true` to `context: deprecated`.
-
 <Note>
-    If you use the `selective` configuration, you'll have to specify new context key names (>=2.x) it doesn't work with deprecated keys. So for example if you try to specify `operation_name` instead of `apollo::supergraph::operation_name` it won't map to the new context key.
+
+The `selective` context keys feature can not be used together with `deprecated` names.
+
 </Note>
 
 ### Updated syntax for configuring supergraph endpoint path
@@ -517,12 +520,10 @@ telemetry:
 
 <!-- PR: https://github.com/apollographql/router/pull/6486 -->
 
-Traffic shaping has been improved significantly in router v2.x. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in:
+Traffic shaping has been improved significantly in router v2.x. We've added a new mechanism, concurrency control, and we've improved the router's ability to observe timeout and traffic shaping restrictions correctly. These improvements do mean that clients of the router may see an increase in errors as traffic shaping constraints are enforced:
 
 - [Service Unavailable](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/503)
 - [Gateway Timeout](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/504)
-
-errors as traffic shaping constraints are enforced.
 
 We recommend that users experiment with their configuration in order to arrive at the right combination of timeout, concurrency and rate limit controls for their particular use case.
 
