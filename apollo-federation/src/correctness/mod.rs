@@ -14,6 +14,7 @@ use std::sync::Arc;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
+use query_plan_analysis::AnalysisContext;
 
 use crate::FederationError;
 use crate::compat::coerce_executable_values;
@@ -69,8 +70,9 @@ pub fn check_plan(
 
     let op_rs = response_shape::compute_response_shape_for_operation(&operation_doc, api_schema)?;
     let root_type = response_shape::compute_the_root_type_condition_for_operation(&operation_doc)?;
-    let plan_rs = query_plan_analysis::interpret_query_plan(supergraph_schema, &root_type, plan)
-        .map_err(|e| {
+    let context = AnalysisContext::new(supergraph_schema.clone(), subgraphs_by_name);
+    let plan_rs =
+        query_plan_analysis::interpret_query_plan(&context, &root_type, plan).map_err(|e| {
             ComparisonError::new(format!(
                 "Failed to compute the response shape from query plan:\n{e}"
             ))
