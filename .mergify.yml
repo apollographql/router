@@ -11,8 +11,8 @@ pull_request_rules:
           - "{{ author }}"
         bot_account: "{{ author }}"
 defaults:
-    actions:
-        backport:
-            assignees:
-            - "{{ author }}"
-            bot_account: "{{ author }}"
+  actions:
+    backport:
+      assignees:
+        - "{{ author }}"
+      bot_account: "{{ author }}"
