@@ -37,51 +37,50 @@ The following headings describe features that have been removed or deprecated in
 
 Multiple metrics have been removed in router v2.x as part of evolving towards OpenTelemetry metrics and conventions. Each of the removed metrics listed below has a replacement metric or a method for deriving its value:
 
-- `apollo_router_http_request_retry_total`. Use the `http.client.request.duration`
-  metric's `http.request.resend_count` attribute. Set [`default_requirement_level`](/docs/graphos/reference/router/telemetry/instrumentation/instruments#default_requirement_level)
-  to `recommended` to make the Router emit this attribute.
+- Removed `apollo_router_http_request_retry_total`. This is replaced by `http.client.request.duration` metric's `http.request.resend_count` attribute. Set [`default_requirement_level`](/docs/graphos/reference/router/telemetry/instrumentation/instruments#default_requirement_level)
+  to `recommended` to make the router emit this attribute.
 
-- `apollo_router_timeout`. This metric conflated timed-out requests from client
+- Removed `apollo_router_timeout`. This metric conflated timed-out requests from client
   to the router, and requests from the router to subgraphs. Timed-out requests
   have HTTP status code 504. Use the `http.response.status_code` attribute on the
   `http.server.request.duration` metric to identify timed-out router requests, and
   the same attribute on the `http.client.request.duration` metric to identify
   timed-out subgraph requests.
 
-- `apollo_router_http_requests_total`. This is replaced by
+- Removed `apollo_router_http_requests_total`. This is replaced by
   `http.server.request.duration` metric for requests from clients to router and
   `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_http_request_duration_seconds`. This is replaced by
+- Removed `apollo_router_http_request_duration_seconds`. This is replaced by
   `http.server.request.duration` metric for requests from clients to router and
   `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_session_count_total`. This does not have an equivalent in 2.0.0,
+- Removed `apollo_router_session_count_total`. This does not have an equivalent in 2.0.0,
   though one may be introduced in a point release.
 
-- `apollo_router_session_count_active`. This is replaced by
+- Removed `apollo_router_session_count_active`. This is replaced by
   `http.server.active_requests`.
 
-- `apollo_require_authentication_failure_count`. Use the
+- Removed `apollo_require_authentication_failure_count`. Use the
   `http.server.request.duration` metric's `http.response.status_code` attribute.
   Requests with authentication failures have HTTP status code 401.
 
-- `apollo_authentication_failure_count`. Use the
+- Removed `apollo_authentication_failure_count`. Use the
   `apollo.router.operations.authentication.jwt` metric's
   `authentication.jwt.failed` attribute.
 
-- `apollo_authentication_success_count`. Use the
+- Removed `apollo_authentication_success_count`. Use the
   `apollo.router.operations.authentication.jwt` metric instead. If the
   `authentication.jwt.failed` attribute is _absent_ or `false`, the authentication
   succeeded.
 
-- `apollo_router_deduplicated_subscriptions_total`. Use the
+- Removed`apollo_router_deduplicated_subscriptions_total`. Use the
   `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated`
   attribute.
 
-- `apollo_router_cache_miss_count`. Cache miss count can be derived from `apollo.router.cache.miss.time`.
+- Removed `apollo_router_cache_miss_count`. Cache miss count can be derived from `apollo.router.cache.miss.time`.
 
-- `apollo_router_cache_hit_count`. Cache hit count can be derived from `apollo.router.cache.hit.time`.
+- Removed `apollo_router_cache_hit_count`. Cache hit count can be derived from `apollo.router.cache.hit.time`.
 
 ### Removed processing time metrics
 
@@ -121,7 +120,7 @@ telemetry:
 
 <!-- PR: https://github.com/apollographql/router/pull/6274 -->
 
-Support for Scaffold (todo: provide link) for generating boilerplate source code for a Rust plugin has been removed in router v2.x.
+Support for the `cargo-scaffold` command to generate boilerplate source code for a Rust plugin has been removed in router v2.x.
 
 **Upgrade step**: Source code generated using Scaffold will continue to compile, so existing Rust plugins will be unaffected by this change.
 
@@ -354,7 +353,7 @@ You can continue using deprecated context key names from router 1.x if you confi
 
 ### Context Keys for Coprocessors
 
-The [context key renames](#Renamed-context-keys) may impact your coprocessor logic. It can be tricky to update all context key usage together with the Router upgrade. To aid this, the `context` option for Coprocessors has been extended.
+The [context key renames](#renamed-context-keys) may impact your coprocessor logic. It can be tricky to update all context key usage together with the router upgrade. To aid this, the `context` option for Coprocessors has been extended.
 
 You can specify `context: deprecated` to send all context with the old names, compatible with v1.x. Context keys are translated to their v1.x names before being sent to the coprocessor, and translated back to the v2.x names after being received from the coprocessor.
 
