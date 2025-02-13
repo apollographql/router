@@ -18,11 +18,22 @@
 //!
 //! Any requests made to the snapshot server will be proxied on to the given base URL, and the
 //! responses will be saved to the given file. The next time the snapshot server receives the
-//! same request (same relative path, HTTP method, and request body), it will respond with the
-//! response recorded in the file rather than sending the request to the upstream server.
+//! same request, it will respond with the response recorded in the file rather than sending the
+//! request to the upstream server.
 //!
 //! The snapshot file can be manually edited to manipulate responses for testing purposes, or to
 //! redact information that you don't want to include in source-controlled snapshot files.
+//!
+//! Requests are matched to snapshots based on the URL path, HTTP method, and base64 encoding of
+//! the request body (if there is one). If the snapshot specifies the `path` field, the URL path
+//! must match exactly. Alternatively, a snapshot containing a `regex` field will match any URL
+//! path that matches the regular expression. A snapshot with an exact `path` match takes
+//! precedence over a snapshot with `regex`. Snapshots recorded by the server will always specify
+//! `path`. The only way to use `regex` is to manually edit a snapshot file. A typical pattern is
+//! to record a snapshot from a REST API, then manually change `path` to `regex` and replace the
+//! variable part of the path with `.*`. Note that any special characters in the path that have
+//! meaning to the `regex` crate must be escaped with `\\`, such as the `?` in a URL query
+//! parameter.
 //!
 //! The offline mode will never call the upstream server, and will always return a saved snapshot
 //! response. If one is not available, a `500` error is returned. This is useful for tests, for
@@ -36,10 +47,7 @@
 //! This is typically desirable, as headers may contain ephemeral information like dates or tokens.
 //!
 //! **IMPORTANT:** this module stores HTTP responses to the local file system in plain text. It
-//! should not be used with production APIs that return sensitive data.
-//!
-//! This module should also not be used in conjunction with performance testing, as returning
-//! snapshot data locally will be much faster than sending HTTP requests to an external server.
+//! should not be used with APIs that return sensitive data.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -100,11 +108,14 @@ static FILTERED_HEADERS: [HeaderName; 6] = [
 #[derive(Debug, thiserror::Error)]
 enum SnapshotError {
     /// Unable to load snapshots
-    #[error("unable to load snapshots")]
+    #[error("unable to load snapshot file - {0}")]
     IoError(#[from] std::io::Error),
     /// Unable to parse snapshots
-    #[error("unable to parse snapshots")]
+    #[error("unable to parse snapshots - {0}")]
     ParseError(#[from] serde_json::Error),
+    /// Invalid snapshot
+    #[error("invalid snapshot - {0}")]
+    InvalidSnapshot(String),
 }
 
 /// A server that mocks an API using snapshots recorded from actual HTTP responses.
@@ -279,11 +290,25 @@ fn response_from_snapshot(
     } else {
         snapshots_by_key
             .get(key)
+            .inspect(|snapshot| {
+                debug!(
+                    url = %uri,
+                    method = %method,
+                    path = %snapshot.request.path.as_ref().unwrap_or(&String::from("")),
+                    "Found existing snapshot"
+                );
+            })
             .or_else(|| {
                 // Look up snapshot using regex
                 for snapshot in snapshots_by_regex.iter() {
                     if let Some(regex) = &snapshot.request.regex {
                         if regex.is_match(uri) {
+                            debug!(
+                                url = %uri,
+                                method = %method,
+                                regex = %regex.to_string(),
+                                "Found existing snapshot"
+                            );
                             return Some(snapshot);
                         }
                     }
@@ -291,11 +316,6 @@ fn response_from_snapshot(
                 None
             })
             .and_then(|snapshot| {
-                debug!(
-                    url = %uri,
-                    method = %method,
-                    "Found existing snapshot"
-                );
                 snapshot
                     .clone()
                     .into_response()
@@ -362,11 +382,15 @@ fn load<P: AsRef<Path>>(
 ) -> Result<(BTreeMap<String, Snapshot>, Vec<Snapshot>), SnapshotError> {
     let str = std::fs::read_to_string(path)?;
     let snapshots: Vec<Snapshot> = serde_json::from_str(&str)?;
-    info!("Loaded {} snapshots", snapshots.len());
     let mut snapshots_by_key: BTreeMap<String, Snapshot> = Default::default();
     let mut snapshots_by_regex: Vec<Snapshot> = Default::default();
     for snapshot in snapshots.into_iter() {
         if snapshot.request.regex.is_some() {
+            if snapshot.request.path.is_some() {
+                return Err(SnapshotError::InvalidSnapshot(String::from(
+                    "snapshot cannot specify both regex and path",
+                )));
+            }
             snapshots_by_regex.push(snapshot);
         } else {
             snapshots_by_key.insert(snapshot.key(), snapshot);
@@ -447,12 +471,31 @@ impl SnapshotServer {
 
         let snapshot_file = snapshot_path.as_ref();
 
-        let (snapshots_by_key, snapshots_by_regex) = load(snapshot_file).unwrap_or_else(|_| {
-            if offline {
-                warn!("Unable to load snapshot file in offline mode - all requests will fail");
+        let (snapshots_by_key, snapshots_by_regex) = match load(snapshot_file) {
+            Err(SnapshotError::IoError(ioe)) if ioe.kind() == std::io::ErrorKind::NotFound => {
+                if offline {
+                    warn!("Snapshot file not found in offline mode - all requests will fail");
+                } else {
+                    info!("Snapshot file not found - new snapshot file will be recorded");
+                }
+                (BTreeMap::default(), vec![])
             }
-            (BTreeMap::default(), vec![])
-        });
+            Err(e) => {
+                if offline {
+                    warn!("Unable to load snapshot file in offline mode - all requests will fail: {e}");
+                } else {
+                    warn!("Unable to load snapshot file - new snapshot file will be recorded: {e}");
+                }
+                (BTreeMap::default(), vec![])
+            }
+            Ok((snapshots_by_key, snapshots_by_regex)) => {
+                info!(
+                    "Loaded {} snapshots",
+                    snapshots_by_key.len() + snapshots_by_regex.len()
+                );
+                (snapshots_by_key, snapshots_by_regex)
+            }
+        };
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
