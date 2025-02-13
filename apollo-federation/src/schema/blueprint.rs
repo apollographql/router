@@ -21,21 +21,21 @@ struct CoreFeature {
 #[allow(dead_code)]
 trait SchemaBlueprint {
     fn on_missing_directive_definition(
-        _schema: &Schema,
+        _schema: &mut Schema,
         _directive: &Directive,
     ) -> Result<Option<DirectiveDefinition>, FederationError>;
 
-    fn on_directive_definition_and_schema_parsed(_: &Schema) -> Option<FederationError>;
+    fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError>;
 
     fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool;
 
-    fn on_constructed(_: &Schema);
+    fn on_constructed(_: &mut Schema);
 
-    fn on_added_core_feature(_schema: &Schema, _feature: &CoreFeature);
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature);
 
     fn on_invalidation(_: &Schema);
 
-    fn on_validation(_schema: &Schema) -> Option<FederationError>;
+    fn on_validation(_schema: &Schema) -> Result<(), FederationError>;
 
     fn on_apollo_rs_validation_error(
         _error: apollo_compiler::validation::WithErrors<Schema>,
@@ -48,6 +48,56 @@ trait SchemaBlueprint {
     ) -> FederationError;
 
     fn apply_directives_after_parsing() -> bool;
+}
+
+#[allow(dead_code)]
+struct DefaultBlueprint {}
+
+impl SchemaBlueprint for DefaultBlueprint {
+    fn on_missing_directive_definition(
+        _schema: &mut Schema,
+        _directive: &Directive,
+    ) -> Result<Option<DirectiveDefinition>, FederationError> {
+        Ok(None)
+    }
+
+    fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError> {
+        Ok(())
+    }
+
+    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
+        false
+    }
+
+    fn on_constructed(_: &mut Schema) {}
+
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {}
+
+    fn on_invalidation(_: &Schema) {
+        todo!()
+    }
+
+    fn on_validation(_schema: &Schema) -> Result<(), FederationError> {
+        Ok(())
+    }
+
+    fn on_apollo_rs_validation_error(
+        _error: apollo_compiler::validation::WithErrors<Schema>,
+    ) -> FederationError {
+        todo!()
+    }
+
+    fn on_unknown_directive_validation_error(
+        _schema: &Schema,
+        _unknown_directive_name: &str,
+        error: FederationError,
+    ) -> FederationError {
+        error
+    }
+
+    fn apply_directives_after_parsing() -> bool {
+        false
+    }
 }
 
 #[allow(dead_code)]
@@ -66,13 +116,13 @@ impl FederationBlueprint {
 
 impl SchemaBlueprint for FederationBlueprint {
     fn on_missing_directive_definition(
-        _schema: &Schema,
+        _schema: &mut Schema,
         _directive: &Directive,
     ) -> Result<Option<DirectiveDefinition>, FederationError> {
         todo!()
     }
 
-    fn on_directive_definition_and_schema_parsed(_: &Schema) -> Option<FederationError> {
+    fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError> {
         todo!()
     }
 
@@ -80,11 +130,11 @@ impl SchemaBlueprint for FederationBlueprint {
         todo!()
     }
 
-    fn on_constructed(_: &Schema) {
+    fn on_constructed(_: &mut Schema) {
         todo!()
     }
 
-    fn on_added_core_feature(_schema: &Schema, _feature: &CoreFeature) {
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
         todo!()
     }
 
@@ -92,7 +142,7 @@ impl SchemaBlueprint for FederationBlueprint {
         todo!()
     }
 
-    fn on_validation(_schema: &Schema) -> Option<FederationError> {
+    fn on_validation(_schema: &Schema) -> Result<(), FederationError> {
         todo!()
     }
 
