@@ -442,7 +442,7 @@ fn detect_cpu_count(system: &System) -> u64 {
                 _ => system_cpus,
             }
         }
-        None => system_cpus,
+        CGroupVersion::None => system_cpus,
     }
 }
 
