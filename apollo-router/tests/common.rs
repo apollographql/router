@@ -724,10 +724,9 @@ impl IntegrationTest {
 
                 let mut request = client
                     .post(url)
-                    .header(CONTENT_TYPE, mime.to_string())
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("x-my-header", "test")
+                    .header("apollo-require-preflight", "test")
                     .multipart(request)
                     .build()
                     .unwrap();

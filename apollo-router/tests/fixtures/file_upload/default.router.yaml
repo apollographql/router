@@ -3,6 +3,7 @@
 csrf:
   required_headers:
     - x-my-header
+    - apollo-require-preflight
 preview_file_uploads:
   enabled: true
   protocols:
