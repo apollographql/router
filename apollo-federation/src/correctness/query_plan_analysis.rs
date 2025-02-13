@@ -8,6 +8,7 @@ use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Name;
 use itertools::Itertools;
 
+use super::query_plan_soundness::check_requires;
 use super::response_shape::Clause;
 use super::response_shape::DefinitionVariant;
 use super::response_shape::Literal;
@@ -118,9 +119,8 @@ impl ResponseShape {
 
     /// Add a new condition to a ResponseShape.
     /// - This method is intended for the top-level response shape.
-    fn add_boolean_conditions(&self, literals: &[Literal]) -> Self {
-        let added_clause = Clause::from_literals(literals);
-        self.concatenate_and_simplify_boolean_conditions(&Clause::default(), &added_clause)
+    pub(crate) fn add_boolean_conditions(&self, clause: &Clause) -> Self {
+        self.concatenate_and_simplify_boolean_conditions(&Clause::default(), clause)
     }
 }
 
@@ -145,6 +145,14 @@ impl AnalysisContext<'_> {
             supergraph_schema,
             subgraphs_by_name,
         }
+    }
+
+    pub fn supergraph_schema(&self) -> &ValidFederationSchema {
+        &self.supergraph_schema
+    }
+
+    pub fn subgraphs_by_name(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
+        self.subgraphs_by_name
     }
 
     fn get_subgraph_schema(&self, subgraph_name: &str) -> Option<&ValidFederationSchema> {
@@ -381,7 +389,7 @@ fn apply_rewrites(
 
 fn interpret_fetch_node(
     context: &AnalysisContext,
-    _state: &ResponseShape,
+    state: &ResponseShape,
     conditions: &[Literal],
     fetch: &FetchNode,
 ) -> Result<ResponseShape, String> {
@@ -390,8 +398,8 @@ fn interpret_fetch_node(
         .operation_document
         .as_parsed()
         .map_err(|e| e.to_string())?;
+    let boolean_clause = Clause::from_literals(conditions);
     let mut result = if !fetch.requires.is_empty() {
-        // TODO: check requires
         // Response shapes per entity selection
         let response_shapes =
             compute_response_shape_for_entity_fetch_operation(operation_doc, schema).map_err(
@@ -402,6 +410,23 @@ fn interpret_fetch_node(
                     )
                 },
             )?;
+
+        // Soundness check
+        let subgraph_name = &fetch.subgraph_name;
+        let Some(subgraph_schema) = context.get_subgraph_schema(subgraph_name) else {
+            return Err(format!(
+                "Subgraph schema not found for {subgraph_name}:\n{fetch}"
+            ));
+        };
+        check_requires(
+            context,
+            subgraph_schema,
+            state,
+            &boolean_clause,
+            &response_shapes,
+            &fetch.requires,
+        )
+        .map_err(|e| format!("{e}\nfetch node: {fetch}"))?;
 
         // Compute the merged result from the individual entity response shapes.
         merge_response_shapes(response_shapes.iter()).map_err(|e| {
@@ -418,7 +443,7 @@ fn interpret_fetch_node(
             )
         })
     }
-    .map(|rs| rs.add_boolean_conditions(conditions))?;
+    .map(|rs| rs.add_boolean_conditions(&boolean_clause))?;
     for rewrite in &fetch.output_rewrites {
         result = apply_rewrites(schema, &result, rewrite)?;
     }
@@ -769,7 +794,9 @@ fn interpret_plan_node_under_boolean_condition(
         .map_err(|e| e.description().to_string())?
     else {
         // We must have at least one variant for the given clause.
-        return Err(format!("Internal error: failed to collect applicable variants for full clause `{full_clause}`"));
+        return Err(format!(
+            "Internal error: failed to collect applicable variants for full clause `{full_clause}`"
+        ));
     };
     let Some(sub_state) = merged_variant.sub_selection_response_shape() else {
         // A sub-selection is expected at the FlattenNode path.

@@ -31,7 +31,7 @@ impl ComparisonError {
         ComparisonError { description }
     }
 
-    fn add_description(self: ComparisonError, description: &str) -> ComparisonError {
+    pub fn add_description(self: ComparisonError, description: &str) -> ComparisonError {
         ComparisonError {
             description: format!("{}\n{}", self.description, description),
         }
@@ -495,7 +495,10 @@ fn compare_field_selection_key(
     Ok(())
 }
 
-fn compare_representative_field(this: &Field, other: &Field) -> Result<(), ComparisonError> {
+pub(crate) fn compare_representative_field(
+    this: &Field,
+    other: &Field,
+) -> Result<(), ComparisonError> {
     check_match_eq!(this.name, other.name);
     // Note: Arguments and directives are NOT normalized.
     if !same_ast_arguments(&this.arguments, &other.arguments) {

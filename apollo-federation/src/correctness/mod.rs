@@ -1,6 +1,7 @@
 pub mod query_plan_analysis;
 #[cfg(test)]
 pub mod query_plan_analysis_test;
+mod query_plan_soundness;
 pub mod response_shape;
 pub mod response_shape_compare;
 #[cfg(test)]
@@ -83,6 +84,10 @@ pub fn check_plan(
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
     let assumption = response_shape::Clause::default(); // empty assumption at the top level
-    compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs)?;
+    compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs).map_err(|e| {
+        ComparisonError::new(format!(
+            "Response shape from query plan does not match response shape from input operation:\n{e}"
+        ))
+    })?;
     Ok(())
 }
