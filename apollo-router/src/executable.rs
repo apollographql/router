@@ -327,12 +327,16 @@ pub fn main() -> Result<()> {
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
+
+    // This environment variable is intentionally undocumented.
+    // See also APOLLO_ROUTER_COMPUTE_THREADS in apollo-router/src/compute_job.rs
+    if let Some(nb) = std::env::var("APOLLO_ROUTER_IO_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
         builder.worker_threads(nb);
     }
+
     let runtime = builder.build()?;
     runtime.block_on(Executable::builder().start())
 }
