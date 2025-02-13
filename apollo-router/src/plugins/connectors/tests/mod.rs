@@ -63,9 +63,9 @@ async fn value_from_config() {
         "query { me { id name username} }",
         Default::default(),
         Some(json!({
-            "preview_connectors": {
-                "subgraphs": {
-                    "connectors": {
+            "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                             "id": 1,
                         }
@@ -108,7 +108,7 @@ async fn max_requests() {
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "max_requests_per_operation_per_source": 2
           }
         })),
@@ -173,7 +173,7 @@ async fn source_max_requests() {
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "subgraphs": {
               "connectors": {
                 "sources": {
@@ -570,7 +570,7 @@ async fn test_headers() {
         "query { users { id } }",
         Default::default(),
         Some(json!({
-            "preview_connectors": {
+            "connectors": {
                 "subgraphs": {
                     "connectors": {
                         "$config": {
@@ -1450,7 +1450,7 @@ async fn test_sources_in_context() {
         "query Posts { posts { id body title author { name username } } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "expose_sources_in_context": true
           },
           "coprocessor": {
@@ -1518,7 +1518,7 @@ async fn test_variables() {
         "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "subgraphs": {
               "connectors": {
                 "$config": {
@@ -1804,14 +1804,10 @@ async fn execute(
     let common_config = json!({
         "include_subgraph_errors": { "all": true },
         "override_subgraph_url": {"graphql": subgraph_uri},
-        "preview_connectors": {
-            "subgraphs": {
-                "connectors": {
-                    "sources": {
-                        "json": {
-                            "override_url": connector_uri
-                        }
-                    }
+        "connectors": {
+            "sources": {
+                "connectors.json": {
+                    "override_url": connector_uri
                 }
             }
         }

@@ -1179,10 +1179,6 @@ fn merge_overrides(
     }
     if let Some(sources) = config
         .as_object_mut()
-        .and_then(|o| o.get_mut("preview_connectors"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("subgraphs"))
-        .and_then(|o| o.as_object_mut())
         .and_then(|o| o.get_mut("connectors"))
         .and_then(|o| o.as_object_mut())
         .and_then(|o| o.get_mut("sources"))
@@ -1191,7 +1187,7 @@ fn merge_overrides(
         for (name, url) in overrides2 {
             let mut obj = serde_json::Map::new();
             obj.insert("override_url".to_string(), url.clone());
-            sources.insert(name.to_string(), Value::Object(obj));
+            sources.insert(format!("connectors.{}", name), Value::Object(obj));
         }
     }
 

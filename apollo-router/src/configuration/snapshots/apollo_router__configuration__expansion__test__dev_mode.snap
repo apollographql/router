@@ -2,6 +2,8 @@
 source: apollo-router/src/configuration/expansion.rs
 expression: value
 ---
+connectors:
+  debug_extensions: true
 homepage:
   enabled: false
   some_other_config: should remain
@@ -9,8 +11,6 @@ include_subgraph_errors:
   all: true
 plugins:
   experimental.expose_query_plan: true
-preview_connectors:
-  debug_extensions: true
 sandbox:
   enabled: true
 supergraph:
