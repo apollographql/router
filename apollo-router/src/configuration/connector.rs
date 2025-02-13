@@ -10,7 +10,7 @@ pub(crate) struct ConnectorConfiguration<T>
 where
     T: Serialize + JsonSchema,
 {
-    // Map of subgraph_name.connector_source_name to configuration
+    /// Map of subgraph_name.connector_source_name to configuration
     #[serde(default)]
     pub(crate) sources: HashMap<String, T>,
 }
