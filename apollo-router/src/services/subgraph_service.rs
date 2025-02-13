@@ -637,18 +637,10 @@ async fn call_websocket(
                     .and_then(|e| e.downcast_ref::<std::str::Utf8Error>())
                 {
                     let pos = utf8_err.valid_up_to();
-                    let bytes = utf8_err.as_bytes();
-                    if pos < bytes.len() {
-                        let bad_byte = bytes[pos];
-                        format!("invalid UTF-8 at position {pos}, byte = 0x{bad_byte:02X}")
-                    } else {
-                        format!(
-                            "invalid UTF-8 at position {pos}, but 'pos' is beyond the available bytes ({})",
-                            bytes.len()
-                        )
-                    }
+                    format!("invalid UTF-8 at position {pos}")
                 } else {
-                    "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
+                    "invalid UTF-8 in WebSocket handshake; no additional details available"
+                        .to_string()
                 }
             }
 
@@ -662,9 +654,7 @@ async fn call_websocket(
                     })
                     .collect::<String>();
 
-                format!(
-                    "WebSocket upgrade failed.\nStatus: {status}\nHeaders:{headers}"
-                )
+                format!("WebSocket upgrade failed.\nStatus: {status}\nHeaders:{headers}")
             }
 
             tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
