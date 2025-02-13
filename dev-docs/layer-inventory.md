@@ -53,12 +53,6 @@ Plugins:
 - Telemetry: other work
   - A lot of stuff is happening inside a `map_future` layer. I haven't checked this out but I think it's fine from a backpressure/pipeline perspective.
   - This would be easier to understand in a named layer, potentially.
-- Body limiting (limits plugin)
-  - Rejects bodies that are too big. It's an equivalent of the tower-http `RequestBodyLimitLayer`.
-  - There's a bit of a dance happening here that we can hopefully remove.
-  - Comment: "This layer differs from the tower version in that it will always generate an error eagerly rather than allowing the downstream service to catch and handle the error."
-  - I do not understand what that means. But it must be related to making the `map_error_to_graphql` call inside the limits plugin work.
-  - It may not be trivial to change this to use tower-http.
 - Traffic shaping:
   - Load shedding.
     - This is just tower!
@@ -76,6 +70,15 @@ Plugins:
     - Only present if a global rate limit is configured in the router.
     - We use a `.map_result()` layer to handle the error and turn it into a GraphQL error response.
     - This is provided by `tower`!
+- Body limiting (limits plugin)
+  - Rejects bodies that are too big. It's an equivalent of the tower-http `RequestBodyLimitLayer`.
+  - There's a bit of a dance happening here that we can hopefully remove.
+  - Comment: "This layer differs from the tower version in that it will always generate an error eagerly rather than allowing the downstream service to catch and handle the error."
+  - I do not understand what that means. But it must be related to making the `map_error_to_graphql` call inside the limits plugin work.
+  - It may not be trivial to change this to use tower-http.
+- CSRF
+  - This is a checkpoint layer.
+  - Rejects requests that might be cross-site request forgery, by making sure all requests have a header or a content-type that *requires* the browser to do CORS preflight. (I.e., we prevent requests that are exempt from CORS from executing queries.)
 - Fleet detection
   - Records router request and response size (unless disabled by environment variable).
   - The size counting has the effect of turning all bodies into streams, which may have negative effects!
@@ -130,10 +133,6 @@ Front (`SupergraphCreator`):
 - AllowOnlyHttpPostMutationsLayer is the final step before going into the supergraph service proper.
 
 Plugins:
-- CSRF
-  - This is a checkpoint layer.
-  - Rejects requests that might be cross-site request forgery...
-  - TODO(@goto-bus-stop): I'm not actually sure how this works
 - Telemetry: InstrumentLayer
   - The same underlying implementation as the one in `router_service`, but creating a different span.
 - Telemetry: other work
