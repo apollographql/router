@@ -38,6 +38,7 @@ use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use prost::Message;
 use proto::reports::Report;
+use serde_json::json;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tower::Service;
@@ -635,6 +636,33 @@ async fn test_send_variable_value() {
 async fn test_stats() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_invalid_enum_argument() {
+    let request = supergraph::Request::fake_builder()
+        .query("mutation{createProduct(upc:'asdf', color:$color){name reviews {author{name}}}}")
+        .variable("color", "invalid")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, false, false).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_invalid_enum_input_field() {
+    // TODO add nullable input type
+    let request = supergraph::Request::fake_builder()
+        .query("mutation{createProductFromDescription(description: $description){name reviews {author{name}}}}")
+        .variable("description",  json!({ "upc": "asdf", "color": "invalid" }))
         .build()
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");

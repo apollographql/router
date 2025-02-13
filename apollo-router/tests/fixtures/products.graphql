@@ -6,7 +6,8 @@ type Query {
 }
 
 type Mutation {
-  createProduct(upc: ID!, name: String): Product
+  createProduct(upc: ID!, name: String, color: Color): Product
+  createProductFromDescription(description: ProductDescription): Product
 }
 
 type Product @key(fields: "upc") {
@@ -14,4 +15,16 @@ type Product @key(fields: "upc") {
   name: String
   price: Int
   weight: Int
+}
+
+input ProductDescription {
+  upc: ID!
+  name:String
+  color: Color
+}
+
+enum Color {
+  RED,
+  BLUE,
+  GREEN
 }
