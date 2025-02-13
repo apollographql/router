@@ -399,7 +399,7 @@ fn detect_cpu_count(system: &System) -> u64 {
 
     let system_cpus = system.cpus().len() as u64;
     // Grab the contents of /proc/filesystems
-    match detect_cgroup_version(&fs::read_to_string("/proc/filesystems")) {
+    match detect_cgroup_version(&fs::read_to_string("/proc/filesystems")).unwrap_or_default() {
         CGroupVersion::CGroup2 => {
             // If we're looking at cgroup2 then we need to look in `cpu.max`
             match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
@@ -467,10 +467,11 @@ fn detect_cgroup_version(filesystems: &str) -> CGroupVersion {
 }
 
 #[allow(unused)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum CGroupVersion {
     CGroup2,
     CGroup,
+    #[default]
     None,
 }
 
