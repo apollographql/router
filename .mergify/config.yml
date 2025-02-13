@@ -27,3 +27,8 @@ queue_rules:
     queue_conditions:
       - and:
           - base = 1.x
+defaults:
+    actions:
+        backport:
+            assignees:
+            - "{{ author }}"
