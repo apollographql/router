@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -342,7 +343,7 @@ expression: "&schema"
     },
     "CSRFConfig": {
       "additionalProperties": false,
-      "description": "CSRF Configuration.",
+      "description": "CSRF protection configuration.\n\nSee <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.",
       "properties": {
         "required_headers": {
           "default": [
@@ -357,7 +358,7 @@ expression: "&schema"
         },
         "unsafe_disabled": {
           "default": false,
-          "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe. See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.",
+          "description": "The CSRF plugin is enabled by default.\n\nSetting `unsafe_disabled: true` *disables* CSRF protection.",
           "type": "boolean"
         }
       },

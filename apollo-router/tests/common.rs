@@ -17,11 +17,6 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use mediatype::names::BOUNDARY;
-use mediatype::names::FORM_DATA;
-use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -715,19 +710,11 @@ impl IntegrationTest {
 
             async move {
                 let client = reqwest::Client::new();
-                let mime = {
-                    let mut m = MediaType::new(MULTIPART, FORM_DATA);
-                    m.set_param(BOUNDARY, mediatype::Value::new(request.boundary()).unwrap());
-
-                    m
-                };
-
                 let mut request = client
                     .post(url)
-                    .header(CONTENT_TYPE, mime.to_string())
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("x-my-header", "test")
+                    .header("apollo-require-preflight", "test")
                     .multipart(request)
                     .build()
                     .unwrap();
