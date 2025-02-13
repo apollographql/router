@@ -660,8 +660,29 @@ pub(crate) async fn create_plugins(
         };
     }
 
+    // Be careful with this list! Moving things around can have subtle consequences.
+    // Requests flow through this list multiple times in two directions. First, they go "down"
+    // through the list several times as requests at the different services. Then, they go
+    // "up" through the list as a response several times, once for each service.
+    //
+    // The order of this list determines the relative order of plugin hooks executing at each
+    // service. This is *not* the same as the order a request flows through the router.
+    // For example, assume these three plugins:
+    // 1. header propagation (has a hook at the subgraph service)
+    // 2. telemetry (has hooks at router, supergraph, and subgraph services)
+    // 3. rate limiting (has a hook at the router service)
+    // The order here means that header propagation happens before telemetry *at the subgraph
+    // service*. Depending on the requirements of plugins, it may have to be in this order. The
+    // *router service* hook for telemetry still happens well before header propagation. Similarly,
+    // header propagation being first does not mean that it's exempt from rate limiting, for the
+    // same reason. Rate limiting must be after telemetry, though, because telemetry and rate
+    // limiting both work at the router service, and requests rejected from the router service must
+    // flow through telemetry so we can record errors.
+    //
+    // Broadly, for telemetry to work, we must make sure that the telemetry plugin is the first
+    // plugin in this list *that adds a router service hook*. Other plugins can be before the
+    // telemetry plugin if they must do work *before* telemetry at specific services.
     add_mandatory_apollo_plugin!("include_subgraph_errors");
-    add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("headers");
     if apollo_telemetry_plugin_mandatory {
         match initial_telemetry_plugin {
@@ -675,10 +696,12 @@ pub(crate) async fn create_plugins(
             }
         }
     }
-    add_mandatory_apollo_plugin!("limits");
     add_mandatory_apollo_plugin!("license_enforcement");
     add_mandatory_apollo_plugin!("health_check");
+    // TODO: Introduce a CORS plugin here
     add_mandatory_apollo_plugin!("traffic_shaping");
+    add_mandatory_apollo_plugin!("limits");
+    add_mandatory_apollo_plugin!("csrf");
     add_mandatory_apollo_plugin!("fleet_detector");
 
     add_optional_apollo_plugin!("forbid_mutations");
@@ -692,7 +715,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("demand_control");
 
     // This relative ordering is documented in `docs/source/customizations/native.mdx`:
-    add_optional_apollo_plugin!("preview_connectors");
+    add_optional_apollo_plugin!("connectors");
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();

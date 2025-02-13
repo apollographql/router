@@ -1,4 +1,4 @@
-preview_connectors:
+connectors:
   debug_extensions: true
   expose_sources_in_context: true
   max_requests_per_operation_per_source: 100
