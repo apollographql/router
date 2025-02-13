@@ -56,7 +56,10 @@ Multiple metrics have been removed in router v2.x as part of evolving towards Op
   `http.server.request.duration` metric for requests from clients to router and
   `http.client.request.duration` for requests from router to subgraphs.
 
-- `apollo_router_session_count_total`. This is replaced by
+- `apollo_router_session_count_total`. This does not have an equivalent in 2.0.0,
+  though one may be introduced in a point release.
+
+- `apollo_router_session_count_active`. This is replaced by
   `http.server.active_requests`.
 
 - `apollo_require_authentication_failure_count`. Use the
@@ -152,7 +155,7 @@ router. Users customizing the router with Rhai scripts, Rust scripts, or coproce
 
 ### Removed `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async()`
 
-Both `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async() are removed as part of architectural optimizations in router v2.x.  
+Both `OneShotAsyncCheckpointLayer` and `.oneshot_checkpoint_async()` are removed as part of architectural optimizations in router v2.x.
 
 **Upgrade step**: 
 - Replace uses of `apollo_router::layers::ServiceBuilderExt::oneshot_checkpoint_async` with the `checkpoint_async` method.
@@ -170,7 +173,7 @@ OneShotAsyncCheckpointLayer::new(move |request: execution::Request| {
 .boxed()
 ```
 
-New plugin code using `AsyncCheckpointLayer`
+New plugin code using `AsyncCheckpointLayer`:
 
 ```rust
 use apollo_router::layers::async_checkpoint_layer::AsyncCheckpointLayer;
