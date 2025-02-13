@@ -1422,7 +1422,7 @@ impl Batching {
                     subgraph_batching_config
                         .subgraphs
                         .get(service_name)
-                        .map_or(true, |x| x.enabled)
+                        .is_none_or(|x| x.enabled)
                 } else {
                     // If it isn't, require:
                     // - an enabled subgraph entry

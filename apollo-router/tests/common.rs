@@ -553,7 +553,9 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).expect("line: '{line}' isn't JSON, might you have some debug output in the logging?");
+                    let Ok(log) = serde_json::from_str::<Log>(&line) else {
+                        panic!("line: '{line}' isn't JSON, might you have some debug output in the logging?");
+                    };
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(

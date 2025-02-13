@@ -295,7 +295,7 @@ where
                 let right_att = gt[1]
                     .on_response_event(response, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0]
@@ -304,7 +304,7 @@ where
                 let right_att = gt[1]
                     .on_response_event(response, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response_event(response, ctx).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_event_response(response, ctx)),
@@ -325,12 +325,12 @@ where
             Condition::Gt(gt) => {
                 let left_att = gt[0].on_response(response).map(AttributeValue::from);
                 let right_att = gt[1].on_response(response).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0].on_response(response).map(AttributeValue::from);
                 let right_att = gt[1].on_response(response).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response(response).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_response(response)),
@@ -351,12 +351,12 @@ where
             Condition::Gt(gt) => {
                 let left_att = gt[0].on_error(error, ctx).map(AttributeValue::from);
                 let right_att = gt[1].on_error(error, ctx).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0].on_error(error, ctx).map(AttributeValue::from);
                 let right_att = gt[1].on_error(error, ctx).map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_error(error, ctx).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_error(error, ctx)),
@@ -387,7 +387,7 @@ where
                 let right_att = gt[1]
                     .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0]
@@ -396,7 +396,7 @@ where
                 let right_att = gt[1]
                     .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
-                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+                left_att.zip(right_att).is_some_and(|(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response_field(ty, field, value, ctx).is_some(),
             Condition::All(all) => all

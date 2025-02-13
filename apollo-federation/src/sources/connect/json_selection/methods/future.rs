@@ -949,7 +949,7 @@ fn not_shape(
 fn is_truthy(data: &JSON) -> bool {
     match data {
         JSON::Bool(b) => *b,
-        JSON::Number(n) => n.as_f64().map_or(false, |n| n != 0.0),
+        JSON::Number(n) => n.as_f64().is_some_and(|n| n != 0.0),
         JSON::Null => false,
         JSON::String(s) => !s.as_str().is_empty(),
         JSON::Object(_) | JSON::Array(_) => true,

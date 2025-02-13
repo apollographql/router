@@ -306,7 +306,7 @@ where
             );
         });
 
-        let response = client.call(request).await.map_err(BoxError::from)?;
+        let response = client.call(request).await?;
         router::body::into_bytes(response.into_body())
             .await
             .map_err(BoxError::from)

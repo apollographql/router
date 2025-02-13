@@ -74,6 +74,7 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
+    #[allow(clippy::needless_lifetimes)] // needless in `new` but not in generated builder methods
     pub(crate) async fn new<'a, 'b>(
         config: Option<&'a str>,
         schema: Option<&'b str>,
