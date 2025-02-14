@@ -673,26 +673,6 @@ The `->echo` method is still useful when you want to do something with the input
 value (which is bound to `@` within the echoed expression), rather than ignoring
 the input value (using `@` nowhere in the expression).
 
-The `$(...)` syntax can be useful within a `LitExpr` as well:
-
-```graphql
-# $(-1) needs wrapping in order to apply the ->mul method
-suffix: results.slice($(-1)->mul($args.suffixLength))
-
-# Instead of something like this:
-# suffix: results.slice($->echo(-1)->mul($args.suffixLength))
-```
-
-In fairness, due to the commutavity of multiplication, this particular case
-could have been written as `suffix: results.slice($args.suffixLength->mul(-1))`,
-but not all methods allow reversing the input and arguments so easily, and this
-syntax works in part because it still parenthesizes the `-1` literal value,
-forcing `LitExpr` parsing, much like the new `ExprPath` syntax.
-
-When you don't need to apply a `.key` or `->method` to a literal value within a
-`LitExpr`, you do not need to wrap it with `$(...)`, so the `ExprPath` syntax is
-relatively uncommon within `LitExpr` expressions.
-
 ### `PathStep ::=`
 
 ![PathStep](./grammar/PathStep.svg)
