@@ -34,6 +34,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
+use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
@@ -359,16 +360,19 @@ impl Plugin for DemandControl {
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => ControlFlow::Break(
-                            execution::Response::builder()
-                                .errors(
-                                    err.into_graphql_errors()
-                                        .expect("must be able to convert to graphql error"),
-                                )
-                                .context(req.context.clone())
-                                .build()
-                                .expect("Must be able to build response"),
-                        ),
+                        Err(err) => {
+                            emit_error_event(err.code(), "Demand control execution error");
+                            ControlFlow::Break(
+                                execution::Response::builder()
+                                    .errors(
+                                        err.into_graphql_errors()
+                                            .expect("must be able to convert to graphql error"),
+                                    )
+                                    .context(req.context.clone())
+                                    .build()
+                                    .expect("Must be able to build response"),
+                            )
+                        }
                     })
                 })
                 .map_response(|mut resp: execution::Response| {
