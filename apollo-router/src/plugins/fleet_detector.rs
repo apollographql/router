@@ -144,8 +144,14 @@ impl GaugeStore {
                         let local_system_getter = system_getter.clone();
                         let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
-                        let cpu_count = detect_cpu_count(system);
-                        gauge.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
+                        let (detection_method, cpu_count) = detect_cpu_count(system);
+                        gauge.observe(
+                            cpu_count,
+                            &[
+                                KeyValue::new("host.arch", get_otel_arch()),
+                                KeyValue::new("detection_method", detection_method),
+                            ],
+                        )
                     })
                     .init(),
             );
@@ -386,15 +392,15 @@ impl PluginPrivate for FleetDetector {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn detect_cpu_count(system: &System) -> u64 {
-    system.cpus().len() as u64
+fn detect_cpu_count(system: &System) -> (&'static str, u64) {
+    ("system", system.cpus().len() as u64)
 }
 
 // Because Linux provides CGroups as a way of controlling the proportion of CPU time each
 // process gets we can perform slightly more introspection here than simply appealing to the
 // raw number of processors. Hence, the extra logic including below.
 #[cfg(target_os = "linux")]
-fn detect_cpu_count(system: &System) -> u64 {
+fn detect_cpu_count(system: &System) -> (&'static str, u64) {
     use std::fs;
 
     let system_cpus = system.cpus().len() as u64;
@@ -407,18 +413,19 @@ fn detect_cpu_count(system: &System) -> u64 {
                     // The format of the file lists the quota first, followed by the period,
                     // but the quota could also be max which would mean there are no restrictions.
                     if readings.starts_with("max") {
-                        system_cpus
+                        ("system", system_cpus)
                     } else {
                         // If it's not max then divide the two to get an integer answer
                         match readings.split_once(' ') {
-                            None => system_cpus,
-                            Some((quota, period)) => {
-                                calculate_cpu_count_with_default(system_cpus, quota, period)
-                            }
+                            None => ("system", system_cpus),
+                            Some((quota, period)) => (
+                                "cgroup2",
+                                calculate_cpu_count_with_default(system_cpus, quota, period),
+                            ),
                         }
                     }
                 }
-                Err(_) => system_cpus,
+                Err(_) => ("system", system_cpus),
             }
         }
         Ok(CGroupVersion::CGroup) => {
@@ -434,16 +441,19 @@ fn detect_cpu_count(system: &System) -> u64 {
                     // In v1 quota being -1 indicates no restrictions so return the maximum (all
                     // system CPUs) otherwise divide the two.
                     if quota == "-1" {
-                        system_cpus
+                        ("system", system_cpus)
                     } else {
-                        calculate_cpu_count_with_default(system_cpus, &quota, &period)
+                        (
+                            "cgroup",
+                            calculate_cpu_count_with_default(system_cpus, &quota, &period),
+                        )
                     }
                 }
-                _ => system_cpus,
+                _ => ("system", system_cpus),
             }
         }
         // Error reading the file or no cgroup support
-        _ => system_cpus,
+        _ => ("system", system_cpus),
     }
 }
 
