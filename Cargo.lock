@@ -377,6 +377,7 @@ dependencies = [
  "serde_derive_default",
  "serde_json",
  "serde_json_bytes",
+ "serde_regex",
  "serde_urlencoded",
  "serde_yaml",
  "serial_test",
@@ -6282,6 +6283,16 @@ dependencies = [
  "percent-encoding",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "serde_regex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8136f1a4ea815d7eac4101cfd0b16dc0cb5e1fe1b8609dfd728058656b7badf"
+dependencies = [
+ "regex",
+ "serde",
 ]
 
 [[package]]
