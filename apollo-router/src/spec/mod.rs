@@ -162,3 +162,9 @@ impl IntoGraphQLErrors for SpecError {
         }
     }
 }
+
+impl From<std::convert::Infallible> for SpecError {
+    fn from(value: std::convert::Infallible) -> Self {
+        match value {}
+    }
+}
