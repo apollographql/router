@@ -4,6 +4,8 @@ pub mod query_plan_analysis_test;
 pub mod response_shape;
 pub mod response_shape_compare;
 #[cfg(test)]
+pub mod response_shape_compare_test;
+#[cfg(test)]
 pub mod response_shape_test;
 mod subgraph_constraint;
 

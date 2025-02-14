@@ -4,6 +4,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Field;
 
+use super::response_shape::Clause;
 use super::response_shape::DefinitionVariant;
 use super::response_shape::FieldSelectionKey;
 use super::response_shape::NormalizedTypeCondition;
@@ -11,7 +12,6 @@ use super::response_shape::PossibleDefinitions;
 use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::utils::FallibleIterator;
 
 #[derive(Debug)]
 pub struct ComparisonError {
@@ -255,29 +255,58 @@ fn compare_possible_definitions_per_type_condition<T: PathConstraint>(
     this.conditional_variants()
         .iter()
         .try_for_each(|this_def| {
-            // search the same boolean clause in other
-            let found = other
-                .conditional_variants()
-                .iter()
-                .fallible_any(|other_def| {
-                    if this_def.boolean_clause() != other_def.boolean_clause() {
-                        Ok(false)
-                    } else {
-                        compare_definition_variant(path_constraint, this_def, other_def)?;
-                        Ok(true)
-                    }
-                })?;
-            if !found {
-                Err(ComparisonError::new(
-                    format!("mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition:\nexpected clause: {}\ntarget definitions:\n{}",
-                            this_def.boolean_clause(),
-                            other,
-                    ),
-                ))
-            } else {
-                Ok(())
-            }
+            let clause = this_def.boolean_clause();
+            let Some(other_def) = collect_variants_for_boolean_condition(other, clause)? else {
+                return Err(ComparisonError::new(format!(
+                        "no variants found for Boolean condition: {clause}\ndefs:\n{other}"
+                )));
+            };
+            compare_definition_variant(path_constraint, this_def, &other_def)
+                .map_err(|e| {
+                    e.add_description(&format!(
+                        "mismatch in Boolean conditions of PossibleDefinitionsPerTypeCondition\n - Boolean condition: {}",
+                        this_def.boolean_clause(),
+                    ))
+                })
         })
+}
+
+/// Collect all variants implied by the Boolean condition and merge them into one.
+/// Returns `None` if no variants are applicable.
+fn collect_variants_for_boolean_condition(
+    defs: &PossibleDefinitionsPerTypeCondition,
+    filter_cond: &Clause,
+) -> Result<Option<DefinitionVariant>, ComparisonError> {
+    let mut iter = defs
+        .conditional_variants()
+        .iter()
+        .filter(|variant| filter_cond.implies(variant.boolean_clause()));
+    let Some(first) = iter.next() else {
+        return Ok(None);
+    };
+    let mut result_sub = first.sub_selection_response_shape().cloned();
+    for variant in iter {
+        compare_representative_field(variant.representative_field(), first.representative_field())
+            .map_err(|e| {
+                e.add_description("mismatch in representative_field under definition variant")
+            })?;
+        match (&mut result_sub, variant.sub_selection_response_shape()) {
+            (None, None) => {}
+            (Some(result_sub), Some(variant_sub)) => {
+                result_sub.merge_with(variant_sub).map_err(|e| {
+                    ComparisonError::new(format!("failed to merge implied variants: {e}"))
+                })?;
+            }
+            _ => {
+                return Err(ComparisonError::new(
+                    "mismatch in sub-selections of implied variants".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(Some(
+        first.with_updated_fields(filter_cond.clone(), result_sub),
+    ))
 }
 
 fn compare_definition_variant<T: PathConstraint>(
@@ -286,7 +315,9 @@ fn compare_definition_variant<T: PathConstraint>(
     other: &DefinitionVariant,
 ) -> Result<(), ComparisonError> {
     compare_representative_field(this.representative_field(), other.representative_field())
-        .map_err(|e| e.add_description("mismatch in field display under definition variant"))?;
+        .map_err(|e| {
+            e.add_description("mismatch in representative_field under definition variant")
+        })?;
     check_match_eq!(this.boolean_clause(), other.boolean_clause());
     match (
         this.sub_selection_response_shape(),

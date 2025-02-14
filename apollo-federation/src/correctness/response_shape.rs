@@ -398,6 +398,23 @@ impl Clause {
         self.0.is_empty()
     }
 
+    /// check if `self` implies `other`
+    /// - The literals in `other` is a subset of `self`.
+    pub fn implies(&self, other: &Clause) -> bool {
+        let mut self_variables: IndexMap<Name, bool> = IndexMap::default();
+        // Assume that `self` has no conflicts.
+        for lit in &self.0 {
+            self_variables.insert(lit.variable().clone(), lit.polarity());
+        }
+        other.0.iter().all(|lit| {
+            if let Some(polarity) = self_variables.get(lit.variable()) {
+                *polarity == lit.polarity()
+            } else {
+                false
+            }
+        })
+    }
+
     /// Creates a clause from a vector of literals.
     pub fn from_literals(literals: &[Literal]) -> Self {
         let variables: IndexMap<Name, bool> = literals
