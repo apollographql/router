@@ -7,7 +7,7 @@
 
 set -u
 
-BINARY_DOWNLOAD_PREFIX="https://github.com/apollographql/router/releases/download"
+BINARY_DOWNLOAD_PREFIX="${APOLLO_ROUTER_BINARY_DOWNLOAD_PREFIX:="https://github.com/apollographql/router/releases/download"}"
 
 # Router version defined in apollo-router's Cargo.toml
 # Note: Change this line manually during the release steps.
