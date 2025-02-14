@@ -151,6 +151,7 @@ impl AggregateMeterProvider {
     pub(crate) fn shutdown(&self) {
         // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
         // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
+        // then we don't get stuck on the mutex.
         let mut inner = self.inner.lock();
         let mut swap = Inner::default();
         std::mem::swap(&mut *inner, &mut swap);
