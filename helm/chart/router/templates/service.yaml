@@ -45,4 +45,3 @@ spec:
     {{- end }}
   selector:
     {{- include "router.selectorLabels" . | nindent 4 }}
-
