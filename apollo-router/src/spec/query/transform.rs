@@ -569,13 +569,10 @@ mod tests {
                 def: &ast::Field,
             ) -> Result<Option<ast::Field>, BoxError> {
                 Ok(field(self, field_def, def)?.map(|mut new| {
-                    new.directives.push(
-                        ast::Directive {
-                            name: apollo_compiler::name!("added"),
-                            arguments: Vec::new(),
-                        }
-                        .into(),
-                    );
+                    new.directives.push(ast::Directive {
+                        name: apollo_compiler::name!("added"),
+                        arguments: Vec::new(),
+                    });
                     new
                 }))
             }
@@ -707,7 +704,7 @@ fragment F on Query {
         result: ast::Document,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(f, "query:\n{}\nfiltered:\n{}", self.query, self.result,)
         }

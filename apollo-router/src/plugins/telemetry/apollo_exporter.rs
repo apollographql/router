@@ -4,7 +4,6 @@ use std::io::Write;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -18,6 +17,7 @@ use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
 use http::StatusCode;
 use opentelemetry::ExportError;
+use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
@@ -193,7 +193,7 @@ impl ApolloExporter {
         }
 
         // If studio has previously told us not to submit reports, return for further processing
-        let expires_at = *self.studio_backoff.lock().unwrap();
+        let expires_at = *self.studio_backoff.lock();
         let now = Instant::now();
         if expires_at > now {
             let remaining = expires_at - now;
@@ -261,8 +261,11 @@ impl ApolloExporter {
         let retries = if has_traces { 5 } else { 1 };
 
         for i in 0..retries {
-            // We know these requests can be cloned
-            let task_req = req.try_clone().expect("requests must be clone-able");
+            let task_req = req.try_clone().ok_or_else(|| {
+                ApolloExportError::ServerError(
+                    "Tried to clone a request that cannot be cloned".to_string(),
+                )
+            })?;
             match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();
@@ -292,7 +295,7 @@ impl ApolloExporter {
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
                                 retry_after = returned_retry_after;
-                                *self.studio_backoff.lock().unwrap() =
+                                *self.studio_backoff.lock() =
                                     Instant::now() + Duration::from_secs(retry_after);
                             }
                             // Even if we can't update the studio_backoff, we should not continue to

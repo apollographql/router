@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/set_context.rs
 expression: response
+snapshot_kind: text
 ---
 {
   "data": {
@@ -29,7 +30,7 @@ expression: response
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "4fc423a49bbddcc8869c014934dfd128dd61a1760c4eb619940ad46f614c843b",
+              "schemaAwareHash": "3a42fbf2a9a7f48e3ed94f72391fef2af7a06310b2ac92e4ee76c2ceb24507fb",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -81,7 +82,7 @@ expression: response
                     "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
-                "schemaAwareHash": "d863b0ef9ef616faaade4c73b2599395e074ec1521ec07634471894145e97f44",
+                "schemaAwareHash": "72ee0ea9ed33e8ce0736bb392a654d4cf6f9316809be1e9b0aed00842b6e37a9",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],

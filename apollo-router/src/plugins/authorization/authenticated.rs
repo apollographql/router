@@ -96,7 +96,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if !self.entity_query {
             traverse::operation(self, root_type, node)
@@ -319,7 +319,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
+impl transform::Visitor for AuthenticatedVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -534,6 +534,7 @@ mod tests {
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
+    use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
@@ -627,7 +628,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,
@@ -1502,10 +1503,7 @@ mod tests {
 
         let context = Context::new();
         context
-            .insert(
-                "apollo_authentication::JWT::claims",
-                "placeholder".to_string(),
-            )
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
             .unwrap();
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
@@ -1584,7 +1582,7 @@ mod tests {
         let context = Context::new();
         /*context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             "placeholder".to_string(),
         )
         .unwrap();*/
@@ -1659,13 +1657,13 @@ mod tests {
         let context = Context::new();
         /*context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             "placeholder".to_string(),
         )
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(ClientRequestAccepts {
                 multipart_defer: true,
                 multipart_subscription: true,
@@ -1945,7 +1943,7 @@ mod tests {
     #[tokio::test]
     async fn introspection_mixed_with_authenticated_fields() {
         // Note: in https://github.com/apollographql/router/pull/5952/ we moved introspection handling
-        // before authorization filtering in bridge_query_planner.rs, relying on the fact that queries
+        // before authorization filtering in query_planner_service.rs, relying on the fact that queries
         // mixing introspection and concrete fields are not supported, so introspection answers right
         // away. If this ever changes, we should make sure that unauthorized fields are still properly
         // filtered out

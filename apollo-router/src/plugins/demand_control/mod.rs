@@ -11,6 +11,7 @@ use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
 use displaydoc::Display;
 use futures::future::Either;
 use futures::stream;
@@ -42,11 +43,14 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-pub(crate) static COST_ESTIMATED_KEY: &str = "cost.estimated";
-pub(crate) static COST_ACTUAL_KEY: &str = "cost.actual";
-pub(crate) static COST_DELTA_KEY: &str = "cost.delta";
-pub(crate) static COST_RESULT_KEY: &str = "cost.result";
-pub(crate) static COST_STRATEGY_KEY: &str = "cost.strategy";
+pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
+pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
+pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
+pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
+pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
+pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
+pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -123,6 +127,8 @@ pub(crate) enum DemandControlError {
     SubgraphOperationNotInitialized(crate::query_planner::fetch::SubgraphOperationNotInitialized),
     /// {0}
     ContextSerializationError(String),
+    /// {0}
+    FederationError(FederationError),
 }
 
 impl IntoGraphQLErrors for DemandControlError {
@@ -163,6 +169,10 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
+            DemandControlError::FederationError(_) => Ok(vec![graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build()]),
         }
     }
 }
@@ -175,6 +185,7 @@ impl DemandControlError {
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
+            DemandControlError::FederationError(_) => "FEDERATION_ERROR",
         }
     }
 }
@@ -185,7 +196,7 @@ impl<T> From<WithErrors<T>> for DemandControlError {
     }
 }
 
-impl<'a> From<FieldLookupError<'a>> for DemandControlError {
+impl From<FieldLookupError<'_>> for DemandControlError {
     fn from(value: FieldLookupError) -> Self {
         match value {
             FieldLookupError::NoSuchType => DemandControlError::QueryParseFailure(
@@ -198,6 +209,12 @@ impl<'a> From<FieldLookupError<'a>> for DemandControlError {
                 ))
             }
         }
+    }
+}
+
+impl From<FederationError> for DemandControlError {
+    fn from(value: FederationError) -> Self {
+        DemandControlError::FederationError(value)
     }
 }
 
@@ -259,7 +276,7 @@ impl Context {
     }
 
     pub(crate) fn insert_demand_control_context(&self, ctx: DemandControlContext) {
-        self.extensions().with_lock(|mut lock| lock.insert(ctx));
+        self.extensions().with_lock(|lock| lock.insert(ctx));
     }
 
     pub(crate) fn get_demand_control_context(&self) -> Option<DemandControlContext> {
@@ -293,6 +310,19 @@ impl Plugin for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if !init.config.enabled {
+            return Ok(DemandControl {
+                strategy_factory: StrategyFactory::new(
+                    init.config.clone(),
+                    Arc::new(DemandControlledSchema::empty(
+                        init.supergraph_schema.clone(),
+                    )?),
+                    Arc::new(HashMap::new()),
+                ),
+                config: init.config,
+            });
+        }
+
         let demand_controlled_supergraph_schema =
             DemandControlledSchema::new(init.supergraph_schema.clone())?;
         let mut demand_controlled_subgraph_schemas = HashMap::new();
@@ -344,7 +374,7 @@ impl Plugin for DemandControl {
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
                         .context
-                        .unsupported_executable_document()
+                        .executable_document()
                         .expect("must have document");
                     let strategy = resp
                         .context
@@ -608,19 +638,15 @@ mod test {
             .config(config)
             .build()
             .await;
-
         let ctx = context();
-
         let resp = plugin
-            .call_execution(
-                execution::Request::fake_builder().context(ctx).build(),
-                |req| {
-                    execution::Response::fake_builder()
-                        .context(req.context)
-                        .build()
-                        .unwrap()
-                },
-            )
+            .execution_service(|req| async {
+                Ok(execution::Response::fake_builder()
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            })
+            .call(execution::Request::fake_builder().context(ctx).build())
             .await
             .unwrap();
 
@@ -648,11 +674,12 @@ mod test {
             .build();
         req.executable_document = Some(Arc::new(Valid::assume_valid(ExecutableDocument::new())));
         let resp = plugin
-            .call_subgraph(req, |req| {
-                subgraph::Response::fake_builder()
+            .subgraph_service("test", |req| async {
+                Ok(subgraph::Response::fake_builder()
                     .context(req.context)
-                    .build()
+                    .build())
             })
+            .call(req)
             .await
             .unwrap();
 
@@ -667,7 +694,7 @@ mod test {
             ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_document));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_document));
         ctx
     }
 

@@ -10,6 +10,7 @@ use fred::prelude::RedisValue;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use parking_lot::Mutex;
+use tower::Service;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
@@ -163,7 +164,7 @@ async fn insert() {
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onOrganization1_0}}fragment _generated_onOrganization1_0 on Organization{creatorUser{__typename id}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
             "variables": {
                 "representations": [
                     {
@@ -286,7 +287,7 @@ async fn no_cache_control() {
         ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onOrganization1_0}}fragment _generated_onOrganization1_0 on Organization{creatorUser{__typename id}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
             "variables": {
                 "representations": [
                     {
@@ -377,7 +378,7 @@ async fn private() {
             .build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){..._generated_onOrganization1_0}}fragment _generated_onOrganization1_0 on Organization{creatorUser{__typename id}}",
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
             "variables": {
                 "representations": [
                     {
@@ -428,7 +429,7 @@ async fn private() {
         .await
         .unwrap();
 
-    let service = TestHarness::builder()
+    let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
@@ -446,7 +447,7 @@ async fn private() {
         .context(context)
         .build()
         .unwrap();
-    let mut response = service.clone().oneshot(request).await.unwrap();
+    let mut response = service.ready().await.unwrap().call(request).await.unwrap();
     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
@@ -457,7 +458,7 @@ async fn private() {
 
     println!("\nNOW WITHOUT SUBGRAPHS\n");
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let service = TestHarness::builder()
+    let mut service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
         .schema(SCHEMA)
@@ -474,7 +475,7 @@ async fn private() {
         .context(context)
         .build()
         .unwrap();
-    let mut response = service.clone().oneshot(request).await.unwrap();
+    let mut response = service.ready().await.unwrap().call(request).await.unwrap();
     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
@@ -493,7 +494,7 @@ async fn private() {
         .context(context)
         .build()
         .unwrap();
-    let mut response = service.clone().oneshot(request).await.unwrap();
+    let mut response = service.ready().await.unwrap().call(request).await.unwrap();
     assert!(response
         .context
         .get::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS)

@@ -1,6 +1,4 @@
 #![allow(missing_docs)] // FIXME
-#![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
-
 mod error;
 mod event;
 
@@ -354,6 +352,7 @@ mod tests {
     use crate::router::Event::UpdateLicense;
     use crate::router::Event::UpdateSchema;
     use crate::uplink::license_enforcement::LicenseState;
+    use crate::uplink::schema::SchemaState;
     use crate::Configuration;
 
     fn init_with_server() -> RouterHttpServer {
@@ -417,7 +416,10 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateSchema(schema.to_string()))
+            .send_event(UpdateSchema(SchemaState {
+                sdl: schema.to_string(),
+                launch_id: None,
+            }))
             .await
             .unwrap();
         router_handle
@@ -460,9 +462,10 @@ mod tests {
             .await
             .unwrap();
         router_handle
-            .send_event(UpdateSchema(
-                include_str!("../testdata/supergraph_missing_name.graphql").to_string(),
-            ))
+            .send_event(UpdateSchema(SchemaState {
+                sdl: include_str!("../testdata/supergraph_missing_name.graphql").to_string(),
+                launch_id: None,
+            }))
             .await
             .unwrap();
         router_handle
@@ -502,9 +505,10 @@ mod tests {
 
         // let's update the schema to add the field
         router_handle
-            .send_event(UpdateSchema(
-                include_str!("../testdata/supergraph.graphql").to_string(),
-            ))
+            .send_event(UpdateSchema(SchemaState {
+                sdl: include_str!("../testdata/supergraph.graphql").to_string(),
+                launch_id: None,
+            }))
             .await
             .unwrap();
 
@@ -528,9 +532,10 @@ mod tests {
 
         // let's go back and remove the field
         router_handle
-            .send_event(UpdateSchema(
-                include_str!("../testdata/supergraph_missing_name.graphql").to_string(),
-            ))
+            .send_event(UpdateSchema(SchemaState {
+                sdl: include_str!("../testdata/supergraph_missing_name.graphql").to_string(),
+                launch_id: None,
+            }))
             .await
             .unwrap();
 

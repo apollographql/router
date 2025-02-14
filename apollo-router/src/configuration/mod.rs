@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -19,12 +20,9 @@ pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
-use rustls::Certificate;
-use rustls::PrivateKey;
+use rustls::pki_types::CertificateDer;
+use rustls::pki_types::PrivateKeyDer;
 use rustls::ServerConfig;
-use rustls_pemfile::certs;
-use rustls_pemfile::read_one;
-use rustls_pemfile::Item;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -44,10 +42,12 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
-use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+#[cfg(test)]
+use crate::plugins::healthcheck::test_listen;
+use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::limits;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -55,6 +55,7 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
+pub(crate) mod connector;
 pub(crate) mod cors;
 pub(crate) mod expansion;
 mod experimental;
@@ -109,6 +110,22 @@ pub enum ConfigurationError {
     CertificateAuthorities { error: String },
 }
 
+impl From<proteus::Error> for ConfigurationError {
+    fn from(error: proteus::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl From<proteus::parser::Error> for ConfigurationError {
+    fn from(error: proteus::parser::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
 /// The configuration for the router.
 ///
 /// Can be created through `serde::Deserialize` from various formats,
@@ -161,10 +178,6 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Set the query planner implementation to use.
-    #[serde(default)]
-    pub(crate) experimental_query_planner_mode: QueryPlannerMode,
-
     /// Plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
@@ -196,37 +209,6 @@ impl PartialEq for Configuration {
     }
 }
 
-/// Query planner modes.
-#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
-#[derivative(Debug)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum QueryPlannerMode {
-    /// Use the new Rust-based implementation.
-    ///
-    /// Raises an error at Router startup if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    New,
-    /// Use the old JavaScript-based implementation.
-    Legacy,
-    /// Use primarily the Javascript-based implementation,
-    /// but also schedule background jobs to run the Rust implementation and compare results,
-    /// logging warnings if the implementations disagree.
-    ///
-    /// Raises an error at Router startup if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    Both,
-    /// Use primarily the Javascript-based implementation,
-    /// but also schedule on a best-effort basis background jobs
-    /// to run the Rust implementation and compare results,
-    /// logging warnings if the implementations disagree.
-    ///
-    /// Falls back to `legacy` with a warning
-    /// if the the new planner does not support the schema
-    /// (such as using legacy Apollo Federation 1)
-    #[default]
-    BothBestEffort,
-}
-
 impl<'de> serde::Deserialize<'de> for Configuration {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -252,7 +234,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_chaos: Chaos,
             batching: Batching,
             experimental_type_conditioned_fetching: bool,
-            experimental_query_planner_mode: QueryPlannerMode,
         }
         let mut ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -264,6 +245,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         ad_hoc.apollo_plugins.plugins.insert(
             "limits".to_string(),
             serde_json::to_value(&ad_hoc.limits).unwrap(),
+        );
+        ad_hoc.apollo_plugins.plugins.insert(
+            "health_check".to_string(),
+            serde_json::to_value(&ad_hoc.health_check).unwrap(),
         );
 
         // Use a struct literal instead of a builder to ensure this is exhaustive
@@ -279,7 +264,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: ad_hoc.limits,
             experimental_chaos: ad_hoc.experimental_chaos,
             experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
-            experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
@@ -301,14 +285,10 @@ fn default_graphql_listen() -> ListenAddr {
 }
 
 #[cfg(test)]
-fn test_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
-}
-
-#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -325,7 +305,6 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
-        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -340,7 +319,6 @@ impl Configuration {
             persisted_queries: persisted_query.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -392,40 +370,32 @@ impl Configuration {
             ).build())
     }
 
-    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
-        router_bridge::planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments,
-            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
-            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
-                enable_defer: Some(self.supergraph.defer_support),
-            }),
-            graphql_validation: false,
-            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
-                bypass_planner_for_single_subgraph: None,
-                max_evaluated_plans: self
-                    .supergraph
-                    .query_planning
-                    .experimental_plans_limit
-                    .or(Some(10000)),
-                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
-            }),
-            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
-        }
-    }
-
     pub(crate) fn rust_query_planner_config(
         &self,
     ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-        apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            reuse_query_fragments: self.supergraph.reuse_query_fragments.unwrap_or(true),
+        use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+        use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
+
+        let max_evaluated_plans = self
+            .supergraph
+            .query_planning
+            .experimental_plans_limit
+            // Fails if experimental_plans_limit is zero; use our default.
+            .and_then(NonZeroU32::new)
+            .unwrap_or(NonZeroU32::new(10_000).expect("it is not zero"));
+
+        QueryPlannerConfig {
             subgraph_graphql_validation: false,
             generate_query_fragments: self.supergraph.generate_query_fragments,
-            incremental_delivery:
-                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
-                    enable_defer: self.supergraph.defer_support,
-                },
+            incremental_delivery: QueryPlanIncrementalDeliveryConfig {
+                enable_defer: self.supergraph.defer_support,
+            },
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
-            debug: Default::default(),
+            debug: QueryPlannerDebugConfig {
+                max_evaluated_plans,
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            },
         }
     }
 }
@@ -441,6 +411,7 @@ impl Default for Configuration {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -458,18 +429,16 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_type_conditioned_fetching: Option<bool>,
-        experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
             limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
-            experimental_query_planner_mode: experimental_query_planner_mode.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -492,14 +461,6 @@ impl Configuration {
 
 impl Configuration {
     pub(crate) fn validate(self) -> Result<Self, ConfigurationError> {
-        #[cfg(not(feature = "hyper_header_limits"))]
-        if self.limits.http1_max_request_headers.is_some() {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "'limits.http1_max_request_headers' requires 'hyper_header_limits' feature",
-                error: "enable 'hyper_header_limits' feature in order to use 'limits.http1_max_request_headers'".to_string(),
-            });
-        }
-
         // Sandbox and Homepage cannot be both enabled
         if self.sandbox.enabled && self.homepage.enabled {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -587,7 +548,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
     }
 }
 
@@ -683,11 +644,6 @@ pub(crate) struct Supergraph {
     /// Default: false
     pub(crate) introspection: bool,
 
-    /// Enable reuse of query fragments
-    /// Default: depends on the federation version
-    #[serde(rename = "experimental_reuse_query_fragments")]
-    pub(crate) reuse_query_fragments: Option<bool>,
-
     /// Enable QP generation of fragments for subgraph requests
     /// Default: true
     pub(crate) generate_query_fragments: bool,
@@ -714,22 +670,9 @@ const fn default_generate_query_fragments() -> bool {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case", untagged)]
-pub(crate) enum AvailableParallelism {
-    Auto(Auto),
-    Fixed(NonZeroUsize),
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Auto {
     Auto,
-}
-
-impl Default for AvailableParallelism {
-    fn default() -> Self {
-        Self::Fixed(NonZeroUsize::new(1).expect("cannot fail"))
-    }
 }
 
 fn default_defer_support() -> bool {
@@ -739,13 +682,13 @@ fn default_defer_support() -> bool {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
@@ -756,16 +699,8 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: generate_query_fragments.and_then(|v|
-                if v {
-                    if reuse_query_fragments.is_some_and(|v| v) {
-                        // warn the user that both are enabled and it's overridden
-                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
-                    }
-                    Some(false)
-                } else { reuse_query_fragments }
-            ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -776,13 +711,13 @@ impl Supergraph {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        reuse_query_fragments: Option<bool>,
         generate_query_fragments: Option<bool>,
         early_cancel: Option<bool>,
         experimental_log_on_broken_pipe: Option<bool>,
@@ -793,16 +728,8 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            reuse_query_fragments: generate_query_fragments.and_then(|v|
-                if v {
-                    if reuse_query_fragments.is_some_and(|v| v) {
-                        // warn the user that both are enabled and it's overridden
-                        tracing::warn!("Both 'generate_query_fragments' and 'experimental_reuse_query_fragments' are explicitly enabled, 'experimental_reuse_query_fragments' will be overridden to false");
-                    }
-                    Some(false)
-                } else { reuse_query_fragments }
-            ),
-            generate_query_fragments: generate_query_fragments.unwrap_or_else(default_generate_query_fragments),
+            generate_query_fragments: generate_query_fragments
+                .unwrap_or_else(default_generate_query_fragments),
             early_cancel: early_cancel.unwrap_or_default(),
             experimental_log_on_broken_pipe: experimental_log_on_broken_pipe.unwrap_or_default(),
         }
@@ -824,7 +751,7 @@ impl Supergraph {
             path = format!("{}router_extra_path", self.path);
         } else if SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.path) {
             let new_path = SUPERGRAPH_ENDPOINT_REGEX
-                .replace(&self.path, "${first_path}${sub_path}:supergraph_route");
+                .replace(&self.path, "${first_path}${sub_path}{supergraph_route}");
             path = new_path.to_string();
         }
 
@@ -924,19 +851,6 @@ pub(crate) struct QueryPlanning {
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
     /// the old schema, if it determines that the schema update does not affect the corresponding query
     pub(crate) experimental_reuse_query_plans: bool,
-
-    /// Set the size of a pool of workers to enable query planning parallelism.
-    /// Default: 1.
-    pub(crate) experimental_parallelism: AvailableParallelism,
-}
-
-impl QueryPlanning {
-    pub(crate) fn experimental_query_planner_parallelism(&self) -> io::Result<NonZeroUsize> {
-        match self.experimental_parallelism {
-            AvailableParallelism::Auto(Auto::Auto) => std::thread::available_parallelism(),
-            AvailableParallelism::Fixed(n) => Ok(n),
-        }
-    }
 }
 
 /// Cache configuration
@@ -1117,26 +1031,26 @@ pub(crate) struct Tls {
     /// TLS server configuration
     ///
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
-    pub(crate) supergraph: Option<TlsSupergraph>,
+    pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsSupergraph {
     /// server certificate in PEM format
     #[serde(deserialize_with = "deserialize_certificate", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate: Certificate,
+    pub(crate) certificate: CertificateDer<'static>,
     /// server key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) key: PrivateKey,
+    pub(crate) key: PrivateKeyDer<'static>,
     /// list of certificate authorities in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate_chain: Vec<Certificate>,
+    pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
 }
 
 impl TlsSupergraph {
@@ -1145,9 +1059,8 @@ impl TlsSupergraph {
         certificates.extend(self.certificate_chain.iter().cloned());
 
         let mut config = ServerConfig::builder()
-            .with_safe_defaults()
             .with_no_client_auth()
-            .with_single_cert(certificates, self.key.clone())
+            .with_single_cert(certificates, self.key.clone_key())
             .map_err(ApolloRouterError::Rustls)?;
         config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
@@ -1155,7 +1068,7 @@ impl TlsSupergraph {
     }
 }
 
-fn deserialize_certificate<'de, D>(deserializer: D) -> Result<Certificate, D::Error>
+fn deserialize_certificate<'de, D>(deserializer: D) -> Result<CertificateDer<'static>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1174,7 +1087,9 @@ where
         })
 }
 
-fn deserialize_certificate_chain<'de, D>(deserializer: D) -> Result<Vec<Certificate>, D::Error>
+fn deserialize_certificate_chain<'de, D>(
+    deserializer: D,
+) -> Result<Vec<CertificateDer<'static>>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1183,7 +1098,7 @@ where
     load_certs(&data).map_err(serde::de::Error::custom)
 }
 
-fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKey, D::Error>
+fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKeyDer<'static>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -1192,20 +1107,24 @@ where
     load_key(&data).map_err(serde::de::Error::custom)
 }
 
-pub(crate) fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
-    certs(&mut BufReader::new(data.as_bytes()))
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
-        .map(|mut certs| certs.drain(..).map(Certificate).collect())
+#[derive(thiserror::Error, Debug)]
+#[error("could not load TLS certificate: {0}")]
+struct LoadCertError(std::io::Error);
+
+pub(crate) fn load_certs(data: &str) -> io::Result<Vec<CertificateDer<'static>>> {
+    rustls_pemfile::certs(&mut BufReader::new(data.as_bytes()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, LoadCertError(error)))
 }
 
-pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
+pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
     let mut reader = BufReader::new(data.as_bytes());
-    let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
+    let mut key_iterator = iter::from_fn(|| rustls_pemfile::read_one(&mut reader).transpose());
 
     let private_key = match key_iterator.next() {
-        Some(Ok(Item::RSAKey(key))) => PrivateKey(key),
-        Some(Ok(Item::PKCS8Key(key))) => PrivateKey(key),
-        Some(Ok(Item::ECKey(key))) => PrivateKey(key),
+        Some(Ok(rustls_pemfile::Item::Pkcs1Key(key))) => PrivateKeyDer::from(key),
+        Some(Ok(rustls_pemfile::Item::Pkcs8Key(key))) => PrivateKeyDer::from(key),
+        Some(Ok(rustls_pemfile::Item::Sec1Key(key))) => PrivateKeyDer::from(key),
         Some(Err(e)) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -1243,7 +1162,7 @@ pub(crate) struct TlsClient {
     /// list of certificate authorities in PEM format
     pub(crate) certificate_authorities: Option<String>,
     /// client certificate authentication
-    pub(crate) client_authentication: Option<TlsClientAuth>,
+    pub(crate) client_authentication: Option<Arc<TlsClientAuth>>,
 }
 
 #[buildstructor::buildstructor]
@@ -1251,7 +1170,7 @@ impl TlsClient {
     #[builder]
     pub(crate) fn new(
         certificate_authorities: Option<String>,
-        client_authentication: Option<TlsClientAuth>,
+        client_authentication: Option<Arc<TlsClientAuth>>,
     ) -> Self {
         Self {
             certificate_authorities,
@@ -1267,17 +1186,17 @@ impl Default for TlsClient {
 }
 
 /// TLS client authentication
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct TlsClientAuth {
     /// list of certificates in PEM format
     #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) certificate_chain: Vec<Certificate>,
+    pub(crate) certificate_chain: Vec<CertificateDer<'static>>,
     /// key in PEM format
     #[serde(deserialize_with = "deserialize_key", skip_serializing)]
     #[schemars(with = "String")]
-    pub(crate) key: PrivateKey,
+    pub(crate) key: PrivateKeyDer<'static>,
 }
 
 /// Configuration options pertaining to the sandbox page.
@@ -1362,84 +1281,6 @@ impl Homepage {
 impl Default for Homepage {
     fn default() -> Self {
         Self::builder().enabled(default_homepage()).build()
-    }
-}
-
-/// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct HealthCheck {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:8088
-    pub(crate) listen: ListenAddr,
-
-    /// Set to false to disable the health check
-    pub(crate) enabled: bool,
-
-    /// Optionally set a custom healthcheck path
-    /// Defaults to /health
-    pub(crate) path: String,
-}
-
-fn default_health_check_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
-}
-
-fn default_health_check_enabled() -> bool {
-    true
-}
-
-fn default_health_check_path() -> String {
-    "/health".to_string()
-}
-
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}").to_string();
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-        }
-    }
-}
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-        }
-    }
-}
-
-impl Default for HealthCheck {
-    fn default() -> Self {
-        Self::builder().build()
     }
 }
 

@@ -249,8 +249,8 @@ pub struct FetchDataKeyRenamer {
 /// elements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub enum FetchDataPathElement {
-    Key(Name, Conditions),
-    AnyIndex(Conditions),
+    Key(Name, Option<Conditions>),
+    AnyIndex(Option<Conditions>),
     TypenameEquals(Name),
     Parent,
 }
@@ -265,13 +265,4 @@ pub enum QueryPathElement {
     Field(executable::Field),
     #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_inline_fragment")]
     InlineFragment(executable::InlineFragment),
-}
-
-impl QueryPlan {
-    fn new(node: impl Into<TopLevelPlanNode>, statistics: QueryPlanningStatistics) -> Self {
-        Self {
-            node: Some(node.into()),
-            statistics,
-        }
-    }
 }

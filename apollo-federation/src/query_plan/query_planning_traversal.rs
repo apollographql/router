@@ -7,7 +7,9 @@ use serde::Serialize;
 use tracing::trace;
 
 use super::fetch_dependency_graph::FetchIdGenerator;
+use crate::ensure;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
@@ -187,6 +189,29 @@ impl BestQueryPlanInfo {
     }
 }
 
+pub(crate) fn convert_type_from_subgraph(
+    ty: CompositeTypeDefinitionPosition,
+    subgraph_schema: &ValidFederationSchema,
+    supergraph_schema: &ValidFederationSchema,
+) -> Result<CompositeTypeDefinitionPosition, FederationError> {
+    if subgraph_schema.is_interface_object_type(ty.clone().into())? {
+        let type_in_supergraph_pos: CompositeTypeDefinitionPosition = supergraph_schema
+            .get_type(ty.type_name().clone())?
+            .try_into()?;
+        ensure!(
+            matches!(
+                type_in_supergraph_pos,
+                CompositeTypeDefinitionPosition::Interface(_)
+            ),
+            "Type {} should be an interface in the supergraph",
+            ty.type_name()
+        );
+        Ok(type_in_supergraph_pos)
+    } else {
+        Ok(ty)
+    }
+}
+
 impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     #[cfg_attr(
         feature = "snapshot_tracing",
@@ -347,7 +372,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             }
         }
         self.compute_best_plan_from_closed_branches()?;
-        return Ok(self.best_plan.as_ref());
+        Ok(self.best_plan.as_ref())
     }
 
     /// Returns whether to terminate planning immediately, and any new open branches to push onto
@@ -393,14 +418,23 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 no_followups = true;
                 break;
             }
+
+            let evaluated_paths_count = &self.parameters.statistics.evaluated_plan_paths;
+            let simultaneous_indirect_path_count: usize =
+                followups_for_option.iter().map(|p| p.paths.0.len()).sum();
+            evaluated_paths_count
+                .set(evaluated_paths_count.get() + simultaneous_indirect_path_count);
+
             new_options.extend(followups_for_option);
             if let Some(options_limit) = self.parameters.config.debug.paths_limit {
                 if new_options.len() > options_limit as usize {
-                    // TODO: Create a new error code for this error kind.
-                    return Err(FederationError::internal(format!(
-                        "Too many options generated for {}, reached the limit of {}.",
-                        selection, options_limit,
-                    )));
+                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                        message: format!(
+                            "Too many options generated for {}, reached the limit of {}.",
+                            selection, options_limit,
+                        ),
+                    }
+                    .into());
                 }
             }
         }
@@ -1004,6 +1038,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         if is_root_path_tree {
             compute_root_fetch_groups(
                 self.root_kind,
+                &self.parameters.federated_query_graph,
                 dependency_graph,
                 path_tree,
                 type_conditioned_fetching_enabled,
@@ -1024,6 +1059,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 self.root_kind,
                 root_type.clone(),
             )?;
+            let subgraph_schema = self
+                .parameters
+                .federated_query_graph
+                .schema_by_source(&query_graph_node.source)?;
+            let supergraph_root_type = convert_type_from_subgraph(
+                root_type,
+                subgraph_schema,
+                &dependency_graph.supergraph_schema,
+            )?;
             compute_nodes_for_tree(
                 dependency_graph,
                 path_tree,
@@ -1031,7 +1075,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 FetchDependencyGraphNodePath::new(
                     dependency_graph.supergraph_schema.clone(),
                     self.parameters.config.type_conditioned_fetching,
-                    root_type,
+                    supergraph_root_type,
                 )?,
                 Default::default(),
                 &Default::default(),
@@ -1167,7 +1211,7 @@ impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTravers
 //            The same would be infeasible to implement in Rust due to the cyclic references.
 //            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
+impl ConditionResolver for QueryPlanningTraversal<'_, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
     #[track_caller]
     fn resolve(

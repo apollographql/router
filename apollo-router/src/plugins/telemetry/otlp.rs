@@ -1,16 +1,16 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
-use lazy_static::lazy_static;
-use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-use opentelemetry::sdk::metrics::InstrumentKind;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+use opentelemetry_sdk::metrics::InstrumentKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,10 +26,10 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-lazy_static! {
-    static ref DEFAULT_GRPC_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4317");
-    static ref DEFAULT_HTTP_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:4318");
-}
+static DEFAULT_GRPC_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:4317"));
+static DEFAULT_HTTP_ENDPOINT: LazyLock<Uri> =
+    LazyLock::new(|| Uri::from_static("http://127.0.0.1:4318"));
 
 const DEFAULT_HTTP_ENDPOINT_PATH: &str = "/v1/traces";
 
@@ -65,7 +65,7 @@ pub(crate) struct Config {
     pub(crate) temporality: Temporality,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) enum TelemetryDataKind {
     Traces,
     Metrics,
@@ -207,6 +207,7 @@ impl GrpcExporter {
             {
                 return Some(
                     ClientTlsConfig::new()
+                        .with_native_roots()
                         .with(&domain_name, |b, d| b.domain_name(*d))
                         .try_with(&self.ca, |b, c| {
                             Ok(b.ca_certificate(Certificate::from_pem(c)))
@@ -219,7 +220,8 @@ impl GrpcExporter {
                 .transpose();
             }
         }
-        Ok(None)
+        // This was a breaking change in tonic where we now have to specify native roots.
+        Ok(Some(ClientTlsConfig::new().with_native_roots()))
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
@@ -257,11 +259,11 @@ pub(crate) enum Temporality {
 }
 
 pub(crate) struct CustomTemporalitySelector(
-    pub(crate) opentelemetry::sdk::metrics::data::Temporality,
+    pub(crate) opentelemetry_sdk::metrics::data::Temporality,
 );
 
 impl TemporalitySelector for CustomTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry::sdk::metrics::data::Temporality {
+    fn temporality(&self, _kind: InstrumentKind) -> opentelemetry_sdk::metrics::data::Temporality {
         self.0
     }
 }
@@ -269,11 +271,11 @@ impl TemporalitySelector for CustomTemporalitySelector {
 impl From<&Temporality> for Box<dyn TemporalitySelector> {
     fn from(value: &Temporality) -> Self {
         Box::new(match value {
-            Temporality::Cumulative => CustomTemporalitySelector(
-                opentelemetry::sdk::metrics::data::Temporality::Cumulative,
-            ),
+            Temporality::Cumulative => {
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Cumulative)
+            }
             Temporality::Delta => {
-                CustomTemporalitySelector(opentelemetry::sdk::metrics::data::Temporality::Delta)
+                CustomTemporalitySelector(opentelemetry_sdk::metrics::data::Temporality::Delta)
             }
         })
     }

@@ -196,20 +196,21 @@ impl Request {
     fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(value);
 
-        if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+        if let serde_json::Value::Array(entries) = value {
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                result.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.batching = 1u64,
-                mode = %BatchingMode::BatchHttpLink // Only supported mode right now
+            u64_counter!(
+                "apollo.router.operations.batching",
+                "Total requests with batched operations",
+                1,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
+            for entry in entries {
                 let bytes = serde_json::to_vec(entry)?;
                 result.push(Request::deserialize_from_bytes(&bytes.into())?);
             }
@@ -223,20 +224,21 @@ impl Request {
     fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(value);
 
-        if value.is_array() {
-            tracing::info!(
-                histogram.apollo.router.operations.batching.size = result.len() as f64,
-                mode = "batch_http_link" // Only supported mode right now
+        if let serde_json::Value::Array(entries) = value {
+            u64_histogram!(
+                "apollo.router.operations.batching.size",
+                "Number of queries contained within each query batch",
+                result.len() as u64,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
 
-            tracing::info!(
-                monotonic_counter.apollo.router.operations.batching = 1u64,
-                mode = "batch_http_link" // Only supported mode right now
+            u64_counter!(
+                "apollo.router.operations.batching",
+                "Total requests with batched operations",
+                1,
+                mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
+            for entry in entries {
                 result.push(Request::process_value(entry)?);
             }
         } else {
@@ -303,7 +305,7 @@ fn get_from_urlencoded_value<'a, T: Deserialize<'a>>(
 
 struct RequestFromBytesSeed<'data>(&'data Bytes);
 
-impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
+impl<'de> DeserializeSeed<'de> for RequestFromBytesSeed<'_> {
     type Value = Request;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -325,7 +327,7 @@ impl<'data, 'de> DeserializeSeed<'de> for RequestFromBytesSeed<'data> {
 
         struct RequestVisitor<'data>(&'data Bytes);
 
-        impl<'data, 'de> serde::de::Visitor<'de> for RequestVisitor<'data> {
+        impl<'de> serde::de::Visitor<'de> for RequestVisitor<'_> {
             type Value = Request;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {

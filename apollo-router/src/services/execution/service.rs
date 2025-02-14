@@ -1,6 +1,5 @@
 //! Implements the Execution phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -9,7 +8,6 @@ use std::task::Poll;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
-use apollo_compiler::validation::Valid;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::Stream;
@@ -47,13 +45,14 @@ use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::Telemetry;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
+use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::Plugins;
-use crate::services::SubgraphServiceFactory;
 use crate::spec::query::subselections::BooleanValues;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -62,8 +61,8 @@ use crate::spec::Schema;
 #[derive(Clone)]
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
     apollo_telemetry_config: Option<ApolloTelemetryConfig>,
@@ -149,7 +148,7 @@ impl ExecutionService {
             .query_plan
             .execute(
                 &context,
-                &self.subgraph_service_factory,
+                &self.fetch_service_factory,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
                 &self.subgraph_schemas,
@@ -344,6 +343,23 @@ impl ExecutionService {
                     ,
             );
 
+            for error in response.errors.iter_mut() {
+                if let Some(path) = &mut error.path {
+                    // Check if path can be matched to the supergraph query and truncate if not
+                    let matching_len = query.matching_error_path_length(path);
+                    if path.len() != matching_len {
+                        path.0.drain(matching_len..);
+
+                        if path.is_empty() {
+                            error.path = None;
+                        }
+
+                        // if path was invalid that means we can't trust locations either
+                        error.locations.clear();
+                    }
+                }
+            }
+
             nullified_paths.extend(paths);
 
             let mut referenced_enums = context
@@ -361,7 +377,7 @@ impl ExecutionService {
 
             context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
+                    .with_lock(|lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {
@@ -615,9 +631,9 @@ async fn consume_responses(
 #[derive(Clone)]
 pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
@@ -642,7 +658,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                 self.plugins.iter().rev().fold(
                     crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
-                        subgraph_service_factory: self.subgraph_service_factory.clone(),
+                        fetch_service_factory: self.fetch_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
                         subgraph_schemas: self.subgraph_schemas.clone(),
                         apollo_telemetry_config: apollo_telemetry_conf,

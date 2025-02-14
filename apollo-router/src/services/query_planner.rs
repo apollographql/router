@@ -4,16 +4,24 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use derivative::Derivative;
-use router_bridge::planner::PlanOptions;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
 
 use super::layers::query_analysis::ParsedDocument;
+use crate::compute_job::MaybeBackPressureError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
 use crate::Context;
+
+/// Options for planning a query
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlanOptions {
+    /// Which labels to override during query planning
+    pub(crate) override_conditions: Vec<String>,
+}
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
@@ -109,16 +117,12 @@ impl Response {
     }
 }
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, QueryPlannerError>;
+pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
+pub(crate) type BoxService = tower::util::BoxService<Request, Response, ServiceError>;
 #[allow(dead_code)]
-pub(crate) type BoxCloneService =
-    tower::util::BoxCloneService<Request, Response, QueryPlannerError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
 #[allow(dead_code)]
-pub(crate) type ServiceResult = Result<Response, QueryPlannerError>;
-#[allow(dead_code)]
-pub(crate) type Body = hyper::Body;
-#[allow(dead_code)]
-pub(crate) type Error = hyper::Error;
+pub(crate) type ServiceResult = Result<Response, ServiceError>;
 
 #[async_trait]
 pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {

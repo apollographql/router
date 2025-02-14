@@ -252,27 +252,26 @@ async fn it_handles_short_timeouts() -> Result<(), BoxError> {
     .await?;
 
     if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-        ---
+        assert_yaml_snapshot!(responses, @r"
         - data:
             entryA:
               index: 0
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - data:
             entryA:
               index: 1
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
-        "###);
+        ");
     }
 
     Ok(())
@@ -323,8 +322,7 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
     // verify the output
     let responses = [results_a, results_b].concat();
     if test_is_enabled() {
-        assert_yaml_snapshot!(responses, @r###"
-        ---
+        assert_yaml_snapshot!(responses, @r"
         - data:
             entryA:
               index: 0
@@ -335,24 +333,24 @@ async fn it_handles_indefinite_timeouts() -> Result<(), BoxError> {
             entryA:
               index: 2
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
         - errors:
-            - message: Request timed out
+            - message: Your request has been timed out
               path: []
               extensions:
-                code: REQUEST_TIMEOUT
+                code: GATEWAY_TIMEOUT
                 service: b
-        "###);
+        ");
     }
 
     Ok(())
@@ -445,7 +443,7 @@ async fn it_handles_single_request_cancelled_by_rhai() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__b__0{{entryB(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__b__0 {{ entryB(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -683,7 +681,7 @@ async fn it_handles_single_request_cancelled_by_coprocessor() -> Result<(), BoxE
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -785,7 +783,7 @@ async fn it_handles_single_invalid_graphql() -> Result<(), BoxError> {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__a__0{{entryA(count:{REQUEST_COUNT}){{index}}}}",
+                    "query op{index}__a__0 {{ entryA(count: {REQUEST_COUNT}) {{ index }} }}",
                 ))
             );
         }
@@ -857,6 +855,7 @@ mod helper {
 
     use super::test_is_enabled;
     use crate::integration::common::IntegrationTest;
+    use crate::integration::common::Query;
 
     /// Helper type for specifying a valid handler
     pub type Handler = fn(&wiremock::Request) -> ResponseTemplate;
@@ -916,7 +915,9 @@ mod helper {
 
         // Execute the request
         let request = serde_json::to_value(requests)?;
-        let (_span, response) = router.execute_query(&request).await;
+        let (_span, response) = router
+            .execute_query(Query::builder().body(request).build())
+            .await;
 
         serde_json::from_slice::<Vec<Response>>(&response.bytes().await?).map_err(BoxError::from)
     }
@@ -927,7 +928,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -943,7 +944,7 @@ mod helper {
             assert_eq!(
                 request.query,
                 Some(format!(
-                    "query op{index}__{}__0{{entry{}(count:{count}){{index}}}}",
+                    "query op{index}__{}__0 {{ entry{}(count: {count}) {{ index }} }}",
                     subgraph.to_lowercase(),
                     subgraph
                 ))
@@ -971,7 +972,7 @@ mod helper {
 
         // Extract info about this operation
         let (subgraph, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())
@@ -1010,7 +1011,7 @@ mod helper {
 
         // Extract info about this operation
         let (_, count): (String, usize) = {
-            let re = regex::Regex::new(r"entry([AB])\(count:([0-9]+)\)").unwrap();
+            let re = regex::Regex::new(r"entry([AB])\(count: ?([0-9]+)\)").unwrap();
             let captures = re.captures(requests[0].query.as_ref().unwrap()).unwrap();
 
             (captures[1].to_string(), captures[2].parse().unwrap())

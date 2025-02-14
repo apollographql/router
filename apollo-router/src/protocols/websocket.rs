@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
@@ -300,13 +299,10 @@ where
         request: graphql::Request,
         heartbeat_interval: Option<tokio::time::Duration>,
     ) -> Result<SubscriptionStream<S>, graphql::Error> {
-        tracing::info!(
-            monotonic_counter
-                .apollo
-                .router
-                .operations
-                .subscriptions
-                .events = 1u64,
+        u64_counter!(
+            "apollo.router.operations.subscriptions.events",
+            "Number of subscription events",
+            1,
             subscriptions.mode = "passthrough"
         );
 
@@ -347,12 +343,12 @@ where
                 ClientMessage::CloseWebsocket => {
                     future::ready(Ok(Message::Close(Some(CloseFrame{
                         code: CloseCode::Normal,
-                        reason: Cow::default(),
+                        reason: Default::default(),
                     }))))
                 },
                 message => {
                     future::ready(match serde_json::to_string(&message) {
-                        Ok(client_message_str) => Ok(Message::Text(client_message_str)),
+                        Ok(client_message_str) => Ok(Message::text(client_message_str)),
                         Err(err) => Err(Error::SerdeError(err)),
                     })
                 },
@@ -443,13 +439,10 @@ where
                 tracing::trace!("cannot shutdown sink: {err:?}");
             };
 
-            tracing::info!(
-                monotonic_counter
-                    .apollo
-                    .router
-                    .operations
-                    .subscriptions
-                    .events = 1u64,
+            u64_counter!(
+                "apollo.router.operations.subscriptions.events",
+                "Number of subscription events",
+                1,
                 subscriptions.mode = "passthrough",
                 subscriptions.complete = true
             );
@@ -695,7 +688,6 @@ mod tests {
     use axum::extract::WebSocketUpgrade;
     use axum::routing::get;
     use axum::Router;
-    use axum::Server;
     use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;
@@ -711,7 +703,7 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-transport-ws"]).on_upgrade(move |mut socket| async move {
                 let connection_ack = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let ack_msg: ClientMessage = serde_json::from_str(&connection_ack).unwrap();
                 if let ClientMessage::ConnectionInit { payload } = ack_msg {
@@ -725,7 +717,7 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::Text(
+                        .send(AxumWsMessage::text(
                             serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                         ))
                         .await
@@ -736,7 +728,7 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
@@ -759,9 +751,7 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
-                        "coucou".to_string(),
-                    ))
+                    .send(AxumWsMessage::text("coucou"))
                     .await
                     .unwrap();
 
@@ -774,7 +764,7 @@ mod tests {
 
                    tokio::time::sleep(duration).await;
                    let ping_message = socket.next().await.unwrap().unwrap();
-                   assert_eq!(ping_message, AxumWsMessage::Text(
+                   assert_eq!(ping_message, AxumWsMessage::text(
                        serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
                    ));
 
@@ -786,38 +776,38 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Text(
+                assert_eq!(pong_message, AxumWsMessage::text(
                     serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
                 ));
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                     ))
                     .await
                     .unwrap();
 
                 let pong_message = socket.next().await.unwrap().unwrap();
-                assert_eq!(pong_message, AxumWsMessage::Text(
+                assert_eq!(pong_message, AxumWsMessage::text(
                     serde_json::to_string(&ClientMessage::Pong { payload: None }).unwrap(),
                 ));
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Complete { id: client_id.unwrap() }).unwrap(),
                     ))
                     .await
@@ -833,13 +823,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -849,7 +838,7 @@ mod tests {
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
-            let res = ws.on_upgrade(move |mut socket| async move {
+            let res = ws.protocols(["graphql-ws"]).on_upgrade(move |mut socket| async move {
                 let init_connection = socket.recv().await.unwrap().unwrap().into_text().unwrap();
                 let init_msg: ClientMessage = serde_json::from_str(&init_connection).unwrap();
                 assert!(matches!(init_msg, ClientMessage::ConnectionInit { .. }));
@@ -857,7 +846,7 @@ mod tests {
                 if send_ping {
                     // It turns out some servers may send Pings before they even ack the connection.
                     socket
-                        .send(AxumWsMessage::Text(
+                        .send(AxumWsMessage::text(
                             serde_json::to_string(&ServerMessage::Ping { payload: None }).unwrap(),
                         ))
                         .await
@@ -867,13 +856,13 @@ mod tests {
                     assert!(matches!(pong_message, ClientMessage::Pong { payload: None }));
                 }
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::ConnectionAck).unwrap(),
                     ))
                     .await
                     .unwrap();
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
                     ))
                     .await
@@ -896,20 +885,18 @@ mod tests {
                 }
 
                 socket
-                    .send(AxumWsMessage::Text(
-                        "coucou".to_string(),
-                    ))
+                    .send(AxumWsMessage::text("coucou"))
                     .await
                     .unwrap();
 
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::Next { id: client_id.clone().unwrap(), payload: graphql::Response::builder().data(serde_json_bytes::json!({"userWasCreated": {"username": "ada_lovelace"}})).build() }).unwrap(),
                     ))
                     .await
                     .unwrap();
                 socket
-                    .send(AxumWsMessage::Text(
+                    .send(AxumWsMessage::text(
                         serde_json::to_string(&ServerMessage::KeepAlive).unwrap(),
                     ))
                     .await
@@ -930,13 +917,12 @@ mod tests {
         };
 
         let app = Router::new().route("/ws", get(ws_handler));
-        let server = Server::bind(
-            &format!("127.0.0.1:{}", port.unwrap_or_default())
-                .parse()
-                .unwrap(),
-        )
-        .serve(app.into_make_service());
-        let local_addr = server.local_addr();
+        let listener =
+            tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port.unwrap_or_default()))
+                .await
+                .unwrap();
+        let server = axum::serve(listener, app);
+        let local_addr = server.local_addr().unwrap();
         tokio::spawn(async { server.await.unwrap() });
         local_addr
     }
@@ -964,7 +950,7 @@ mod tests {
         let socket_addr =
             emulate_correct_websocket_server_new_protocol(send_ping, heartbeat_interval, port)
                 .await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{}/ws", socket_addr);
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,
@@ -1031,7 +1017,7 @@ mod tests {
 
     async fn test_ws_connection_old_proto(send_ping: bool, port: Option<u16>) {
         let socket_addr = emulate_correct_websocket_server_old_protocol(send_ping, port).await;
-        let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
+        let url = format!("ws://{}/ws", socket_addr);
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
             http::header::SEC_WEBSOCKET_PROTOCOL,

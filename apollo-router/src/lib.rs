@@ -19,8 +19,6 @@
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
-// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
-#![allow(clippy::mutable_key_type)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
@@ -50,7 +48,7 @@ mod json_ext;
 pub mod plugin;
 
 #[macro_use]
-pub(crate) mod metrics;
+pub mod metrics;
 
 mod ageing_priority_queue;
 mod apollo_studio_interop;
@@ -83,7 +81,9 @@ pub mod test_harness;
 pub mod tracer;
 mod uplink;
 
-pub use crate::axum_factory::unsupported_set_axum_router_callback;
+#[doc(hidden)]
+pub mod otel_compat;
+
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::extensions::sync::ExtensionsMutex;
@@ -99,6 +99,10 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::SnapshotServer;
 pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
@@ -110,16 +114,14 @@ pub mod _private {
     // Reexports for macros
     pub use linkme;
     pub use once_cell;
-    pub use router_bridge;
     pub use serde_json;
 
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
-    // For comparison/fuzzing
-    pub use crate::query_planner::bridge_query_planner::render_diff;
-    pub use crate::query_planner::bridge_query_planner::QueryPlanResult;
-    pub use crate::query_planner::dual_query_planner::diff_plan;
-    pub use crate::query_planner::dual_query_planner::plan_matches;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+
+    pub fn compute_job_queued_count() -> &'static std::sync::atomic::AtomicUsize {
+        &crate::compute_job::queue().queued_count
+    }
 }

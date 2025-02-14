@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -47,6 +48,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
+use crate::utils::iter_into_single_item;
 use crate::utils::FallibleIterator;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
@@ -70,11 +72,11 @@ pub fn build_federated_query_graph(
         graph: Default::default(),
         sources: Default::default(),
         subgraphs_by_name: Default::default(),
+        supergraph_schema: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
-        subgraph_to_args: Default::default(),
-        subgraph_to_arg_indices: Default::default(),
+        arguments_to_context_ids_by_source: Default::default(),
     };
     let query_graph =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
@@ -105,11 +107,11 @@ pub fn build_query_graph(
         graph: Default::default(),
         sources: Default::default(),
         subgraphs_by_name: Default::default(),
+        supergraph_schema: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
-        subgraph_to_args: Default::default(),
-        subgraph_to_arg_indices: Default::default(),
+        arguments_to_context_ids_by_source: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -962,9 +964,10 @@ struct FederatedQueryGraphBuilder {
 
 impl FederatedQueryGraphBuilder {
     fn new(
-        query_graph: QueryGraph,
+        mut query_graph: QueryGraph,
         supergraph_schema: ValidFederationSchema,
     ) -> Result<Self, FederationError> {
+        query_graph.supergraph_schema = Some(supergraph_schema.clone());
         let base = BaseQueryGraphBuilder::new(
             query_graph,
             FEDERATED_GRAPH_ROOT_SOURCE.into(),
@@ -972,6 +975,7 @@ impl FederatedQueryGraphBuilder {
             // here (note that empty schemas have no Query type, making them invalid GraphQL).
             ValidFederationSchema::new(Valid::assume_valid(Schema::new()))?,
         );
+
         let subgraphs = FederatedQueryGraphBuilderSubgraphs::new(&base)?;
         Ok(FederatedQueryGraphBuilder {
             base,
@@ -1478,27 +1482,24 @@ impl FederatedQueryGraphBuilder {
 
     fn handle_context(&mut self) -> Result<(), FederationError> {
         let mut subgraph_to_args: IndexMap<Arc<str>, Vec<ObjectFieldArgumentDefinitionPosition>> =
-            IndexMap::default();
+            Default::default();
         let mut coordinate_map: IndexMap<
             Arc<str>,
             IndexMap<ObjectFieldDefinitionPosition, Vec<ContextCondition>>,
-        > = IndexMap::default();
+        > = Default::default();
         for (subgraph_name, subgraph) in self.base.query_graph.subgraphs() {
             let subgraph_data = self.subgraphs.get(subgraph_name)?;
-            let Some((_, context_refs)) = &subgraph
+            let Some(context_refs) = &subgraph
                 .referencers()
                 .directives
-                .iter()
-                .find(|(dir, _)| **dir == subgraph_data.context_directive_definition_name)
+                .get(&subgraph_data.context_directive_definition_name)
             else {
                 continue;
             };
-
-            let Some((_, from_context_refs)) = &subgraph
+            let Some(from_context_refs) = &subgraph
                 .referencers()
                 .directives
-                .iter()
-                .find(|(dir, _)| **dir == subgraph_data.from_context_directive_definition_name)
+                .get(&subgraph_data.from_context_directive_definition_name)
             else {
                 continue;
             };
@@ -1514,7 +1515,9 @@ impl FederatedQueryGraphBuilder {
                     .directives
                     .get_all(subgraph_data.context_directive_definition_name.as_str())
                 {
-                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
                         .or_default()
@@ -1527,7 +1530,9 @@ impl FederatedQueryGraphBuilder {
                     .directives
                     .get_all(subgraph_data.context_directive_definition_name.as_str())
                 {
-                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
                         .or_default()
@@ -1540,7 +1545,9 @@ impl FederatedQueryGraphBuilder {
                     .directives
                     .get_all(subgraph_data.context_directive_definition_name.as_str())
                 {
-                    let application = FederationSpecDefinition::context_directive_arguments(dir)?;
+                    let application = subgraph_data
+                        .federation_spec_definition
+                        .context_directive_arguments(dir)?;
                     context_name_to_types
                         .entry(application.name)
                         .or_default()
@@ -1557,36 +1564,41 @@ impl FederatedQueryGraphBuilder {
                     .or_default()
                     .push(object_field_arg.clone());
                 let field_coordinate = object_field_arg.parent();
-                if let Some(dir) = input_value.directives.get(
+                let Some(dir) = input_value.directives.get(
                     subgraph_data
                         .from_context_directive_definition_name
                         .as_str(),
-                ) {
-                    let application = subgraph_data
-                        .federation_spec_definition
-                        .from_context_directive_arguments(dir)?;
-                    let (context, selection) = parse_context(application.field)?;
-
-                    let types_with_context_set = context_name_to_types
-                        .get(context.as_str())
-                        .into_iter()
-                        .flatten()
-                        .cloned()
-                        .collect();
-                    let conditions = ContextCondition {
+                ) else {
+                    bail!(
+                        "Argument {} unexpectedly missing @fromContext directive",
+                        object_field_arg
+                    );
+                };
+                let application = subgraph_data
+                    .federation_spec_definition
+                    .from_context_directive_arguments(dir)?;
+                let (context, selection) = parse_context(application.field)?;
+                let Some(types_with_context_set) = context_name_to_types.get(context.as_str())
+                else {
+                    bail!(
+                        r#"Context ${} is never set in subgraph "{}""#,
                         context,
-                        selection,
-                        subgraph_name: subgraph_name.clone(),
-                        argument_coordinate: object_field_arg.clone(),
-                        types_with_context_set,
-                        named_parameter: object_field_arg.argument_name.to_owned(),
-                        arg_type: input_value.ty.clone(),
-                    };
-                    coordinate_map
-                        .entry(field_coordinate.clone())
-                        .or_default()
-                        .push(conditions);
-                }
+                        subgraph_name
+                    );
+                };
+                let conditions = ContextCondition {
+                    context,
+                    subgraph_name: subgraph_name.clone(),
+                    selection,
+                    types_with_context_set: types_with_context_set.clone(),
+                    argument_name: object_field_arg.argument_name.to_owned(),
+                    argument_coordinate: object_field_arg.clone(),
+                    argument_type: input_value.ty.clone(),
+                };
+                coordinate_map
+                    .entry(field_coordinate.clone())
+                    .or_default()
+                    .push(conditions);
             }
         }
 
@@ -1617,16 +1629,29 @@ impl FederatedQueryGraphBuilder {
         }
 
         // Add the context argument mapping
-        self.base.query_graph.subgraph_to_arg_indices = self
+        self.base.query_graph.arguments_to_context_ids_by_source = self
             .base
             .query_graph
             .subgraphs()
-            .filter_map(|(source, _)| subgraph_to_args.get_full(source))
+            .enumerate()
+            .filter_map(|(index, (source, _))| {
+                subgraph_to_args
+                    .get_key_value(source)
+                    .map(|(source, args)| (index, source, args))
+            })
             .map(|(index, source, args)| {
                 Ok::<_, FederationError>((
                     source.clone(),
                     args.iter()
-                        .sorted()
+                        // TODO: We're manually sorting by the actual GraphQL coordinate string here
+                        //       to mimic the behavior of JS code. In the future, we could just sort
+                        //       the argument position in the natural tuple-based way.
+                        .sorted_by_key(|arg| {
+                            format!(
+                                "{}.{}({}:)",
+                                arg.type_name, arg.field_name, arg.argument_name
+                            )
+                        })
                         .enumerate()
                         .map(|(i, arg)| {
                             Ok::<_, FederationError>((
@@ -1638,7 +1663,6 @@ impl FederatedQueryGraphBuilder {
                 ))
             })
             .process_results(|r| r.collect())?;
-        self.base.query_graph.subgraph_to_args = subgraph_to_args;
 
         Ok(())
     }
@@ -2332,43 +2356,83 @@ fn resolvable_key_applications<'doc>(
     Ok(applications)
 }
 
+static CONTEXT_PARSING_LEADING_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap());
+
+static CONTEXT_PARSING_CONTEXT_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap());
+
+fn context_parse_error(context: &str, message: &str) -> FederationError {
+    SingleFederationError::FromContextParseError {
+        context: context.to_string(),
+        message: message.to_string(),
+    }
+    .into()
+}
+
 fn parse_context(field: &str) -> Result<(String, String), FederationError> {
-    let pattern = Regex::new(
-        r#"^(?:[\n\r\t ,]|#[^\n\r]*)*\$(?:[\n\r\t ,]|#[^\n\r]*)*([A-Za-z_]\w*)([\s\S]*)$"#,
-    )
-    .unwrap();
+    // PORT_NOTE: The original JS regex, as shown below
+    //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
+    // makes use of negative lookaheads, which aren't supported natively by Rust's regex crate.
+    // There's a fancy_regex crate which does support this, but in the specific case above, the
+    // negative lookaheads are just used to ensure strict *-greediness for the preceding expression
+    // (i.e., it guarantees those *-expressions match greedily and won't backtrack).
+    //
+    // We can emulate that in this case by matching a series of regexes instead of a single regex,
+    // where for each regex, the relevant *-expression doesn't backtrack by virtue of the rest of
+    // the haystack guaranteeing a match. Also note that Rust has (?s:.) to match all characters
+    // including newlines, which we use in place of JS's common regex workaround of [\s\S].
+    fn strip_leading_ignored_tokens(input: &str) -> Result<&str, FederationError> {
+        iter_into_single_item(CONTEXT_PARSING_LEADING_PATTERN.captures_iter(input))
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str())
+            .ok_or_else(|| context_parse_error(input, "Failed to skip any leading ignored tokens"))
+    }
 
-    let mut iter = pattern.captures_iter(field);
+    let dollar_start = strip_leading_ignored_tokens(field)?;
+    let mut dollar_iter = dollar_start.chars();
+    if dollar_iter.next() != Some('$') {
+        return Err(context_parse_error(
+            dollar_start,
+            r#"Failed to find leading "$""#,
+        ));
+    }
+    let after_dollar = dollar_iter.as_str();
 
-    let Some(captures) = iter.next() else {
-        bail!("Expected to find the name of a context and a selection inside the field argument to `@fromContext`: {field:?}");
+    let context_start = strip_leading_ignored_tokens(after_dollar)?;
+    let Some(context_captures) =
+        iter_into_single_item(CONTEXT_PARSING_CONTEXT_PATTERN.captures_iter(context_start))
+    else {
+        return Err(context_parse_error(
+            dollar_start,
+            "Failed to find context name token and selection",
+        ));
     };
 
-    if iter.next().is_some() {
-        bail!("Expected only one context and selection pair inside the field argument to `@fromContext`: {field:?}");
-    }
+    let context = match context_captures.get(1).map(|m| m.as_str()) {
+        Some(context) if !context.is_empty() => context,
+        _ => {
+            return Err(context_parse_error(
+                context_start,
+                "Expected to find non-empty context name",
+            ));
+        }
+    };
 
-    let (context, selection) = captures
-        .iter()
-        // Ignore the first match because it is always the whole matching substring
-        .skip(1)
-        .flatten()
-        .fold(("", ""), |(_, b), group| (b, group.as_str()));
+    let selection = match context_captures.get(2).map(|m| m.as_str()) {
+        Some(selection) if !selection.is_empty() => selection,
+        _ => {
+            return Err(context_parse_error(
+                context_start,
+                "Expected to find non-empty selection",
+            ));
+        }
+    };
 
-    if context.is_empty() {
-        bail!("Expected to find the name of a context inside the field argument to `@fromContext`: {field:?}");
-    }
-
-    if selection.is_empty() {
-        bail!(
-            "Expected to find and a selection inside the field argument to `@fromContext`: {field:?}"
-        );
-    }
-
-    Ok((
-        context.trim_end().to_owned(),
-        selection.trim_start().to_owned(),
-    ))
+    // PORT_NOTE: apollo_compiler's parsing code for field sets requires ignored tokens to be
+    // pre-stripped if curly braces are missing, so we additionally do that here.
+    let selection = strip_leading_ignored_tokens(selection)?;
+    Ok((context.to_owned(), selection.to_owned()))
 }
 
 #[cfg(test)]
@@ -2508,6 +2572,9 @@ mod tests {
             assert_eq!(context, known_context);
             assert_eq!(selection, known_selection);
         }
+        // Ensure we don't backtrack in the comment regex.
+        assert!(super::parse_context("#comment $fakeContext fakeSelection").is_err());
+        assert!(super::parse_context("$ #comment fakeContext fakeSelection").is_err());
     }
 
     #[test]

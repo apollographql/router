@@ -5,7 +5,6 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -18,30 +17,27 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::HeaderValue;
-use mediatype::names::BOUNDARY;
-use mediatype::names::FORM_DATA;
-use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::trace::config;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::sdk::Resource;
-use opentelemetry::testing::trace::NoopSpanExporter;
+use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
+use opentelemetry::trace::TraceId;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::testing::trace::NoopSpanExporter;
+use opentelemetry_sdk::trace::BatchConfigBuilder;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Config;
+use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use parking_lot::Mutex;
 use regex::Regex;
 use reqwest::Request;
 use serde_json::json;
@@ -69,6 +65,75 @@ use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
 
+pub struct Query {
+    traced: bool,
+    psr: Option<&'static str>,
+    headers: HashMap<String, String>,
+    content_type: String,
+    body: Value,
+}
+
+impl Default for Query {
+    fn default() -> Self {
+        Query::builder().build()
+    }
+}
+
+#[buildstructor::buildstructor]
+impl Query {
+    #[builder]
+    pub fn new(
+        traced: Option<bool>,
+        psr: Option<&'static str>,
+        body: Option<Value>,
+        content_type: Option<String>,
+        headers: HashMap<String, String>,
+    ) -> Self {
+        Self {
+            traced: traced.unwrap_or(true),
+            psr,
+            body: body.unwrap_or(
+                json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}}),
+            ),
+            content_type: content_type
+                .unwrap_or_else(|| APPLICATION_JSON.essence_str().to_string()),
+            headers,
+        }
+    }
+}
+impl Query {
+    #[allow(dead_code)]
+    pub fn with_bad_content_type(mut self) -> Self {
+        self.content_type = "garbage".to_string();
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_bad_query(mut self) -> Self {
+        self.body = json!({"garbage":{}});
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_anonymous(mut self) -> Self {
+        self.body = json!({"query":"query {topProducts{name}}","variables":{}});
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_huge_query(mut self) -> Self {
+        self.body = json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}});
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn introspection() -> Query {
+        Query::builder()
+            .body(json!({"query":"{__schema {types {name}}}","variables":{}}))
+            .build()
+    }
+}
+
 pub struct IntegrationTest {
     router: Option<Child>,
     test_config_location: PathBuf,
@@ -79,6 +144,7 @@ pub struct IntegrationTest {
     collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
+    extra_propagator: Telemetry,
 
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
@@ -88,13 +154,14 @@ pub struct IntegrationTest {
     bind_address: Arc<Mutex<Option<SocketAddr>>>,
     redis_namespace: String,
     log: String,
+    subgraph_context: Arc<Mutex<Option<SpanContext>>>,
+    logs: Vec<String>,
 }
 
 impl IntegrationTest {
     pub(crate) fn bind_address(&self) -> SocketAddr {
         self.bind_address
             .lock()
-            .expect("lock poisoned")
             .expect("no bind address set, router must be started first.")
     }
 }
@@ -102,13 +169,18 @@ impl IntegrationTest {
 struct TracedResponder {
     response_template: ResponseTemplate,
     telemetry: Telemetry,
+    extra_propagator: Telemetry,
     subscriber_subgraph: Dispatch,
     subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+    subgraph_context: Arc<Mutex<Option<SpanContext>>>,
 }
 
 impl Respond for TracedResponder {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
-        let context = self.telemetry.extract_context(request);
+        let context = self.telemetry.extract_context(request, &Context::new());
+        let context = self.extra_propagator.extract_context(request, &context);
+
+        *self.subgraph_context.lock() = Some(context.span().span_context().clone());
         tracing_core::dispatcher::with_default(&self.subscriber_subgraph, || {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
@@ -124,9 +196,8 @@ impl Respond for TracedResponder {
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub enum Telemetry {
-    Jaeger,
     Otlp {
-        endpoint: String,
+        endpoint: Option<String>,
     },
     Datadog,
     Zipkin,
@@ -136,27 +207,15 @@ pub enum Telemetry {
 
 impl Telemetry {
     fn tracer_provider(&self, service_name: &str) -> TracerProvider {
-        let config = config().with_resource(Resource::new(vec![KeyValue::new(
+        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
             SERVICE_NAME,
             service_name.to_string(),
         )]));
 
         match self {
-            Telemetry::Jaeger => TracerProvider::builder()
-                .with_config(config)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_jaeger::new_agent_pipeline()
-                            .with_service_name(service_name)
-                            .build_sync_agent_exporter()
-                            .expect("jaeger pipeline failed"),
-                        opentelemetry::runtime::Tokio,
-                    )
-                    .with_scheduled_delay(Duration::from_millis(10))
-                    .build(),
-                )
-                .build(),
-            Telemetry::Otlp { endpoint } => TracerProvider::builder()
+            Telemetry::Otlp {
+                endpoint: Some(endpoint),
+            } => TracerProvider::builder()
                 .with_config(config)
                 .with_span_processor(
                     BatchSpanProcessor::builder(
@@ -167,9 +226,13 @@ impl Telemetry {
                         )
                         .build_span_exporter()
                         .expect("otlp pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -181,9 +244,13 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -195,13 +262,17 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .init_exporter()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
-            Telemetry::None => TracerProvider::builder()
+            Telemetry::None | Telemetry::Otlp { endpoint: None } => TracerProvider::builder()
                 .with_config(config)
                 .with_simple_exporter(NoopSpanExporter::default())
                 .build(),
@@ -212,39 +283,48 @@ impl Telemetry {
         let ctx = tracing::span::Span::current().context();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
             Telemetry::Datadog => {
+                // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
+                // In testing we are manually setting the PSR header, and we don't want to override it.
+                let psr = request
+                    .headers()
+                    .get("x-datadog-sampling-priority")
+                    .cloned();
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
+                );
+
+                if let Some(psr) = psr {
+                    request
+                        .headers_mut()
+                        .insert("x-datadog-sampling-priority", psr);
+                }
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Zipkin => {
                 let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             _ => {}
         }
     }
 
-    pub(crate) fn extract_context(&self, request: &wiremock::Request) -> Context {
+    pub(crate) fn extract_context(
+        &self,
+        request: &wiremock::Request,
+        context: &Context,
+    ) -> Context {
         let headers: HashMap<String, String> = request
             .headers
             .iter()
@@ -252,23 +332,44 @@ impl Telemetry {
             .collect();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.extract(&headers)
-            }
             Telemetry::Datadog => {
+                let span_ref = context.span();
+                let original_span_context = span_ref.span_context();
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
-                propagator.extract(&headers)
+                let mut context = propagator.extract_with_context(context, &headers);
+                // We're going to override the sampled so that we can test sampling priority
+                if let Some(psr) = headers.get("x-datadog-sampling-priority") {
+                    let state = context
+                        .span()
+                        .span_context()
+                        .trace_state()
+                        .insert("psr", psr.to_string())
+                        .expect("psr");
+                    let new_trace_id = if original_span_context.is_valid() {
+                        original_span_context.trace_id()
+                    } else {
+                        context.span().span_context().trace_id()
+                    };
+                    context = context.with_remote_span_context(SpanContext::new(
+                        new_trace_id,
+                        context.span().span_context().span_id(),
+                        context.span().span_context().trace_flags(),
+                        true,
+                        state,
+                    ));
+                }
+
+                context
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
-                propagator.extract(&headers)
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
+                propagator.extract_with_context(context, &headers)
             }
             Telemetry::Zipkin => {
                 let propagator = opentelemetry_zipkin::Propagator::new();
-                propagator.extract(&headers)
+                propagator.extract_with_context(context, &headers)
             }
-            _ => Context::current(),
+            _ => context.clone(),
         }
     }
 }
@@ -276,9 +377,11 @@ impl Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
+    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,
+        extra_propagator: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
         collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
         supergraph: Option<PathBuf>,
@@ -288,6 +391,7 @@ impl IntegrationTest {
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
+        let extra_propagator = extra_propagator.unwrap_or_default();
         let tracer_provider_client = telemetry.tracer_provider("client");
         let subscriber_client = Self::dispatch(&tracer_provider_client);
         let tracer_provider_subgraph = telemetry.tracer_provider("subgraph");
@@ -297,7 +401,9 @@ impl IntegrationTest {
         let url = format!("http://{address}/");
 
         // Add a default override for products, if not specified
-        subgraph_overrides.entry("products".into()).or_insert(url);
+        subgraph_overrides
+            .entry("products".into())
+            .or_insert(url.clone());
 
         // Insert the overrides into the config
         let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
@@ -313,12 +419,25 @@ impl IntegrationTest {
             .start()
             .await;
 
+        let subgraph_context = Arc::new(Mutex::new(None));
         Mock::given(method("POST"))
-            .respond_with(TracedResponder{response_template:responder.unwrap_or_else(||
-                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
+            .respond_with(TracedResponder {
+                response_template: responder.unwrap_or_else(|| {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "data": {
+                            "topProducts": [
+                                { "name": "Table" },
+                                { "name": "Couch" },
+                                { "name": "Chair" },
+                            ],
+                        },
+                    }))
+                }),
                 telemetry: telemetry.clone(),
+                extra_propagator: extra_propagator.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
-                subgraph_callback
+                subgraph_callback,
+                subgraph_context: subgraph_context.clone(),
             })
             .mount(&subgraphs)
             .await;
@@ -353,8 +472,11 @@ impl IntegrationTest {
             subscriber_client,
             _tracer_provider_subgraph: tracer_provider_subgraph,
             telemetry,
+            extra_propagator,
             redis_namespace,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
+            subgraph_context,
+            logs: vec![],
         }
     }
 
@@ -372,6 +494,11 @@ impl IntegrationTest {
         Dispatch::new(subscriber)
     }
 
+    #[allow(dead_code)]
+    pub fn subgraph_context(&self) -> SpanContext {
+        self.subgraph_context.lock().as_ref().unwrap().clone()
+    }
+
     pub fn router_location() -> PathBuf {
         PathBuf::from(env!("CARGO_BIN_EXE_router"))
     }
@@ -387,7 +514,6 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
-
         router
             .args(dbg!([
                 "--hr",
@@ -412,12 +538,10 @@ impl IntegrationTest {
             let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                println!("{line}");
-
                 // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
                 if let Some(captures) = bind_address_regex.captures(&line) {
                     let address = captures.name("address").unwrap().as_str();
-                    let mut bind_address = bind_address.lock().unwrap();
+                    let mut bind_address = bind_address.lock();
                     *bind_address = Some(address.parse().unwrap());
                 }
 
@@ -429,7 +553,7 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    let log = serde_json::from_str::<Log>(&line).expect("line: '{line}' isn't JSON, might you have some debug output in the logging?");
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(
@@ -453,12 +577,12 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_started(&mut self) {
-        self.assert_log_contains("GraphQL endpoint exposed").await;
+        self.wait_for_log_message("GraphQL endpoint exposed").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_not_started(&mut self) {
-        self.assert_log_contains("no valid configuration").await;
+        self.wait_for_log_message("no valid configuration").await;
     }
 
     #[allow(dead_code)]
@@ -502,93 +626,60 @@ impl IntegrationTest {
     pub fn execute_default_query(
         &self,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(
-            &json!({"query":"query {topProducts{name}}","variables":{}}),
-            None,
-            None,
-        )
+        self.execute_query(Query::builder().build())
     }
 
     #[allow(dead_code)]
     pub fn execute_query(
         &self,
-        query: &Value,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(query, None, None)
-    }
-
-    #[allow(dead_code)]
-    pub fn execute_bad_query(
-        &self,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), None, None)
-    }
-
-    #[allow(dead_code)]
-    pub fn execute_huge_query(
-        &self,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None, None)
-    }
-
-    #[allow(dead_code)]
-    pub fn execute_bad_content_type(
-        &self,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"), None)
-    }
-
-    #[allow(dead_code)]
-    pub fn execute_query_with_headers(
-        &self,
-        query: &Value,
-        headers: HashMap<String, String>,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        self.execute_query_internal(query, None, Some(headers))
-    }
-
-    fn execute_query_internal(
-        &self,
-        query: &Value,
-        content_type: Option<&'static str>,
-        headers: Option<HashMap<String, String>>,
+        query: Query,
     ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let telemetry = self.telemetry.clone();
+        let extra_propagator = self.extra_propagator.clone();
 
-        let query = query.clone();
         let url = format!("http://{}", self.bind_address());
-
+        let subgraph_context = self.subgraph_context.clone();
         async move {
             let span = info_span!("client_request");
-            let span_id = span.context().span().span_context().trace_id();
+            let trace_id = span.context().span().span_context().trace_id();
             async move {
                 let client = reqwest::Client::new();
 
-                let mut builder = client
-                    .post(url)
-                    .header(
-                        CONTENT_TYPE,
-                        content_type.unwrap_or(APPLICATION_JSON.essence_str()),
-                    )
-                    .header("apollographql-client-name", "custom_name")
-                    .header("apollographql-client-version", "1.0")
-                    .header("x-my-header", "test")
-                    .header("head", "test");
+                let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
-                if let Some(headers) = headers {
-                    for (name, value) in headers {
-                        builder = builder.header(name, value);
-                    }
+                for (name, value) in query.headers {
+                    builder = builder.header(name, value);
                 }
 
-                let mut request = builder.json(&query).build().unwrap();
-                telemetry.inject_context(&mut request);
+                if let Some(psr) = query.psr {
+                    builder = builder.header("x-datadog-sampling-priority", psr);
+                }
+
+                let mut request = builder.json(&query.body).build().unwrap();
+                if query.traced {
+                    telemetry.inject_context(&mut request);
+                    extra_propagator.inject_context(&mut request);
+                }
+
                 match client.execute(request).await {
-                    Ok(response) => (span_id, response),
+                    Ok(response) => {
+                        if query.traced {
+                            (trace_id, response)
+                        } else {
+                            (
+                                subgraph_context
+                                    .lock()
+                                    .as_ref()
+                                    .expect("subgraph context")
+                                    .trace_id(),
+                                response,
+                            )
+                        }
+                    }
                     Err(err) => {
                         panic!("unable to send successful request to router, {err}")
                     }
@@ -596,53 +687,6 @@ impl IntegrationTest {
             }
             .instrument(span)
             .await
-        }
-        .with_subscriber(self.subscriber_client.clone())
-    }
-
-    #[allow(dead_code)]
-    pub fn execute_untraced_query(
-        &self,
-        query: &Value,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
-        assert!(
-            self.router.is_some(),
-            "router was not started, call `router.start().await; router.assert_started().await`"
-        );
-        let query = query.clone();
-        let url = format!("http://{}", self.bind_address());
-
-        async move {
-            let client = reqwest::Client::new();
-
-            let mut request = client
-                .post(url)
-                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                .header("apollographql-client-name", "custom_name")
-                .header("apollographql-client-version", "1.0")
-                .json(&query)
-                .build()
-                .unwrap();
-
-            request.headers_mut().remove(ACCEPT);
-            match client.execute(request).await {
-                Ok(response) => (
-                    TraceId::from_hex(
-                        response
-                            .headers()
-                            .get("apollo-custom-trace-id")
-                            .cloned()
-                            .unwrap_or(HeaderValue::from_static("no-trace-id"))
-                            .to_str()
-                            .unwrap_or_default(),
-                    )
-                    .unwrap_or(TraceId::INVALID),
-                    response,
-                ),
-                Err(err) => {
-                    panic!("unable to send successful request to router, {err}")
-                }
-            }
         }
         .with_subscriber(self.subscriber_client.clone())
     }
@@ -666,19 +710,11 @@ impl IntegrationTest {
 
             async move {
                 let client = reqwest::Client::new();
-                let mime = {
-                    let mut m = MediaType::new(MULTIPART, FORM_DATA);
-                    m.set_param(BOUNDARY, mediatype::Value::new(request.boundary()).unwrap());
-
-                    m
-                };
-
                 let mut request = client
                     .post(url)
-                    .header(CONTENT_TYPE, mime.to_string())
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("x-my-header", "test")
+                    .header("apollo-require-preflight", "test")
                     .multipart(request)
                     .build()
                     .unwrap();
@@ -689,7 +725,7 @@ impl IntegrationTest {
                 global::get_text_map_propagator(|propagator| {
                     propagator.inject_context(
                         &tracing::span::Span::current().context(),
-                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                        &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                     );
                 });
                 request.headers_mut().remove(ACCEPT);
@@ -730,7 +766,7 @@ impl IntegrationTest {
         global::get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &span.context(),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 
@@ -794,25 +830,26 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_reloaded(&mut self) {
-        self.assert_log_contains("reload complete").await;
+        self.wait_for_log_message("reload complete").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_no_reload_necessary(&mut self) {
-        self.assert_log_contains("no reload necessary").await;
+        self.wait_for_log_message("no reload necessary").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
-        self.assert_log_contains("continuing with previous configuration")
+        self.wait_for_log_message("continuing with previous configuration")
             .await;
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn wait_for_log_message(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(10) {
             if let Ok(line) = self.stdio_rx.try_recv() {
+                self.logs.push(line.to_string());
                 if line.contains(msg) {
                     return;
                 }
@@ -820,7 +857,24 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         self.dump_stack_traces();
-        panic!("'{msg}' not detected in logs");
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                return;
+            }
+        }
+
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -830,10 +884,25 @@ impl IntegrationTest {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 if line.contains(msg) {
                     self.dump_stack_traces();
-                    panic!("'{msg}' detected in logs");
+                    panic!(
+                        "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                        logs = self.logs.join("\n")
+                    );
                 }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_not_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
         }
     }
 
@@ -1080,6 +1149,7 @@ fn merge_overrides(
     let overrides = subgraph_overrides
         .iter()
         .map(|(name, url)| (name.clone(), serde_json::Value::String(url.clone())));
+    let overrides2 = overrides.clone();
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("override_subgraph_url"))
@@ -1092,6 +1162,19 @@ fn merge_overrides(
         }
         Some(override_url) => {
             override_url.extend(overrides);
+        }
+    }
+    if let Some(sources) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("connectors"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("sources"))
+        .and_then(|o| o.as_object_mut())
+    {
+        for (name, url) in overrides2 {
+            let mut obj = serde_json::Map::new();
+            obj.insert("override_url".to_string(), url.clone());
+            sources.insert(format!("connectors.{}", name), Value::Object(obj));
         }
     }
 

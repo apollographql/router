@@ -42,19 +42,24 @@ use self::jwks::JwksManager;
 use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
+use crate::configuration::connector::ConnectorConfiguration;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
-use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::PluginPrivate;
+use crate::plugins::authentication::connector::ConnectorAuth;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
-use crate::register_plugin;
+use crate::plugins::authentication::subgraph::make_signing_params;
+use crate::plugins::authentication::subgraph::AuthConfig;
+use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::Context;
 
+mod connector;
 mod jwks;
 pub(crate) mod subgraph;
 
@@ -62,7 +67,9 @@ pub(crate) mod subgraph;
 mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
-pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
+pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo::authentication::jwt_claims";
+pub(crate) const DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS: &str =
+    "apollo_authentication::JWT::claims";
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
@@ -123,6 +130,7 @@ struct Router {
 struct AuthenticationPlugin {
     router: Option<Router>,
     subgraph: Option<SubgraphAuth>,
+    connector: Option<ConnectorAuth>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, serde_derive_default::Default)]
@@ -207,6 +215,8 @@ struct Conf {
     router: Option<RouterConf>,
     /// Subgraph configuration
     subgraph: Option<subgraph::Config>,
+    /// Connector configuration
+    connector: Option<ConnectorConfiguration<AuthConfig>>,
 }
 
 // We may support additional authentication mechanisms in future, so all
@@ -409,7 +419,7 @@ fn search_jwks(
 }
 
 #[async_trait::async_trait]
-impl Plugin for AuthenticationPlugin {
+impl PluginPrivate for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -491,7 +501,30 @@ impl Plugin for AuthenticationPlugin {
             None
         };
 
-        Ok(Self { router, subgraph })
+        let connector = if let Some(config) = init.config.connector {
+            let mut signing_params: HashMap<ConnectorSourceRef, Arc<SigningParamsConfig>> =
+                Default::default();
+            for (s, source_config) in config.sources {
+                let source_ref: ConnectorSourceRef = s.parse()?;
+                signing_params.insert(
+                    source_ref.clone(),
+                    make_signing_params(&source_config, &source_ref.subgraph_name)
+                        .await
+                        .map(Arc::new)?,
+                );
+            }
+            Some(ConnectorAuth {
+                signing_params: Arc::new(signing_params),
+            })
+        } else {
+            None
+        };
+
+        Ok(Self {
+            router,
+            subgraph,
+            connector,
+        })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -532,6 +565,17 @@ impl Plugin for AuthenticationPlugin {
             service
         }
     }
+
+    fn connector_request_service(
+        &self,
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
+        if let Some(auth) = &self.connector {
+            auth.connector_request_service(service)
+        } else {
+            service
+        }
+    }
 }
 
 fn authenticate(
@@ -539,8 +583,6 @@ fn authenticate(
     jwks_manager: &JwksManager,
     request: router::Request,
 ) -> ControlFlow<router::Response, router::Request> {
-    const AUTHENTICATION_KIND: &str = "JWT";
-
     // We are going to do a lot of similar checking so let's define a local function
     // to help reduce repetition
     fn failure_message(
@@ -549,17 +591,10 @@ fn authenticate(
         status: StatusCode,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
-        tracing::info!(
-            monotonic_counter.apollo_authentication_failure_count = 1u64,
-            kind = %AUTHENTICATION_KIND
-        );
-        tracing::info!(
-            monotonic_counter
-                .apollo
-                .router
-                .operations
-                .authentication
-                .jwt = 1,
+        u64_counter!(
+            "apollo.router.operations.authentication.jwt",
+            "Number of requests with JWT authentication",
+            1,
             authentication.jwt.failed = true
         );
         tracing::info!(message = %error, "jwt authentication failure");
@@ -662,11 +697,11 @@ fn authenticate(
             );
         }
         // This is a metric and will not appear in the logs
-        tracing::info!(
-            monotonic_counter.apollo_authentication_success_count = 1u64,
-            kind = %AUTHENTICATION_KIND
+        u64_counter!(
+            "apollo.router.operations.jwt",
+            "Number of requests with JWT authentication",
+            1
         );
-        tracing::info!(monotonic_counter.apollo.router.operations.jwt = 1u64);
         return ControlFlow::Continue(request);
     }
 
@@ -934,4 +969,4 @@ pub(crate) fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("apollo", "authentication", AuthenticationPlugin);
+register_private_plugin!("apollo", "authentication", AuthenticationPlugin);

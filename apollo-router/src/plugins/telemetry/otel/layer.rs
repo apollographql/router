@@ -1,23 +1,19 @@
 use std::any::TypeId;
 use std::fmt;
 use std::marker;
-use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Instant;
 use std::time::SystemTime;
 
 use once_cell::unsync;
+use opentelemetry::trace as otel;
 use opentelemetry::trace::noop;
-use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry::trace::{self as otel};
 use opentelemetry::Context as OtelContext;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
-use rand::thread_rng;
-use rand::Rng;
 use tracing_core::field;
 use tracing_core::span;
 use tracing_core::span::Attributes;
@@ -32,8 +28,6 @@ use tracing_subscriber::Layer;
 use super::OtelData;
 use super::PreSampledTracer;
 use crate::plugins::cache::invalidation_endpoint::INVALIDATION_ENDPOINT_SPAN_NAME;
-use crate::plugins::telemetry::config::Sampler;
-use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
 use crate::plugins::telemetry::consts::FIELD_EXCEPTION_STACKTRACE;
 use crate::plugins::telemetry::consts::OTEL_KIND;
@@ -43,10 +37,8 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::reload::IsSampled;
 use crate::plugins::telemetry::reload::SampledSpan;
-use crate::plugins::telemetry::reload::SPAN_SAMPLING_RATE;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 
@@ -157,7 +149,7 @@ struct SpanEventVisitor<'a, 'b> {
     custom_event: bool,
 }
 
-impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
+impl field::Visit for SpanEventVisitor<'_, '_> {
     /// Record events on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -273,10 +265,7 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
         if self.exception_config.propagate {
             if let Some(span) = &mut self.span_builder {
                 if let Some(attrs) = span.attributes.as_mut() {
-                    attrs.insert(
-                        Key::new(FIELD_EXCEPTION_MESSAGE),
-                        Value::String(error_msg.clone().into()),
-                    );
+                    attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
                     // NOTE: This is actually not the stacktrace of the exception. This is
                     // the "source chain". It represents the heirarchy of errors from the
@@ -284,10 +273,10 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
                     // of the callsites in the code that led to the error happening.
                     // `std::error::Error::backtrace` is a nightly-only API and cannot be
                     // used here until the feature is stabilized.
-                    attrs.insert(
-                        Key::new(FIELD_EXCEPTION_STACKTRACE),
+                    attrs.push(KeyValue::new(
+                        FIELD_EXCEPTION_STACKTRACE,
                         Value::Array(chain.clone().into()),
-                    );
+                    ));
                 }
             }
         }
@@ -318,16 +307,16 @@ struct SpanAttributeVisitor<'a> {
     exception_config: ExceptionFieldConfig,
 }
 
-impl<'a> SpanAttributeVisitor<'a> {
+impl SpanAttributeVisitor<'_> {
     fn record(&mut self, attribute: KeyValue) {
         debug_assert!(self.span_builder.attributes.is_some());
         if let Some(v) = self.span_builder.attributes.as_mut() {
-            v.insert(attribute.key, attribute.value);
+            v.push(attribute);
         }
     }
 }
 
-impl<'a> field::Visit for SpanAttributeVisitor<'a> {
+impl field::Visit for SpanAttributeVisitor<'_> {
     /// Set attributes on the underlying OpenTelemetry [`Span`] from `bool` values.
     ///
     /// [`Span`]: opentelemetry::trace::Span
@@ -662,32 +651,6 @@ thread_local! {
     });
 }
 
-pub(crate) fn configure(sampler: &SamplerOption) {
-    let ratio = match sampler {
-        SamplerOption::TraceIdRatioBased(ratio) => {
-            // can't use std::cmp::min because f64 is not Ord
-            if *ratio > 1.0 {
-                1.0
-            } else {
-                *ratio
-            }
-        }
-        SamplerOption::Always(s) => match s {
-            Sampler::AlwaysOn => 1f64,
-            Sampler::AlwaysOff => 0f64,
-        },
-    };
-
-    SPAN_SAMPLING_RATE.store(f64::to_bits(ratio), Ordering::Relaxed);
-}
-
-impl<S, T> OpenTelemetryLayer<S, T> {
-    fn sample(&self) -> bool {
-        let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
-    }
-}
-
 impl<S, T> OpenTelemetryLayer<S, T>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
@@ -740,7 +703,7 @@ where
         }
 
         // - there's no parent span (it's the root), so we make the sampling decision
-        self.sample()
+        true
     }
 }
 
@@ -754,99 +717,90 @@ where
     /// [OpenTelemetry `Span`]: opentelemetry::trace::Span
     /// [tracing `Span`]: tracing::Span
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let is_sampled = self.enabled(span.metadata(), &ctx);
-        let mut extensions = span.extensions_mut();
-        let parent_cx = self.parent_context(attrs, &ctx);
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            let parent_cx = self.parent_context(attrs, &ctx);
 
-        // Record new trace id if there is no active parent span
-        let trace_id = if parent_cx.span().span_context().is_valid()
-            || parent_cx.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
-        {
-            // It probably means we have a remote parent trace
-            parent_cx.span().span_context().trace_id()
-        } else {
-            let sampled_span = span
-                .parent()
-                .and_then(|s| s.extensions().get::<SampledSpan>().cloned());
+            // Record new trace id if there is no active parent span
+            let trace_id = if parent_cx.span().span_context().trace_id()
+                != opentelemetry::trace::TraceId::INVALID
+            {
+                parent_cx.span().span_context().trace_id()
+            } else {
+                self.tracer.new_trace_id()
+            };
+            let span_id = self.tracer.new_span_id();
+            let sampled = if self.enabled(attrs.metadata(), &ctx) {
+                SampledSpan::Sampled(trace_id.to_bytes().into(), span_id)
+            } else {
+                SampledSpan::NotSampled(trace_id.to_bytes().into(), span_id)
+            };
+            let is_sampled = matches!(sampled, SampledSpan::Sampled(_, _));
+            extensions.insert(sampled);
 
-            match sampled_span {
-                // It's not the root span
-                Some(SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _)) => {
-                    opentelemetry_api::trace::TraceId::from(trace_id.to_u128())
+            // Inactivity may still be tracked even if the span isn't sampled.
+            if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
+                extensions.insert(Timings::new());
+            }
+
+            if !is_sampled {
+                // Nothing more to do as it's not sampled
+                return;
+            }
+
+            let mut builder = self
+                .tracer
+                .span_builder(attrs.metadata().name())
+                .with_start_time(SystemTime::now())
+                // Eagerly assign span id so children have stable parent id
+                .with_span_id(self.tracer.new_span_id())
+                .with_trace_id(trace_id);
+
+            let builder_attrs = builder.attributes.get_or_insert(Vec::with_capacity(
+                attrs.fields().len() + self.extra_span_attrs(),
+            ));
+
+            if self.location {
+                let meta = attrs.metadata();
+
+                if let Some(filename) = meta.file() {
+                    builder_attrs.push(KeyValue::new("code.filepath", filename));
                 }
-                // It's probably the root span
-                None => self.tracer.new_trace_id(),
-            }
-        };
 
-        let span_id = self.tracer.new_span_id();
-        let sampled = if is_sampled {
-            SampledSpan::Sampled(trace_id.to_bytes().into(), span_id)
+                if let Some(module) = meta.module_path() {
+                    builder_attrs.push(KeyValue::new("code.namespace", module));
+                }
+
+                if let Some(line) = meta.line() {
+                    builder_attrs.push(KeyValue::new("code.lineno", line as i64));
+                }
+            }
+
+            if self.with_threads {
+                THREAD_ID.with(|id| builder_attrs.push(KeyValue::new("thread.id", **id as i64)));
+                if let Some(name) = std::thread::current().name() {
+                    // TODO(eliza): it's a bummer that we have to allocate here, but
+                    // we can't easily get the string as a `static`. it would be
+                    // nice if `opentelemetry` could also take `Arc<str>`s as
+                    // `String` values...
+                    builder_attrs.push(KeyValue::new("thread.name", name.to_owned()));
+                }
+            }
+
+            attrs.record(&mut SpanAttributeVisitor {
+                span_builder: &mut builder,
+                exception_config: self.exception_config,
+            });
+            extensions.insert(OtelData {
+                builder,
+                parent_cx,
+                event_attributes: None,
+                forced_status: None,
+                forced_span_name: None,
+            });
         } else {
-            SampledSpan::NotSampled(trace_id.to_bytes().into(), span_id)
-        };
-        extensions.insert(sampled);
-
-        if !is_sampled {
-            // Nothing more to do as it's not sampled
-            return;
+            tracing::error!("Span not found, this is a bug");
         }
-
-        if self.tracked_inactivity && extensions.get_mut::<Timings>().is_none() {
-            extensions.insert(Timings::new());
-        }
-
-        let mut builder = self
-            .tracer
-            .span_builder(attrs.metadata().name())
-            .with_start_time(SystemTime::now())
-            // Eagerly assign span id so children have stable parent id
-            .with_span_id(span_id)
-            .with_trace_id(trace_id);
-
-        let builder_attrs = builder.attributes.get_or_insert(OrderMap::with_capacity(
-            attrs.fields().len() + self.extra_span_attrs(),
-        ));
-
-        if self.location {
-            let meta = attrs.metadata();
-
-            if let Some(filename) = meta.file() {
-                builder_attrs.insert("code.filepath".into(), filename.into());
-            }
-
-            if let Some(module) = meta.module_path() {
-                builder_attrs.insert("code.namespace".into(), module.into());
-            }
-
-            if let Some(line) = meta.line() {
-                builder_attrs.insert("code.lineno".into(), (line as i64).into());
-            }
-        }
-
-        if self.with_threads {
-            THREAD_ID.with(|id| builder_attrs.insert("thread.id".into(), (**id as i64).into()));
-            if let Some(name) = std::thread::current().name() {
-                // TODO(eliza): it's a bummer that we have to allocate here, but
-                // we can't easily get the string as a `static`. it would be
-                // nice if `opentelemetry` could also take `Arc<str>`s as
-                // `String` values...
-                builder_attrs.insert("thread.name".into(), name.to_owned().into());
-            }
-        }
-
-        attrs.record(&mut SpanAttributeVisitor {
-            span_builder: &mut builder,
-            exception_config: self.exception_config,
-        });
-        extensions.insert(OtelData {
-            builder,
-            parent_cx,
-            event_attributes: None,
-            forced_status: None,
-            forced_span_name: None,
-        });
     }
 
     fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
@@ -854,21 +808,24 @@ where
             return;
         }
 
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
-            return;
-        }
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if extensions
+                .get_mut::<SampledSpan>()
+                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
+                .unwrap_or(true)
+            {
+                // It's not sampled
+                return;
+            }
 
-        if let Some(timings) = extensions.get_mut::<Timings>() {
-            let now = Instant::now();
-            timings.idle += (now - timings.last).as_nanos() as i64;
-            timings.last = now;
+            if let Some(timings) = extensions.get_mut::<Timings>() {
+                let now = Instant::now();
+                timings.idle += (now - timings.last).as_nanos() as i64;
+                timings.last = now;
+            }
+        } else {
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
@@ -877,21 +834,24 @@ where
             return;
         }
 
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
-            return;
-        }
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if extensions
+                .get_mut::<SampledSpan>()
+                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
+                .unwrap_or(true)
+            {
+                // It's not sampled
+                return;
+            }
 
-        if let Some(timings) = extensions.get_mut::<Timings>() {
-            let now = Instant::now();
-            timings.busy += (now - timings.last).as_nanos() as i64;
-            timings.last = now;
+            if let Some(timings) = extensions.get_mut::<Timings>() {
+                let now = Instant::now();
+                timings.busy += (now - timings.last).as_nanos() as i64;
+                timings.last = now;
+            }
+        } else {
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
@@ -899,60 +859,63 @@ where
     ///
     /// [`attributes`]: opentelemetry::trace::SpanBuilder::attributes
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
-            return;
-        }
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if extensions
+                .get_mut::<SampledSpan>()
+                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
+                .unwrap_or(true)
+            {
+                // It's not sampled
+                return;
+            }
 
-        if let Some(data) = extensions.get_mut::<OtelData>() {
-            values.record(&mut SpanAttributeVisitor {
-                span_builder: &mut data.builder,
-                exception_config: self.exception_config,
-            });
+            if let Some(data) = extensions.get_mut::<OtelData>() {
+                values.record(&mut SpanAttributeVisitor {
+                    span_builder: &mut data.builder,
+                    exception_config: self.exception_config,
+                });
+            }
+        } else {
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
     fn on_follows_from(&self, id: &Id, follows: &Id, ctx: Context<S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
-            return;
-        }
+        if let (Some(span), Some(follows_span)) = (ctx.span(id), ctx.span(follows)) {
+            let mut extensions = span.extensions_mut();
+            if extensions
+                .get_mut::<SampledSpan>()
+                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
+                .unwrap_or(true)
+            {
+                // It's not sampled
+                return;
+            }
 
-        let data = extensions
-            .get_mut::<OtelData>()
-            .expect("Missing otel data span extensions");
+            let data = extensions
+                .get_mut::<OtelData>()
+                .expect("Missing otel data span extensions");
 
-        let follows_span = ctx
-            .span(follows)
-            .expect("Span to follow not found, this is a bug");
-        let mut follows_extensions = follows_span.extensions_mut();
-        let follows_data = follows_extensions
-            .get_mut::<OtelData>()
-            .expect("Missing otel data span extensions");
+            let mut follows_extensions = follows_span.extensions_mut();
+            let follows_data = follows_extensions
+                .get_mut::<OtelData>()
+                .expect("Missing otel data span extensions");
 
-        let follows_context = self
-            .tracer
-            .sampled_context(follows_data)
-            .span()
-            .span_context()
-            .clone();
-        let follows_link = otel::Link::new(follows_context, Vec::new());
-        if let Some(ref mut links) = data.builder.links {
-            links.push(follows_link);
+            let follows_context = self
+                .tracer
+                .sampled_context(follows_data)
+                .span()
+                .span_context()
+                .clone();
+            let follows_link = otel::Link::new(follows_context, Vec::new(), 0);
+            if let Some(ref mut links) = data.builder.links {
+                links.push(follows_link);
+            } else {
+                data.builder.links = Some(vec![follows_link]);
+            }
         } else {
-            data.builder.links = Some(vec![follows_link]);
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
@@ -965,10 +928,6 @@ where
     /// [`ERROR`]: tracing::Level::ERROR
     /// [`Error`]: opentelemetry::trace::StatusCode::Error
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        // Don't include deprecated metric events
-        if !filter_metric_events(event) {
-            return;
-        }
         // Ignore events that are not in the context of a span
         if let Some(span) = ctx.lookup_current() {
             let mut extensions = span.extensions_mut();
@@ -1012,7 +971,7 @@ where
                     otel_event.attributes.extend(
                         event_attributes
                             .into_iter()
-                            .map(|(key, value)| KeyValue::new(key, value)),
+                            .map(|(k, v)| KeyValue::new(k, v)),
                     )
                 }
             }
@@ -1060,53 +1019,56 @@ where
     ///
     /// [`Span`]: opentelemetry::trace::Span
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
-            return;
-        }
+        if let Some(span) = ctx.span(&id) {
+            let mut extensions = span.extensions_mut();
+            if extensions
+                .get_mut::<SampledSpan>()
+                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
+                .unwrap_or(true)
+            {
+                // It's not sampled
+                return;
+            }
 
-        if let Some(OtelData {
-            mut builder,
-            parent_cx,
-            forced_status,
-            forced_span_name,
-            ..
-        }) = extensions.remove::<OtelData>()
-        {
-            if self.tracked_inactivity {
-                // Append busy/idle timings when enabled.
-                if let Some(timings) = extensions.get_mut::<Timings>() {
-                    let busy_ns = Key::new("busy_ns");
-                    let idle_ns = Key::new("idle_ns");
+            if let Some(OtelData {
+                mut builder,
+                parent_cx,
+                forced_status,
+                forced_span_name,
+                ..
+            }) = extensions.remove::<OtelData>()
+            {
+                if self.tracked_inactivity {
+                    // Append busy/idle timings when enabled.
+                    if let Some(timings) = extensions.get_mut::<Timings>() {
+                        let busy_ns = Key::new("busy_ns");
+                        let idle_ns = Key::new("idle_ns");
 
+                        let attributes = builder
+                            .attributes
+                            .get_or_insert_with(|| Vec::with_capacity(3));
+                        attributes.push(KeyValue::new(busy_ns, timings.busy));
+                        attributes.push(KeyValue::new(idle_ns, timings.idle));
+                    }
+                }
+                if let Some(forced_status) = forced_status {
+                    builder.status = forced_status;
+                }
+                if let Some(forced_span_name) = forced_span_name {
+                    // Insert the original span name as an attribute so that we can map it later
                     let attributes = builder
                         .attributes
-                        .get_or_insert_with(|| OrderMap::with_capacity(3));
-                    attributes.insert(busy_ns, timings.busy.into());
-                    attributes.insert(idle_ns, timings.idle.into());
+                        .get_or_insert_with(|| Vec::with_capacity(1));
+                    attributes.push(KeyValue::new(OTEL_ORIGINAL_NAME, builder.name));
+                    builder.name = forced_span_name.into();
                 }
+                // Assign end time, build and start span, drop span to export
+                builder
+                    .with_end_time(SystemTime::now())
+                    .start_with_context(&self.tracer, &parent_cx);
             }
-            if let Some(forced_status) = forced_status {
-                builder.status = forced_status;
-            }
-            if let Some(forced_span_name) = forced_span_name {
-                // Insert the original span name as an attribute so that we can map it later
-                let attributes = builder
-                    .attributes
-                    .get_or_insert_with(|| OrderMap::with_capacity(1));
-                attributes.insert(OTEL_ORIGINAL_NAME.into(), builder.name.into());
-                builder.name = forced_span_name.into();
-            }
-            // Assign end time, build and start span, drop span to export
-            builder
-                .with_end_time(SystemTime::now())
-                .start_with_context(&self.tracer, &parent_cx);
+        } else {
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
@@ -1155,13 +1117,13 @@ mod tests {
     use std::error::Error;
     use std::fmt::Display;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::thread;
     use std::time::SystemTime;
 
     use opentelemetry::trace::noop;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::StringValue;
+    use parking_lot::Mutex;
     use tracing_subscriber::prelude::*;
 
     use super::*;
@@ -1176,7 +1138,7 @@ mod tests {
         where
             T: Into<Cow<'static, str>>,
         {
-            noop::NoopSpan::new()
+            noop::NoopSpan::DEFAULT
         }
         fn span_builder<T>(&self, name: T) -> otel::SpanBuilder
         where
@@ -1189,14 +1151,14 @@ mod tests {
             builder: otel::SpanBuilder,
             parent_cx: &OtelContext,
         ) -> Self::Span {
-            *self.0.lock().unwrap() = Some(OtelData {
+            *self.0.lock() = Some(OtelData {
                 builder,
                 parent_cx: parent_cx.clone(),
                 event_attributes: None,
                 forced_status: None,
                 forced_span_name: None,
             });
-            noop::NoopSpan::new()
+            noop::NoopSpan::DEFAULT
         }
     }
 
@@ -1214,7 +1176,7 @@ mod tests {
 
     impl TestTracer {
         fn with_data<T>(&self, f: impl FnOnce(&OtelData) -> T) -> T {
-            let lock = self.0.lock().unwrap();
+            let lock = self.0.lock();
             let data = lock.as_ref().expect("no span data has been recorded yet");
             f(data)
         }
@@ -1240,6 +1202,7 @@ mod tests {
         fn set_status(&mut self, _status: otel::Status) {}
         fn update_name<T: Into<Cow<'static, str>>>(&mut self, _new_name: T) {}
         fn end_with_timestamp(&mut self, _timestamp: SystemTime) {}
+        fn add_link(&mut self, _span_context: otel::SpanContext, _attributes: Vec<KeyValue>) {}
     }
 
     #[derive(Debug)]
@@ -1283,12 +1246,7 @@ mod tests {
             tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
         });
 
-        let recorded_name = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|b| b.builder.name.clone());
+        let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(dynamic_name.into()))
     }
 
@@ -1309,12 +1267,7 @@ mod tests {
             );
         });
 
-        let recorded_name = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|b| b.builder.name.clone());
+        let recorded_name = tracer.0.lock().as_ref().map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(Cow::Owned(forced_dynamic_name)))
     }
 
@@ -1358,15 +1311,7 @@ mod tests {
             tracing::debug_span!("request", otel.status_message = message);
         });
 
-        let recorded_status_message = tracer
-            .0
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .builder
-            .status
-            .clone();
+        let recorded_status_message = tracer.0.lock().as_ref().unwrap().builder.status.clone();
 
         assert_eq!(recorded_status_message, otel::Status::error(message))
     }
@@ -1412,7 +1357,7 @@ mod tests {
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
         let keys = attributes
             .iter()
-            .map(|(key, _)| key.as_str())
+            .map(|kv| kv.key.as_str())
             .collect::<Vec<&str>>();
         assert!(keys.contains(&"idle_ns"));
         assert!(keys.contains(&"busy_ns"));
@@ -1442,7 +1387,6 @@ mod tests {
         let attributes = tracer
             .0
             .lock()
-            .unwrap()
             .as_ref()
             .unwrap()
             .builder
@@ -1453,7 +1397,7 @@ mod tests {
 
         let key_values = attributes
             .into_iter()
-            .map(|(key, value)| (key.as_str().to_owned(), value))
+            .map(|kv| (kv.key.to_string(), kv.value))
             .collect::<HashMap<_, _>>();
 
         assert_eq!(key_values["error"].as_str(), "user error");
@@ -1494,7 +1438,7 @@ mod tests {
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
         let keys = attributes
             .iter()
-            .map(|(key, _)| key.as_str())
+            .map(|kv| kv.key.as_str())
             .collect::<Vec<&str>>();
         assert!(keys.contains(&"code.filepath"));
         assert!(keys.contains(&"code.namespace"));
@@ -1524,7 +1468,7 @@ mod tests {
         let attributes = tracer
             .with_data(|data| data.builder.attributes.as_ref().unwrap().clone())
             .drain(..)
-            .map(|(key, value)| (key.as_str().to_string(), value))
+            .map(|kv| (kv.key.to_string(), kv.value))
             .collect::<HashMap<_, _>>();
         assert_eq!(attributes.get("thread.name"), expected_name.as_ref());
         assert_eq!(attributes.get("thread.id"), Some(&expected_id));
@@ -1547,7 +1491,7 @@ mod tests {
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
         let keys = attributes
             .iter()
-            .map(|(key, _)| key.as_str())
+            .map(|kv| kv.key.as_str())
             .collect::<Vec<&str>>();
         assert!(!keys.contains(&"thread.name"));
         assert!(!keys.contains(&"thread.id"));
@@ -1579,7 +1523,6 @@ mod tests {
         let attributes = tracer
             .0
             .lock()
-            .unwrap()
             .as_ref()
             .unwrap()
             .builder
@@ -1590,7 +1533,7 @@ mod tests {
 
         let key_values = attributes
             .into_iter()
-            .map(|(key, value)| (key.as_str().to_owned(), value))
+            .map(|kv| (kv.key.to_string(), kv.value))
             .collect::<HashMap<_, _>>();
 
         assert_eq!(key_values[FIELD_EXCEPTION_MESSAGE].as_str(), "user error");

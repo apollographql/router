@@ -1,14 +1,11 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::fmt::Display;
 use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
-use axum::error_handling::HandleErrorLayer;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -24,22 +21,19 @@ use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
-use http_body::combinators::UnsyncBoxBody;
-use hyper::server::conn::Http;
-use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
-use serde::Serialize;
+use once_cell::sync::Lazy;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
+use regex::Regex;
 use serde_json::json;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
-use tower::service_fn;
-use tower::BoxError;
-use tower::ServiceBuilder;
+use tower::layer::layer_fn;
 use tower::ServiceExt;
-use tower_http::decompression::DecompressionBody;
 use tower_http::trace::TraceLayer;
 use tracing::instrument::WithSubscriber;
 use tracing::Instrument;
@@ -60,11 +54,11 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::metrics::meter_provider;
 use crate::plugins::telemetry::SpanMode;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::services::http::service::BodyStream;
 use crate::services::router;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
@@ -72,56 +66,48 @@ use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 use crate::Context;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
+static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^/\{\*[^/]+\}$").expect("this regex to check wildcard paths is valid")
+});
 
-struct SessionCountGuard;
+fn session_count_instrument() -> ObservableGauge<u64> {
+    let meter = meter_provider().meter("apollo/router");
+    meter
+        .u64_observable_gauge("apollo.router.session.count.active")
+        .with_description("Amount of in-flight sessions")
+        .with_callback(|gauge| {
+            gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
+        })
+        .init()
+}
 
-impl SessionCountGuard {
+struct ActiveSessionCountGuard;
+
+impl ActiveSessionCountGuard {
     fn start() -> Self {
-        let session_count = ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire) + 1;
-        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        ACTIVE_SESSION_COUNT.fetch_add(1, Ordering::Acquire);
         Self
     }
 }
 
-impl Drop for SessionCountGuard {
+impl Drop for ActiveSessionCountGuard {
     fn drop(&mut self) {
-        let session_count = ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire) - 1;
-        tracing::info!(value.apollo_router_session_count_active = session_count,);
+        ACTIVE_SESSION_COUNT.fetch_sub(1, Ordering::Acquire);
     }
 }
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
-pub(crate) struct AxumHttpServerFactory {
-    live: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
-}
+pub(crate) struct AxumHttpServerFactory {}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Self {}
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[allow(dead_code)]
-enum HealthStatus {
-    Up,
-    Down,
-}
-
-#[derive(Debug, Serialize)]
-struct Health {
-    status: HealthStatus,
-}
-
 pub(crate) fn make_axum_router<RF>(
-    live: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -131,68 +117,6 @@ where
     RF: RouterFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-
-    if configuration.health_check.enabled {
-        tracing::info!(
-            "Health check exposed at {}{}",
-            configuration.health_check.listen,
-            configuration.health_check.path
-        );
-        endpoints.insert(
-            configuration.health_check.listen.clone(),
-            Endpoint::from_router_service(
-                configuration.health_check.path.clone(),
-                service_fn(move |req: router::Request| {
-                    let mut status_code = StatusCode::OK;
-                    let health = if let Some(query) = req.router_request.uri().query() {
-                        let query_upper = query.to_ascii_uppercase();
-                        // Could be more precise, but sloppy match is fine for this use case
-                        if query_upper.starts_with("READY") {
-                            let status = if ready.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else if query_upper.starts_with("LIVE") {
-                            let status = if live.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else {
-                            Health {
-                                status: HealthStatus::Up,
-                            }
-                        }
-                    } else {
-                        Health {
-                            status: HealthStatus::Up,
-                        }
-                    };
-                    tracing::trace!(?health, request = ?req.router_request, "health check");
-                    async move {
-                        Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body::<Body>(
-                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?,
-                            context: req.context,
-                        })
-                    }
-                })
-                .boxed(),
-            ),
-        );
-    }
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
@@ -235,17 +159,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RF: RouterFactory,
     {
-        let live = self.live.clone();
-        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers = make_axum_router(
-                live.clone(),
-                ready.clone(),
-                service_factory,
-                &configuration,
-                extra_endpoints,
-                license,
-            )?;
+            let all_routers =
+                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
 
             // serve main router
 
@@ -300,25 +216,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let actual_main_listen_address = main_listener
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
-            let mut http_config = Http::new();
-            http_config.http1_keep_alive(true);
-            http_config.http1_header_read_timeout(Duration::from_secs(10));
-
-            #[cfg(feature = "hyper_header_limits")]
-            if let Some(max_headers) = configuration.limits.http1_max_request_headers {
-                http_config.http1_max_headers(max_headers);
-            }
-
-            if let Some(max_buf_size) = configuration.limits.http1_max_request_buf_size {
-                http_config.max_buf_size(max_buf_size.as_u64() as usize);
-            }
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 main_listener,
-                actual_main_listen_address.clone(),
                 all_routers.main.1,
-                true,
-                http_config.clone(),
+                configuration.limits.http1_max_request_headers,
+                configuration.limits.http1_max_request_buf_size,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -355,10 +258,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             listener,
-                            listen_addr.clone(),
                             router,
-                            false,
-                            http_config.clone(),
+                            configuration.limits.http1_max_request_headers,
+                            configuration.limits.http1_max_request_buf_size,
                             all_connections_stopped_sender.clone(),
                         );
                         (
@@ -419,14 +321,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
             ))
         })
     }
-
-    fn live(&self, live: bool) {
-        self.live.store(live, Ordering::SeqCst);
-    }
-
-    fn ready(&self, ready: bool) {
-        self.ready.store(ready, Ordering::SeqCst);
-    }
 }
 
 // This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
@@ -445,10 +339,6 @@ pub(crate) fn span_mode(configuration: &Configuration) -> SpanMode {
         .unwrap_or_default()
 }
 
-async fn decompression_error(_error: BoxError) -> axum::response::Response {
-    (StatusCode::BAD_REQUEST, "cannot decompress request body").into_response()
-}
-
 fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
@@ -463,14 +353,15 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
-    let decompression = ServiceBuilder::new()
-        .layer(HandleErrorLayer::<_, ()>::new(decompression_error))
-        .layer(
-            tower_http::decompression::RequestDecompressionLayer::new()
-                .br(true)
-                .gzip(true)
-                .deflate(true),
-        );
+    // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
+    // to turn errors from decompression into an axum error response. Now,
+    // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
+    // So maybe we don't need this anymore? But I don't understand what happens to an error *caused
+    // by decompression* (such as an invalid compressed data stream).
+    let decompression = tower_http::decompression::RequestDecompressionLayer::new()
+        .br(true)
+        .gzip(true)
+        .deflate(true);
     let mut main_route = main_router::<RF>(configuration)
         .layer(decompression)
         .layer(middleware::from_fn_with_state(
@@ -505,7 +396,7 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
+async fn metrics_handler(request: Request<axum::body::Body>, next: Next) -> Response {
     let resp = next.run(request).await;
     u64_counter!(
         "apollo.router.operations",
@@ -516,22 +407,15 @@ async fn metrics_handler<B>(request: Request<B>, next: Next<B>) -> Response {
     resp
 }
 
-async fn license_handler<B>(
+async fn license_handler(
     State((license, start, delta)): State<(LicenseState, Instant, Arc<AtomicU64>)>,
-    request: Request<B>,
-    next: Next<B>,
+    request: Request<axum::body::Body>,
+    next: Next,
 ) -> Response {
     if matches!(
         license,
-        LicenseState::LicensedHalt | LicenseState::LicensedWarn
+        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
     ) {
-        u64_counter!(
-            "apollo_router_http_requests_total",
-            "Total number of HTTP requests made.",
-            1,
-            status = StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64,
-            error = LICENSE_EXPIRED_SHORT_MESSAGE
-        );
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
         // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
@@ -555,90 +439,62 @@ async fn license_handler<B>(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt) {
+    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(UnsyncBoxBody::default())
+            .body(axum::body::Body::default())
             .expect("canned response must be valid")
     } else {
         next.run(request).await
     }
 }
 
-pub(super) fn main_router<RF>(
-    configuration: &Configuration,
-) -> axum::Router<(), DecompressionBody<Body>>
+#[derive(Clone)]
+struct HandlerOptions {
+    early_cancel: bool,
+    experimental_log_on_broken_pipe: bool,
+}
+
+pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router<()>
 where
     RF: RouterFactory,
 {
-    let early_cancel = configuration.supergraph.early_cancel;
-    let experimental_log_on_broken_pipe = configuration.supergraph.experimental_log_on_broken_pipe;
     let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
-        get({
-            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
-                handle_graphql(
-                    service.create().boxed(),
-                    early_cancel,
-                    experimental_log_on_broken_pipe,
-                    request,
-                )
-            }
-        })
-        .post({
-            move |Extension(service): Extension<RF>, request: Request<DecompressionBody<Body>>| {
-                handle_graphql(
-                    service.create().boxed(),
-                    early_cancel,
-                    experimental_log_on_broken_pipe,
-                    request,
-                )
-            }
-        }),
+        get(handle_graphql::<RF>).post(handle_graphql::<RF>),
     );
 
-    if configuration.supergraph.path == "/*" {
-        router = router.route(
-            "/",
-            get({
-                move |Extension(service): Extension<RF>,
-                      request: Request<DecompressionBody<Body>>| {
-                    handle_graphql(
-                        service.create().boxed(),
-                        early_cancel,
-                        experimental_log_on_broken_pipe,
-                        request,
-                    )
-                }
-            })
-            .post({
-                move |Extension(service): Extension<RF>,
-                      request: Request<DecompressionBody<Body>>| {
-                    handle_graphql(
-                        service.create().boxed(),
-                        early_cancel,
-                        experimental_log_on_broken_pipe,
-                        request,
-                    )
-                }
-            }),
-        );
+    if BARE_WILDCARD_PATH_REGEX.is_match(configuration.supergraph.path.as_str()) {
+        router = router.route("/", get(handle_graphql::<RF>).post(handle_graphql::<RF>));
     }
+
+    router = router.route_layer(Extension(HandlerOptions {
+        early_cancel: configuration.supergraph.early_cancel,
+        experimental_log_on_broken_pipe: configuration.supergraph.experimental_log_on_broken_pipe,
+    }));
+    // Tie the lifetime of the session count instrument to the lifetime of the router
+    // by moving it into a no-op layer.
+    let instrument = session_count_instrument();
+    router = router.layer(layer_fn(move |service| {
+        let _ = &instrument;
+        service
+    }));
 
     router
 }
 
-async fn handle_graphql(
-    service: router::BoxService,
-    early_cancel: bool,
-    experimental_log_on_broken_pipe: bool,
-    http_request: Request<DecompressionBody<Body>>,
+async fn handle_graphql<RF: RouterFactory>(
+    Extension(options): Extension<HandlerOptions>,
+    Extension(service_factory): Extension<RF>,
+    http_request: Request<axum::body::Body>,
 ) -> impl IntoResponse {
-    let _guard = SessionCountGuard::start();
+    let _guard = ActiveSessionCountGuard::start();
 
-    let (parts, body) = http_request.into_parts();
-
-    let http_request = http::Request::from_parts(parts, Body::wrap_stream(BodyStream::new(body)));
+    let HandlerOptions {
+        early_cancel,
+        experimental_log_on_broken_pipe,
+    } = options;
+    let service = service_factory.create();
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
@@ -669,15 +525,6 @@ async fn handle_graphql(
         res
     };
 
-    let dur = context.busy_time();
-    let processing_seconds = dur.as_secs_f64();
-
-    f64_histogram!(
-        "apollo.router.processing.time",
-        "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
-        processing_seconds
-    );
-
     match res {
         Err(err) => internal_server_error(err),
         Ok(response) => {
@@ -694,7 +541,7 @@ async fn handle_graphql(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    Body::wrap_stream(compressor.process(body.into()))
+                    router::body::from_result_stream(compressor.process(body))
                 }
             };
 
@@ -746,7 +593,7 @@ impl<'a> CancelHandler<'a> {
     }
 }
 
-impl<'a> Drop for CancelHandler<'a> {
+impl Drop for CancelHandler<'_> {
     fn drop(&mut self) {
         if !self.got_first_response {
             if self.experimental_log_on_broken_pipe {
@@ -755,7 +602,7 @@ impl<'a> Drop for CancelHandler<'a> {
             }
             self.context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(CanceledRequest));
+                .with_lock(|lock| lock.insert(CanceledRequest));
         }
     }
 }
@@ -778,7 +625,7 @@ mod tests {
             Configuration::from_str(include_str!("testdata/span_mode_default.router.yaml"))
                 .unwrap();
         let mode = span_mode(&config);
-        assert_eq!(mode, SpanMode::Deprecated);
+        assert_eq!(mode, SpanMode::SpecCompliant);
     }
 
     #[test]
@@ -822,7 +669,9 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(
+                            r#"{"query":"query { me { name }}"}"#,
+                        ))
                         .unwrap(),
                 ),
             )
@@ -856,7 +705,9 @@ mod tests {
                         .uri("/")
                         .header(ACCEPT, "application/json")
                         .header(CONTENT_TYPE, "application/json")
-                        .body(hyper::Body::from(r#"{"query":"query { me { name }}"}"#))
+                        .body(router::body::from_bytes(
+                            r#"{"query":"query { me { name }}"}"#,
+                        ))
                         .unwrap(),
                 ),
             )

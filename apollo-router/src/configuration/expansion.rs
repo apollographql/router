@@ -168,6 +168,11 @@ fn dev_mode_defaults() -> Vec<Override> {
             .value(false)
             .value_type(ValueType::Bool)
             .build(),
+        Override::builder()
+            .config_path("connectors.debug_extensions")
+            .value(true)
+            .value_type(ValueType::Bool)
+            .build(),
     ]
 }
 
@@ -230,19 +235,17 @@ impl Expansion {
         // Anything that needs expanding via env variable should be placed here. Don't pollute the codebase with calls to std::env.
         // For testing we have the one fixed expansion. We don't actually want to expand env variables during tests
         let mut transformer_builder = TransformBuilder::default();
-        transformer_builder =
-            transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
+        transformer_builder = transformer_builder.add_action(Parser::parse("", "")?);
         for override_config in &self.override_configs {
             if let Some(value) = override_config.value() {
-                transformer_builder = transformer_builder.add_action(
-                    Parser::parse(&format!("const({value})"), &override_config.config_path)
-                        .expect("migration must be valid"),
-                );
+                transformer_builder = transformer_builder.add_action(Parser::parse(
+                    &format!("const({value})"),
+                    &override_config.config_path,
+                )?);
             }
         }
         *config = transformer_builder
-            .build()
-            .expect("failed to build config default transformer")
+            .build()?
             .apply(config)
             .map_err(|e| ConfigurationError::InvalidConfiguration {
                 message: "could not set configuration defaults as the source configuration had an invalid structure",

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
-use std::sync::RwLock;
 use std::time::Duration;
 
 use futures::future::join_all;
@@ -16,6 +15,7 @@ use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::Algorithm;
 use mime::APPLICATION_JSON;
+use parking_lot::RwLock;
 use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
@@ -112,9 +112,7 @@ async fn poll(
                 tokio::time::sleep(config.poll_interval).await;
 
                 if let Some(jwks) = get_jwks(config.url.clone(), config.headers.clone()).await {
-                    if let Ok(mut map) = jwks_map.write() {
-                        map.insert(config.url, jwks);
-                    }
+                    jwks_map.write().insert(config.url, jwks);
                 }
             }),
         )
@@ -237,7 +235,7 @@ pub(super) struct Iter<'a> {
     list: Vec<JwksConfig>,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = JwkSetInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -245,16 +243,13 @@ impl<'a> Iterator for Iter<'a> {
             match self.list.pop() {
                 None => return None,
                 Some(config) => {
-                    if let Ok(map) = self.manager.jwks_map.read() {
-                        if let Some(jwks) = map.get(&config.url) {
-                            return Some(JwkSetInfo {
-                                jwks: jwks.clone(),
-                                issuer: config.issuer.clone(),
-                                algorithms: config.algorithms.clone(),
-                            });
-                        }
-                    } else {
-                        return None;
+                    let map = self.manager.jwks_map.read();
+                    if let Some(jwks) = map.get(&config.url) {
+                        return Some(JwkSetInfo {
+                            jwks: jwks.clone(),
+                            issuer: config.issuer.clone(),
+                            algorithms: config.algorithms.clone(),
+                        });
                     }
                 }
             }
