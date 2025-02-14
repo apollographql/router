@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::Write as _; // for write! macro
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
@@ -650,21 +649,29 @@ async fn call_websocket(
                 let headers = response
                     .headers()
                     .iter()
-                    .fold(String::new(), |mut acc, (k, v)| {
+                    .map(|(k, v)| {
                         let header_value = v.to_str().unwrap_or("HTTP Error");
-                        write!(acc, "\n    {}: {}", k, header_value).unwrap();
-                        acc
-                    });
+                        format!("{k:?}: {header_value:?}")
+                    })
+                    .collect::<Vec<String>>()
+                    .join("; ");
 
-                format!("WebSocket upgrade failed.\nStatus: {status}\nHeaders:{headers}")
+                format!("WebSocket upgrade failed. Status: {status}; Headers: [{headers}]")
             }
 
             tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
                 format!("WebSocket protocol error: {proto_err}")
             }
 
-            other_error => format!("{other_error}"),
+            other_error => other_error.to_string(),
         };
+
+        tracing::debug!(
+            error.type   = "websocket_connection_failed",
+            error.details= %error_details,
+            error.source = %std::any::type_name_of_val(&err),
+            "WebSocket connection failed"
+        );
 
         FetchError::SubrequestWsError {
             service: service_name.clone(),
@@ -2725,8 +2732,7 @@ mod tests {
             .unwrap_err();
 
         let err_str = err.to_string();
-        assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed.\nStatus: 400 Bad Request\nHeaders:\n    content-type: text/plain; charset=utf-8\n    content-length: 11\n    date: "));
-        assert!(err_str.ends_with(" GMT"));
+        assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
