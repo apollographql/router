@@ -673,6 +673,47 @@ The `->echo` method is still useful when you want to do something with the input
 value (which is bound to `@` within the echoed expression), rather than ignoring
 the input value (using `@` nowhere in the expression).
 
+#### The difference between `array.field->map(...)` and `$(array.field)->map(...)`
+
+When you apply a field selection to an array (as in `array.field`), the field
+selection is automatically mapped over each element of the array, producing a
+new array of all the field values.
+
+If the field selection has a further `->method` applied to it (as in
+`array.field->map(...)`), the method will be applied to each of the resulting
+field values _individually_, rather than to the array as a whole, which is
+probably not what you want given that you're using `->map` (unless each field
+value is an array, and you want an array of all those arrays, after mapping).
+
+The `$(...)` wrapping syntax can be useful to control this behavior, because it
+allows writing `$(array.field)->map(...)`, which provides the complete array of
+field values as a single input to the `->map` method:
+
+```json
+// Input JSON
+{
+  "array": [
+    { "field": 1 },
+    { "field": 2 },
+    { "field": 3 }
+  ]
+}
+```
+
+```graphql
+# Produces [2, 4, 6] by doubling each field value
+doubled: $(array.field)->map(@->mul(2))
+
+# Produces [[2], [4], [6]], since ->map applied to a non-array produces a
+# single-element array wrapping the result of the mapping expression applied
+# to that individual value
+nested: array.field->map(@->mul(2))
+```
+
+In this capacity, the `$(...)` syntax is useful for controlling
+associativity/grouping/precedence, similar to parenthesized expressions in other
+programming languages.
+
 ### `PathStep ::=`
 
 ![PathStep](./grammar/PathStep.svg)
