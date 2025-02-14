@@ -45,7 +45,4 @@ spec:
     {{- end }}
   selector:
     {{- include "router.selectorLabels" . | nindent 4 }}
-  {{- with .Values.service.annotations }}
-  annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+
