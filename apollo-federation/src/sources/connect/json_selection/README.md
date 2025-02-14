@@ -834,6 +834,55 @@ Also, as a minor syntactic convenience, `LitObject` literals can have
 `Identifier` or `LitString` keys, whereas JSON objects can have only
 double-quoted string literal keys.
 
+### `LitPath ::=`
+
+![LitPath](./grammar/LitPath.svg)
+
+A `LitPath` is a special form of `PathSelection` (similar to `VarPath`,
+`KeyPath`, `AtPath`, and `ExprPath`) that can be used _only_ within `LitExpr`
+expressions, allowing the head of the path to be any `LitExpr` value, with a
+non-empty tail of `PathStep` items afterward:
+
+```graphql
+object: $({
+  sd: "asdf"->slice(1, 3),
+  sum: 1234->add(5678),
+  celsius: 98.6->sub(32)->mul(5)->div(9),
+  nine: -1->add(10),
+  false: true->not,
+  true: false->not,
+  twenty: { a: 1, b: 2 }.b->mul(10),
+  last: [1, 2, 3]->last,
+  justA: "abc"->first,
+  justC: "abc"->last,
+})
+```
+
+Note that expressions like `true->not` and `"asdf"->slice(1, 3)` have a
+different interpretation in the default selection syntax (outside of `LitExpr`
+parsing), since `true` and `"asdf"` will be interpreted as field names there,
+not as literal values. If you want to refer to a quoted field value within a
+`LitExpr`, you can use the `$.` variable prefix to disambiguate it:
+
+```graphql
+object: $({
+  fieldEntries: $."quoted field"->entries,
+  stringPrefix: "quoted field"->slice(0, "quoted"->size),
+})
+```
+
+You can still nest the `$(...)` inside itself (or use it within `->` method
+arguments), as in
+
+```graphql
+justA: $($("abc")->first)
+nineAgain: $($(-1)->add($(10)))
+```
+
+In these examples, only the outermost `$(...)` wrapper is required, though the
+inner wrappers may be used to clarify the structure of the expression, similar
+to parentheses in other languages.
+
 ### `LitPrimitive ::=`
 
 ![LitPrimitive](./grammar/LitPrimitive.svg)
