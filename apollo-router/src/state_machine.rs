@@ -215,7 +215,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     // In the case of a failed reload the server handle is retained, which has the old config/schema/license in.
                     let mut guard = state_machine.listen_addresses.clone().write_owned().await;
                     let signals = std::mem::take(all_connections_stopped_signals);
-                    new_state = match Self::try_start(
+                    let start_result = Self::try_start(
                         state_machine,
                         server_handle,
                         Some(router_service_factory),
@@ -225,8 +225,19 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         &mut guard,
                         signals,
                     )
-                    .await
-                    {
+                    .await;
+
+                    u64_counter!(
+                        "apollo.router.reload",
+                        "Amount of times the router reloaded",
+                        1,
+                        new_schema = schema_reload,
+                        new_license = license_reload,
+                        new_configuration = configuration_reload,
+                        success = start_result.is_ok()
+                    );
+
+                    new_state = match start_result {
                         Ok(new_state) => {
                             tracing::info!(
                                 new_schema = schema_reload,
