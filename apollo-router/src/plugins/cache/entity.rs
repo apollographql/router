@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use http::header;
 use http::header::CACHE_CONTROL;
+use indexmap::IndexMap;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1362,7 +1363,41 @@ fn extract_cache_keys(
 pub(crate) fn hash_entity_key(representation: &Value) -> String {
     // We have to hash the representation because it can contains PII
     let mut digest = Sha256::new();
-    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+    let sorted_repr: Option<Value> = match representation {
+        Value::Array(values) => Value::Array(
+            values
+                .clone()
+                .into_iter()
+                .map(|val| match val {
+                    Value::Object(map) => {
+                        let mut indexed_map: IndexMap<ByteString, Value> = IndexMap::from_iter(map);
+                        indexed_map.sort_keys();
+
+                        Value::Object(serde_json_bytes::Map::from_iter(indexed_map))
+                    }
+                    other => other,
+                })
+                .collect::<Vec<Value>>(),
+        )
+        .into(),
+        Value::Object(map) => {
+            let mut indexed_map: IndexMap<ByteString, Value> = IndexMap::from_iter(map.clone());
+            indexed_map.sort_keys();
+
+            Value::Object(serde_json_bytes::Map::from_iter(indexed_map)).into()
+        }
+        _ => None,
+    };
+
+    match sorted_repr {
+        Some(representation) => {
+            digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+        }
+        None => {
+            digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+        }
+    }
+
     hex::encode(digest.finalize().as_slice())
 }
 
