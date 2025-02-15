@@ -127,7 +127,7 @@ pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
 
 /// Collect and merge all definitions applicable to the given type condition.
 /// Returns `None` if no definitions are applicable.
-fn collect_definitions_for_type_condition(
+pub(crate) fn collect_definitions_for_type_condition(
     defs: &PossibleDefinitions,
     filter_cond: &NormalizedTypeCondition,
 ) -> Result<Option<PossibleDefinitionsPerTypeCondition>, ComparisonError> {
@@ -409,7 +409,7 @@ fn generate_clauses(vars: &[Name]) -> Vec<Clause> {
 
 /// Collect all variants implied by the Boolean condition and merge them into one.
 /// Returns `None` if no variants are applicable.
-fn collect_variants_for_boolean_condition(
+pub(crate) fn collect_variants_for_boolean_condition(
     defs: &PossibleDefinitionsPerTypeCondition,
     filter_cond: &Clause,
 ) -> Result<Option<DefinitionVariant>, ComparisonError> {

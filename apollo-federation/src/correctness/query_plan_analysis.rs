@@ -17,6 +17,8 @@ use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_entity_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
+use super::response_shape_compare::collect_definitions_for_type_condition;
+use super::response_shape_compare::collect_variants_for_boolean_condition;
 use crate::FederationError;
 use crate::SingleFederationError;
 use crate::bail;
@@ -634,44 +636,36 @@ fn interpret_plan_node_for_matching_conditions(
 ) -> Result<PossibleDefinitions, String> {
     // Note: `next_type_condition` is applied to the next key down the path.
     let schema = &context.supergraph_schema;
-    let filter_type_cond = normalize_type_condition(schema, &type_condition)?;
+    let normalized_type_cond = normalize_type_condition(schema, &type_condition)?;
+
     let mut response_defs = PossibleDefinitions::default();
-    for (type_cond, defs_per_type_cond) in state_defs.iter() {
-        if let Some(filter_type_cond) = &filter_type_cond {
-            if !filter_type_cond.implies(type_cond) {
-                // Not applicable => skip
-                continue;
-            }
+    if let Some(type_cond) = normalized_type_cond {
+        // Type-conditioned fetching => only consider one type condition.
+        if let Some(response_per_type_cond) = interpret_plan_node_under_type_condition(
+            context,
+            state_defs,
+            &type_cond,
+            boolean_conditions,
+            next_type_condition,
+            next_path,
+            node,
+        )? {
+            response_defs.insert(type_cond, response_per_type_cond);
         }
-        let response_variants =
-            defs_per_type_cond
-                .conditional_variants()
-                .iter()
-                .filter_map(|variant| {
-                    let Some(sub_state) = variant.sub_selection_response_shape() else {
-                        return Some(Err(format!("No sub-selection for variant: {variant}")));
-                    };
-                    let sub_rs = interpret_plan_node_at_path(
-                        context,
-                        sub_state,
-                        boolean_conditions,
-                        next_type_condition.as_ref(),
-                        next_path,
-                        node,
-                    );
-                    match sub_rs {
-                        Err(e) => Some(Err(e)),
-                        Ok(sub_rs) => sub_rs.map(|sub_rs| {
-                            Ok(variant.with_updated_sub_selection_response_shape(sub_rs))
-                        }),
-                    }
-                });
-        let response_variants: Result<Vec<_>, _> = response_variants.collect();
-        let response_variants = response_variants?;
-        if !response_variants.is_empty() {
-            let response_defs_per_type_cond =
-                defs_per_type_cond.with_updated_conditional_variants(response_variants);
-            response_defs.insert(type_cond.clone(), response_defs_per_type_cond);
+    } else {
+        // No type-conditioned fetching => consider each type condition separately.
+        for (type_cond, _defs_per_type_cond) in state_defs.iter() {
+            if let Some(response_per_type_cond) = interpret_plan_node_under_type_condition(
+                context,
+                state_defs,
+                type_cond,
+                boolean_conditions,
+                next_type_condition,
+                next_path,
+                node,
+            )? {
+                response_defs.insert(type_cond.clone(), response_per_type_cond);
+            }
         }
     }
     Ok(response_defs)
@@ -695,6 +689,100 @@ fn normalize_type_condition(
     let result = NormalizedTypeCondition::from_object_types(obj_types.into_iter())
         .map_err(format_federation_error)?;
     Ok(Some(result))
+}
+
+fn interpret_plan_node_under_type_condition(
+    context: &AnalysisContext,
+    state_defs: &PossibleDefinitions,
+    type_cond: &NormalizedTypeCondition,
+    conditions: &[Literal],
+    next_type_condition: &Option<Vec<Name>>,
+    next_path: &[FetchDataPathElement],
+    node: &PlanNode,
+) -> Result<Option<PossibleDefinitionsPerTypeCondition>, String> {
+    // `state_defs` may have multiple overlapping type conditions. We merge them so that the plan
+    // node is interpreted in the merged state. That means the `requires` conditions can be checked
+    // against the one whole state, instead of split states.
+    let Some(merged_state_def) = collect_definitions_for_type_condition(state_defs, type_cond)
+        .map_err(|e| e.description().to_string())?
+    else {
+        // Logically, if no definitions are found for the given type condition (in case of
+        // type-conditioned fetching), that means this plan node is infeasible (kind of dead-code).
+        // However, since that's not expected to happen in our query plans, we report an error
+        // here.
+        return Err(format!(
+            "No matching definitions in state for type condition: {type_cond}"
+        ));
+    };
+    // Interpret the node under every Boolean combination.
+    let response_variants = merged_state_def
+        .conditional_variants()
+        .iter()
+        .filter_map(|variant| {
+            let sub_rs = interpret_plan_node_under_boolean_condition(
+                context,
+                &merged_state_def,
+                variant.boolean_clause(),
+                conditions,
+                next_type_condition,
+                next_path,
+                node,
+            );
+            match sub_rs {
+                Ok(None) => None,
+                Ok(Some(sub_rs)) => {
+                    Some(Ok(variant.with_updated_sub_selection_response_shape(sub_rs)))
+                }
+                Err(e) => Some(Err(e)),
+            }
+        });
+    let response_variants: Result<Vec<_>, _> = response_variants.collect();
+    let response_variants = response_variants?;
+    if !response_variants.is_empty() {
+        Ok(Some(
+            merged_state_def.with_updated_conditional_variants(response_variants),
+        ))
+    } else {
+        // None of the variants are applicable.
+        Ok(None)
+    }
+}
+
+fn interpret_plan_node_under_boolean_condition(
+    context: &AnalysisContext,
+    state_def: &PossibleDefinitionsPerTypeCondition,
+    variant_clause: &Clause,
+    conditions: &[Literal],
+    next_type_condition: &Option<Vec<Name>>,
+    next_path: &[FetchDataPathElement],
+    node: &PlanNode,
+) -> Result<Option<ResponseShape>, String> {
+    // We are considering variants that satisfy both the `variant_clause` and the fetch
+    // `conditions`. We concatenate them into a single full condition.
+    let Some(full_clause) = variant_clause.concatenate(&Clause::from_literals(conditions)) else {
+        // This variant's clause is false under the current conditions => skip infeasible variant
+        return Ok(None);
+    };
+    // Collect all applicable variants into a single merged one for the same reason as explained
+    // in the `interpret_plan_node_under_type_condition` function.
+    let Some(merged_variant) = collect_variants_for_boolean_condition(state_def, &full_clause)
+        .map_err(|e| e.description().to_string())?
+    else {
+        // We must have at least one variant for the given clause.
+        return Err(format!("Internal error: failed to collect applicable variants for full clause `{full_clause}`"));
+    };
+    let Some(sub_state) = merged_variant.sub_selection_response_shape() else {
+        // A sub-selection is expected at the FlattenNode path.
+        return Err(format!("No sub-selection for variant: {merged_variant}"));
+    };
+    interpret_plan_node_at_path(
+        context,
+        sub_state,
+        conditions,
+        next_type_condition.as_ref(),
+        next_path,
+        node,
+    )
 }
 
 fn interpret_flatten_node(
