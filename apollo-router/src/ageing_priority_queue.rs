@@ -34,7 +34,6 @@ where
     inner_queues:
         [(crossbeam_channel::Sender<T>, crossbeam_channel::Receiver<T>); INNER_QUEUES_COUNT],
     queued_count: AtomicUsize,
-    soft_capacity: usize,
 }
 
 pub(crate) struct Receiver<'a, T>
@@ -49,21 +48,16 @@ impl<T> AgeingPriorityQueue<T>
 where
     T: Send + 'static,
 {
-    pub(crate) fn soft_bounded(soft_capacity: usize) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             // Using unbounded channels: callers must use `is_full` to implement backpressure
             inner_queues: std::array::from_fn(|_| crossbeam_channel::unbounded()),
             queued_count: AtomicUsize::new(0),
-            soft_capacity,
         }
     }
 
     pub(crate) fn queued_count(&self) -> usize {
         self.queued_count.load(Ordering::Relaxed)
-    }
-
-    pub(crate) fn is_full(&self) -> bool {
-        self.queued_count() >= self.soft_capacity
     }
 
     /// Panics if `priority` is not in `AVAILABLE_PRIORITIES`
@@ -121,16 +115,11 @@ where
 
 #[test]
 fn test_priorities() {
-    let queue = AgeingPriorityQueue::soft_bounded(3);
+    let queue = AgeingPriorityQueue::new();
     assert_eq!(queue.queued_count(), 0);
-    assert!(!queue.is_full());
     queue.send(Priority::P1, "p1");
-    assert!(!queue.is_full());
     queue.send(Priority::P2, "p2");
-    assert!(!queue.is_full());
     queue.send(Priority::P3, "p3");
-    // The queue is now "full" but sending still works, it’s up to the caller to stop sending
-    assert!(queue.is_full());
     queue.send(Priority::P2, "p2 again");
     assert_eq!(queue.queued_count(), 4);
 

@@ -10,10 +10,6 @@ use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
 
-/// We generate backpressure in tower `poll_ready` when the number of queued jobs
-/// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
-const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
-
 /// By default, let this thread pool use all available resources if it can.
 /// In the worst case, we’ll have moderate context switching cost
 /// as the kernel’s scheduler distributes time to it or Tokio or other threads.
@@ -52,7 +48,7 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 }
             });
         }
-        AgeingPriorityQueue::soft_bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
+        AgeingPriorityQueue::new()
     })
 }
 
@@ -72,10 +68,6 @@ where
     });
     queue().send(priority, job);
     async { rx.await.expect("channel disconnected") }
-}
-
-pub(crate) fn is_full() -> bool {
-    queue().is_full()
 }
 
 pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
