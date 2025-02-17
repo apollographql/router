@@ -1647,3 +1647,27 @@ impl Ord for CacheKeyStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_entity_key_ordering() {
+        let representations = serde_json_bytes::json!([{
+            "id1": "test",
+            "id2": "test2"
+        }]);
+        let first_hash_key = hash_entity_key(&representations);
+        let representations = serde_json_bytes::json!([{
+            "id2": "test2",
+            "id1": "test"
+        }]);
+        let second_hash_key = hash_entity_key(&representations);
+
+        assert_eq!(
+            first_hash_key, second_hash_key,
+            "these 2 hashes should be equals because ordering doesn't matter"
+        );
+    }
+}
