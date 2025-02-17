@@ -49,6 +49,7 @@ use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::path_tree::Preference;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
@@ -330,15 +331,15 @@ impl Display for OpPath {
     }
 }
 
-impl PartialOrd for OpPathElement {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+impl Preference for OpPathElement {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
         match (self, other) {
             (OpPathElement::Field(x), OpPathElement::Field(y)) => {
                 // We prefer the one with a sibling typename (= Less).
                 // Otherwise, not comparable.
                 match (&x.sibling_typename, &y.sibling_typename) {
-                    (Some(_), None) => Some(Ordering::Less),
-                    (None, Some(_)) => Some(Ordering::Greater),
+                    (Some(_), None) => Some(true),
+                    (None, Some(_)) => Some(false),
                     _ => None,
                 }
             }
@@ -347,11 +348,11 @@ impl PartialOrd for OpPathElement {
     }
 }
 
-impl PartialOrd for OpGraphPathTrigger {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+impl Preference for OpGraphPathTrigger {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
         match (self, other) {
             (OpGraphPathTrigger::OpPathElement(x), OpGraphPathTrigger::OpPathElement(y)) => {
-                x.partial_cmp(y)
+                x.preferred_over(y)
             }
             _ => None,
         }

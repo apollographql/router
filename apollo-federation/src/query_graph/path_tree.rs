@@ -206,9 +206,18 @@ impl Display for OpPathTree {
     }
 }
 
+/// A partial ordering over type `T` in terms of preference.
+/// - Similar to PartialOrd, but equivalence is unnecessary.
+pub(crate) trait Preference {
+    /// - Returns None, if `self` and `other` are incomparable or equivalent.
+    /// - Returns Some(true), if `self` is preferred over `other`.
+    /// - Returns Some(false), if `other` is preferred over `self`.
+    fn preferred_over(&self, other: &Self) -> Option<bool>;
+}
+
 impl<TTrigger, TEdge> PathTree<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash + PartialOrd,
+    TTrigger: Eq + Hash + Preference,
     TEdge: Copy + Hash + Eq + Into<Option<EdgeIndex>>,
 {
     /// Returns the `QueryGraphNode` represented by `self.node`.
@@ -292,8 +301,7 @@ where
             match for_edge.by_unique_trigger.entry(trigger) {
                 Entry::Occupied(entry) => {
                     let existing = entry.into_mut();
-                    if *trigger < *existing.trigger {
-                        // overwrite if the new trigger is preferable (= less)
+                    if trigger.preferred_over(existing.trigger) == Some(true) {
                         existing.trigger = trigger;
                     }
                     existing.conditions = merge_conditions(&existing.conditions, conditions);
