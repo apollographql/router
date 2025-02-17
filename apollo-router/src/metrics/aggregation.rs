@@ -150,21 +150,16 @@ impl AggregateMeterProvider {
 
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown(&self) {
-<<<<<<< HEAD
-        let inner = self.inner.lock().expect("lock poisoned");
-        for (meter_provider_type, (meter_provider, _)) in &inner.providers {
-=======
         // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
         // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
         // then we don't get stuck on the mutex.
-        let mut inner = self.inner.lock();
+        let mut inner = self.inner.lock().expect("lock poisoned");
         let mut swap = Inner::default();
         std::mem::swap(&mut *inner, &mut swap);
         drop(inner);
 
         // Now that we have dropped the mutex guard we can safely shutdown the meter providers
         for (meter_provider_type, (meter_provider, _)) in &swap.providers {
->>>>>>> 3ca1883e (Prevent deadlocks on metrics shutdown (#6800))
             if let Err(e) = meter_provider.shutdown() {
                 ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
             }
@@ -512,7 +507,7 @@ mod test {
     use std::sync::Weak;
     use std::time::Duration;
 
-<<<<<<< HEAD
+    use async_trait::async_trait;
     use opentelemetry::sdk::metrics::data::Gauge;
     use opentelemetry::sdk::metrics::data::ResourceMetrics;
     use opentelemetry::sdk::metrics::data::Temporality;
@@ -529,26 +524,9 @@ mod test {
     use opentelemetry_api::metrics::MeterProvider;
     use opentelemetry_api::metrics::Result;
     use opentelemetry_api::Context;
-=======
-    use async_trait::async_trait;
-    use opentelemetry::global::GlobalMeterProvider;
-    use opentelemetry::metrics::MeterProvider;
-    use opentelemetry::metrics::Result;
-    use opentelemetry_sdk::metrics::data::Gauge;
-    use opentelemetry_sdk::metrics::data::ResourceMetrics;
-    use opentelemetry_sdk::metrics::data::Temporality;
     use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
-    use opentelemetry_sdk::metrics::reader::AggregationSelector;
-    use opentelemetry_sdk::metrics::reader::MetricReader;
-    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry_sdk::metrics::Aggregation;
-    use opentelemetry_sdk::metrics::InstrumentKind;
-    use opentelemetry_sdk::metrics::ManualReader;
-    use opentelemetry_sdk::metrics::MeterProviderBuilder;
     use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::runtime;
->>>>>>> 3ca1883e (Prevent deadlocks on metrics shutdown (#6800))
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
@@ -775,7 +753,7 @@ mod test {
 
     impl AggregationSelector for TestExporter {
         fn aggregation(&self, _kind: InstrumentKind) -> Aggregation {
-            Aggregation::Default
+            Aggregation::Sum
         }
     }
 
@@ -830,9 +808,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
+            Some(FilterMeterProvider::public(delegate)),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -856,9 +832,7 @@ mod test {
 
         meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
+            Some(FilterMeterProvider::public(delegate)),
         );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -870,12 +844,13 @@ mod test {
             .build();
 
         // Setting the meter provider should not deadlock.
-        meter_provider.set(
+        if let Some(old) = meter_provider.set(
             MeterProviderType::OtelDefault,
-            Some(FilterMeterProvider::public(GlobalMeterProvider::new(
-                delegate,
-            ))),
-        );
+            Some(FilterMeterProvider::public(delegate)),
+        ) {
+            // In this version of Otel we are responsible for shutting down the meter provider.
+            let _ = old.shutdown();
+        }
 
         tokio::time::sleep(Duration::from_millis(20)).await;
 
