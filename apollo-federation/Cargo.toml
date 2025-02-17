@@ -60,5 +60,13 @@ dhat = "0.3.3"
 name = "main"
 
 [[test]]
-name = "isolated_connectors_validation"
-path = "tests/connectors/validation.rs"
+name = "connectors_validation_profiling"
+path = "tests/dhat_profiling/connectors_validation.rs"
+
+[[test]]
+name = "supergraph_creation_profiling"
+path = "tests/dhat_profiling/supergraph.rs"
+
+[[test]]
+name = "query_plan_creation_profiling"
+path = "tests/dhat_profiling/query_plan.rs"
