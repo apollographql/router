@@ -24,6 +24,12 @@ If you're new to observability, check out [OpenTelemetry's observability primer]
 
 ## Analyzing metrics and gathering insights with GraphOS
 
+<Note>
+
+Reporting metrics from Apollo Server or a monograph requires a legacy Team plan or [current Free or Enterprise plan](https://www.apollographql.com/pricing).
+
+</Note>
+
 Everything connected to GraphOS—including clients, routers, and subgraphs—can report metrics about GraphQL operations they send and service. GraphOS thus is the hub for collecting operation metrics.
 
 Once operation and field usage metrics are collected by GraphOS, you can use the GraphOS Studio [**Insights**](/graphos/platform/insights) suite to visualize and analyze them to understand your supergraph's usage and performance.
@@ -32,19 +38,7 @@ Additionally, you can forward the metrics that GraphOS collects to your APM solu
 
 <EnterpriseFeature>
 
-The following require an [Enterprise plan](https://www.apollographql.com/pricing/):
-
-<br />
-<br />
-
-- Connecting a self-hosted router to GraphOS
-- Forwarding metrics to Datadog
-
-<br />
-
-Reporting metrics from [Apollo Server](/apollo-server) or a [monograph](/graphos/get-started/concepts/graphs/#monographs) requires an [Enterprise or legacy Team plan](https://www.apollographql.com/pricing).
-
-If your organization doesn't currently have an Enterprise plan, you can test out this functionality by signing up for a free [GraphOS trial](https://studio.apollographql.com/signup?referrer=docs-content).
+Forwarding metrics to Datadog requires an [Enterprise plan](https://www.apollographql.com/pricing/):
 
 </EnterpriseFeature>
 
