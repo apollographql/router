@@ -970,7 +970,7 @@ jobs:
                 # We always create the version as a "pre-release" version.
                 # It is promoted to latest in a separate step in RELEASE_CHECKLIST.md
                 command: >
-                  gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
+                  gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/*
             - run:
                 name: Docker build
                 command: |
