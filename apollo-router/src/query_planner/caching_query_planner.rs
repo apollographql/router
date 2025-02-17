@@ -21,6 +21,9 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::cache::DeduplicatingCache;
+use crate::cache::EntryError;
+use crate::compute_job::ComputeBackPressureError;
+use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -49,6 +52,7 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo::supergraph::operation_id";
+pub(crate) const DEPRECATED_APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
 /// Hashed value of query planner configuration for use in cache keys.
 #[derive(Clone, Hash, PartialEq, Eq)]
@@ -76,7 +80,11 @@ impl std::fmt::Debug for ConfigModeHash {
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: Clone> {
     cache: Arc<
-        DeduplicatingCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>,
+        DeduplicatingCache<
+            CachingQueryKey,
+            Result<QueryPlannerContent, Arc<QueryPlannerError>>,
+            ComputeBackPressureError,
+        >,
     >,
     delegate: T,
     schema: Arc<Schema>,
@@ -105,7 +113,7 @@ where
     T: tower::Service<
             QueryPlannerRequest,
             Response = QueryPlannerResponse,
-            Error = QueryPlannerError,
+            Error = MaybeBackPressureError<QueryPlannerError>,
         > + Send,
     <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
@@ -256,7 +264,7 @@ where
 
         let mut count = 0usize;
         let mut reused = 0usize;
-        for WarmUpCachingQueryKey {
+        'all_cache_keys_loop: for WarmUpCachingQueryKey {
             query,
             operation_name,
             hash,
@@ -308,48 +316,61 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = match query_analysis
-                    .parse_document(&query, operation_name.as_deref())
-                    .await
-                {
-                    Ok(doc) => doc,
-                    Err(error) => {
-                        let e = Arc::new(QueryPlannerError::SpecError(error));
-                        tokio::spawn(async move {
-                            entry.insert(Err(e)).await;
-                        });
-                        continue;
-                    }
-                };
-
-                let request = QueryPlannerRequest {
-                    query,
-                    operation_name,
-                    document: doc,
-                    metadata: caching_key.metadata,
-                    plan_options: caching_key.plan_options,
-                };
-
-                let res = match service.ready().await {
-                    Ok(service) => service.call(request).await,
-                    Err(_) => break,
-                };
-
-                match res {
-                    Ok(QueryPlannerResponse { content, .. }) => {
-                        if let Some(content) = content.clone() {
-                            count += 1;
+                let doc = loop {
+                    match query_analysis
+                        .parse_document(&query, operation_name.as_deref())
+                        .await
+                    {
+                        Ok(doc) => break doc,
+                        Err(MaybeBackPressureError::PermanentError(error)) => {
+                            let e = Arc::new(QueryPlannerError::SpecError(error));
                             tokio::spawn(async move {
-                                entry.insert(Ok(content.clone())).await;
+                                entry.insert(Err(e)).await;
                             });
+                            continue 'all_cache_keys_loop;
+                        }
+                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            // try again
                         }
                     }
-                    Err(error) => {
-                        count += 1;
-                        let e = Arc::new(error);
-                        tokio::spawn(async move {
-                            entry.insert(Err(e)).await;
-                        });
+                };
+
+                loop {
+                    let request = QueryPlannerRequest {
+                        query: query.clone(),
+                        operation_name: operation_name.clone(),
+                        document: doc.clone(),
+                        metadata: caching_key.metadata.clone(),
+                        plan_options: caching_key.plan_options.clone(),
+                    };
+                    let res = match service.ready().await {
+                        Ok(service) => service.call(request).await,
+                        Err(_) => break 'all_cache_keys_loop,
+                    };
+
+                    match res {
+                        Ok(QueryPlannerResponse { content, .. }) => {
+                            if let Some(content) = content.clone() {
+                                count += 1;
+                                tokio::spawn(async move {
+                                    entry.insert(Ok(content.clone())).await;
+                                });
+                            }
+                            break;
+                        }
+                        Err(MaybeBackPressureError::PermanentError(error)) => {
+                            count += 1;
+                            let e = Arc::new(error);
+                            tokio::spawn(async move {
+                                entry.insert(Err(e)).await;
+                            });
+                            break;
+                        }
+                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                            // try again
+                        }
                     }
                 }
             }
@@ -376,7 +397,7 @@ where
     T: tower::Service<
         QueryPlannerRequest,
         Response = QueryPlannerResponse,
-        Error = QueryPlannerError,
+        Error = MaybeBackPressureError<QueryPlannerError>,
     >,
     <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
@@ -416,7 +437,7 @@ where
     T: tower::Service<
             QueryPlannerRequest,
             Response = QueryPlannerResponse,
-            Error = QueryPlannerError,
+            Error = MaybeBackPressureError<QueryPlannerError>,
         > + Clone
         + Send
         + 'static,
@@ -500,13 +521,21 @@ where
                 async move {
                     let service = match self.delegate.ready().await {
                         Ok(service) => service,
-                        Err(error) => {
+                        Err(MaybeBackPressureError::PermanentError(error)) => {
                             let e = Arc::new(error);
                             let err = e.clone();
                             tokio::spawn(async move {
                                 entry.insert(Err(err)).await;
                             });
                             return Err(CacheResolverError::RetrievalError(e));
+                        }
+                        Err(MaybeBackPressureError::TemporaryError(error)) => {
+                            let err = error.clone();
+                            tokio::spawn(async move {
+                                // Temporary errors are never cached
+                                entry.send(Err(err)).await;
+                            });
+                            return Err(CacheResolverError::Backpressure(error));
                         }
                     };
 
@@ -530,7 +559,7 @@ where
                                     });
                                 } else {
                                     tokio::spawn(async move {
-                                        entry.send(Ok(content)).await;
+                                        entry.send(Ok(Ok(content))).await;
                                     });
                                 }
                             }
@@ -543,7 +572,7 @@ where
                             }
                             Ok(QueryPlannerResponse { content, errors })
                         }
-                        Err(error) => {
+                        Err(MaybeBackPressureError::PermanentError(error)) => {
                             let e = Arc::new(error);
                             let err = e.clone();
                             tokio::spawn(async move {
@@ -556,6 +585,14 @@ where
                             }
                             Err(CacheResolverError::RetrievalError(e))
                         }
+                        Err(MaybeBackPressureError::TemporaryError(error)) => {
+                            let err = error.clone();
+                            tokio::spawn(async move {
+                                // Temporary errors are never cached
+                                entry.send(Err(err)).await;
+                            });
+                            Err(CacheResolverError::Backpressure(error))
+                        }
                     }
                 }
                 .in_current_span(),
@@ -567,10 +604,11 @@ where
                 )))
             })?
         } else {
-            let res = entry
-                .get()
-                .await
-                .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
+            let res = entry.get().await.map_err(|e| match e {
+                EntryError::IsFirst | // IsFirst should be unreachable
+                EntryError::RecvError => QueryPlannerError::UnhandledPlannerResult.into(),
+                EntryError::UncachedError(e) => CacheResolverError::Backpressure(e),
+            })?;
 
             match res {
                 Ok(content) => {
@@ -714,7 +752,7 @@ mod tests {
             fn sync_call(
                 &self,
                 key: QueryPlannerRequest,
-            ) -> Result<QueryPlannerResponse, QueryPlannerError>;
+            ) -> Result<QueryPlannerResponse, MaybeBackPressureError<QueryPlannerError>>;
         }
 
         impl Clone for MyQueryPlanner {
@@ -725,7 +763,7 @@ mod tests {
     impl Service<QueryPlannerRequest> for MockMyQueryPlanner {
         type Response = QueryPlannerResponse;
 
-        type Error = QueryPlannerError;
+        type Error = MaybeBackPressureError<QueryPlannerError>;
 
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -750,7 +788,7 @@ mod tests {
             planner
                 .expect_sync_call()
                 .times(0..2)
-                .returning(|_| Err(QueryPlannerError::UnhandledPlannerResult));
+                .returning(|_| Err(QueryPlannerError::UnhandledPlannerResult.into()));
             planner
         });
 
