@@ -71,6 +71,10 @@ spec:
             - --config
             - /app/configuration.yaml
             {{- end }}
+            {{- if .Values.supergraphFile}}
+            - --supergraph
+            - /app/supergraph-schema.graphql
+            {{- end }}
           {{- end }}
           env:
             - name: APOLLO_ROUTER_OFFICIAL_HELM_CHART

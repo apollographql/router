@@ -21,4 +21,8 @@ metadata:
 data:
   configuration.yaml: |
     {{- toYaml $configuration | nindent 4 }}
+  {{- if .Values.supergraphFile }}
+  supergraph-schema.graphql: |-
+{{ .Values.supergraphFile | indent 4 }}
+  {{- end }}
 {{- end }}
