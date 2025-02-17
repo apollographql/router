@@ -2,13 +2,13 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use parking_lot::Mutex;
 use rhai::Engine;
 use rhai::EvalAltResult;
 use serde_json::Value;
@@ -67,7 +67,7 @@ async fn call_rhai_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult
     // Get a scope to use for our test
     let scope = block.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
     // happy
@@ -104,7 +104,7 @@ async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
     // Get a scope to use for our test
     let scope = block.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // We must wrap our canned request in Arc<Mutex<Option<>>> to keep the rhai runtime
     // happy
@@ -320,7 +320,7 @@ async fn it_can_access_sdl_constant() {
     // Get a scope to use for our test
     let scope = block.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // Call our function to make sure we can access the sdl
     let sdl: String = block
@@ -595,7 +595,7 @@ async fn base_globals_function(fn_name: &str) -> Result<bool, Box<rhai::EvalAltR
     // Get a scope to use for our test
     let scope = block.scope.clone();
 
-    let mut guard = scope.lock().unwrap();
+    let mut guard = scope.lock();
 
     // Call our rhai test function. If it doesn't return an error, the test failed.
     block.engine.call_fn(&mut guard, &block.ast, fn_name, ())

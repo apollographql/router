@@ -566,6 +566,7 @@ where
 mod tests {
     use std::sync::Arc;
 
+    use apollo_compiler::parser::Parser;
     use apollo_compiler::ExecutableDocument;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
@@ -588,9 +589,9 @@ mod tests {
     fn parse_schema_and_operation(
         schema_and_operation: &str,
     ) -> (ValidFederationSchema, ExecutableDocument) {
-        let (schema, executable_document) =
-            apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql")
-                .unwrap();
+        let (schema, executable_document) = Parser::new()
+            .parse_mixed_validate(schema_and_operation, "document.graphql")
+            .unwrap();
         let executable_document = executable_document.into_inner();
         let schema = ValidFederationSchema::new(schema).unwrap();
         (schema, executable_document)

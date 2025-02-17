@@ -135,7 +135,7 @@ impl Instrumented for GraphQLInstruments {
         self.custom.on_response_event(response, ctx);
 
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
-            if let Some(executable_document) = ctx.unsupported_executable_document() {
+            if let Some(executable_document) = ctx.executable_document() {
                 GraphQLInstrumentsVisitor {
                     ctx,
                     instruments: self,
@@ -230,7 +230,7 @@ pub(crate) mod test {
                 .await;
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -239,8 +239,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -277,7 +277,7 @@ pub(crate) mod test {
                 .build()
                 .await;
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -286,8 +286,9 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
+
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -332,7 +333,7 @@ pub(crate) mod test {
                 .await;
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
                     ))
@@ -341,8 +342,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -374,7 +375,7 @@ pub(crate) mod test {
                 .await;
 
             harness
-                .call_supergraph(request, |req| {
+                .supergraph_service(|req| async {
                     let response: serde_json::Value = serde_json::from_str(include_str!(
                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
                     ))
@@ -383,8 +384,8 @@ pub(crate) mod test {
                         .data(response["data"].clone())
                         .context(req.context)
                         .build()
-                        .unwrap()
                 })
+                .call(request)
                 .await
                 .unwrap();
 
@@ -400,9 +401,7 @@ pub(crate) mod test {
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|mut lock| lock.insert(query));
+        context.extensions().with_lock(|lock| lock.insert(query));
 
         context
     }

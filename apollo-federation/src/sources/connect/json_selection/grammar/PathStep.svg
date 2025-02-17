@@ -3,30 +3,30 @@
    <defs>
       <style type="text/css">
     @namespace "http://www.w3.org/2000/svg";
-    .line                 {fill: none; stroke: #332200; stroke-width: 1;}
-    .bold-line            {stroke: #140E00; shape-rendering: crispEdges; stroke-width: 2;}
-    .thin-line            {stroke: #1F1400; shape-rendering: crispEdges}
-    .filled               {fill: #332200; stroke: none;}
+    .line                 {fill: none; stroke: #332900; stroke-width: 1;}
+    .bold-line            {stroke: #141000; shape-rendering: crispEdges; stroke-width: 2;}
+    .thin-line            {stroke: #1F1800; shape-rendering: crispEdges}
+    .filled               {fill: #332900; stroke: none;}
     text.terminal         {font-family: Verdana, Sans-serif;
                             font-size: 12px;
-                            fill: #140E00;
+                            fill: #141000;
                             font-weight: bold;
                           }
     text.nonterminal      {font-family: Verdana, Sans-serif;
                             font-size: 12px;
-                            fill: #1A1100;
+                            fill: #1A1400;
                             font-weight: normal;
                           }
     text.regexp           {font-family: Verdana, Sans-serif;
                             font-size: 12px;
-                            fill: #1F1400;
+                            fill: #1F1800;
                             font-weight: normal;
                           }
-    rect, circle, polygon {fill: #332200; stroke: #332200;}
-    rect.terminal         {fill: #FFC34D; stroke: #332200; stroke-width: 1;}
-    rect.nonterminal      {fill: #FFDF9E; stroke: #332200; stroke-width: 1;}
+    rect, circle, polygon {fill: #332900; stroke: #332900;}
+    rect.terminal         {fill: #FFDB4D; stroke: #332900; stroke-width: 1;}
+    rect.nonterminal      {fill: #FFEC9E; stroke: #332900; stroke-width: 1;}
     rect.text             {fill: none; stroke: none;}
-    polygon.regexp        {fill: #FFECC7; stroke: #332200; stroke-width: 1;}
+    polygon.regexp        {fill: #FFF4C7; stroke: #332900; stroke-width: 1;}
   </style>
    </defs>
    <polygon points="9 17 1 13 1 21"/>

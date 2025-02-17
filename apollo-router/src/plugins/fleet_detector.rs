@@ -2,15 +2,16 @@ use std::env;
 use std::env::consts::ARCH;
 use std::env::consts::OS;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use futures::StreamExt;
+use http_body::Body as _;
+use http_body_util::BodyExt as _;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::metrics::Unit;
-use opentelemetry_api::KeyValue;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
@@ -26,7 +27,6 @@ use crate::plugin::PluginPrivate;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;
@@ -44,7 +44,8 @@ struct SystemGetter {
 impl SystemGetter {
     fn new() -> Self {
         let mut system = System::new();
-        system.refresh_all();
+        system.refresh_cpu_all();
+        system.refresh_memory();
         Self {
             system,
             start: Instant::now(),
@@ -117,10 +118,10 @@ impl GaugeStore {
                     .with_description(
                         "The CPU frequency of the underlying instance the router is deployed to",
                     )
-                    .with_unit(Unit::new("Mhz"))
+                    .with_unit("Mhz")
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
-                        let mut system_getter = local_system_getter.lock().unwrap();
+                        let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
                         let cpus = system.cpus();
                         let cpu_freq =
@@ -141,10 +142,16 @@ impl GaugeStore {
                     )
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
-                        let mut system_getter = local_system_getter.lock().unwrap();
+                        let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
-                        let cpu_count = detect_cpu_count(system);
-                        gauge.observe(cpu_count, &[KeyValue::new("host.arch", get_otel_arch())])
+                        let (detection_method, cpu_count) = detect_cpu_count(system);
+                        gauge.observe(
+                            cpu_count,
+                            &[
+                                KeyValue::new("host.arch", get_otel_arch()),
+                                KeyValue::new("detection_method", detection_method),
+                            ],
+                        )
                     })
                     .init(),
             );
@@ -160,14 +167,14 @@ impl GaugeStore {
                     )
                     .with_callback(move |gauge| {
                         let local_system_getter = system_getter.clone();
-                        let mut system_getter = local_system_getter.lock().unwrap();
+                        let mut system_getter = local_system_getter.lock();
                         let system = system_getter.get_system();
                         gauge.observe(
                             system.total_memory(),
                             &[KeyValue::new("host.arch", get_otel_arch())],
                         )
                     })
-                    .with_unit(Unit::new("bytes"))
+                    .with_unit("bytes")
                     .init(),
             );
         }
@@ -237,7 +244,7 @@ impl PluginPrivate for FleetDetector {
     }
 
     fn activate(&self) {
-        let mut store = self.gauge_store.lock().expect("lock poisoned");
+        let mut store = self.gauge_store.lock();
         if matches!(*store, GaugeStore::Pending) {
             *store = GaugeStore::active(&self.gauge_options);
         }
@@ -252,7 +259,7 @@ impl PluginPrivate for FleetDetector {
             // Count the number of request bytes from clients to the router
             .map_request(move |req: router::Request| router::Request {
                 router_request: req.router_request.map(move |body| {
-                    router::Body::wrap_stream(body.inspect(|res| {
+                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
                         if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.request_size",
@@ -267,7 +274,7 @@ impl PluginPrivate for FleetDetector {
             // Count the number of response bytes from the router to clients
             .map_response(move |res: router::Response| router::Response {
                 response: res.response.map(move |body| {
-                    router::Body::wrap_stream(body.inspect(|res| {
+                    router::body::from_result_stream(body.into_data_stream().inspect(|res| {
                         if let Ok(bytes) = res {
                             u64_counter!(
                                 "apollo.router.operations.response_size",
@@ -299,17 +306,37 @@ impl PluginPrivate for FleetDetector {
                 HttpRequest {
                     http_request: req.http_request.map(move |body| {
                         let sn = sn.clone();
-                        RouterBody::wrap_stream(body.inspect(move |res| {
-                            if let Ok(bytes) = res {
-                                let sn = sn.clone();
-                                u64_counter!(
-                                    "apollo.router.operations.fetch.request_size",
-                                    "Total number of request bytes for subgraph fetches",
-                                    bytes.len() as u64,
-                                    subgraph.name = sn.to_string()
-                                );
-                            }
-                        }))
+                        let size_hint = body.size_hint();
+
+                        // Short-circuit for complete bodies
+                        //
+                        // If the `SizeHint` gives us an exact value, we can use this for the
+                        // metric and return without wrapping the request Body into a stream.
+                        if let Some(size) = size_hint.exact() {
+                            let sn = sn.clone();
+                            u64_counter!(
+                                "apollo.router.operations.fetch.request_size",
+                                "Total number of request bytes for subgraph fetches",
+                                size,
+                                subgraph.name = sn.to_string()
+                            );
+                            return body;
+                        }
+
+                        // For streaming bodies, we need to wrap the stream and count bytes as we go
+                        router::body::from_result_stream(body.into_data_stream().inspect(
+                            move |res| {
+                                if let Ok(bytes) = res {
+                                    let sn = sn.clone();
+                                    u64_counter!(
+                                        "apollo.router.operations.fetch.request_size",
+                                        "Total number of request bytes for subgraph fetches",
+                                        bytes.len() as u64,
+                                        subgraph.name = sn.to_string()
+                                    );
+                                }
+                            },
+                        ))
                     }),
                     context: req.context,
                 }
@@ -331,17 +358,19 @@ impl PluginPrivate for FleetDetector {
                         Ok(HttpResponse {
                             http_response: res.http_response.map(move |body| {
                                 let sn = sn.clone();
-                                RouterBody::wrap_stream(body.inspect(move |res| {
-                                    if let Ok(bytes) = res {
-                                        let sn = sn.clone();
-                                        u64_counter!(
+                                router::body::from_result_stream(body.into_data_stream().inspect(
+                                    move |res| {
+                                        if let Ok(bytes) = res {
+                                            let sn = sn.clone();
+                                            u64_counter!(
                                             "apollo.router.operations.fetch.response_size",
                                             "Total number of response bytes for subgraph fetches",
                                             bytes.len() as u64,
                                             subgraph.name = sn.to_string()
                                         );
-                                    }
-                                }))
+                                        }
+                                    },
+                                ))
                             }),
                             context: res.context,
                         })
@@ -363,72 +392,98 @@ impl PluginPrivate for FleetDetector {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn detect_cpu_count(system: &System) -> u64 {
-    system.cpus().len() as u64
+fn detect_cpu_count(system: &System) -> (&'static str, u64) {
+    ("system", system.cpus().len() as u64)
 }
 
 // Because Linux provides CGroups as a way of controlling the proportion of CPU time each
 // process gets we can perform slightly more introspection here than simply appealing to the
 // raw number of processors. Hence, the extra logic including below.
 #[cfg(target_os = "linux")]
-fn detect_cpu_count(system: &System) -> u64 {
-    use std::collections::HashSet;
+fn detect_cpu_count(system: &System) -> (&'static str, u64) {
     use std::fs;
 
     let system_cpus = system.cpus().len() as u64;
     // Grab the contents of /proc/filesystems
-    let fses: HashSet<String> = match fs::read_to_string("/proc/filesystems") {
-        Ok(content) => content
-            .lines()
-            .map(|x| x.split_whitespace().next().unwrap_or("").to_string())
-            .filter(|x| x.contains("cgroup"))
-            .collect(),
-        Err(_) => return system_cpus,
-    };
-
-    if fses.contains("cgroup2") {
-        // If we're looking at cgroup2 then we need to look in `cpu.max`
-        match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
-            Ok(readings) => {
-                // The format of the file lists the quota first, followed by the period,
-                // but the quota could also be max which would mean there are no restrictions.
-                if readings.starts_with("max") {
-                    system_cpus
-                } else {
-                    // If it's not max then divide the two to get an integer answer
-                    match readings.split_once(' ') {
-                        None => system_cpus,
-                        Some((quota, period)) => {
-                            calculate_cpu_count_with_default(system_cpus, quota, period)
+    match fs::read_to_string("/proc/filesystems").map(|fs| detect_cgroup_version(&fs)) {
+        Ok(CGroupVersion::CGroup2) => {
+            // If we're looking at cgroup2 then we need to look in `cpu.max`
+            match fs::read_to_string("/sys/fs/cgroup/cpu.max") {
+                Ok(readings) => {
+                    // The format of the file lists the quota first, followed by the period,
+                    // but the quota could also be max which would mean there are no restrictions.
+                    if readings.starts_with("max") {
+                        ("system", system_cpus)
+                    } else {
+                        // If it's not max then divide the two to get an integer answer
+                        match readings.split_once(' ') {
+                            None => ("system", system_cpus),
+                            Some((quota, period)) => (
+                                "cgroup2",
+                                calculate_cpu_count_with_default(system_cpus, quota, period),
+                            ),
                         }
                     }
                 }
+                Err(_) => ("system", system_cpus),
             }
-            Err(_) => system_cpus,
         }
-    } else if fses.contains("cgroup") {
-        // If we're in cgroup v1 then we need to read from two separate files
-        let quota = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
-            .map(|s| String::from(s.trim()))
-            .ok();
-        let period = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
-            .map(|s| String::from(s.trim()))
-            .ok();
-        match (quota, period) {
-            (Some(quota), Some(period)) => {
-                // In v1 quota being -1 indicates no restrictions so return the maximum (all
-                // system CPUs) otherwise divide the two.
-                if quota == "-1" {
-                    system_cpus
-                } else {
-                    calculate_cpu_count_with_default(system_cpus, &quota, &period)
+        Ok(CGroupVersion::CGroup) => {
+            // If we're in cgroup v1 then we need to read from two separate files
+            let quota = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_quota_us")
+                .map(|s| String::from(s.trim()))
+                .ok();
+            let period = fs::read_to_string("/sys/fs/cgroup/cpu/cpu.cfs_period_us")
+                .map(|s| String::from(s.trim()))
+                .ok();
+            match (quota, period) {
+                (Some(quota), Some(period)) => {
+                    // In v1 quota being -1 indicates no restrictions so return the maximum (all
+                    // system CPUs) otherwise divide the two.
+                    if quota == "-1" {
+                        ("system", system_cpus)
+                    } else {
+                        (
+                            "cgroup",
+                            calculate_cpu_count_with_default(system_cpus, &quota, &period),
+                        )
+                    }
                 }
+                _ => ("system", system_cpus),
             }
-            _ => system_cpus,
         }
-    } else {
-        system_cpus
+        // Error reading the file or no cgroup support
+        _ => ("system", system_cpus),
     }
+}
+
+/// Detect the cgroup version supported in Linux based on the content of the `/proc/filesystems`
+/// file
+#[allow(unused)]
+fn detect_cgroup_version(filesystems: &str) -> CGroupVersion {
+    use std::collections::HashSet;
+    let versions: HashSet<_> = filesystems
+        .lines()
+        .flat_map(|line: &str| line.split_whitespace())
+        .filter(|x| x.contains("cgroup"))
+        .collect();
+
+    if versions.contains("cgroup2") {
+        CGroupVersion::CGroup2
+    } else if versions.contains("cgroup") {
+        CGroupVersion::CGroup
+    } else {
+        CGroupVersion::None
+    }
+}
+
+#[allow(unused)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum CGroupVersion {
+    CGroup2,
+    CGroup,
+    #[default]
+    None,
 }
 
 #[cfg(target_os = "linux")]
@@ -473,6 +528,8 @@ register_private_plugin!("apollo", "fleet_detector", FleetDetector);
 
 #[cfg(test)]
 mod tests {
+    use std::convert::Infallible;
+
     use http::StatusCode;
     use tower::Service as _;
 
@@ -482,7 +539,7 @@ mod tests {
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
-    use crate::services::Body;
+    use crate::services::router::Body;
 
     #[tokio::test]
     async fn test_disabled_router_service() {
@@ -509,7 +566,7 @@ mod tests {
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());
             let router_req = router::Request::fake_builder()
-                .body("request")
+                .body(router::body::from_bytes("request"))
                 .build()
                 .unwrap();
             let _router_response = bad_request_router_service
@@ -567,7 +624,7 @@ mod tests {
             let mut bad_request_router_service =
                 plugin.router_service(mock_bad_request_service.boxed());
             let router_req = router::Request::fake_builder()
-                .body(Body::wrap_stream(Body::from("request")))
+                .body(router::body::from_bytes("request"))
                 .build()
                 .unwrap();
             let _router_response = bad_request_router_service
@@ -597,32 +654,32 @@ mod tests {
 
             // GIVEN an http client service request
             let mut mock_bad_request_service = MockHttpClientService::new();
-            mock_bad_request_service.expect_call().times(1).returning(
-                |req: http::Request<Body>| {
+            mock_bad_request_service
+                .expect_call()
+                .times(1)
+                .returning(|req| {
                     Box::pin(async {
-                        let data = hyper::body::to_bytes(req.into_body()).await?;
                         Ok(http::Response::builder()
                             .status(StatusCode::BAD_REQUEST)
                             .header("content-type", "application/json")
                             // making sure the request body is consumed
-                            .body(Body::from(data))
+                            .body(req.into_body())
                             .unwrap())
                     })
-                },
-            );
+                });
             let mut bad_request_http_client_service = plugin.http_client_service(
                 "subgraph",
                 mock_bad_request_service
-                    .map_request(|req: HttpRequest| req.http_request.map(|body| body.into_inner()))
-                    .map_response(|res: http::Response<Body>| HttpResponse {
-                        http_response: res.map(RouterBody::from),
+                    .map_request(|req: HttpRequest| req.http_request)
+                    .map_response(|res| HttpResponse {
+                        http_response: res,
                         context: Default::default(),
                     })
                     .boxed(),
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
-                    .body(RouterBody::from("request"))
+                    .body(router::body::from_bytes("request"))
                     .unwrap(),
                 context: Default::default(),
             };
@@ -634,7 +691,10 @@ mod tests {
                 .await
                 .unwrap();
             // making sure the response body is consumed
-            let _data = hyper::body::to_bytes(http_client_response.http_response.into_body())
+            let _data = http_client_response
+                .http_response
+                .into_body()
+                .collect()
                 .await
                 .unwrap();
 
@@ -660,7 +720,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_enabled_http_client_service() {
+    async fn test_enabled_http_client_service_full() {
         async {
             // WHEN the plugin is enabled
             let plugin = FleetDetector {
@@ -668,34 +728,34 @@ mod tests {
                 ..Default::default()
             };
 
-            // GIVEN an http client service request
+            // GIVEN an http client service request with a complete body
             let mut mock_bad_request_service = MockHttpClientService::new();
-            mock_bad_request_service.expect_call().times(1).returning(
-                |req: http::Request<Body>| {
+            mock_bad_request_service
+                .expect_call()
+                .times(1)
+                .returning(|req| {
                     Box::pin(async {
-                        let data = hyper::body::to_bytes(req.into_body()).await?;
                         Ok(http::Response::builder()
                             .status(StatusCode::BAD_REQUEST)
                             .header("content-type", "application/json")
                             // making sure the request body is consumed
-                            .body(Body::from(data))
+                            .body(req.into_body())
                             .unwrap())
                     })
-                },
-            );
+                });
             let mut bad_request_http_client_service = plugin.http_client_service(
                 "subgraph",
                 mock_bad_request_service
-                    .map_request(|req: HttpRequest| req.http_request.map(|body| body.into_inner()))
-                    .map_response(|res: http::Response<Body>| HttpResponse {
-                        http_response: res.map(RouterBody::from),
+                    .map_request(|req: HttpRequest| req.http_request)
+                    .map_response(|res| HttpResponse {
+                        http_response: res,
                         context: Default::default(),
                     })
                     .boxed(),
             );
             let http_client_req = HttpRequest {
                 http_request: http::Request::builder()
-                    .body(RouterBody::from("request"))
+                    .body(router::body::from_bytes("request"))
                     .unwrap(),
                 context: Default::default(),
             };
@@ -708,7 +768,10 @@ mod tests {
                 .unwrap();
 
             // making sure the response body is consumed
-            let _data = hyper::body::to_bytes(http_client_response.http_response.into_body())
+            let _data = http_client_response
+                .http_response
+                .into_body()
+                .collect()
                 .await
                 .unwrap();
 
@@ -735,5 +798,121 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_enabled_http_client_service_stream() {
+        async {
+            // WHEN the plugin is enabled
+            let plugin = FleetDetector {
+                enabled: true,
+                ..Default::default()
+            };
+
+            // GIVEN an http client service request with a streaming body
+            let mut mock_bad_request_service = MockHttpClientService::new();
+            mock_bad_request_service.expect_call().times(1).returning(
+                |req: http::Request<Body>| {
+                    Box::pin(async {
+                        // making sure the request body is consumed
+                        let data = router::body::into_bytes(req.into_body()).await?;
+                        Ok(http::Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .header("content-type", "application/json")
+                            .body(router::body::from_bytes(data))
+                            .unwrap())
+                    })
+                },
+            );
+            let mut bad_request_http_client_service = plugin.http_client_service(
+                "subgraph",
+                mock_bad_request_service
+                    .map_request(|req: HttpRequest| req.http_request)
+                    .map_response(|res: http::Response<Body>| HttpResponse {
+                        http_response: res.map(Body::from),
+                        context: Default::default(),
+                    })
+                    .boxed(),
+            );
+            let http_client_req = HttpRequest {
+                http_request: http::Request::builder()
+                    .body(router::body::from_result_stream(futures::stream::once(
+                        async { Ok::<_, Infallible>(bytes::Bytes::from("request")) },
+                    )))
+                    .unwrap(),
+                context: Default::default(),
+            };
+            let http_client_response = bad_request_http_client_service
+                .ready()
+                .await
+                .unwrap()
+                .call(http_client_req)
+                .await
+                .unwrap();
+
+            // making sure the response body is consumed
+            let _data = router::body::into_bytes(http_client_response.http_response.into_body())
+                .await
+                .unwrap();
+
+            // THEN fetch metrics should exist
+            assert_counter!(
+                "apollo.router.operations.fetch",
+                1,
+                &[
+                    KeyValue::new("subgraph.name", "subgraph"),
+                    KeyValue::new("http.response.status_code", 400),
+                    KeyValue::new("client_error", false)
+                ]
+            );
+            assert_counter!(
+                "apollo.router.operations.fetch.request_size",
+                7,
+                &[KeyValue::new("subgraph.name", "subgraph"),]
+            );
+            assert_counter!(
+                "apollo.router.operations.fetch.response_size",
+                7,
+                &[KeyValue::new("subgraph.name", "subgraph"),]
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test]
+    fn test_detect_cgroup_version_2() {
+        const PROC_FILESYSTEMS_CGROUP2: &str = "nodev   proc
+nodev   cgroup
+nodev   cgroup2
+        ext3
+        ext2
+        ext4";
+
+        let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
+        assert_eq!(res, CGroupVersion::CGroup2)
+    }
+
+    #[test]
+    fn test_detect_cgroup_version_1() {
+        const PROC_FILESYSTEMS_CGROUP2: &str = "nodev   proc
+nodev   cgroup
+        ext3
+        ext2
+        ext4";
+
+        let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
+        assert_eq!(res, CGroupVersion::CGroup)
+    }
+
+    #[test]
+    fn test_detect_cgroup_version_none() {
+        const PROC_FILESYSTEMS_CGROUP2: &str = "nodev   proc
+        ext3
+        ext2
+        ext4";
+
+        let res = detect_cgroup_version(PROC_FILESYSTEMS_CGROUP2);
+        assert_eq!(res, CGroupVersion::None)
     }
 }

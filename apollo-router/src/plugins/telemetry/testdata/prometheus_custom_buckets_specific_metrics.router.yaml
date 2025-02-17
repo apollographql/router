@@ -7,7 +7,7 @@ telemetry:
       common:
         service_name: apollo-router
         views:
-          - name: apollo_router_http_request_duration_seconds
+          - name: apollo.test.histo
             unit: seconds
             description: duration of the http request
             aggregation:

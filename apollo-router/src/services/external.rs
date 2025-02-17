@@ -25,7 +25,7 @@ use super::subgraph::SubgraphRequestId;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
-use crate::services::router::body::get_body_bytes;
+use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::Context;
 
@@ -297,17 +297,17 @@ where
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
-            .body(serde_json::to_vec(&self)?.into())?;
+            .body(router::body::from_bytes(serde_json::to_vec(&self)?))?;
 
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &prepare_context(tracing::span::Span::current().context()),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                &mut crate::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 
-        let response = client.call(request).await?;
-        get_body_bytes(response.into_body())
+        let response = client.call(request).await.map_err(BoxError::from)?;
+        router::body::into_bytes(response.into_body())
             .await
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))

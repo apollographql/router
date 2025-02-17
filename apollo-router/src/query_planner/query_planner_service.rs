@@ -1,24 +1,22 @@
 //! Calls out to the apollo-federation crate
 
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Poll;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
-use opentelemetry_api::metrics::MeterProvider as _;
-use opentelemetry_api::metrics::ObservableGauge;
-use opentelemetry_api::KeyValue;
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -26,6 +24,7 @@ use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
+use crate::compute_job::MaybeBackPressureError;
 use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -41,7 +40,8 @@ use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
-use crate::query_planner::fetch::QueryHash;
+use crate::query_planner::fetch::SubgraphSchema;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -50,7 +50,6 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::spec::operation_limits::OperationLimits;
-use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
@@ -67,7 +66,7 @@ const INTERNAL_INIT_ERROR: &str = "internal";
 pub(crate) struct QueryPlannerService {
     planner: Arc<QueryPlanner>,
     schema: Arc<Schema>,
-    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    subgraph_schemas: Arc<SubgraphSchemas>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
@@ -129,11 +128,11 @@ impl QueryPlannerService {
         // before we potentially share it in Arc with a background thread
         // for "both" mode.
         init_query_plan_root_node: impl Fn(&mut PlanNode) -> Result<(), ValidationErrors>,
-    ) -> Result<QueryPlanResult, QueryPlannerError> {
+    ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
-        let (plan, mut root_node) = compute_job::execute(priority, move || {
+        let job = move || -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
             let query_plan_options = QueryPlanOptions {
@@ -162,21 +161,28 @@ impl QueryPlannerService {
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            result.map(|plan| {
-                let root_node = convert_root_query_plan_node(&plan);
-                (plan, root_node)
-            })
-        })
-        .await
-        .expect("query planner panicked")?;
+            let plan = result?;
+            let root_node = convert_root_query_plan_node(&plan);
+            Ok((plan, root_node))
+        };
+        let (plan, mut root_node) = compute_job::execute(priority, job)
+            .map_err(MaybeBackPressureError::TemporaryError)?
+            .await
+            // `expect()` propagates any panic that potentially happens in the closure, but:
+            //
+            // * We try to avoid such panics in the first place and consider them bugs
+            // * The panic handler in `apollo-router/src/executable.rs` exits the process
+            //   so this error case should never be reached.
+            .expect("query planner panicked")?;
         if let Some(node) = &mut root_node {
-            init_query_plan_root_node(node)?;
+            init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
 
         Ok(QueryPlanResult {
             formatted_query_plan: Some(Arc::new(plan.to_string())),
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
+            evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
         })
     }
 
@@ -191,7 +197,12 @@ impl QueryPlannerService {
             planner
                 .subgraph_schemas()
                 .iter()
-                .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
+                .map(|(name, schema)| {
+                    (
+                        name.to_string(),
+                        SubgraphSchema::new(schema.schema().clone()),
+                    )
+                })
                 .collect(),
         );
 
@@ -218,9 +229,7 @@ impl QueryPlannerService {
         self.schema.clone()
     }
 
-    pub(crate) fn subgraph_schemas(
-        &self,
-    ) -> Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>> {
+    pub(crate) fn subgraph_schemas(&self) -> Arc<SubgraphSchemas> {
         self.subgraph_schemas.clone()
     }
 
@@ -241,7 +250,7 @@ impl QueryPlannerService {
         )?;
 
         let (fragments, operation, defer_stats, schema_aware_hash) =
-            Query::extract_query_information(&self.schema, executable, operation_name)?;
+            Query::extract_query_information(&self.schema, &query, executable, operation_name)?;
 
         let subselections = crate::spec::query::subselections::collect_subselections(
             &self.configuration,
@@ -276,13 +285,10 @@ impl QueryPlannerService {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
         query_metrics: OperationLimits<u32>,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+    ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
             .plan_inner(doc, operation.clone(), plan_options, |root_node| {
-                root_node.init_parsed_operations_and_hash_subqueries(
-                    &self.subgraph_schemas,
-                    &self.schema.raw_sdl,
-                )?;
+                root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
                 root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
                 Ok(())
             })
@@ -291,6 +297,7 @@ impl QueryPlannerService {
             query_plan_root_node,
             formatted_query_plan,
             evaluated_plan_count,
+            evaluated_plan_paths,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -321,6 +328,11 @@ impl QueryPlannerService {
                 "Number of query plans evaluated for a query before choosing the best one",
                 evaluated_plan_count
             );
+            u64_histogram!(
+                "apollo.router.query_planning.plan.evaluated_paths",
+                "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
+                evaluated_plan_paths
+            );
 
             Ok(QueryPlannerContent::Plan {
                 plan: Arc::new(super::QueryPlan {
@@ -334,7 +346,7 @@ impl QueryPlannerService {
             })
         } else {
             failfast_debug!("empty query plan");
-            Err(QueryPlannerError::EmptyPlan(usage_reporting))
+            Err(QueryPlannerError::EmptyPlan(usage_reporting).into())
         }
     }
 }
@@ -342,16 +354,12 @@ impl QueryPlannerService {
 impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Response = QueryPlannerResponse;
 
-    type Error = QueryPlannerError;
+    type Error = MaybeBackPressureError<QueryPlannerError>;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if crate::compute_job::is_full() {
-            Poll::Pending
-        } else {
-            Poll::Ready(Ok(()))
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
@@ -373,26 +381,27 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::TransformError(
                         e.to_string(),
-                    )))
+                    ))
+                    .into())
                 }
                 Ok(modified_query) => {
                     let executable_document = modified_query
                         .to_executable_validate(api_schema)
                         // Assume transformation creates a valid document: ignore conversion errors
-                        .map_err(|e| SpecError::ValidationError(e.into()))?;
-                    let hash = QueryHashVisitor::hash_query(
-                        this.schema.supergraph_schema(),
-                        &this.schema.raw_sdl,
-                        &executable_document,
-                        operation_name.as_deref(),
-                    )
-                    .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+                        .map_err(|e| {
+                            QueryPlannerError::from(SpecError::ValidationError(e.into()))
+                        })?;
+                    let hash = this
+                        .schema
+                        .schema_id
+                        .operation_hash(&modified_query.to_string(), operation_name.as_deref());
                     doc = ParsedDocumentInner::new(
                         modified_query,
                         Arc::new(executable_document),
                         operation_name.as_deref(),
-                        Arc::new(QueryHash(hash)),
-                    )?;
+                        Arc::new(hash),
+                    )
+                    .map_err(QueryPlannerError::from)?;
                 }
             }
 
@@ -436,7 +445,7 @@ impl QueryPlannerService {
         &self,
         mut key: QueryKey,
         mut doc: ParsedDocument,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+    ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
@@ -465,9 +474,9 @@ impl QueryPlannerService {
             .await
         {
             ControlFlow::Continue(()) => (),
-            ControlFlow::Break(response) => {
+            ControlFlow::Break(result) => {
                 return Ok(QueryPlannerContent::CachedIntrospectionResponse {
-                    response: Box::new(response),
+                    response: Box::new(result.map_err(MaybeBackPressureError::TemporaryError)?),
                 })
             }
         }
@@ -501,23 +510,23 @@ impl QueryPlannerService {
         };
 
         if let Some((unauthorized_paths, new_doc)) = filter_res {
-            key.filtered_query = new_doc.to_string();
+            let new_query = new_doc.to_string();
+            let new_hash = self
+                .schema
+                .schema_id
+                .operation_hash(&new_query, key.operation_name.as_deref());
+
+            key.filtered_query = new_query;
             let executable_document = new_doc
                 .to_executable_validate(self.schema.api_schema())
-                .map_err(|e| SpecError::ValidationError(e.into()))?;
-            let hash = QueryHashVisitor::hash_query(
-                self.schema.supergraph_schema(),
-                &self.schema.raw_sdl,
-                &executable_document,
-                key.operation_name.as_deref(),
-            )
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+                .map_err(|e| QueryPlannerError::from(SpecError::ValidationError(e.into())))?;
             doc = ParsedDocumentInner::new(
                 new_doc,
                 Arc::new(executable_document),
                 key.operation_name.as_deref(),
-                Arc::new(QueryHash(hash)),
-            )?;
+                Arc::new(new_hash),
+            )
+            .map_err(QueryPlannerError::from)?;
             selections.unauthorized.paths = unauthorized_paths;
         }
 
@@ -550,10 +559,8 @@ impl QueryPlannerService {
     pub(super) fn activate(&self) {
         // Gauges MUST be initialized after a meter provider is created.
         // When a hot reload happens this means that the gauges must be re-initialized.
-        *self
-            .compute_jobs_queue_size_gauge
-            .lock()
-            .expect("lock poisoned") = Some(crate::compute_job::create_queue_size_gauge());
+        *self.compute_jobs_queue_size_gauge.lock() =
+            Some(crate::compute_job::create_queue_size_gauge());
         self.introspection.activate();
     }
 }
@@ -563,6 +570,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
+    pub(super) evaluated_plan_paths: u64,
 }
 
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
@@ -595,6 +603,8 @@ pub(crate) fn metric_rust_qp_init(init_error_kind: Option<&'static str>) {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use test_log::test;
     use tower::ServiceExt;
 
@@ -694,7 +704,9 @@ mod tests {
                 .unwrap_err();
 
         match err {
-            QueryPlannerError::EmptyPlan(usage_reporting) => {
+            MaybeBackPressureError::PermanentError(QueryPlannerError::EmptyPlan(
+                usage_reporting,
+            )) => {
                 insta::with_settings!({sort_maps => true}, {
                     insta::assert_json_snapshot!("empty_query_plan_usage_reporting", usage_reporting);
                 });
@@ -1084,7 +1096,7 @@ mod tests {
             &configuration,
         )?;
 
-        planner
+        let result = planner
             .get(
                 QueryKey {
                     original_query: original_query.to_string(),
@@ -1095,7 +1107,12 @@ mod tests {
                 },
                 doc,
             )
-            .await
+            .await;
+        match result {
+            Ok(x) => Ok(x),
+            Err(MaybeBackPressureError::PermanentError(e)) => Err(e),
+            Err(MaybeBackPressureError::TemporaryError(e)) => panic!("{e:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1123,6 +1140,7 @@ mod tests {
                         Ok(subgraph::Response::builder()
                             .extensions(crate::json_ext::Object::new())
                             .context(request.context)
+                            .subgraph_name(String::default())
                             .build())
                     }
                 })

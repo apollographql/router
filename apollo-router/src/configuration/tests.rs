@@ -127,7 +127,6 @@ subgraphs:
   account: true
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     assert_eq!(
@@ -156,7 +155,6 @@ unknown:
   foo: true
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     assert_eq!(
@@ -181,7 +179,6 @@ fn empty_config() {
         r#"
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect("should have been ok with an empty config");
 }
@@ -198,7 +195,6 @@ telemetry:
   another_non_existant: 3
   "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -216,7 +212,6 @@ supergraph:
   another_one: true
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -232,7 +227,6 @@ supergraph:
   listen: true
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -250,7 +244,6 @@ cors:
   allow_headers: [ Content-Type, 5 ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -270,7 +263,6 @@ cors:
     - 5
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -285,7 +277,6 @@ cors:
   allow_headers: [ "*" ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -304,7 +295,6 @@ cors:
   methods: [ GET, "*" ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -323,7 +313,6 @@ cors:
   allow_any_origin: true
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -342,7 +331,6 @@ cors:
     - "*"
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -413,16 +401,7 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                #[cfg(not(feature = "hyper_header_limits"))]
-                if yaml.contains("http1_max_request_headers") {
-                    continue;
-                }
-
-                if let Err(e) = validate_yaml_configuration(
-                    &yaml,
-                    Expansion::default().unwrap(),
-                    Mode::NoUpgrade,
-                ) {
+                if let Err(e) = validate_yaml_configuration(&yaml, Expansion::default().unwrap()) {
                     panic!(
                         "{} configuration error: \n{}",
                         entry.path().to_string_lossy(),
@@ -443,7 +422,6 @@ supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("Must have an error because we expect a boolean");
     insta::assert_snapshot!(error.to_string());
@@ -462,7 +440,6 @@ cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -484,7 +461,6 @@ cors:
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -502,7 +478,6 @@ supergraph:
   another_one: foo
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -516,7 +491,6 @@ supergraph:
   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
         Expansion::default().unwrap(),
-        Mode::NoUpgrade,
     )
     .expect_err("must have an error because the env variable is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -533,7 +507,6 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
-        Mode::NoUpgrade,
     )
     .expect_err("must have an error because the mode is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -551,7 +524,6 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
-        Mode::NoUpgrade,
     )
     .expect("must have expanded successfully");
 }
@@ -572,7 +544,6 @@ supergraph:
             path.to_string_lossy()
         ),
         Expansion::builder().supported_mode("file").build(),
-        Mode::NoUpgrade,
     )
     .expect("must have expanded successfully");
 
@@ -599,11 +570,7 @@ fn upgrade_old_configuration() {
             let new_config =
                 serde_yaml::to_string(&new_config).expect("must be able to serialize config");
 
-            let result = validate_yaml_configuration(
-                &new_config,
-                Expansion::builder().build(),
-                Mode::NoUpgrade,
-            );
+            let result = validate_yaml_configuration(&new_config, Expansion::builder().build());
 
             match result {
                 Ok(_) => {
@@ -682,7 +649,7 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g{supergraph_route}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/graphql/g*").build())
@@ -692,16 +659,16 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(
         &conf.supergraph.sanitized_path(),
-        "/graphql/g:supergraph_route"
+        "/graphql/g{supergraph_route}"
     );
 
     let conf = Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*").build())
+        .supergraph(Supergraph::builder().path("/{*rest}").build())
         .build()
         .unwrap()
         .validate()
         .unwrap();
-    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+    assert_eq!(&conf.supergraph.sanitized_path(), "/{*rest}");
 
     let conf = Configuration::builder()
         .supergraph(Supergraph::builder().path("/test").build())
@@ -719,6 +686,9 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
@@ -744,7 +714,6 @@ tls:
 "#,
         ),
         Expansion::builder().supported_mode("file").build(),
-        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     cfg.tls.supergraph.unwrap().tls_config().unwrap();
@@ -920,7 +889,12 @@ fn it_defaults_health_check_configuration() {
 #[test]
 fn it_sets_custom_health_check_path() {
     let conf = Configuration::builder()
-        .health_check(HealthCheck::new(None, None, Some("/healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("/healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 
@@ -931,7 +905,12 @@ fn it_sets_custom_health_check_path() {
 fn it_adds_slash_to_custom_health_check_path_if_missing() {
     let conf = Configuration::builder()
         // NB the missing `/`
-        .health_check(HealthCheck::new(None, None, Some("healthz".to_string())))
+        .health_check(HealthCheck::new(
+            None,
+            None,
+            Some("healthz".to_string()),
+            Default::default(),
+        ))
         .build()
         .unwrap();
 

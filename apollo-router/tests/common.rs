@@ -5,7 +5,6 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -18,30 +17,27 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use mediatype::names::BOUNDARY;
-use mediatype::names::FORM_DATA;
-use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::trace::config;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::sdk::Resource;
-use opentelemetry::testing::trace::NoopSpanExporter;
+use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
-use opentelemetry_api::trace::SpanContext;
-use opentelemetry_api::trace::TraceId;
-use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
+use opentelemetry::trace::TraceId;
+use opentelemetry::trace::TracerProvider as OtherTracerProvider;
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::testing::trace::NoopSpanExporter;
+use opentelemetry_sdk::trace::BatchConfigBuilder;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Config;
+use opentelemetry_sdk::trace::TracerProvider;
+use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use parking_lot::Mutex;
 use regex::Regex;
 use reqwest::Request;
 use serde_json::json;
@@ -159,13 +155,13 @@ pub struct IntegrationTest {
     redis_namespace: String,
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
+    logs: Vec<String>,
 }
 
 impl IntegrationTest {
     pub(crate) fn bind_address(&self) -> SocketAddr {
         self.bind_address
             .lock()
-            .expect("lock poisoned")
             .expect("no bind address set, router must be started first.")
     }
 }
@@ -184,8 +180,7 @@ impl Respond for TracedResponder {
         let context = self.telemetry.extract_context(request, &Context::new());
         let context = self.extra_propagator.extract_context(request, &context);
 
-        *self.subgraph_context.lock().expect("lock poisoned") =
-            Some(context.span().span_context().clone());
+        *self.subgraph_context.lock() = Some(context.span().span_context().clone());
         tracing_core::dispatcher::with_default(&self.subscriber_subgraph, || {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
@@ -201,7 +196,6 @@ impl Respond for TracedResponder {
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub enum Telemetry {
-    Jaeger,
     Otlp {
         endpoint: Option<String>,
     },
@@ -213,26 +207,12 @@ pub enum Telemetry {
 
 impl Telemetry {
     fn tracer_provider(&self, service_name: &str) -> TracerProvider {
-        let config = config().with_resource(Resource::new(vec![KeyValue::new(
+        let config = Config::default().with_resource(Resource::new(vec![KeyValue::new(
             SERVICE_NAME,
             service_name.to_string(),
         )]));
 
         match self {
-            Telemetry::Jaeger => TracerProvider::builder()
-                .with_config(config)
-                .with_span_processor(
-                    BatchSpanProcessor::builder(
-                        opentelemetry_jaeger::new_agent_pipeline()
-                            .with_service_name(service_name)
-                            .build_sync_agent_exporter()
-                            .expect("jaeger pipeline failed"),
-                        opentelemetry::runtime::Tokio,
-                    )
-                    .with_scheduled_delay(Duration::from_millis(10))
-                    .build(),
-                )
-                .build(),
             Telemetry::Otlp {
                 endpoint: Some(endpoint),
             } => TracerProvider::builder()
@@ -246,9 +226,13 @@ impl Telemetry {
                         )
                         .build_span_exporter()
                         .expect("otlp pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -260,9 +244,13 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -274,9 +262,13 @@ impl Telemetry {
                             .with_service_name(service_name)
                             .init_exporter()
                             .expect("zipkin pipeline failed"),
-                        opentelemetry::runtime::Tokio,
+                        opentelemetry_sdk::runtime::Tokio,
                     )
-                    .with_scheduled_delay(Duration::from_millis(10))
+                    .with_batch_config(
+                        BatchConfigBuilder::default()
+                            .with_scheduled_delay(Duration::from_millis(10))
+                            .build(),
+                    )
                     .build(),
                 )
                 .build(),
@@ -291,13 +283,6 @@ impl Telemetry {
         let ctx = tracing::span::Span::current().context();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.inject_context(
-                    &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
-            }
             Telemetry::Datadog => {
                 // Get the existing PSR header if it exists. This is because the existing telemetry propagator doesn't support PSR properly yet.
                 // In testing we are manually setting the PSR header, and we don't want to override it.
@@ -308,7 +293,7 @@ impl Telemetry {
                 let propagator = opentelemetry_datadog::DatadogPropagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 );
 
                 if let Some(psr) = psr {
@@ -318,17 +303,17 @@ impl Telemetry {
                 }
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             Telemetry::Zipkin => {
                 let propagator = opentelemetry_zipkin::Propagator::new();
                 propagator.inject_context(
                     &ctx,
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                 )
             }
             _ => {}
@@ -347,10 +332,6 @@ impl Telemetry {
             .collect();
 
         match self {
-            Telemetry::Jaeger => {
-                let propagator = opentelemetry_jaeger::Propagator::new();
-                propagator.extract_with_context(context, &headers)
-            }
             Telemetry::Datadog => {
                 let span_ref = context.span();
                 let original_span_context = span_ref.span_context();
@@ -381,7 +362,7 @@ impl Telemetry {
                 context
             }
             Telemetry::Otlp { .. } => {
-                let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::default();
+                let propagator = opentelemetry_sdk::propagation::TraceContextPropagator::default();
                 propagator.extract_with_context(context, &headers)
             }
             Telemetry::Zipkin => {
@@ -420,7 +401,9 @@ impl IntegrationTest {
         let url = format!("http://{address}/");
 
         // Add a default override for products, if not specified
-        subgraph_overrides.entry("products".into()).or_insert(url);
+        subgraph_overrides
+            .entry("products".into())
+            .or_insert(url.clone());
 
         // Insert the overrides into the config
         let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
@@ -438,13 +421,23 @@ impl IntegrationTest {
 
         let subgraph_context = Arc::new(Mutex::new(None));
         Mock::given(method("POST"))
-            .respond_with(TracedResponder{response_template:responder.unwrap_or_else(||
-                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}))),
+            .respond_with(TracedResponder {
+                response_template: responder.unwrap_or_else(|| {
+                    ResponseTemplate::new(200).set_body_json(json!({
+                        "data": {
+                            "topProducts": [
+                                { "name": "Table" },
+                                { "name": "Couch" },
+                                { "name": "Chair" },
+                            ],
+                        },
+                    }))
+                }),
                 telemetry: telemetry.clone(),
                 extra_propagator: extra_propagator.clone(),
                 subscriber_subgraph: Self::dispatch(&tracer_provider_subgraph),
                 subgraph_callback,
-                subgraph_context: subgraph_context.clone()
+                subgraph_context: subgraph_context.clone(),
             })
             .mount(&subgraphs)
             .await;
@@ -483,6 +476,7 @@ impl IntegrationTest {
             redis_namespace,
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
+            logs: vec![],
         }
     }
 
@@ -502,12 +496,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub fn subgraph_context(&self) -> SpanContext {
-        self.subgraph_context
-            .lock()
-            .expect("lock poisoned")
-            .as_ref()
-            .unwrap()
-            .clone()
+        self.subgraph_context.lock().as_ref().unwrap().clone()
     }
 
     pub fn router_location() -> PathBuf {
@@ -525,7 +514,6 @@ impl IntegrationTest {
                 .env("APOLLO_KEY", apollo_key)
                 .env("APOLLO_GRAPH_REF", apollo_graph_ref);
         }
-
         router
             .args(dbg!([
                 "--hr",
@@ -550,12 +538,10 @@ impl IntegrationTest {
             let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                println!("{line}");
-
                 // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
                 if let Some(captures) = bind_address_regex.captures(&line) {
                     let address = captures.name("address").unwrap().as_str();
-                    let mut bind_address = bind_address.lock().unwrap();
+                    let mut bind_address = bind_address.lock();
                     *bind_address = Some(address.parse().unwrap());
                 }
 
@@ -567,7 +553,7 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    let log = serde_json::from_str::<Log>(&line).expect("line: '{line}' isn't JSON, might you have some debug output in the logging?");
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(
@@ -591,12 +577,12 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_started(&mut self) {
-        self.assert_log_contains("GraphQL endpoint exposed").await;
+        self.wait_for_log_message("GraphQL endpoint exposed").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_not_started(&mut self) {
-        self.assert_log_contains("no valid configuration").await;
+        self.wait_for_log_message("no valid configuration").await;
     }
 
     #[allow(dead_code)]
@@ -687,7 +673,6 @@ impl IntegrationTest {
                             (
                                 subgraph_context
                                     .lock()
-                                    .expect("poisoned")
                                     .as_ref()
                                     .expect("subgraph context")
                                     .trace_id(),
@@ -725,19 +710,11 @@ impl IntegrationTest {
 
             async move {
                 let client = reqwest::Client::new();
-                let mime = {
-                    let mut m = MediaType::new(MULTIPART, FORM_DATA);
-                    m.set_param(BOUNDARY, mediatype::Value::new(request.boundary()).unwrap());
-
-                    m
-                };
-
                 let mut request = client
                     .post(url)
-                    .header(CONTENT_TYPE, mime.to_string())
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("x-my-header", "test")
+                    .header("apollo-require-preflight", "test")
                     .multipart(request)
                     .build()
                     .unwrap();
@@ -748,7 +725,7 @@ impl IntegrationTest {
                 global::get_text_map_propagator(|propagator| {
                     propagator.inject_context(
                         &tracing::span::Span::current().context(),
-                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                        &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
                     );
                 });
                 request.headers_mut().remove(ACCEPT);
@@ -789,7 +766,7 @@ impl IntegrationTest {
         global::get_text_map_propagator(|propagator| {
             propagator.inject_context(
                 &span.context(),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                &mut apollo_router::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 
@@ -853,25 +830,26 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_reloaded(&mut self) {
-        self.assert_log_contains("reload complete").await;
+        self.wait_for_log_message("reload complete").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_no_reload_necessary(&mut self) {
-        self.assert_log_contains("no reload necessary").await;
+        self.wait_for_log_message("no reload necessary").await;
     }
 
     #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
-        self.assert_log_contains("continuing with previous configuration")
+        self.wait_for_log_message("continuing with previous configuration")
             .await;
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn wait_for_log_message(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(10) {
             if let Ok(line) = self.stdio_rx.try_recv() {
+                self.logs.push(line.to_string());
                 if line.contains(msg) {
                     return;
                 }
@@ -879,7 +857,24 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         self.dump_stack_traces();
-        panic!("'{msg}' not detected in logs");
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                return;
+            }
+        }
+
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -889,10 +884,25 @@ impl IntegrationTest {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 if line.contains(msg) {
                     self.dump_stack_traces();
-                    panic!("'{msg}' detected in logs");
+                    panic!(
+                        "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                        logs = self.logs.join("\n")
+                    );
                 }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_not_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
         }
     }
 
@@ -1139,6 +1149,7 @@ fn merge_overrides(
     let overrides = subgraph_overrides
         .iter()
         .map(|(name, url)| (name.clone(), serde_json::Value::String(url.clone())));
+    let overrides2 = overrides.clone();
     match config
         .as_object_mut()
         .and_then(|o| o.get_mut("override_subgraph_url"))
@@ -1151,6 +1162,19 @@ fn merge_overrides(
         }
         Some(override_url) => {
             override_url.extend(overrides);
+        }
+    }
+    if let Some(sources) = config
+        .as_object_mut()
+        .and_then(|o| o.get_mut("connectors"))
+        .and_then(|o| o.as_object_mut())
+        .and_then(|o| o.get_mut("sources"))
+        .and_then(|o| o.as_object_mut())
+    {
+        for (name, url) in overrides2 {
+            let mut obj = serde_json::Map::new();
+            obj.insert("override_url".to_string(), url.clone());
+            sources.insert(format!("connectors.{}", name), Value::Object(obj));
         }
     }
 

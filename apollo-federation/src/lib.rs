@@ -27,6 +27,8 @@
 
 mod api_schema;
 mod compat;
+#[cfg(feature = "correctness")]
+pub mod correctness;
 mod display_helpers;
 pub mod error;
 pub mod link;
@@ -35,6 +37,7 @@ pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
+pub mod sources;
 pub mod subgraph;
 pub(crate) mod supergraph;
 pub(crate) mod utils;

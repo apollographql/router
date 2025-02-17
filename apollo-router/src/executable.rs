@@ -28,7 +28,7 @@ use url::Url;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Discussed;
-use crate::metrics::meter_provider;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
@@ -62,6 +62,8 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 pub(crate) const APOLLO_TELEMETRY_DISABLED: &str = "APOLLO_TELEMETRY_DISABLED";
+
+const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
@@ -201,10 +203,6 @@ pub struct Opt {
     #[clap(env = "APOLLO_ROUTER_SUPERGRAPH_URLS", value_delimiter = ',')]
     supergraph_urls: Option<Vec<Url>>,
 
-    /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue), hide(true))]
-    schema: bool,
-
     /// Subcommands
     #[clap(subcommand)]
     command: Option<Commands>,
@@ -234,10 +232,6 @@ pub struct Opt {
     #[clap(long, env, action = ArgAction::Append)]
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
-
-    /// The time between polls to Apollo uplink. Minimum 10s.
-    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
-    apollo_uplink_poll_interval: Duration,
 
     /// Disable sending anonymous usage information to Apollo.
     #[clap(long, env = APOLLO_TELEMETRY_DISABLED, value_parser = FalseyValueParser::new())]
@@ -294,7 +288,7 @@ impl Opt {
                 .as_ref()
                 .map(|endpoints| Self::parse_endpoints(endpoints))
                 .transpose()?,
-            poll_interval: self.apollo_uplink_poll_interval,
+            poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
             timeout: self.apollo_uplink_timeout,
         })
     }
@@ -333,12 +327,16 @@ pub fn main() -> Result<()> {
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
-    if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
+
+    // This environment variable is intentionally undocumented.
+    // See also APOLLO_ROUTER_COMPUTE_THREADS in apollo-router/src/compute_job.rs
+    if let Some(nb) = std::env::var("APOLLO_ROUTER_IO_THREADS")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
         builder.worker_threads(nb);
     }
+
     let runtime = builder.build()?;
     runtime.block_on(Executable::builder().start())
 }
@@ -404,6 +402,8 @@ impl Executable {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
+        // Enable crypto
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         copy_args_to_env();
 
@@ -416,13 +416,6 @@ impl Executable {
         };
 
         setup_panic_handler();
-
-        if opt.schema {
-            eprintln!("`router --schema` is deprecated. Use `router config schema`");
-            let schema = generate_config_schema();
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-            return Ok(());
-        }
 
         let result = match opt.command.as_ref() {
             Some(Commands::Config(ConfigSubcommandArgs {
@@ -459,7 +452,7 @@ impl Executable {
             // We should be good to shutdown OpenTelemetry now as the router should have finished everything.
             tokio::task::spawn_blocking(move || {
                 opentelemetry::global::shutdown_tracer_provider();
-                meter_provider().shutdown();
+                meter_provider_internal().shutdown();
             })
             .await?;
         }
@@ -473,9 +466,6 @@ impl Executable {
         license: Option<LicenseSource>,
         mut opt: Opt,
     ) -> Result<()> {
-        if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
-            return Err(anyhow!("apollo-uplink-poll-interval must be at least 10s"));
-        }
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
@@ -501,7 +491,6 @@ impl Executable {
                     ConfigurationSource::File {
                         path,
                         watch: opt.hot_reload,
-                        delay: None,
                     }
                 })
                 .unwrap_or_default(),
@@ -544,17 +533,18 @@ impl Executable {
                 SchemaSource::File {
                     path: supergraph_path,
                     watch: opt.hot_reload,
-                    delay: None,
                 }
             }
             (_, _, Some(supergraph_urls), _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
+                if opt.hot_reload {
+                    tracing::warn!("Schema hot reloading is disabled for --supergraph-urls / APOLLO_ROUTER_SUPERGRAPH_URLS.");
+                }
+
                 SchemaSource::URLs {
                     urls: supergraph_urls.clone(),
-                    watch: opt.hot_reload,
-                    period: opt.apollo_uplink_poll_interval
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {
