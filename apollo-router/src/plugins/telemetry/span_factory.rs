@@ -1,6 +1,5 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tracing::error_span;
 use tracing::info_span;
 
 use crate::context::OPERATION_NAME;
@@ -12,8 +11,6 @@ use crate::plugins::telemetry::Telemetry;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::tracer::TraceId;
-use crate::uplink::license_enforcement::LicenseState;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
 
 #[derive(Debug, Copy, Clone, Deserialize, JsonSchema, Default, Eq, PartialEq)]
 /// Span mode to create new or deprecated spans
@@ -27,46 +24,21 @@ pub(crate) enum SpanMode {
 }
 
 impl SpanMode {
-    pub(crate) fn create_request<B>(
-        &self,
-        request: &http::Request<B>,
-        license_state: LicenseState,
-    ) -> ::tracing::span::Span {
+    pub(crate) fn create_request<B>(&self, request: &http::Request<B>) -> ::tracing::span::Span {
         match self {
             SpanMode::Deprecated => {
-                if matches!(
-                    license_state,
-                    LicenseState::LicensedWarn { limits: _ }
-                        | LicenseState::LicensedHalt { limits: _ }
-                ) {
-                    error_span!(
-                        REQUEST_SPAN_NAME,
-                        "http.method" = %request.method(),
-                        "http.request.method" = %request.method(),
-                        "http.route" = %request.uri(),
-                        "http.flavor" = ?request.version(),
-                        "http.status" = 500, // This prevents setting later
-                        "otel.name" = ::tracing::field::Empty,
-                        "otel.kind" = "SERVER",
-                        "graphql.operation.name" = ::tracing::field::Empty,
-                        "graphql.operation.type" = ::tracing::field::Empty,
-                        "apollo_router.license" = LICENSE_EXPIRED_SHORT_MESSAGE,
-                        "apollo_private.request" = true,
-                    )
-                } else {
-                    info_span!(
-                        REQUEST_SPAN_NAME,
-                        "http.method" = %request.method(),
-                        "http.request.method" = %request.method(),
-                        "http.route" = %request.uri(),
-                        "http.flavor" = ?request.version(),
-                        "otel.name" = ::tracing::field::Empty,
-                        "otel.kind" = "SERVER",
-                        "graphql.operation.name" = ::tracing::field::Empty,
-                        "graphql.operation.type" = ::tracing::field::Empty,
-                        "apollo_private.request" = true,
-                    )
-                }
+                info_span!(
+                    REQUEST_SPAN_NAME,
+                    "http.method" = %request.method(),
+                    "http.request.method" = %request.method(),
+                    "http.route" = %request.uri(),
+                    "http.flavor" = ?request.version(),
+                    "otel.name" = ::tracing::field::Empty,
+                    "otel.kind" = "SERVER",
+                    "graphql.operation.name" = ::tracing::field::Empty,
+                    "graphql.operation.type" = ::tracing::field::Empty,
+                    "apollo_private.request" = true,
+                )
             }
             SpanMode::SpecCompliant => {
                 unreachable!("this code path should not be reachable, this is a bug!")
