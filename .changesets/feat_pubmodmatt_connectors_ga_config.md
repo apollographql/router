@@ -1,3 +1,0 @@
-### Move preview_connectors config to connectors for GA ([PR #6699](https://github.com/apollographql/router/pull/6699))
-
-Apollo Connectors is now [generally available](https://www.apollographql.com/docs/graphos/reference/feature-launch-stages#general-availability). See the [connectors changelog](https://www.apollographql.com/docs/graphos/schema-design/connectors/changelog) for instructions on how to migrate preview router configuration.
