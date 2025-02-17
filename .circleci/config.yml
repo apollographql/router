@@ -967,17 +967,10 @@ jobs:
                   cd artifacts && sha1sum *.tar.gz > sha1sums.txt
             - run:
                 name: Create GitHub Release
+                # We always create the version as a "pre-release" version.
+                # It is promoted to latest in a separate step in RELEASE_CHECKLIST.md
                 command: >
-                  case "$VERSION" in
-
-                    # If the VERSION contains a dash, consider it a pre-release version.
-                    # This is in-line with SemVer's expectations/designations!
-                    *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
-
-                    # In all other cases, publish it as the latest version.
-                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
-
-                  esac
+                  gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
             - run:
                 name: Docker build
                 command: |
