@@ -1232,12 +1232,19 @@ mod tests {
                 spec: ConnectSpec::V0_1,
                 request_variables: Default::default(),
                 response_variables: Default::default(),
+                request_headers: Default::default(),
+                response_headers: Default::default(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
                 inputs: Default::default(),
                 selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
             };
+            let supergraph_request = Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            );
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
@@ -1245,6 +1252,7 @@ mod tests {
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
+                supergraph_request,
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
@@ -1314,12 +1322,19 @@ mod tests {
                 spec: ConnectSpec::V0_1,
                 request_variables: Default::default(),
                 response_variables: Default::default(),
+                request_headers: Default::default(),
+                response_headers: Default::default(),
             };
             let response_key = ResponseKey::RootField {
                 name: "hello".to_string(),
                 inputs: Default::default(),
                 selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
             };
+            let supergraph_request = Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            );
             let connector_request = Request {
                 context: context.clone(),
                 connector: Arc::new(connector.clone()),
@@ -1327,6 +1342,7 @@ mod tests {
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
+                supergraph_request,
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {

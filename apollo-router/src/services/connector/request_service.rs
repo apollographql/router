@@ -76,6 +76,9 @@ pub(crate) struct Request {
 
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
+
+    /// The original supergraph request from the supergraph service
+    pub(crate) supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 }
 
 /// Response type for a connector
@@ -318,6 +321,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 &request.context,
                 debug_request,
                 &debug,
+                request.supergraph_request,
             )
             .await)
         })

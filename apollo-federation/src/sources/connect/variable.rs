@@ -51,6 +51,8 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::Context,
                     Namespace::Status,
                     Namespace::This,
+                    Namespace::Request,
+                    Namespace::Response,
                 ]
             }
         }
@@ -96,6 +98,8 @@ pub enum Namespace {
     Context,
     Status,
     This,
+    Request,
+    Response,
 }
 
 impl Namespace {
@@ -106,6 +110,8 @@ impl Namespace {
             Self::Context => "$context",
             Self::Status => "$status",
             Self::This => "$this",
+            Self::Request => "$request",
+            Self::Response => "$response",
         }
     }
 }
@@ -120,6 +126,8 @@ impl FromStr for Namespace {
             "$context" => Ok(Self::Context),
             "$status" => Ok(Self::Status),
             "$this" => Ok(Self::This),
+            "$request" => Ok(Self::Request),
+            "$response" => Ok(Self::Response),
             _ => Err(()),
         }
     }
