@@ -72,6 +72,14 @@ You can choose to manage the runtime infrastructure for your routers by yourself
   class="hidden dark:block"
 />
 
+<Caution>
+
+Self-hosted routers running on the [Free plan](https://www.apollographql.com/pricing) are rate limited to 60 requests per minute. 
+
+For requests in excess of this limit, the router returns an HTTP 503 (Service Unavailable) response.
+
+</Caution>
+
 ### Common router core
 
 Both cloud-hosted and self-hosted routers are powered by the [Apollo Router Core](https://github.com/apollographql/router)—a high-performance router packaged as a standalone binary.
@@ -125,8 +133,8 @@ Apollo offers the following router options, in increasing order of configurabili
       </td>
       <td>
         The Apollo Router Core is available as a free and source-available
-        router. Connecting your self-hosted router to GraphOS requires an{" "}
-        <a href="https://apollographql.com/pricing">Enterprise</a> plan.
+        router. Connecting your self-hosted router to GraphOS requires a{" "}
+        <a href="https://apollographql.com/pricing">GraphOS</a> plan.
       </td>
     </tr>
   </tbody>
@@ -137,8 +145,8 @@ Apollo offers the following router options, in increasing order of configurabili
 <sup>**</sup>We've paused new sign-ups for Serverless and Dedicated plans while
 we improve our offerings based on user feedback. This means cloud routing is
 temporarily unavailable to new users. In the meantime, you can explore other
-GraphOS features with a [free
-trial](https://studio.apollographql.com/signup?referrer=docs-content).
+GraphOS features with our [Free
+plan](https://studio.apollographql.com/signup?referrer=docs-content).
 
 </Note>
 
@@ -150,8 +158,6 @@ Cloud-hosted routers automatically have access to additional GraphOS Router feat
 
 ## Next steps
 
-- Learn more about Apollo-managed routers in [cloud-hosted router](/graphos/routing/cloud/)
-
 - Learn more about deploying router instances in your own infrastructure in [self-hosted router](/graphos/routing/self-hosted/)
 
 - Learn the basics about configuring a router in [Configuring a Router](/graphos/routing/configure-your-router)
@@ -160,3 +166,4 @@ Cloud-hosted routers automatically have access to additional GraphOS Router feat
 
 - To learn more about the intricacies of query plans, see the [example graph](/graphos/reference/federation/query-plans#example-graph) and [query plan](/graphos/reference/federation/query-plans#example-graph) in reference docs
 
+- Learn more about Apollo-managed routers in [cloud-hosted router](/graphos/routing/cloud/)
