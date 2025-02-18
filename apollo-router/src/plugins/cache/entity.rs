@@ -74,6 +74,7 @@ pub(crate) struct EntityCache {
     storage: Arc<Storage>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    // FIXME: wrong name, it's not entity type is Query type
     entity_type: Option<String>,
     enabled: bool,
     metrics: Metrics,
@@ -506,6 +507,7 @@ impl EntityCache {
 struct CacheService {
     service: subgraph::BoxCloneService,
     name: String,
+    // FIXME: wrong name, it's not entity type is Query type
     entity_type: Option<String>,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
@@ -572,6 +574,8 @@ impl CacheService {
             .variables
             .contains_key(REPRESENTATIONS)
         {
+            // FIXME: Nothing prevents our users to have a variable called `representations`
+            // Suggestion: take the top level _entities instead
             if request.operation_kind == OperationKind::Query {
                 let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
                 match cache_lookup_root(
@@ -588,6 +592,7 @@ impl CacheService {
                 {
                     ControlFlow::Break(response) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
+                        // Needed for the surrogate cache key feature
                         let _ = response.context.insert(
                             CacheMetricContextKey::new(response.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
@@ -596,6 +601,7 @@ impl CacheService {
                     }
                     ControlFlow::Continue((request, mut root_cache_key)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
+                        // Needed for the surrogate cache key feature
                         let _ = request.context.insert(
                             CacheMetricContextKey::new(request.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
@@ -1313,6 +1319,7 @@ fn extract_cache_keys(
     private_id: Option<&str>,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
+    // FIXME: Why don't we have duplicates here ? QueryHash already contains query_text and we're hashing query with subgraph request body ?!
     let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context, cache_key);
