@@ -646,16 +646,12 @@ async fn call_websocket(
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
     .map_err(|err| {
-<<<<<<< HEAD
         if display_body || display_headers {
             tracing::info!(
                 http.response.error = format!("{:?}", &err), apollo.subgraph.name = %service_name, "Websocket connection error from subgraph {service_name:?} received"
             );
         }
-        FetchError::SubrequestWsError {
-            service: service_name.clone(),
-            reason: format!("cannot connect websocket to subgraph: {err}"),
-=======
+
         let error_details = match &err {
             tokio_tungstenite::tungstenite::Error::Utf8 => {
                 "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
@@ -684,8 +680,8 @@ async fn call_websocket(
         };
 
         tracing::debug!(
-            error.type   = "websocket_connection_failed",
-            error.details= %error_details,
+            error.r#type = "websocket_connection_failed",
+            error.details = %error_details,
             error.source = %std::any::type_name_of_val(&err),
             "WebSocket connection failed"
         );
@@ -693,7 +689,6 @@ async fn call_websocket(
         FetchError::SubrequestWsError {
             service: service_name.clone(),
             reason: format!("cannot connect websocket to subgraph: {error_details}"),
->>>>>>> 018e649e (Add more observability around WS handshake failures (#6798))
         }
     })?;
 
