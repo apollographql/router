@@ -525,7 +525,13 @@ where
 
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
-            let event_name = format!("{event:?}");
+            let event_name = match &event {
+                Event::UpdateLicense(license_state) => {
+                    format!("UpdateLicense({})", license_state.get_name())
+                }
+                event => format!("{event:?}"),
+            };
+
             let previous_state = format!("{state:?}");
 
             state = match event {
