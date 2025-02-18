@@ -75,7 +75,7 @@ Your subgraph libraries must support federated tracing (also known as FTV1 traci
 
 - To confirm support, check the `FEDERATED TRACING` entry for your library on [this page](/federation/building-supergraphs/supported-subgraphs).
 - Consult your library's documentation to learn how to enable federated tracing.
-    - If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
+  - If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
 
 ### Subgraph trace sampling
 
@@ -86,7 +86,7 @@ You can customize your router's trace sampling probability by setting the follow
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    # In this example, the trace sampler is configured  
+    # In this example, the trace sampler is configured
     # with a 50% probability of sampling a request.
     # This value can't exceed the value of tracing.common.sampler.
     field_level_instrumentation_sampler: 0.5
@@ -330,7 +330,6 @@ An array of names for the variables that the router _will not_ report to GraphOS
 </tbody>
 </table>
 
-
 ```yaml title="router.yaml"
 telemetry:
   apollo:
@@ -366,6 +365,7 @@ By default, your router _does_ report error information, and it _does_ redact th
 Your subgraph libraries must support federated tracing (also known as FTV1 tracing) to provide errors to GraphOS. If you use Apollo Server with `@apollo/subgraph`, federated tracing support is enabled automatically.
 
 To confirm support:
+
 - Check the `FEDERATED TRACING` entry for your library on [the supported subgraphs page](/federation/building-supergraphs/supported-subgraphs).
 - If federated tracing isn't enabled automatically for your library, consult its documentation to learn how to enable it.
 - Note that federated tracing can also be sampled (see above) so error messages might not be available for all your operations if you have sampled to a lower level.
@@ -386,9 +386,8 @@ telemetry:
             send: false
 ```
 
-
 <Note>
 
-If you're writing a plugin, you can get the Studio Trace ID by reading the value of `apollo_operation_id` from the context.
+If you're writing a plugin, you can get the Studio Trace ID by reading the value of `apollo::supergraph::operation_id` from the context.
 
 </Note>

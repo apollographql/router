@@ -90,7 +90,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
-use crate::metrics::meter_provider;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -105,7 +105,6 @@ use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
-use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
@@ -126,7 +125,6 @@ use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::metrics_layer;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -134,9 +132,9 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
-use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
+use crate::services::connector;
 use crate::services::execution;
-use crate::services::http::HttpRequest;
+use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -171,10 +169,14 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-pub(crate) const CLIENT_NAME: &str = "apollo_telemetry::client_name";
-const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
-const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
-pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
+pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
+pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
+pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
+pub(crate) const DEPRECATED_STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -870,44 +872,35 @@ impl PluginPrivate for Telemetry {
             .boxed()
     }
 
-    fn http_client_service(
+    fn connector_request_service(
         &self,
-        _subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: connector::request_service::BoxService,
+    ) -> connector::request_service::BoxService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
         let static_connector_instruments = self.connector_custom_instruments.read().clone();
         ServiceBuilder::new()
             .map_future_with_request_data(
-                move |http_request: &HttpRequest| {
-                    if http_request
-                        .context
-                        .contains_key(CONNECTOR_INFO_CONTEXT_KEY)
-                    {
-                        let custom_instruments = req_fn_config
-                            .instrumentation
-                            .instruments
-                            .new_connector_instruments(static_connector_instruments.clone());
-                        custom_instruments.on_request(http_request);
-                        let custom_events =
-                            req_fn_config.instrumentation.events.new_connector_events();
-                        custom_events.on_request(http_request);
+                move |request: &connector::request_service::Request| {
+                    let custom_instruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_connector_instruments(static_connector_instruments.clone());
+                    custom_instruments.on_request(request);
+                    let custom_events = req_fn_config.instrumentation.events.new_connector_events();
+                    custom_events.on_request(request);
 
-                        let custom_span_attributes = req_fn_config
-                            .instrumentation
-                            .spans
-                            .connector
-                            .attributes
-                            .on_request(http_request);
+                    let custom_span_attributes = req_fn_config
+                        .instrumentation
+                        .spans
+                        .connector
+                        .attributes
+                        .on_request(request);
 
-                        (
-                            http_request.context.clone(),
-                            Some((custom_instruments, custom_events, custom_span_attributes)),
-                        )
-                    } else {
-                        (http_request.context.clone(), None)
-                    }
+                    (
+                        request.context.clone(),
+                        Some((custom_instruments, custom_events, custom_span_attributes)),
+                    )
                 },
                 move |(context, custom_telemetry): (
                     Context,
@@ -915,34 +908,30 @@ impl PluginPrivate for Telemetry {
                 ),
                       f: BoxFuture<
                     'static,
-                    Result<crate::services::http::HttpResponse, BoxError>,
+                    Result<connector::request_service::Response, BoxError>,
                 >| {
                     let conf = res_fn_config.clone();
                     async move {
                         match custom_telemetry {
                             Some((custom_instruments, custom_events, custom_span_attributes)) => {
                                 let span = Span::current();
-                                span.set_span_dyn_attributes_for_span_name(
-                                    CONNECT_SPAN_NAME,
-                                    custom_span_attributes,
-                                );
+                                span.set_span_dyn_attributes(custom_span_attributes);
+
                                 let result = f.await;
                                 match &result {
-                                    Ok(http_response) => {
-                                        span.set_span_dyn_attributes_for_span_name(
-                                            CONNECT_SPAN_NAME,
+                                    Ok(response) => {
+                                        span.set_span_dyn_attributes(
                                             conf.instrumentation
                                                 .spans
                                                 .connector
                                                 .attributes
-                                                .on_response(http_response),
+                                                .on_response(response),
                                         );
-                                        custom_instruments.on_response(http_response);
-                                        custom_events.on_response(http_response);
+                                        custom_instruments.on_response(response);
+                                        custom_events.on_response(response);
                                     }
                                     Err(err) => {
-                                        span.set_span_dyn_attributes_for_span_name(
-                                            CONNECT_SPAN_NAME,
+                                        span.set_span_dyn_attributes(
                                             conf.instrumentation
                                                 .spans
                                                 .connector
@@ -1200,7 +1189,7 @@ impl Telemetry {
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
+                .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
         }
     }
 
@@ -1270,7 +1259,7 @@ impl Telemetry {
                             if !matches!(sender, Sender::Noop) {
                                 if let (true, Some(query)) = (
                                     config.apollo.experimental_local_field_metrics,
-                                    ctx.unsupported_executable_document(),
+                                    ctx.executable_document(),
                                 ) {
                                     local_stat_recorder.visit(
                                         &query,
@@ -1359,7 +1348,7 @@ impl Telemetry {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
-                .get::<_, bool>("persisted_query_hit")
+                .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
 
             if context
@@ -1406,7 +1395,7 @@ impl Telemetry {
                 // values for deferred responses and subscriptions.
                 let enum_response_references = context
                     .extensions()
-                    .with_lock(|mut lock| lock.remove::<ReferencedEnums>())
+                    .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
                 SingleStatsReport {
@@ -1675,7 +1664,7 @@ impl Telemetry {
 
 impl TelemetryActivation {
     fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider();
+        let meter_provider = meter_provider_internal();
         commit_prometheus();
         let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
 
@@ -1691,8 +1680,6 @@ impl TelemetryActivation {
 
         old_meter_providers[2] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        metrics_layer().clear();
 
         Self::checked_meter_shutdown(old_meter_providers);
     }
@@ -1829,6 +1816,12 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 if let MetricsError::Other(msg) = &err {
                     if msg.contains("Warning") {
                         ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
+                        return;
+                    }
+
+                    // TODO: We should be able to remove this after upgrading to 0.26.0, which addresses the double-shutdown
+                    // called out in https://github.com/open-telemetry/opentelemetry-rust/issues/1661
+                    if msg == "metrics provider already shut down" {
                         return;
                     }
                 }
@@ -1991,7 +1984,6 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::time::Duration;
 
     use axum_extra::headers::HeaderName;
@@ -2010,6 +2002,7 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
+    use parking_lot::Mutex;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -2103,7 +2096,7 @@ mod tests {
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
             .split('\n')
-            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
+            .filter(|l| l.contains("bucket"))
             .sorted()
             .join("\n")
     }
@@ -3036,7 +3029,7 @@ mod tests {
         }
         impl TestLayer {
             fn assert_log_entry_count(&self, message: &str, expected: usize) {
-                let log_entries = self.visitor.lock().unwrap().log_entries.clone();
+                let log_entries = self.visitor.lock().log_entries.clone();
                 let actual = log_entries.iter().filter(|e| e.contains(message)).count();
                 assert_eq!(actual, expected);
             }
@@ -3054,7 +3047,7 @@ mod tests {
             Self: 'static,
         {
             fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-                event.record(self.visitor.lock().unwrap().deref_mut())
+                event.record(self.visitor.lock().deref_mut())
             }
         }
 
@@ -3148,7 +3141,7 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: SupergraphRequest| {
-                req.context.extensions().with_lock(|mut lock| {
+                req.context.extensions().with_lock(|lock| {
                     lock.insert(cost_details.clone());
                 });
                 req.context

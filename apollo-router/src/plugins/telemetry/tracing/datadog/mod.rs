@@ -99,7 +99,7 @@ pub(crate) struct Config {
     resource_mapping: HashMap<String, String>,
 
     /// Which spans will be eligible for span stats to be collected for viewing in the APM view.
-    /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.
+    /// Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.
     #[serde(default = "default_span_metrics")]
     span_metrics: HashMap<String, bool>,
 }

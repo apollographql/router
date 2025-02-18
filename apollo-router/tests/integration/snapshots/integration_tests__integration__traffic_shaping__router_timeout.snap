@@ -1,5 +1,5 @@
 ---
 source: apollo-router/tests/integration/traffic_shaping.rs
-expression: response.text().await?
+expression: response
 ---
-"{\"errors\":[{\"message\":\"Request timed out\",\"extensions\":{\"code\":\"REQUEST_TIMEOUT\"}}]}"
+"{\"errors\":[{\"message\":\"Your request has been timed out\",\"extensions\":{\"code\":\"GATEWAY_TIMEOUT\"}}]}"

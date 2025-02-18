@@ -35,6 +35,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
+use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
 
 mod mock_api;
@@ -62,9 +63,9 @@ async fn value_from_config() {
         "query { me { id name username} }",
         Default::default(),
         Some(json!({
-            "preview_connectors": {
-                "subgraphs": {
-                    "connectors": {
+            "connectors": {
+                "sources": {
+                    "connectors.json": {
                         "$config": {
                             "id": 1,
                         }
@@ -107,7 +108,7 @@ async fn max_requests() {
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "max_requests_per_operation_per_source": 2
           }
         })),
@@ -172,7 +173,7 @@ async fn source_max_requests() {
         "query { users { id name username } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "subgraphs": {
               "connectors": {
                 "sources": {
@@ -569,7 +570,7 @@ async fn test_headers() {
         "query { users { id } }",
         Default::default(),
         Some(json!({
-            "preview_connectors": {
+            "connectors": {
                 "subgraphs": {
                     "connectors": {
                         "$config": {
@@ -826,6 +827,51 @@ async fn test_mutation() {
             "id": 3,
             "name": "New User"
           }
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .body(serde_json::json!({ "username": "New User" }))
+            .path("/user")],
+    );
+}
+
+#[tokio::test]
+async fn test_mutation_empty_body() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/user"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&mock_server)
+        .await;
+
+    let response = execute(
+        MUTATION_SCHEMA,
+        &mock_server.uri(),
+        "mutation CreateUser($name: String!) {
+            createUser(name: $name) {
+                success
+            }
+        }",
+        serde_json_bytes::json!({ "name": "New User" })
+            .as_object()
+            .unwrap()
+            .clone(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "createUser": {
+          "success": true
         }
       }
     }
@@ -1355,7 +1401,7 @@ async fn test_interface_object() {
             .method("POST")
             .path("/graphql")
             .body(serde_json::json!({
-              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ..._generated_onItf3_0 } } fragment _generated_onItf3_0 on Itf { __typename ... on T1 { a } ... on T2 { b } }"#,
+              "query": r#"query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Itf { __typename ... on T1 { a } ... on T2 { b } } } }"#,
               "variables": {
                 "representations": [
                   { "__typename": "Itf", "id": 1 },
@@ -1404,7 +1450,7 @@ async fn test_sources_in_context() {
         "query Posts { posts { id body title author { name username } } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "expose_sources_in_context": true
           },
           "coprocessor": {
@@ -1472,7 +1518,7 @@ async fn test_variables() {
         "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
-          "preview_connectors": {
+          "connectors": {
             "subgraphs": {
               "connectors": {
                 "$config": {
@@ -1758,14 +1804,10 @@ async fn execute(
     let common_config = json!({
         "include_subgraph_errors": { "all": true },
         "override_subgraph_url": {"graphql": subgraph_uri},
-        "preview_connectors": {
-            "subgraphs": {
-                "connectors": {
-                    "sources": {
-                        "json": {
-                            "override_url": connector_uri
-                        }
-                    }
+        "connectors": {
+            "sources": {
+                "connectors.json": {
+                    "override_url": connector_uri
                 }
             }
         }
@@ -1785,6 +1827,7 @@ async fn execute(
             Arc::new(crate::spec::Schema::parse(schema, &config).unwrap()),
             None,
             None,
+            LicenseState::default(),
         )
         .await
         .unwrap();

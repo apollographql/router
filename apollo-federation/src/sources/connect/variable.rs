@@ -11,6 +11,8 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use itertools::Itertools;
 
+use crate::sources::connect::validation::Code;
+
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 #[derive(Clone, PartialEq)]
@@ -51,14 +53,6 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::This,
                 ]
             }
-            Phase::Request => {
-                vec![
-                    Namespace::Config,
-                    Namespace::Context,
-                    Namespace::This,
-                    Namespace::Args,
-                ]
-            }
         }
         .into_iter()
     }
@@ -70,14 +64,18 @@ impl<'schema> VariableContext<'schema> {
             .sorted()
             .join(", ")
     }
+
+    /// Get the error code for this context
+    pub(crate) fn error_code(&self) -> Code {
+        match self.target {
+            Target::Body => Code::InvalidSelection,
+        }
+    }
 }
 
 /// The phase an expression is associated with
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Phase {
-    /// The request phase
-    Request,
-
     /// The response phase
     Response,
 }
@@ -86,12 +84,6 @@ pub(crate) enum Phase {
 #[allow(unused)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Target {
-    /// The expression is used in an HTTP header
-    Header,
-
-    /// The expression is used in a URL
-    Url,
-
     /// The expression is used in the body of a request or response
     Body,
 }

@@ -31,7 +31,7 @@ use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
+use crate::spec::QueryHash;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -60,9 +60,8 @@ pub struct Request {
 
     pub context: Context,
 
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
-    pub(crate) subgraph_name: Option<String>,
+    /// Name of the subgraph
+    pub(crate) subgraph_name: String,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
@@ -91,7 +90,7 @@ impl Request {
         operation_kind: OperationKind,
         context: Context,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Self {
@@ -102,7 +101,10 @@ impl Request {
             subgraph_name,
             subscription_stream,
             connection_closed_signal,
-            query_hash: Default::default(),
+            // It's NOT GREAT! to have an empty hash value here.
+            // This value is populated based on the subgraph query hash in the query planner code.
+            // At the time of writing it's in `crate::query_planner::fetch::FetchNode::fetch_node`.
+            query_hash: QueryHash::default().into(),
             authorization: Default::default(),
             executable_document: None,
             id: SubgraphRequestId::new(),
@@ -130,7 +132,7 @@ impl Request {
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
             subscription_stream,
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             connection_closed_signal,
         )
     }
@@ -205,9 +207,8 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub response: http::Response<graphql::Response>,
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
-    pub(crate) subgraph_name: Option<String>,
+    /// Name of the subgraph
+    pub(crate) subgraph_name: String,
     pub context: Context,
     /// unique id matching the corresponding field in the request
     pub(crate) id: SubgraphRequestId,
@@ -224,11 +225,11 @@ impl Response {
         context: Context,
         subgraph_name: String,
         id: SubgraphRequestId,
-    ) -> Response {
+    ) -> Self {
         Self {
             response,
             context,
-            subgraph_name: Some(subgraph_name),
+            subgraph_name,
             id,
         }
     }
@@ -248,9 +249,9 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         id: Option<SubgraphRequestId>,
-    ) -> Response {
+    ) -> Self {
         // Build a response
         let res = graphql::Response::builder()
             .and_label(label)
@@ -300,8 +301,8 @@ impl Response {
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
-    ) -> Response {
-        Response::new(
+    ) -> Self {
+        Self::new(
             label,
             data,
             path,
@@ -310,7 +311,7 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             headers,
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             id,
         )
     }
@@ -336,7 +337,7 @@ impl Response {
         subgraph_name: Option<String>,
         id: Option<SubgraphRequestId>,
     ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+        Ok(Self::new(
             label,
             data,
             path,
@@ -345,7 +346,7 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             Some(header_map(headers)?),
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             id,
         ))
     }
@@ -358,10 +359,10 @@ impl Response {
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         id: Option<SubgraphRequestId>,
-    ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+    ) -> Self {
+        Self::new(
             Default::default(),
             Default::default(),
             Default::default(),
@@ -372,7 +373,7 @@ impl Response {
             Default::default(),
             subgraph_name,
             id,
-        ))
+        )
     }
 }
 

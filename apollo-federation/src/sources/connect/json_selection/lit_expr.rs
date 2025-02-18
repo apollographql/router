@@ -43,31 +43,34 @@ pub(crate) enum LitExpr {
 
 impl LitExpr {
     // LitExpr      ::= LitPrimitive | LitObject | LitArray | PathSelection
-    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        tuple((
-            spaces_or_comments,
-            alt((
-                map(parse_string_literal, |s| s.take_as(Self::String)),
-                Self::parse_number,
-                map(ranged_span("true"), |t| {
-                    WithRange::new(Self::Bool(true), t.range())
-                }),
-                map(ranged_span("false"), |f| {
-                    WithRange::new(Self::Bool(false), f.range())
-                }),
-                map(ranged_span("null"), |n| {
-                    WithRange::new(Self::Null, n.range())
-                }),
-                Self::parse_object,
-                Self::parse_array,
-                map(PathSelection::parse, |p| {
-                    let range = p.range();
-                    WithRange::new(Self::Path(p), range)
-                }),
-            )),
+        let (input, _) = spaces_or_comments(input)?;
+        alt((
+            Self::parse_primitive,
+            Self::parse_object,
+            Self::parse_array,
+            map(PathSelection::parse, |p| {
+                let range = p.range();
+                WithRange::new(Self::Path(p), range)
+            }),
         ))(input)
-        .map(|(input, (_, value))| (input, value))
+    }
+
+    // LitPrimitive ::= LitString | LitNumber | "true" | "false" | "null"
+    fn parse_primitive(input: Span) -> ParseResult<WithRange<Self>> {
+        alt((
+            map(parse_string_literal, |s| s.take_as(Self::String)),
+            Self::parse_number,
+            map(ranged_span("true"), |t| {
+                WithRange::new(Self::Bool(true), t.range())
+            }),
+            map(ranged_span("false"), |f| {
+                WithRange::new(Self::Bool(false), f.range())
+            }),
+            map(ranged_span("null"), |n| {
+                WithRange::new(Self::Null, n.range())
+            }),
+        ))(input)
     }
 
     // LitNumber ::= "-"? ([0-9]+ ("." [0-9]*)? | "." [0-9]+)
@@ -93,7 +96,17 @@ impl LitExpr {
                         );
 
                         let mut s = String::new();
-                        s.push_str(int.fragment());
+
+                        // Remove leading zeros to avoid failing the stricter
+                        // number.parse() below, but allow a single zero.
+                        let mut int_chars_without_leading_zeros =
+                            int.fragment().chars().skip_while(|c| *c == '0');
+                        if let Some(first_non_zero) = int_chars_without_leading_zeros.next() {
+                            s.push(first_non_zero);
+                            s.extend(int_chars_without_leading_zeros);
+                        } else {
+                            s.push('0');
+                        }
 
                         let full_range = if let Some((_, dot, _, frac)) = frac {
                             let frac_range = merge_ranges(
@@ -160,37 +173,32 @@ impl LitExpr {
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
     fn parse_object(input: Span) -> ParseResult<WithRange<Self>> {
-        tuple((
-            spaces_or_comments,
-            ranged_span("{"),
-            spaces_or_comments,
-            map(
-                opt(tuple((
-                    Self::parse_property,
-                    many0(preceded(
-                        tuple((spaces_or_comments, char(','))),
-                        Self::parse_property,
-                    )),
-                    opt(tuple((spaces_or_comments, char(',')))),
-                ))),
-                |properties| {
-                    let mut output = IndexMap::default();
-                    if let Some(((first_key, first_value), rest, _trailing_comma)) = properties {
-                        output.insert(first_key, first_value);
-                        for (key, value) in rest {
-                            output.insert(key, value);
-                        }
-                    }
-                    Self::Object(output)
-                },
-            ),
-            spaces_or_comments,
-            ranged_span("}"),
-        ))(input)
-        .map(|(input, (_, open_brace, _, output, _, close_brace))| {
-            let range = merge_ranges(open_brace.range(), close_brace.range());
-            (input, WithRange::new(output, range))
-        })
+        let (input, _) = spaces_or_comments(input)?;
+        let (input, open_brace) = ranged_span("{")(input)?;
+        let (mut input, _) = spaces_or_comments(input)?;
+
+        let mut output = IndexMap::default();
+
+        if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+            output.insert(key, value);
+            input = remainder;
+
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+                input = remainder;
+                if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+                    output.insert(key, value);
+                    input = remainder;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        let (input, _) = spaces_or_comments(input)?;
+        let (input, close_brace) = ranged_span("}")(input)?;
+
+        let range = merge_ranges(open_brace.range(), close_brace.range());
+        Ok((input, WithRange::new(Self::Object(output), range)))
     }
 
     // LitProperty ::= Key ":" LitExpr
@@ -274,11 +282,12 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
     use crate::sources::connect::json_selection::PathList;
-    use crate::sources::connect::variable::Namespace;
 
+    #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {
         match LitExpr::parse(new_span(input)) {
             Ok((remainder, parsed)) => {
@@ -318,6 +327,50 @@ mod tests {
         check_parse(
             "-123.",
             LitExpr::Number(serde_json::Number::from_f64(-123.0).unwrap()),
+        );
+        check_parse("00", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            "-00",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse("0", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            "-0",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse(" 00 ", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(" 0 ", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            " - 0 ",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse("001", LitExpr::Number(serde_json::Number::from(1)));
+        check_parse(
+            "00.1",
+            LitExpr::Number(serde_json::Number::from_f64(0.1).unwrap()),
+        );
+        check_parse("0010", LitExpr::Number(serde_json::Number::from(10)));
+        check_parse(
+            "00.10",
+            LitExpr::Number(serde_json::Number::from_f64(0.1).unwrap()),
+        );
+        check_parse("-001 ", LitExpr::Number(serde_json::Number::from(-1)));
+        check_parse(
+            "-00.1",
+            LitExpr::Number(serde_json::Number::from_f64(-0.1).unwrap()),
+        );
+        check_parse(" - 0010 ", LitExpr::Number(serde_json::Number::from(-10)));
+        check_parse(
+            "- 00.10",
+            LitExpr::Number(serde_json::Number::from_f64(-0.1).unwrap()),
+        );
+        check_parse(
+            "007.",
+            LitExpr::Number(serde_json::Number::from_f64(7.0).unwrap()),
+        );
+        check_parse(
+            "-007.",
+            LitExpr::Number(serde_json::Number::from_f64(-7.0).unwrap()),
         );
 
         check_parse("true", LitExpr::Bool(true));
@@ -526,7 +579,7 @@ mod tests {
                     Key::field("a").into_with_range(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            KnownVariable::from(Namespace::Args).into_with_range(),
+                            KnownVariable::External(Namespace::Args.to_string()).into_with_range(),
                             PathList::Key(
                                 Key::field("a").into_with_range(),
                                 PathList::Empty.into_with_range(),
@@ -541,7 +594,7 @@ mod tests {
                     Key::field("b").into_with_range(),
                     LitExpr::Path(PathSelection {
                         path: PathList::Var(
-                            KnownVariable::from(Namespace::This).into_with_range(),
+                            KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                             PathList::Key(
                                 Key::field("b").into_with_range(),
                                 PathList::Empty.into_with_range(),

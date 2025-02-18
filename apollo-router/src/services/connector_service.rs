@@ -1,5 +1,6 @@
 //! Tower service for connectors.
 
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
@@ -14,29 +15,19 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
-use tracing::error;
-use tracing::Instrument;
+use tracing_futures::Instrument;
 
 use super::connect::BoxService;
-use super::http::HttpClientServiceFactory;
-use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
-use crate::error::FetchError;
-use crate::plugins::connectors::error::Error as ConnectorError;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
-use crate::plugins::connectors::handle_responses::process_response;
-use crate::plugins::connectors::http::Request;
-use crate::plugins::connectors::http::Response as ConnectorResponse;
-use crate::plugins::connectors::http::Result as ConnectorResult;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::request_limit::RequestLimits;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
 use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::services::router::body::RouterBody;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
@@ -55,36 +46,15 @@ pub(crate) const APOLLO_CONNECTOR_SOURCE_NAME: Key =
     Key::from_static_str("apollo.connector.source.name");
 pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
     Key::from_static_str("apollo.connector.source.detail");
-pub(crate) const CONNECTOR_INFO_CONTEXT_KEY: &str = "apollo_router::connector::info";
 
 /// A service for executing connector requests.
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
-    pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<SubgraphSchemas>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
-}
-
-/// Serializable information about a connector.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct ConnectorInfo {
-    pub(crate) subgraph_name: String,
-    pub(crate) source_name: Option<String>,
-    pub(crate) http_method: String,
-    pub(crate) url_template: String,
-}
-
-impl From<&Connector> for ConnectorInfo {
-    fn from(connector: &Connector) -> Self {
-        Self {
-            subgraph_name: connector.id.subgraph_name.to_string(),
-            source_name: connector.id.source_name.clone(),
-            http_method: connector.transport.method.as_str().to_string(),
-            url_template: connector.transport.connect_template.to_string(),
-        }
-    }
+    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
 
 /// A reference to a unique Connector source.
@@ -131,6 +101,23 @@ impl TryFrom<&Connector> for ConnectorSourceRef {
     }
 }
 
+impl TryFrom<&mut Connector> for ConnectorSourceRef {
+    type Error = ();
+
+    fn try_from(value: &mut Connector) -> Result<Self, Self::Error> {
+        Ok(Self {
+            subgraph_name: value.id.subgraph_name.to_string(),
+            source_name: value.id.source_name.clone().ok_or(())?,
+        })
+    }
+}
+
+impl Display for ConnectorSourceRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.subgraph_name, self.source_name)
+    }
+}
+
 impl tower::Service<ConnectRequest> for ConnectorService {
     type Response = ConnectResponse;
     type Error = BoxError;
@@ -146,19 +133,13 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             .get(&request.service_name)
             .cloned();
 
-        let http_client_factory = self
-            .http_service_factory
-            .get(&request.service_name.to_string())
-            .cloned();
+        let connector_request_service_factory = self.connector_request_service_factory.clone();
 
         Box::pin(async move {
             let Some(connector) = connector else {
                 return Err("no connector found".into());
             };
 
-            let Some(http_client_factory) = http_client_factory else {
-                return Err("no http client found".into());
-            };
             let fetch_time_offset = request.context.created_at.elapsed().as_nanos() as i64;
             let span = tracing::info_span!(
                 CONNECT_SPAN_NAME,
@@ -193,141 +174,74 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 }
             }
 
-            execute(&http_client_factory, request, &connector)
-                .instrument(span)
-                .await
+            let service_name = request.service_name.to_string();
+
+            execute(
+                &connector_request_service_factory,
+                request,
+                connector,
+                &service_name,
+            )
+            .instrument(span)
+            .await
         })
     }
 }
 
 async fn execute(
-    http_client_factory: &HttpClientServiceFactory,
+    connector_request_service_factory: &ConnectorRequestServiceFactory,
     request: ConnectRequest,
-    connector: &Connector,
+    connector: Connector,
+    service_name: &str,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
-    let original_subgraph_name = connector.id.subgraph_name.to_string();
+    let connector = Arc::new(connector);
+    let debug = &context
+        .extensions()
+        .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
 
-    let (ref debug, request_limit) = context.extensions().with_lock(|lock| {
-        let debug = lock.get::<Arc<Mutex<ConnectorContext>>>().cloned();
-        let request_limit = lock
-            .get::<Arc<RequestLimits>>()
-            .map(|limits| limits.get((&connector.id).into(), connector.max_requests))
-            .unwrap_or(None);
-        (debug, request_limit)
-    });
+    let tasks = make_requests(request, &context, connector, service_name, debug)
+        .map_err(BoxError::from)?
+        .into_iter()
+        .map(move |request| async {
+            connector_request_service_factory
+                .create()
+                .oneshot(request)
+                .await
+        });
 
-    let requests = make_requests(request, connector, debug).map_err(BoxError::from)?;
-
-    let tasks = requests.into_iter().map(
-        move |Request {
-                  request: req,
-                  key,
-                  debug_request,
-              }| {
-            // Returning an error from this closure causes all tasks to be cancelled and the operation
-            // to fail. This is the reason for the Result-wrapped-in-a-Result here. An `Err` on the
-            // inner result fails just that one task, but an `Err` on the outer result cancels all the
-            // tasks and fails the whole operation.
-            let context = context.clone();
-            if context
-                .insert(CONNECTOR_INFO_CONTEXT_KEY, ConnectorInfo::from(connector))
-                .is_err()
-            {
-                error!("Failed to store connector info in context");
-            }
-            let original_subgraph_name = original_subgraph_name.clone();
-            let request_limit = request_limit.clone();
-            async move {
-                let res = if request_limit.is_some_and(|request_limit| !request_limit.allow()) {
-                    ConnectorResponse {
-                        result: ConnectorResult::<RouterBody>::Err(
-                            ConnectorError::RequestLimitExceeded,
-                        ),
-                        key,
-                        debug_request,
-                    }
-                } else {
-                    let client = http_client_factory.create(&original_subgraph_name);
-                    let req = HttpRequest {
-                        http_request: req,
-                        context: context.clone(),
-                    };
-                    let res = match client.oneshot(req).await {
-                        Ok(res) => ConnectorResponse {
-                            result: ConnectorResult::HttpResponse(res.http_response),
-                            key,
-                            debug_request,
-                        },
-                        Err(e) => ConnectorResponse {
-                            result: ConnectorResult::<RouterBody>::Err(
-                                ConnectorError::HTTPClientError(handle_subrequest_http_error(
-                                    e, connector,
-                                )),
-                            ),
-                            key,
-                            debug_request,
-                        },
-                    };
-
-                    u64_counter!(
-                        "apollo.router.operations.connectors",
-                        "Total number of requests to connectors",
-                        1,
-                        "connector.type" = CONNECTOR_TYPE_HTTP,
-                        "subgraph.name" = original_subgraph_name
-                    );
-
-                    res
-                };
-
-                Ok::<_, BoxError>(process_response(res, connector, &context, debug).await)
-            }
-        },
-    );
-
-    aggregate_responses(futures::future::try_join_all(tasks).await?).map_err(BoxError::from)
-}
-
-fn handle_subrequest_http_error(err: BoxError, connector: &Connector) -> BoxError {
-    match err.downcast::<FetchError>() {
-        // Replace the internal subgraph name with the connector label
-        Ok(inner) => match *inner {
-            FetchError::SubrequestHttpError {
-                status_code,
-                service: _,
-                reason,
-            } => Box::new(FetchError::SubrequestHttpError {
-                status_code,
-                service: connector.id.subgraph_source(),
-                reason,
-            }),
-            _ => inner,
-        },
-        Err(e) => e,
-    }
+    aggregate_responses(
+        futures::future::try_join_all(tasks)
+            .await
+            .map(|responses| {
+                responses
+                    .into_iter()
+                    .map(|response| response.mapped_response)
+                    .collect()
+            })?,
+    )
+    .map_err(BoxError::from)
 }
 
 #[derive(Clone)]
 pub(crate) struct ConnectorServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<SubgraphSchemas>,
-    pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     _connect_spec_version_instrument: Option<ObservableGauge<u64>>,
+    pub(crate) connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
 }
 
 impl ConnectorServiceFactory {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<SubgraphSchemas>,
-        http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         subscription_config: Option<SubscriptionConfig>,
         connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+        connector_request_service_factory: Arc<ConnectorRequestServiceFactory>,
     ) -> Self {
         Self {
-            http_service_factory,
             subgraph_schemas,
             schema: schema.clone(),
             subscription_config,
@@ -335,19 +249,22 @@ impl ConnectorServiceFactory {
             _connect_spec_version_instrument: connect_spec_version_instrument(
                 schema.connectors.as_ref(),
             ),
+            connector_request_service_factory,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn empty(schema: Arc<Schema>) -> Self {
-        Self {
-            http_service_factory: Arc::new(Default::default()),
-            subgraph_schemas: Default::default(),
-            subscription_config: Default::default(),
-            connectors_by_service_name: Default::default(),
+        Self::new(
             schema,
-            _connect_spec_version_instrument: None,
-        }
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Arc::new(ConnectorRequestServiceFactory::new(
+                Default::default(),
+                Default::default(),
+            )),
+        )
     }
 }
 
@@ -356,11 +273,11 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
 
     fn create(&self) -> Self::Service {
         ConnectorService {
-            http_service_factory: self.http_service_factory.clone(),
             _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connectors_by_service_name: self.connectors_by_service_name.clone(),
+            connector_request_service_factory: self.connector_request_service_factory.clone(),
         }
         .boxed()
     }

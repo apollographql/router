@@ -59,7 +59,6 @@ async fn does_not_exceed_max_evaluated_plans_legacy() {
     let mut router = IntegrationTest::builder()
         .config(
             r#"
-            experimental_query_planner_mode: legacy
             telemetry:
               exporters:
                 metrics:

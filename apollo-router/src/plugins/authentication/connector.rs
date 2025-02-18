@@ -5,41 +5,32 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
-use crate::services::connector_service::ConnectorInfo;
+use crate::services::connector;
 use crate::services::connector_service::ConnectorSourceRef;
-use crate::services::connector_service::CONNECTOR_INFO_CONTEXT_KEY;
-use crate::services::http::HttpRequest;
 
 pub(super) struct ConnectorAuth {
     pub(super) signing_params: Arc<HashMap<ConnectorSourceRef, Arc<SigningParamsConfig>>>,
 }
 
 impl ConnectorAuth {
-    pub(super) fn http_client_service(
+    pub(super) fn connector_request_service(
         &self,
-        subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: connector::request_service::BoxService,
+    ) -> connector::request_service::BoxService {
         let signing_params = self.signing_params.clone();
-        let subgraph_name = subgraph_name.to_string();
         ServiceBuilder::new()
-            .map_request(move |req: HttpRequest| {
-                if let Ok(Some(connector_info)) = req
-                    .context
-                    .get::<&str, ConnectorInfo>(CONNECTOR_INFO_CONTEXT_KEY)
-                {
-                    if let Some(source_name) = connector_info.source_name {
-                        if let Some(signing_params) = signing_params
-                            .get(&ConnectorSourceRef::new(
-                                subgraph_name.clone(),
-                                source_name.clone(),
-                            ))
-                            .cloned()
-                        {
-                            req.context
-                                .extensions()
-                                .with_lock(|mut lock| lock.insert(signing_params));
-                        }
+            .map_request(move |req: connector::request_service::Request| {
+                if let Some(ref source_name) = req.connector.id.source_name {
+                    if let Some(signing_params) = signing_params
+                        .get(&ConnectorSourceRef::new(
+                            req.connector.id.subgraph_name.clone(),
+                            source_name.clone(),
+                        ))
+                        .cloned()
+                    {
+                        req.context
+                            .extensions()
+                            .with_lock(|lock| lock.insert(signing_params));
                     }
                 }
                 req

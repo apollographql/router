@@ -89,7 +89,7 @@ impl Plugin for Connectors {
                             .get(CONNECTORS_DEBUG_HEADER_NAME)
                             == Some(&HeaderValue::from_static("true"));
 
-                    req.context.extensions().with_lock(|mut lock| {
+                    req.context.extensions().with_lock(|lock| {
                         lock.insert::<Arc<RequestLimits>>(Arc::new(RequestLimits::new(
                             max_requests,
                         )));
@@ -107,7 +107,7 @@ impl Plugin for Connectors {
 
                     res = match res {
                         Ok(mut res) => {
-                            res.context.extensions().with_lock(|mut lock| {
+                            res.context.extensions().with_lock(|lock| {
                                 if let Some(limits) = lock.remove::<Arc<RequestLimits>>() {
                                     limits.log();
                                 }
@@ -179,6 +179,6 @@ impl Plugin for Connectors {
     }
 }
 
-pub(crate) const PLUGIN_NAME: &str = "preview_connectors";
+pub(crate) const PLUGIN_NAME: &str = "connectors";
 
 register_plugin!("apollo", PLUGIN_NAME, Connectors);

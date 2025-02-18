@@ -14,7 +14,6 @@ use base64::Engine as _;
 use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
 use opentelemetry::metrics::MeterProvider;
@@ -266,7 +265,7 @@ impl LightSpanData {
     }
 }
 
-/// An externally updateable gauge for "apollo_router_span_lru_size".
+/// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
 ///
 /// When observed, it reports the most recently stored value (give or take atomicity looseness).
 ///
@@ -286,7 +285,7 @@ impl SpanLruSizeInstrument {
 
         let meter = meter_provider().meter("apollo/router");
         let gauge = meter
-            .u64_observable_gauge("apollo_router_span_lru_size")
+            .u64_observable_gauge("apollo.router.exporter.span.lru.size")
             .with_callback({
                 let value = Arc::clone(&value);
                 move |gauge| {
@@ -319,7 +318,7 @@ pub(crate) struct Exporter {
     #[derivative(Debug = "ignore")]
     report_exporter: Option<Arc<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
+    otlp_exporter: Option<ApolloOtlpExporter>,
     otlp_tracing_ratio: f64,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
@@ -407,7 +406,7 @@ impl Exporter {
                 None
             },
             otlp_exporter: if otlp_tracing_ratio > 0f64 {
-                Some(Arc::new(ApolloOtlpExporter::new(
+                Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
                     batch_config,
@@ -415,7 +414,7 @@ impl Exporter {
                     apollo_graph_ref,
                     schema_id,
                     errors_configuration,
-                )?))
+                )?)
             } else {
                 None
             },
@@ -1158,51 +1157,42 @@ impl SpanExporter for Exporter {
         self.span_lru_size_instrument
             .update(self.spans_by_parent_id.len() as u64);
 
-        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
-        let report_exporter = match self.report_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
-        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
-        let otlp_exporter = match self.otlp_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
-
-        let fut = async move {
-            if send_otlp && !otlp_trace_spans.is_empty() {
-                otlp_exporter
-                    .as_ref()
-                    .expect("expected an otel exporter")
-                    .export(otlp_trace_spans.into_iter().flatten().collect())
-                    .await
-            } else if send_reports && !traces.is_empty() {
-                let mut report = telemetry::apollo::Report::default();
-                report += SingleReport::Traces(TracesReport { traces });
-                report_exporter
-                    .as_ref()
-                    .expect("expected an apollo exporter")
+        if send_otlp && !otlp_trace_spans.is_empty() {
+            self.otlp_exporter
+                .as_mut()
+                .expect("expected an otel exporter")
+                .export(otlp_trace_spans.into_iter().flatten().collect())
+        } else if send_reports && !traces.is_empty() {
+            let mut report = telemetry::apollo::Report::default();
+            report += SingleReport::Traces(TracesReport { traces });
+            let exporter = self
+                .report_exporter
+                .as_ref()
+                .expect("expected an apollo exporter")
+                .clone();
+            async move {
+                exporter
                     .submit_report(report)
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                     .await
-            } else {
-                ExportResult::Ok(())
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
             }
-        };
-        fut.boxed()
+            .boxed()
+        } else {
+            async { ExportResult::Ok(()) }.boxed()
+        }
     }
 
     fn shutdown(&mut self) {
         // Currently only handled in the OTLP case.
-        if let Some(exporter) = &self.otlp_exporter {
+        if let Some(exporter) = &mut self.otlp_exporter {
             exporter.shutdown()
         };
     }
 
-    fn set_resource(&mut self, resource: &Resource) {
-        if let Some(exporter) = &self.otlp_exporter {
-            exporter.set_resource(resource);
-        }
+    fn set_resource(&mut self, _resource: &Resource) {
+        // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
+        // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
+        tracing::warn!("setting resource attributes is not allowed for Apollo telemetry");
     }
 }
 
