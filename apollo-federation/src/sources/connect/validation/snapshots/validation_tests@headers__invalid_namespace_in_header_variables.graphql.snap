@@ -48,7 +48,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
     },
     Message {
         code: InvalidHeader,
-        message: "In `@connect(http.headers:)` on `Query.scalar`: `config.bar` must start with one of $args, $config, $context",
+        message: "In `@connect(http.headers:)` on `Query.scalar`: `config.bar` must start with one of $args, $config, $context, $request",
         locations: [
             27:56..27:62,
         ],
