@@ -1139,9 +1139,7 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes
             .as_ref()
             .and_then(|a| a.key(SUBGRAPH_NAME))
         {
-            if let Some(subgraph_name) = &request.subgraph_name {
-                attrs.push(KeyValue::new(key, subgraph_name.clone()));
-            }
+            attrs.push(KeyValue::new(key, request.subgraph_name.clone()));
         }
 
         attrs

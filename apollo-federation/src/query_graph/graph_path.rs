@@ -30,6 +30,7 @@ use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
 use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::BooleanOrVariable;
@@ -48,6 +49,7 @@ use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::path_tree::Preference;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
@@ -326,6 +328,34 @@ impl Display for OpPath {
             }
         }
         Ok(())
+    }
+}
+
+impl Preference for OpPathElement {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
+        match (self, other) {
+            (OpPathElement::Field(x), OpPathElement::Field(y)) => {
+                // We prefer the one with a sibling typename (= Less).
+                // Otherwise, not comparable.
+                match (&x.sibling_typename, &y.sibling_typename) {
+                    (Some(_), None) => Some(true),
+                    (None, Some(_)) => Some(false),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Preference for OpGraphPathTrigger {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
+        match (self, other) {
+            (OpGraphPathTrigger::OpPathElement(x), OpGraphPathTrigger::OpPathElement(y)) => {
+                x.preferred_over(y)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -2949,7 +2979,11 @@ impl OpGraphPath {
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
-        let span = debug_span!("Trying to advance {self} directly with {operation_element}");
+        let span = debug_span!(
+            "Trying to advance directly",
+            from = %self,
+            operation_element = %operation_element,
+        );
         let _guard = span.enter();
         let tail_weight = self.graph.node_weight(self.tail)?;
         let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
@@ -3236,7 +3270,10 @@ impl OpGraphPath {
                                 "Trying to collect field from options {implementation_options:?}"
                             );
                             for implementation_option in &mut implementation_options {
-                                let span = debug_span!("For {implementation_option}");
+                                let span = debug_span!(
+                                    "implementation option",
+                                    implementation_option = %implementation_option
+                                );
                                 let _guard = span.enter();
                                 let field_options_for_implementation = implementation_option
                                     .advance_with_operation_element(
@@ -3394,7 +3431,10 @@ impl OpGraphPath {
                         debug!("Trying to type-explode into intersection between current type and {type_condition_name} = [{}]", intersection.clone().format(","));
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in intersection {
-                            let span = debug_span!("Trying {implementation_type_pos}");
+                            let span = debug_span!(
+                                "attempt type explosion",
+                                implementation_type = %implementation_type_pos
+                            );
                             let guard = span.enter();
                             let implementation_inline_fragment = InlineFragment {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
@@ -3724,9 +3764,12 @@ impl SimultaneousPaths {
                 product.saturating_mul(options.len())
             });
         if num_options > 1_000_000 {
-            return Err(FederationError::internal(format!(
-                "flat_cartesian_product: excessive number of combinations: {num_options}"
-            )));
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!(
+                    "Excessive number of combinations for a given path: {num_options}"
+                ),
+            }
+            .into());
         }
         let mut product = Vec::with_capacity(num_options);
 

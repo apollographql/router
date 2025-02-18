@@ -5,8 +5,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
 ---
 [
     Message {
-        code: InvalidJsonSelection,
-        message: "In `@connect(http: {body:})` on `Mutation.createUser`: variable `$status` is not valid at this location, must be one of $args, $config, $context, $request, $this",
+        code: InvalidBody,
+        message: "In `@connect(http: {body:})` on `Mutation.createUser`: $status is not valid here, must be one of $args, $config, $context",
         locations: [
             21:17..21:24,
         ],

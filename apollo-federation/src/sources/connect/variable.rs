@@ -55,15 +55,6 @@ impl<'schema> VariableContext<'schema> {
                     Namespace::Response,
                 ]
             }
-            Phase::Request => {
-                vec![
-                    Namespace::Config,
-                    Namespace::Context,
-                    Namespace::This,
-                    Namespace::Args,
-                    Namespace::Request,
-                ]
-            }
         }
         .into_iter()
     }
@@ -79,9 +70,7 @@ impl<'schema> VariableContext<'schema> {
     /// Get the error code for this context
     pub(crate) fn error_code(&self) -> Code {
         match self.target {
-            Target::Url => Code::InvalidUrl,
-            Target::Header => Code::InvalidHeader,
-            Target::Body => Code::InvalidJsonSelection,
+            Target::Body => Code::InvalidSelection,
         }
     }
 }
@@ -89,9 +78,6 @@ impl<'schema> VariableContext<'schema> {
 /// The phase an expression is associated with
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Phase {
-    /// The request phase
-    Request,
-
     /// The response phase
     Response,
 }
@@ -100,12 +86,6 @@ pub(crate) enum Phase {
 #[allow(unused)]
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum Target {
-    /// The expression is used in an HTTP header
-    Header,
-
-    /// The expression is used in a URL
-    Url,
-
     /// The expression is used in the body of a request or response
     Body,
 }

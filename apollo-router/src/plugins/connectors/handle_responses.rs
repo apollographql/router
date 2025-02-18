@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use apollo_federation::sources::connect::Connector;
 use axum::body::HttpBody;
+use http::header::CONTENT_LENGTH;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
@@ -529,6 +530,18 @@ async fn deserialize_response<T: HttpBody>(
                 label = connector.id.label
             ),
         );
+    }
+
+    // If the body is obviously empty, don't try to parse it
+    if let Some(content_length) = parts
+        .headers
+        .get(CONTENT_LENGTH)
+        .and_then(|len| len.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok())
+    {
+        if content_length == 0 {
+            return Ok(Value::Null);
+        }
     }
 
     match serde_json::from_slice::<Value>(body) {

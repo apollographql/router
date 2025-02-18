@@ -48,7 +48,7 @@ mod json_ext;
 pub mod plugin;
 
 #[macro_use]
-pub(crate) mod metrics;
+pub mod metrics;
 
 mod ageing_priority_queue;
 mod apollo_studio_interop;
@@ -84,7 +84,6 @@ mod uplink;
 #[doc(hidden)]
 pub mod otel_compat;
 
-pub use crate::axum_factory::unsupported_set_axum_router_callback;
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
 pub use crate::context::extensions::sync::ExtensionsMutex;
@@ -121,4 +120,8 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+
+    pub fn compute_job_queued_count() -> &'static std::sync::atomic::AtomicUsize {
+        &crate::compute_job::queue().queued_count
+    }
 }

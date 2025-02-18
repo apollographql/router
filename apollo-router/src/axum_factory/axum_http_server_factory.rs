@@ -1,7 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::fmt::Display;
 use std::pin::Pin;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -28,15 +27,12 @@ use once_cell::sync::Lazy;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use regex::Regex;
-use serde::Serialize;
 use serde_json::json;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
 use tower::layer::layer_fn;
-use tower::service_fn;
-use tower::BoxError;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 use tracing::instrument::WithSubscriber;
@@ -77,7 +73,7 @@ static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {
 fn session_count_instrument() -> ObservableGauge<u64> {
     let meter = meter_provider().meter("apollo/router");
     meter
-        .u64_observable_gauge("apollo_router_session_count_active")
+        .u64_observable_gauge("apollo.router.session.count.active")
         .with_description("Amount of in-flight sessions")
         .with_callback(|gauge| {
             gauge.observe(ACTIVE_SESSION_COUNT.load(Ordering::Relaxed), &[]);
@@ -103,35 +99,15 @@ impl Drop for ActiveSessionCountGuard {
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
 #[derive(Debug, Default)]
-pub(crate) struct AxumHttpServerFactory {
-    live: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
-}
+pub(crate) struct AxumHttpServerFactory {}
 
 impl AxumHttpServerFactory {
     pub(crate) fn new() -> Self {
-        Self {
-            ..Default::default()
-        }
+        Self {}
     }
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "UPPERCASE")]
-#[allow(dead_code)]
-enum HealthStatus {
-    Up,
-    Down,
-}
-
-#[derive(Debug, Serialize)]
-struct Health {
-    status: HealthStatus,
-}
-
 pub(crate) fn make_axum_router<RF>(
-    live: Arc<AtomicBool>,
-    ready: Arc<AtomicBool>,
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
@@ -141,70 +117,6 @@ where
     RF: RouterFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
-
-    if configuration.health_check.enabled {
-        tracing::info!(
-            "Health check exposed at {}{}",
-            configuration.health_check.listen,
-            configuration.health_check.path
-        );
-        endpoints.insert(
-            configuration.health_check.listen.clone(),
-            Endpoint::from_router_service(
-                configuration.health_check.path.clone(),
-                service_fn(move |req: router::Request| {
-                    let mut status_code = StatusCode::OK;
-                    let health = if let Some(query) = req.router_request.uri().query() {
-                        let query_upper = query.to_ascii_uppercase();
-                        // Could be more precise, but sloppy match is fine for this use case
-                        if query_upper.starts_with("READY") {
-                            let status = if ready.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else if query_upper.starts_with("LIVE") {
-                            let status = if live.load(Ordering::SeqCst) {
-                                HealthStatus::Up
-                            } else {
-                                // It's hard to get k8s to parse payloads. Especially since we
-                                // can't install curl or jq into our docker images because of CVEs.
-                                // So, compromise, k8s will interpret this as probe fail.
-                                status_code = StatusCode::SERVICE_UNAVAILABLE;
-                                HealthStatus::Down
-                            };
-                            Health { status }
-                        } else {
-                            Health {
-                                status: HealthStatus::Up,
-                            }
-                        }
-                    } else {
-                        Health {
-                            status: HealthStatus::Up,
-                        }
-                    };
-                    tracing::trace!(?health, request = ?req.router_request, "health check");
-                    async move {
-                        Ok(router::Response {
-                            response: http::Response::builder().status(status_code).body(
-                                router::body::from_bytes(
-                                    serde_json::to_vec(&health).map_err(BoxError::from)?,
-                                ),
-                            )?,
-                            context: req.context,
-                        })
-                    }
-                })
-                .boxed(),
-            ),
-        );
-    }
 
     ensure_endpoints_consistency(configuration, &endpoints)?;
 
@@ -247,17 +159,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
     where
         RF: RouterFactory,
     {
-        let live = self.live.clone();
-        let ready = self.ready.clone();
         Box::pin(async move {
-            let all_routers = make_axum_router(
-                live.clone(),
-                ready.clone(),
-                service_factory,
-                &configuration,
-                extra_endpoints,
-                license,
-            )?;
+            let all_routers =
+                make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
 
             // serve main router
 
@@ -417,14 +321,6 @@ impl HttpServerFactory for AxumHttpServerFactory {
             ))
         })
     }
-
-    fn live(&self, live: bool) {
-        self.live.store(live, Ordering::SeqCst);
-    }
-
-    fn ready(&self, ready: bool) {
-        self.ready.store(ready, Ordering::SeqCst);
-    }
 }
 
 // This function can be removed once https://github.com/apollographql/router/issues/4083 is done.
@@ -518,7 +414,7 @@ async fn license_handler(
 ) -> Response {
     if matches!(
         license,
-        LicenseState::LicensedHalt | LicenseState::LicensedWarn
+        LicenseState::LicensedHalt { limits: _ } | LicenseState::LicensedWarn { limits: _ }
     ) {
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
@@ -543,7 +439,7 @@ async fn license_handler(
         }
     }
 
-    if matches!(license, LicenseState::LicensedHalt) {
+    if matches!(license, LicenseState::LicensedHalt { limits: _ }) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(axum::body::Body::default())
@@ -629,15 +525,6 @@ async fn handle_graphql<RF: RouterFactory>(
         res
     };
 
-    let dur = context.busy_time();
-    let processing_seconds = dur.as_secs_f64();
-
-    f64_histogram!(
-        "apollo.router.processing.time",
-        "Time spent by the router actually working on the request, not waiting for its network calls or other queries being processed",
-        processing_seconds
-    );
-
     match res {
         Err(err) => internal_server_error(err),
         Ok(response) => {
@@ -715,7 +602,7 @@ impl Drop for CancelHandler<'_> {
             }
             self.context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(CanceledRequest));
+                .with_lock(|lock| lock.insert(CanceledRequest));
         }
     }
 }

@@ -90,7 +90,7 @@ use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
-use crate::metrics::meter_provider;
+use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
@@ -125,7 +125,6 @@ use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
-use crate::plugins::telemetry::reload::metrics_layer;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
@@ -171,9 +170,13 @@ pub(crate) mod utils;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
-const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
-const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
+pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
+pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
+pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo::telemetry::studio_exclude";
+pub(crate) const DEPRECATED_STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const SUPERGRAPH_SCHEMA_ID_CONTEXT_KEY: &str = "apollo::supergraph_schema_id";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -1186,7 +1189,7 @@ impl Telemetry {
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
+                .with_lock(|lock| lock.insert(EnableSubgraphFtv1));
         }
     }
 
@@ -1256,7 +1259,7 @@ impl Telemetry {
                             if !matches!(sender, Sender::Noop) {
                                 if let (true, Some(query)) = (
                                     config.apollo.experimental_local_field_metrics,
-                                    ctx.unsupported_executable_document(),
+                                    ctx.executable_document(),
                                 ) {
                                     local_stat_recorder.visit(
                                         &query,
@@ -1392,7 +1395,7 @@ impl Telemetry {
                 // values for deferred responses and subscriptions.
                 let enum_response_references = context
                     .extensions()
-                    .with_lock(|mut lock| lock.remove::<ReferencedEnums>())
+                    .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
                 SingleStatsReport {
@@ -1661,7 +1664,7 @@ impl Telemetry {
 
 impl TelemetryActivation {
     fn reload_metrics(&mut self) {
-        let meter_provider = meter_provider();
+        let meter_provider = meter_provider_internal();
         commit_prometheus();
         let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
 
@@ -1677,8 +1680,6 @@ impl TelemetryActivation {
 
         old_meter_providers[2] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
-
-        metrics_layer().clear();
 
         Self::checked_meter_shutdown(old_meter_providers);
     }
@@ -1815,6 +1816,12 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 if let MetricsError::Other(msg) = &err {
                     if msg.contains("Warning") {
                         ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
+                        return;
+                    }
+
+                    // TODO: We should be able to remove this after upgrading to 0.26.0, which addresses the double-shutdown
+                    // called out in https://github.com/open-telemetry/opentelemetry-rust/issues/1661
+                    if msg == "metrics provider already shut down" {
                         return;
                     }
                 }
@@ -1977,7 +1984,6 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
-    use std::sync::Mutex;
     use std::time::Duration;
 
     use axum_extra::headers::HeaderName;
@@ -1996,6 +2002,7 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
+    use parking_lot::Mutex;
     use serde_json::Value;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -2089,7 +2096,7 @@ mod tests {
         let body = router::body::into_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
             .split('\n')
-            .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
+            .filter(|l| l.contains("bucket"))
             .sorted()
             .join("\n")
     }
@@ -3022,7 +3029,7 @@ mod tests {
         }
         impl TestLayer {
             fn assert_log_entry_count(&self, message: &str, expected: usize) {
-                let log_entries = self.visitor.lock().unwrap().log_entries.clone();
+                let log_entries = self.visitor.lock().log_entries.clone();
                 let actual = log_entries.iter().filter(|e| e.contains(message)).count();
                 assert_eq!(actual, expected);
             }
@@ -3040,7 +3047,7 @@ mod tests {
             Self: 'static,
         {
             fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-                event.record(self.visitor.lock().unwrap().deref_mut())
+                event.record(self.visitor.lock().deref_mut())
             }
         }
 
@@ -3134,7 +3141,7 @@ mod tests {
             .expect_call()
             .times(1)
             .returning(move |req: SupergraphRequest| {
-                req.context.extensions().with_lock(|mut lock| {
+                req.context.extensions().with_lock(|lock| {
                     lock.insert(cost_details.clone());
                 });
                 req.context

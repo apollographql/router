@@ -402,7 +402,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.connectors,
-            "$.preview_connectors",
+            "$.connectors",
             opt.debug_extensions,
             "$[?(@.debug_extensions == true)]",
             opt.expose_sources_in_context,
@@ -541,6 +541,7 @@ mod test {
 
     use crate::configuration::metrics::InstrumentData;
     use crate::configuration::metrics::Metrics;
+    use crate::uplink::license_enforcement::LicenseLimits;
     use crate::uplink::license_enforcement::LicenseState;
 
     #[derive(RustEmbed)]
@@ -575,7 +576,9 @@ mod test {
     #[test]
     fn test_license_warn() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedWarn);
+        data.populate_license_instrument(&LicenseState::LicensedWarn {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }
@@ -583,7 +586,9 @@ mod test {
     #[test]
     fn test_license_halt() {
         let mut data = InstrumentData::default();
-        data.populate_license_instrument(&LicenseState::LicensedHalt);
+        data.populate_license_instrument(&LicenseState::LicensedHalt {
+            limits: Some(LicenseLimits::default()),
+        });
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

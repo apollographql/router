@@ -43,10 +43,14 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-pub(crate) static COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
-pub(crate) static COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
-pub(crate) static COST_RESULT_KEY: &str = "apollo::demand_control::result";
-pub(crate) static COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
+pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
+pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
+pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
+pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
+pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
+pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -272,7 +276,7 @@ impl Context {
     }
 
     pub(crate) fn insert_demand_control_context(&self, ctx: DemandControlContext) {
-        self.extensions().with_lock(|mut lock| lock.insert(ctx));
+        self.extensions().with_lock(|lock| lock.insert(ctx));
     }
 
     pub(crate) fn get_demand_control_context(&self) -> Option<DemandControlContext> {
@@ -306,6 +310,19 @@ impl Plugin for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if !init.config.enabled {
+            return Ok(DemandControl {
+                strategy_factory: StrategyFactory::new(
+                    init.config.clone(),
+                    Arc::new(DemandControlledSchema::empty(
+                        init.supergraph_schema.clone(),
+                    )?),
+                    Arc::new(HashMap::new()),
+                ),
+                config: init.config,
+            });
+        }
+
         let demand_controlled_supergraph_schema =
             DemandControlledSchema::new(init.supergraph_schema.clone())?;
         let mut demand_controlled_subgraph_schemas = HashMap::new();
@@ -357,7 +374,7 @@ impl Plugin for DemandControl {
                 .map_response(|mut resp: execution::Response| {
                     let req = resp
                         .context
-                        .unsupported_executable_document()
+                        .executable_document()
                         .expect("must have document");
                     let strategy = resp
                         .context
@@ -677,7 +694,7 @@ mod test {
             ParsedDocumentInner::new(ast, doc.into(), None, Default::default()).unwrap();
         let ctx = Context::new();
         ctx.extensions()
-            .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_document));
+            .with_lock(|lock| lock.insert::<ParsedDocument>(parsed_document));
         ctx
     }
 

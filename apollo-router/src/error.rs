@@ -201,10 +201,12 @@ impl From<QueryPlannerError> for FetchError {
 }
 
 /// Error types for CacheResolver
-#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+#[derive(Error, Debug, Display, Clone)]
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
+    /// {0}
+    Backpressure(crate::compute_job::ComputeBackPressureError),
     /// batch processing failed: {0}
     BatchingError(String),
 }
@@ -217,6 +219,7 @@ impl IntoGraphQLErrors for CacheResolverError {
                 .clone()
                 .into_graphql_errors()
                 .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
+            CacheResolverError::Backpressure(e) => Ok(vec![e.to_graphql_error()]),
             CacheResolverError::BatchingError(msg) => Ok(vec![Error::builder()
                 .message(msg)
                 .extension_code("BATCH_PROCESSING_FAILED")
@@ -264,9 +267,6 @@ pub(crate) enum QueryPlannerError {
 
     /// query planning panicked: {0}
     JoinError(String),
-
-    /// Cache resolution failed: {0}
-    CacheResolverError(Arc<CacheResolverError>),
 
     /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
     EmptyPlan(UsageReporting), // usage_reporting_signature
@@ -440,12 +440,6 @@ impl QueryPlannerError {
 impl From<JoinError> for QueryPlannerError {
     fn from(err: JoinError) -> Self {
         QueryPlannerError::JoinError(err.to_string())
-    }
-}
-
-impl From<CacheResolverError> for QueryPlannerError {
-    fn from(err: CacheResolverError) -> Self {
-        QueryPlannerError::CacheResolverError(Arc::new(err))
     }
 }
 
@@ -630,8 +624,6 @@ impl std::fmt::Display for ValidationErrors {
 pub(crate) enum SubgraphBatchingError {
     /// Sender unavailable
     SenderUnavailable,
-    /// Request does not have a subgraph name
-    MissingSubgraphName,
     /// Requests is empty
     RequestsIsEmpty,
     /// Batch processing failed: {0}
