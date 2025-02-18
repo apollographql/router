@@ -344,7 +344,7 @@ async fn service_call(
             } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
                 // Replace the existing usage report so we do not report invalid variable values to
                 // Studio.
-                context.extensions().with_lock(|mut lock| {
+                context.extensions().with_lock(|lock| {
                     lock.insert(Arc::new(UsageReporting {
                         stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
                         referenced_fields_by_type: Default::default(),
