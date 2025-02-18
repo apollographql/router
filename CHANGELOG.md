@@ -1370,6 +1370,13 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
+> [!IMPORTANT]
+> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+> 
+> You should update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) and enable the `preview_datadog_agent_sampling` feature to resolve this issue.
+
 ## 🚀 Features
 
 ### Support demand control directives ([PR #5777](https://github.com/apollographql/router/pull/5777))
