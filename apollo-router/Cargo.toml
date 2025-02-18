@@ -180,13 +180,7 @@ proteus = "0.5.0"
 rand = "0.8.5"
 rhai = { version = "1.19.0", features = ["sync", "serde", "internals"] }
 regex = "1.10.5"
-reqwest = { version = "0.12.9", default-features = false, features = [
-    "rustls-tls",
-    "rustls-tls-native-roots",
-    "gzip",
-    "json",
-    "stream",
-] }
+reqwest = { workspace = true }
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.23.19"
@@ -300,11 +294,7 @@ opentelemetry-datadog = { version = "0.12.0", features = ["reqwest-client"] }
 p256 = "0.13.2"
 pretty_assertions = "1.4.0"
 rand_core = "0.6.4"
-reqwest = { version = "0.12.9", default-features = false, features = [
-    "json",
-    "multipart",
-    "stream",
-] }
+reqwest = { workspace = true, features = ["multipart"] }
 rhai = { version = "1.17.1", features = [
     "sync",
     "serde",
