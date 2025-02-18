@@ -322,8 +322,7 @@ where
             "http.route" = %path,
             "http.url" = %schema_uri,
             "net.transport" = "ip_tcp",
-            //"apollo.subgraph.name" = %service_name,
-            //"graphql.operation.name" = %operation_name,
+            
         );
 
         get_text_map_propagator(|propagator| {
