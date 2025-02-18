@@ -632,16 +632,7 @@ async fn call_websocket(
     .map_err(|err| {
         let error_details = match &err {
             tokio_tungstenite::tungstenite::Error::Utf8 => {
-                if let Some(utf8_err) = err
-                    .source()
-                    .and_then(|e| e.downcast_ref::<std::str::Utf8Error>())
-                {
-                    let pos = utf8_err.valid_up_to();
-                    format!("invalid UTF-8 at position {pos}")
-                } else {
-                    "invalid UTF-8 in WebSocket handshake; no additional details available"
-                        .to_string()
-                }
+                "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
             }
 
             tokio_tungstenite::tungstenite::Error::Http(response) => {
