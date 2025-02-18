@@ -122,10 +122,12 @@ impl AggregateMeterProvider {
         let mut inner = self.inner.lock().expect("lock poisoned");
         // As we are changing a meter provider we need to invalidate any registered instruments.
         // Clearing these allows any weak references at callsites to be invalidated.
+        // This must be done BEFORE the old provider is dropped to ensure that metrics are not lost.
+        // Once invalidated all metrics callsites will try to obtain new instruments, but will be blocked on the mutex.
         inner.registered_instruments.clear();
 
         //Now update the meter provider
-        if let Some(meter_provider) = meter_provider {
+        let old = if let Some(meter_provider) = meter_provider {
             inner
                 .providers
                 .insert(
@@ -135,13 +137,29 @@ impl AggregateMeterProvider {
                 .map(|(old_provider, _)| old_provider)
         } else {
             None
-        }
+        };
+        // Important! The mutex MUST be dropped before the old meter provider is dropped to avoid deadlocks in the case that the export function has metrics.
+        // This implicitly happens by returning the old meter provider.
+        // However, to avoid a potential footgun where someone removes the return value of this function I will explicitly drop the mutex guard.
+        drop(inner);
+
+        // Important! Now it is safe to drop the old meter provider, we return it, so we should be OK. If someone removes the return value of this function then
+        // this must instead be converted to a drop call.
+        old
     }
 
     /// Shutdown MUST be called from a blocking thread.
     pub(crate) fn shutdown(&self) {
-        let inner = self.inner.lock().expect("lock poisoned");
-        for (meter_provider_type, (meter_provider, _)) in &inner.providers {
+        // Make sure that we don't deadlock by dropping the mutex guard before actual shutdown happens
+        // This means that if we have any misbehaving code that tries to access the meter provider during shutdown, e.g. for export metrics
+        // then we don't get stuck on the mutex.
+        let mut inner = self.inner.lock().expect("lock poisoned");
+        let mut swap = Inner::default();
+        std::mem::swap(&mut *inner, &mut swap);
+        drop(inner);
+
+        // Now that we have dropped the mutex guard we can safely shutdown the meter providers
+        for (meter_provider_type, (meter_provider, _)) in &swap.providers {
             if let Err(e) = meter_provider.shutdown() {
                 ::tracing::error!(error = %e, meter_provider_type = ?meter_provider_type, "failed to shutdown meter provider")
             }
@@ -483,10 +501,13 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::AtomicI64;
     use std::sync::Arc;
     use std::sync::Weak;
+    use std::time::Duration;
 
+    use async_trait::async_trait;
     use opentelemetry::sdk::metrics::data::Gauge;
     use opentelemetry::sdk::metrics::data::ResourceMetrics;
     use opentelemetry::sdk::metrics::data::Temporality;
@@ -503,6 +524,9 @@ mod test {
     use opentelemetry_api::metrics::MeterProvider;
     use opentelemetry_api::metrics::Result;
     use opentelemetry_api::Context;
+    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
+    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::runtime;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
@@ -720,5 +744,134 @@ mod test {
         };
         reader.collect(&mut resource_metrics).unwrap();
         assert_eq!(1, resource_metrics.scope_metrics.len());
+    }
+
+    struct TestExporter {
+        meter_provider: AggregateMeterProvider,
+        shutdown: Arc<AtomicBool>,
+    }
+
+    impl AggregationSelector for TestExporter {
+        fn aggregation(&self, _kind: InstrumentKind) -> Aggregation {
+            Aggregation::Sum
+        }
+    }
+
+    impl TemporalitySelector for TestExporter {
+        fn temporality(&self, _kind: InstrumentKind) -> Temporality {
+            Temporality::Cumulative
+        }
+    }
+
+    #[async_trait]
+    impl PushMetricsExporter for TestExporter {
+        async fn export(&self, _metrics: &mut ResourceMetrics) -> Result<()> {
+            self.count();
+            Ok(())
+        }
+
+        async fn force_flush(&self) -> Result<()> {
+            self.count();
+            Ok(())
+        }
+
+        fn shutdown(&self) -> Result<()> {
+            self.count();
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    impl TestExporter {
+        fn count(&self) {
+            let counter = self
+                .meter_provider
+                .versioned_meter("test", None::<String>, None::<String>, None)
+                .u64_counter("test.counter")
+                .init();
+            counter.add(1, &[]);
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_shutdown_exporter_metrics() {
+        // See the `shutdown` method implementation as to why this is tricky.
+        // This test calls the meter provider from within the exporter to ensure there is no deadlock possible.
+        let meter_provider = AggregateMeterProvider::default();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let periodic_reader = reader(&meter_provider, &shutdown);
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(periodic_reader)
+            .build();
+
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(delegate)),
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        meter_provider.shutdown();
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(shutdown.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_reload_exporter_metrics() {
+        // When exporters that interact with the meter provider are being refreshed we want to ensure that they don't deadlock.
+        // I don't think that this could have ever happened, but best to be safe and add a test.
+        let meter_provider = AggregateMeterProvider::default();
+        let shutdown1 = Arc::new(AtomicBool::new(false));
+        let periodic_reader = reader(&meter_provider, &shutdown1);
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(periodic_reader)
+            .build();
+
+        meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(delegate)),
+        );
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let shutdown2 = Arc::new(AtomicBool::new(false));
+        let periodic_reader = reader(&meter_provider, &shutdown2);
+
+        let delegate = MeterProviderBuilder::default()
+            .with_reader(periodic_reader)
+            .build();
+
+        // Setting the meter provider should not deadlock.
+        if let Some(old) = meter_provider.set(
+            MeterProviderType::OtelDefault,
+            Some(FilterMeterProvider::public(delegate)),
+        ) {
+            // In this version of Otel we are responsible for shutting down the meter provider.
+            let _ = old.shutdown();
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // The first meter provider should be shut down and the second is still active
+        assert!(shutdown1.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!shutdown2.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    fn reader(
+        meter_provider: &AggregateMeterProvider,
+        shutdown: &Arc<AtomicBool>,
+    ) -> PeriodicReader {
+        PeriodicReader::builder(
+            TestExporter {
+                meter_provider: meter_provider.clone(),
+                shutdown: shutdown.clone(),
+            },
+            runtime::Tokio,
+        )
+        .with_interval(Duration::from_millis(10))
+        .with_timeout(Duration::from_millis(10))
+        .build()
     }
 }
