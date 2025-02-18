@@ -647,7 +647,8 @@ async fn test_stats() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_invalid_enum_argument() {
     let request = supergraph::Request::fake_builder()
-        .query("mutation{createProduct(upc:'asdf', color:$color){name reviews {author{name}}}}")
+        .query("mutation{createProduct(upc: $upc, color: $color){name reviews {author{name}}}}")
+        .variable("upc", "asdf")
         .variable("color", "invalid")
         .build()
         .unwrap();
