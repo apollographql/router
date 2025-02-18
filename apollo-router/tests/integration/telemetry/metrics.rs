@@ -172,7 +172,12 @@ async fn test_bad_queries() {
         )
         .await;
     router
-        .execute_query(Query::default().with_bad_content_type())
+        .execute_query(
+            Query::builder()
+                .header("apollo-require-preflight", "true")
+                .build()
+                .with_bad_content_type(),
+        )
         .await;
 
     router
