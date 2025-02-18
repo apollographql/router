@@ -48,7 +48,7 @@ pub(crate) enum HandleResponseError {
 
 // --- RAW RESPONSE ------------------------------------------------------------
 
-enum RawResponse {
+pub(crate) enum RawResponse {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)
     /// 2. We couldn't deserialize the response body
@@ -192,7 +192,7 @@ impl RawResponse {
 }
 
 // --- MAPPED RESPONSE ---------------------------------------------------------
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum MappedResponse {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
