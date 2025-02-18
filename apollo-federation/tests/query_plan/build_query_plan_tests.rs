@@ -1352,12 +1352,7 @@ mod selection_condition_tests {
             Fetch(service: "Subgraph1") {
               {
                 test {
-                  t {
-                    id
-                  }
-                  t2: t @skip(if: $v1) {
-                    name
-                  }
+                  __typename @include(if: false)
                 }
               }
             },
@@ -1433,9 +1428,7 @@ mod selection_condition_tests {
             Fetch(service: "Subgraph1") {
               {
                 test {
-                  id
                   name
-                  x @skip(if: $v1)
                 }
               }
             },

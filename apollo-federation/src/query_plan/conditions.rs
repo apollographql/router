@@ -277,53 +277,56 @@ impl Conditions {
     }
 }
 
+/// Simplify the `selection_set` by removing the `conditions` handled by the ancestor plan node.
 pub(crate) fn remove_conditions_from_selection_set(
     selection_set: &SelectionSet,
     conditions: &Conditions,
 ) -> Result<SelectionSet, FederationError> {
-    match conditions {
-        Conditions::Boolean(_) => {
-            // If the conditions are the constant false, this means we know the selection will not be included
-            // in the plan in practice, and it doesn't matter too much what we return here. So we just
-            // the input unchanged as a shortcut.
-            // If the conditions are the constant true, then it means we have no conditions to remove and we can
-            // keep the selection "as is".
-            Ok(selection_set.clone())
-        }
-        Conditions::Variables(variable_conditions) => {
-            selection_set.lazy_map(&NamedFragments::default(), |selection| {
-                let element = selection.element()?;
-                // We remove any of the conditions on the element and recurse.
-                let updated_element =
-                    remove_conditions_of_element(element.clone(), variable_conditions);
-                if let Some(selection_set) = selection.selection_set() {
-                    let updated_selection_set =
-                        remove_conditions_from_selection_set(selection_set, conditions)?;
-                    if updated_element == element {
-                        if *selection_set == updated_selection_set {
-                            Ok(SelectionMapperReturn::Selection(selection.clone()))
-                        } else {
-                            Ok(SelectionMapperReturn::Selection(
-                                selection
-                                    .with_updated_selection_set(Some(updated_selection_set))?,
-                            ))
-                        }
-                    } else {
-                        Ok(SelectionMapperReturn::Selection(Selection::from_element(
-                            updated_element,
-                            Some(updated_selection_set),
-                        )?))
-                    }
-                } else if updated_element == element {
+    // Recurse into each selection in the set.
+    let result = selection_set.lazy_map(&NamedFragments::default(), |selection| {
+        let element = selection.element()?;
+        // We remove any of the conditions on the element and recurse.
+        let Some(updated_element) = remove_conditions_of_element(element.clone(), conditions)?
+        else {
+            // Found a contradiction between `conditions` and `element`'s directives.
+            return Ok(SelectionMapperReturn::None);
+        };
+        if let Some(selection_set) = selection.selection_set() {
+            let updated_selection_set =
+                remove_conditions_from_selection_set(selection_set, conditions)?;
+            if updated_element == element {
+                if *selection_set == updated_selection_set {
                     Ok(SelectionMapperReturn::Selection(selection.clone()))
                 } else {
-                    Ok(SelectionMapperReturn::Selection(Selection::from_element(
-                        updated_element,
-                        None,
-                    )?))
+                    Ok(SelectionMapperReturn::Selection(
+                        selection.with_updated_selection_set(Some(updated_selection_set))?,
+                    ))
                 }
-            })
+            } else {
+                Ok(SelectionMapperReturn::Selection(Selection::from_element(
+                    updated_element,
+                    Some(updated_selection_set),
+                )?))
+            }
+        } else if updated_element == element {
+            Ok(SelectionMapperReturn::Selection(selection.clone()))
+        } else {
+            Ok(SelectionMapperReturn::Selection(Selection::from_element(
+                updated_element,
+                None,
+            )?))
         }
+    })?;
+
+    if result.is_empty() {
+        // All selections are removed. To avoid validation failure in subgraph, we just add a
+        // non-included `__typename` field.
+        Ok(SelectionSet::empty_with_non_included_typename(
+            selection_set.schema.clone(),
+            selection_set.type_position.clone(),
+        ))
+    } else {
+        Ok(result)
     }
 }
 
@@ -390,24 +393,44 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
     })
 }
 
+/// Simplify `element` by removing (overlapping) `conditions` from the `element`'s directives.
+/// If the element's directives are conflicting with `conditions`, returns `None`.
 fn remove_conditions_of_element(
     element: OpPathElement,
-    conditions: &VariableConditions,
-) -> OpPathElement {
-    let updated_directives: DirectiveList = element
-        .directives()
-        .iter()
-        .filter(|d| {
-            !matches_condition_for_kind(d, conditions, ConditionKind::Include)
-                && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
-        })
-        .cloned()
-        .collect();
+    conditions: &Conditions,
+) -> Result<Option<OpPathElement>, FederationError> {
+    // First, check `conditions` and `element`'s directives are conflicting or not.
+    let merged_conditions = conditions
+        .clone()
+        .merge(Conditions::from_directives(element.directives())?);
+    if matches!(merged_conditions, Conditions::Boolean(false)) {
+        return Ok(None);
+    }
 
-    if updated_directives.len() == element.directives().len() {
-        element
-    } else {
-        element.with_updated_directives(updated_directives)
+    // Invariant: At this point, `conditions` and `element`'s directives can't be constant `false`.
+    match &conditions {
+        Conditions::Boolean(_) => {
+            // The `conditions` must be constant `true`. Just return the `element` as is.
+            Ok(Some(element))
+        }
+        Conditions::Variables(variable_conditions) => {
+            // Remove `variable_conditions` from the element's directives.
+            let updated_directives: DirectiveList = element
+                .directives()
+                .iter()
+                .filter(|d| {
+                    !matches_condition_for_kind(d, variable_conditions, ConditionKind::Include)
+                        && !matches_condition_for_kind(d, variable_conditions, ConditionKind::Skip)
+                })
+                .cloned()
+                .collect();
+
+            if updated_directives.len() == element.directives().len() {
+                Ok(Some(element))
+            } else {
+                Ok(Some(element.with_updated_directives(updated_directives)))
+            }
+        }
     }
 }
 
