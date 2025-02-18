@@ -313,16 +313,13 @@ where
                 0
             }
         });
-        let path = schema_uri.path();
 
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
-            "net.peer.name" = %host,
-            "net.peer.port" = %port,
-            "http.route" = %path,
-            "http.url" = %schema_uri,
-            "net.transport" = "ip_tcp",
-            
+            "http.request.method" = "POST",
+            "server.address" = %host,
+            "server.port" = %port,
+            "url.full" = %schema_uri,
         );
 
         get_text_map_propagator(|propagator| {
