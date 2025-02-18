@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use http::header;
 use http::header::CACHE_CONTROL;
-use indexmap::IndexMap;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1360,44 +1359,11 @@ fn extract_cache_keys(
     Ok(res)
 }
 
-pub(crate) fn hash_entity_key(representation: &Value) -> String {
+pub(crate) fn hash_entity_key(representation: &mut Value) -> String {
     // We have to hash the representation because it can contains PII
     let mut digest = Sha256::new();
-    let sorted_repr: Option<Value> = match representation {
-        Value::Array(values) => Value::Array(
-            values
-                .clone()
-                .into_iter()
-                .map(|val| match val {
-                    Value::Object(map) => {
-                        let mut indexed_map: IndexMap<ByteString, Value> = IndexMap::from_iter(map);
-                        indexed_map.sort_keys();
-
-                        Value::Object(serde_json_bytes::Map::from_iter(indexed_map))
-                    }
-                    other => other,
-                })
-                .collect::<Vec<Value>>(),
-        )
-        .into(),
-        Value::Object(map) => {
-            let mut indexed_map: IndexMap<ByteString, Value> = IndexMap::from_iter(map.clone());
-            indexed_map.sort_keys();
-
-            Value::Object(serde_json_bytes::Map::from_iter(indexed_map)).into()
-        }
-        _ => None,
-    };
-
-    match sorted_repr {
-        Some(representation) => {
-            digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        }
-        None => {
-            digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        }
-    }
-
+    representation.sort_all_objects();
+    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
     hex::encode(digest.finalize().as_slice())
 }
 
@@ -1654,16 +1620,16 @@ mod tests {
 
     #[test]
     fn test_hash_entity_key_ordering() {
-        let representations = serde_json_bytes::json!([{
+        let mut representations = serde_json_bytes::json!([{
             "id1": "test",
             "id2": "test2"
         }]);
-        let first_hash_key = hash_entity_key(&representations);
-        let representations = serde_json_bytes::json!([{
+        let first_hash_key = hash_entity_key(&mut representations);
+        let mut representations = serde_json_bytes::json!([{
             "id2": "test2",
             "id1": "test"
         }]);
-        let second_hash_key = hash_entity_key(&representations);
+        let second_hash_key = hash_entity_key(&mut representations);
 
         assert_eq!(
             first_hash_key, second_hash_key,
