@@ -55,9 +55,6 @@ ci = []
 # Enables the HTTP snapshot server for testing
 snapshot = ["axum-server", "serde_regex"]
 
-[package.metadata.docs.rs]
-features = ["docs_rs"]
-
 [dependencies]
 arc-swap = "1.6.0"
 anyhow = "1.0.86"
