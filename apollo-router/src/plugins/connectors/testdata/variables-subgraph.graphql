@@ -17,7 +17,7 @@ type Query {
     @connect(
       source: "v1"
       http: {
-        POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}&header={$request.headers.value}"
+        POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}&header={$request.headers.value->first}"
         headers: [
           { name: "x-connect-context", value: "{$context.value}" }
           { name: "x-connect-config", value: "{$config.value}" }
@@ -27,7 +27,7 @@ type Query {
         arg: $args.arg
         context: $context.value
         config: $config.value
-        request: $request.headers.value
+        request: $request.headers.value->first
         """
       }
       selection: """
@@ -37,8 +37,8 @@ type Query {
       status: $status
       sibling: $("D")
       extra: $->echo({ arg: $args.arg, context: $context.value, config: $config.value, status: $status })
-      request: $request.headers.value
-      response: $response.headers.value
+      request: $request.headers.value->first
+      response: $response.headers.value->first
       """
     )
 }

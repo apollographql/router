@@ -23,6 +23,7 @@ use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
+use crate::services::external::externalize_header_map;
 use crate::Context;
 
 const REPRESENTATIONS_VAR: &str = "representations";
@@ -100,14 +101,17 @@ impl RequestInputs {
         // Add headers from the original router request.
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if variables_used.contains(&Namespace::Request) {
-            let headers: Map<ByteString, Value> = supergraph_request
-                .headers()
+            let new_headers = externalize_header_map(supergraph_request.headers())
+                .unwrap_or_default()
                 .iter()
                 .filter_map(|(key, value)| {
                     if headers_used.contains(key.as_str()) {
                         return Some((
                             key.as_str().into(),
-                            value.to_str().unwrap_or_default().into(),
+                            value
+                                .iter()
+                                .map(|s| Value::String(s.as_str().into()))
+                                .collect(),
                         ));
                     }
 
@@ -115,7 +119,7 @@ impl RequestInputs {
                 })
                 .collect();
             let request_object = json!({
-                "headers": Value::Object(headers)
+                "headers": Value::Object(new_headers)
             });
             map.insert(Namespace::Request.as_str().into(), request_object);
         }
@@ -124,22 +128,26 @@ impl RequestInputs {
         // Only include headers that are actually referenced to save on passing around unused headers in memory.
         if variables_used.contains(&Namespace::Response) {
             if let Some(response_parts) = response_parts {
-                let headers: Map<ByteString, Value> = response_parts
-                    .headers
-                    .iter()
-                    .filter_map(|(key, value)| {
-                        if headers_used.contains(key.as_str()) {
-                            return Some((
-                                key.as_str().into(),
-                                value.to_str().unwrap_or_default().into(),
-                            ));
-                        }
+                let new_headers: Map<ByteString, Value> =
+                    externalize_header_map(&response_parts.headers)
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            if headers_used.contains(key.as_str()) {
+                                return Some((
+                                    key.as_str().into(),
+                                    value
+                                        .iter()
+                                        .map(|s| Value::String(s.as_str().into()))
+                                        .collect(),
+                                ));
+                            }
 
-                        None
-                    })
-                    .collect();
+                            None
+                        })
+                        .collect();
                 let response_object = json!({
-                    "headers": Value::Object(headers)
+                    "headers": Value::Object(new_headers)
                 });
                 map.insert(Namespace::Response.as_str().into(), response_object);
             }
