@@ -1,7 +1,6 @@
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
