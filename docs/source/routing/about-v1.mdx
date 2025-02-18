@@ -4,6 +4,23 @@ subtitle: ""
 description: Learn about Apollo GraphOS Router 1.x, including its Long-Term Support (LTS) release status, new features, and how to upgrade to it
 ---
 
+## Release status of router 1.x
+
+GraphOS Router v1.x is in [**Maintenance**](/graphos/reference/router-release-lifecycle#maintenance) with latest version {products.router.version("lts_1_latest").version}.
+
+| Current Status | Release Date | Latest Minor | Active Date    | Maintenance Date | End of Life Date |
+| -------------- | ------------ | ------------ | -------------- | ---------------- | ---------------- |
+| Maintenance    | August 2022  | v{products.router.version("lts_1_latest").version}  | September 2022 | February 2025     | Planned February 2026       |
+
+As a [maintenance](/graphos/reference/router-release-lifecycle#maintenance) release:
+
+- Only the latest minor version ({products.router.version("lts_1_latest").version}) receives security patches and critical bug fixes. 
+    - If a bug fix requires incrementing the minor version to conform to semantic versioning, subsequent fixes and patches would be applied to this latest incremented minor version.
+
+- No features are added or are under development. The current active release receiving feature updates is v{products.router.version("lts_2_latest").version}. For more details, go to the [upgrade guide from router 1.x to 2.x](https://www.apollographql.com/docs/graphos/reference/upgrade/from-router-v1).
+
+- [Support](https://www.apollographql.com/enterprise/support) is provided via paid support plans until end-of-life (planned for February 2026).
+
 ## What's new in router 1.x
 
 To learn about the latest updates to router v1.x, refer to the [v1.x changelogs](https://github.com/apollographql/router/releases?q=v1&expanded=true). 
