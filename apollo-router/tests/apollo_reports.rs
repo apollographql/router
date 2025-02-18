@@ -660,7 +660,6 @@ async fn test_invalid_enum_argument() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_invalid_enum_input_field() {
-    // TODO add nullable input type
     let request = supergraph::Request::fake_builder()
         .query("mutation{createProductFromDescription(description: $description){name reviews {author{name}}}}")
         .variable("description",  json!({ "upc": "asdf", "color": "invalid" }))
