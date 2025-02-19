@@ -122,18 +122,12 @@ impl TracingConfigurator for Config {
                     batch_processor
                 );
 
+                let endpoint = collector.endpoint.extend_to_full_uri(&DEFAULT_ENDPOINT);
                 let exporter = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(common.into())
                     .with(&collector.username, |b, u| b.with_username(u))
                     .with(&collector.password, |b, p| b.with_password(p))
-                    .with(
-                        &collector
-                            .endpoint
-                            .to_uri(&DEFAULT_ENDPOINT)
-                            // https://github.com/open-telemetry/opentelemetry-rust/issues/1280 Default jaeger endpoint for collector looks incorrect
-                            .or_else(|| Some(DEFAULT_ENDPOINT.clone())),
-                        |b, p| b.with_endpoint(p.to_string()),
-                    )
+                    .with_endpoint(endpoint.to_string())
                     .with_reqwest()
                     .with_batch_processor_config(batch_processor.clone().into())
                     .build_collector_exporter::<runtime::Tokio>()?;
