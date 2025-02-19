@@ -1,6 +1,13 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::parser::Parser;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use regex::Regex;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -13,6 +20,10 @@ use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
+use super::position::CompositeTypeDefinitionPosition;
+use super::position::InterfaceFieldDefinitionPosition;
+use super::position::ObjectFieldDefinitionPosition;
+
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
     Valid::assume_valid_ref(fed_schema.schema())
@@ -24,6 +35,7 @@ fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
 pub(crate) struct SubgraphMetadata {
     federation_spec_definition: &'static FederationSpecDefinition,
     external_metadata: ExternalMetadata,
+    used_fields: IndexSet<FieldDefinitionPosition>,
 }
 
 impl SubgraphMetadata {
@@ -32,9 +44,11 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
+        let used_fields = Self::collect_used_fields(federation_spec_definition, schema)?;
         Ok(Self {
             federation_spec_definition,
             external_metadata,
+            used_fields,
         })
     }
 
@@ -44,6 +58,366 @@ impl SubgraphMetadata {
 
     pub(crate) fn external_metadata(&self) -> &ExternalMetadata {
         &self.external_metadata
+    }
+
+    pub(crate) fn is_field_used(&self, type_name: &str, field_name: &str) -> bool {
+        // TODO: Put these in a proper lookup
+        for position in &self.used_fields {
+            if position.type_name() == type_name && position.field_name() == field_name {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn collect_used_fields(
+        federation_spec_definition: &'static FederationSpecDefinition,
+        schema: &Valid<FederationSchema>,
+    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+        let mut used_fields = IndexSet::default();
+        Self::collect_fields_used_by_key_directive(
+            federation_spec_definition,
+            schema,
+            &mut used_fields,
+        )?;
+        Self::collect_fields_used_by_requires_directive(
+            federation_spec_definition,
+            schema,
+            &mut used_fields,
+        )?;
+        Self::collect_fields_used_by_provides_directive(
+            federation_spec_definition,
+            schema,
+            &mut used_fields,
+        )?;
+        Self::collect_fields_used_by_context_directive(
+            federation_spec_definition,
+            schema,
+            &mut used_fields,
+        )?;
+        Self::collect_fields_used_to_satisfy_interface_constraints(schema, &mut used_fields)?;
+
+        Ok(used_fields)
+    }
+
+    // TODO: Could probably be reused
+    fn collect_fields_used_by_key_directive(
+        federation_spec_definition: &'static FederationSpecDefinition,
+        schema: &Valid<FederationSchema>,
+        used_fields: &mut IndexSet<FieldDefinitionPosition>,
+    ) -> Result<(), FederationError> {
+        let key_directive_definition =
+            federation_spec_definition.key_directive_definition(schema)?;
+        let key_directive_referencers = schema
+            .referencers
+            .get_directive(&key_directive_definition.name)?;
+        let mut key_type_positions: Vec<ObjectOrInterfaceTypeDefinitionPosition> = vec![];
+        for object_type_position in &key_directive_referencers.object_types {
+            key_type_positions.push(object_type_position.clone().into());
+        }
+        for interface_type_position in &key_directive_referencers.interface_types {
+            key_type_positions.push(interface_type_position.clone().into());
+        }
+
+        for type_position in key_type_positions {
+            let directives = match &type_position {
+                ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
+                    &pos.get(schema.schema())?.directives
+                }
+                ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
+                    &pos.get(schema.schema())?.directives
+                }
+            };
+            for key_directive_application in directives.get_all(&key_directive_definition.name) {
+                let key_directive_arguments = federation_spec_definition
+                    .key_directive_arguments(key_directive_application)?;
+                used_fields.extend(collect_target_fields_from_field_set(
+                    unwrap_schema(schema),
+                    type_position.type_name().clone(),
+                    key_directive_arguments.fields,
+                )?);
+            }
+        }
+        Ok(())
+    }
+
+    fn collect_fields_used_by_requires_directive(
+        federation_spec_definition: &'static FederationSpecDefinition,
+        schema: &Valid<FederationSchema>,
+        used_fields: &mut IndexSet<FieldDefinitionPosition>,
+    ) -> Result<(), FederationError> {
+        let requires_directive_definition =
+            federation_spec_definition.requires_directive_definition(schema)?;
+        let requires_directive_referencers = schema
+            .referencers
+            .get_directive(&requires_directive_definition.name)?;
+        for field_definition_position in &requires_directive_referencers.object_fields {
+            let directives = &field_definition_position.get(schema.schema())?.directives;
+            for requires_directive_application in
+                directives.get_all(&requires_directive_definition.name)
+            {
+                let requires_directive_arguments = federation_spec_definition
+                    .requires_directive_arguments(requires_directive_application)?;
+                used_fields.extend(collect_target_fields_from_field_set(
+                    unwrap_schema(schema),
+                    field_definition_position.parent().type_name,
+                    requires_directive_arguments.fields,
+                )?);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_fields_used_by_provides_directive(
+        federation_spec_definition: &'static FederationSpecDefinition,
+        schema: &Valid<FederationSchema>,
+        used_fields: &mut IndexSet<FieldDefinitionPosition>,
+    ) -> Result<(), FederationError> {
+        let provides_directive_definition =
+            federation_spec_definition.provides_directive_definition(schema)?;
+        let provides_directive_referencers = schema
+            .referencers
+            .get_directive(&provides_directive_definition.name)?;
+        for field_definition_position in &provides_directive_referencers.object_fields {
+            let directives = &field_definition_position.get(schema.schema())?.directives;
+            for provides_directive_application in
+                directives.get_all(&provides_directive_definition.name)
+            {
+                let provides_directive_arguments = federation_spec_definition
+                    .provides_directive_arguments(provides_directive_application)?;
+                used_fields.extend(collect_target_fields_from_field_set(
+                    unwrap_schema(schema),
+                    field_definition_position.type_name.clone(),
+                    provides_directive_arguments.fields,
+                )?);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_fields_used_by_context_directive(
+        federation_spec_definition: &'static FederationSpecDefinition,
+        schema: &Valid<FederationSchema>,
+        used_fields: &mut IndexSet<FieldDefinitionPosition>,
+    ) -> Result<(), FederationError> {
+        let context_directive_definition =
+            federation_spec_definition.context_directive_definition(schema)?;
+        let from_context_directive_definition =
+            federation_spec_definition.from_context_directive_definition(schema)?;
+
+        // TODO: JS code short-circuits successfully if either of these doesn't exist
+
+        let mut entry_points: HashMap<String, HashSet<CompositeTypeDefinitionPosition>> =
+            HashMap::new();
+        let context_directive_referencers = schema
+            .referencers
+            .get_directive(&context_directive_definition.name)?;
+        // TODO: These loops are repetitive and brittle to adding new schema targets for a particular directive
+        for interface_type_position in &context_directive_referencers.interface_types {
+            let directives = &interface_type_position.get(schema.schema())?.directives;
+            for context_directive_application in
+                directives.get_all(&context_directive_definition.name)
+            {
+                let context = federation_spec_definition
+                    .context_directive_arguments(context_directive_application)?
+                    .name;
+                if !entry_points.contains_key(context) {
+                    entry_points.insert(context.to_string(), HashSet::new());
+                }
+                entry_points
+                    .get_mut(context)
+                    .expect("was just inserted")
+                    .insert(interface_type_position.clone().into());
+            }
+        }
+        for object_type_position in &context_directive_referencers.object_types {
+            let directives = &object_type_position.get(schema.schema())?.directives;
+            for context_directive_application in
+                directives.get_all(&context_directive_definition.name)
+            {
+                let context = federation_spec_definition
+                    .context_directive_arguments(context_directive_application)?
+                    .name;
+                if !entry_points.contains_key(context) {
+                    entry_points.insert(context.to_string(), HashSet::new());
+                }
+                entry_points
+                    .get_mut(context)
+                    .expect("was just inserted")
+                    .insert(object_type_position.clone().into());
+            }
+        }
+        for union_type_position in &context_directive_referencers.union_types {
+            let directives = &union_type_position.get(schema.schema())?.directives;
+            for context_directive_application in
+                directives.get_all(&context_directive_definition.name)
+            {
+                let context = federation_spec_definition
+                    .context_directive_arguments(context_directive_application)?
+                    .name;
+                if !entry_points.contains_key(context) {
+                    entry_points.insert(context.to_string(), HashSet::new());
+                }
+                entry_points
+                    .get_mut(context)
+                    .expect("was just inserted")
+                    .insert(union_type_position.clone().into());
+            }
+        }
+
+        let from_context_directive_referencers = schema
+            .referencers
+            .get_directive(&from_context_directive_definition.name)?;
+        for argument_definition_position in &from_context_directive_referencers.directive_arguments
+        {
+            let directives = &argument_definition_position
+                .get(schema.schema())?
+                .directives;
+            // TODO: JS used this below; are we using a wrong type name somewhere?
+            // let type_ = argument_definition_position.parent();
+            for from_context_directive_application in
+                directives.get_all(&from_context_directive_definition.name)
+            {
+                let field_value = federation_spec_definition
+                    .from_context_directive_arguments(from_context_directive_application)?
+                    .field;
+                if let Some((context, selection)) = parse_context(field_value) {
+                    if let Some(entry_point) = entry_points.get(context) {
+                        for context_type in entry_point {
+                            let field_set = Parser::new().parse_field_set(
+                                Valid::assume_valid_ref(schema.schema()),
+                                context_type.type_name().clone(),
+                                selection,
+                                "TBD.graphql",
+                            )?;
+                            let mut visitor = UsedFieldCollector::new(schema.schema());
+                            visitor.visit_field_set(&field_set);
+                            used_fields.extend(visitor.used_fields.drain());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn collect_fields_used_to_satisfy_interface_constraints(
+        schema: &Valid<FederationSchema>,
+        used_fields: &mut IndexSet<FieldDefinitionPosition>,
+    ) -> Result<(), FederationError> {
+        for ty in schema.schema().types.values() {
+            if let ExtendedType::Interface(itf) = ty {
+                for field_name in itf.fields.keys() {
+                    let possible_runtime_types = itf
+                        .implements_interfaces
+                        .iter()
+                        .filter_map(|ty| schema.schema().get_object(ty));
+                    for object_type in possible_runtime_types {
+                        used_fields.insert(FieldDefinitionPosition::Object(
+                            ObjectFieldDefinitionPosition {
+                                type_name: object_type.name.clone(),
+                                field_name: field_name.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn parse_context(input: &str) -> Option<(&str, &str)> {
+    let regex = Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$"#).expect("regex is valid");
+    let captures = regex.captures(input)?;
+    let context = captures.get(1)?;
+    let selection = captures.get(2)?;
+    Some((context.as_str(), selection.as_str()))
+}
+
+trait SelectionSetVisitor {
+    fn visit_field_set(&mut self, field_set: &apollo_compiler::executable::FieldSet) {
+        self.visit_selection_set(&field_set.selection_set);
+    }
+
+    fn visit_selection_set(&mut self, selection_set: &apollo_compiler::executable::SelectionSet);
+
+    fn visit_selection(
+        &mut self,
+        parent_ty: &Name,
+        selection: &apollo_compiler::executable::Selection,
+    );
+}
+
+struct UsedFieldCollector<'a> {
+    schema: &'a Schema,
+    used_fields: HashSet<FieldDefinitionPosition>,
+}
+
+impl<'a> UsedFieldCollector<'a> {
+    fn new(schema: &'a Schema) -> Self {
+        Self {
+            schema,
+            used_fields: HashSet::new(),
+        }
+    }
+}
+
+impl<'a> SelectionSetVisitor for UsedFieldCollector<'a> {
+    fn visit_selection_set(&mut self, selection_set: &apollo_compiler::executable::SelectionSet) {
+        for selection in selection_set.selections.iter() {
+            self.visit_selection(&selection_set.ty, selection);
+        }
+    }
+
+    fn visit_selection(
+        &mut self,
+        parent_ty: &Name,
+        selection: &apollo_compiler::executable::Selection,
+    ) {
+        match selection {
+            apollo_compiler::executable::Selection::Field(field) => {
+                if let Some(interface_type) = self.schema.get_interface(parent_ty) {
+                    self.used_fields.insert(FieldDefinitionPosition::Interface(
+                        InterfaceFieldDefinitionPosition {
+                            type_name: parent_ty.clone(),
+                            field_name: field.name.clone(),
+                        },
+                    ));
+                    // TODO: This is used in handling context directive usages, but it may duplicate other logic
+                    // to record all runtime implementer types. Check if this can be removed (ie. if it's duplicated in all paths)
+                    let possible_runtime_types = interface_type
+                        .implements_interfaces
+                        .iter()
+                        .filter_map(|ty| self.schema.get_object(ty));
+                    for object_type in possible_runtime_types {
+                        self.used_fields.insert(FieldDefinitionPosition::Object(
+                            ObjectFieldDefinitionPosition {
+                                type_name: object_type.name.clone(),
+                                field_name: field.name.clone(),
+                            },
+                        ));
+                    }
+                } else {
+                    self.used_fields.insert(FieldDefinitionPosition::Object(
+                        ObjectFieldDefinitionPosition {
+                            type_name: parent_ty.clone(),
+                            field_name: field.name.clone(),
+                        },
+                    ));
+                }
+            }
+            apollo_compiler::executable::Selection::FragmentSpread(_node) => {
+                todo!("Context won't have fragments")
+            }
+            apollo_compiler::executable::Selection::InlineFragment(_node) => {
+                todo!("Context won't have fragments")
+            }
+        }
     }
 }
 
@@ -228,5 +602,24 @@ impl ExternalMetadata {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::schema::FederationSchema;
+
+    #[test]
+    fn interface_implementers_are_used_fields() {
+        let schema_str = include_str!("fixtures/used_fields.graphqls");
+        let schema = apollo_compiler::Schema::parse(schema_str, "used_fields.graphqls")
+            .expect("valid schema");
+        let fed_schema = FederationSchema::new(schema)
+            .expect("federation schema")
+            .validate_or_return_self()
+            .expect("valid federation schema");
+        let meta = fed_schema.subgraph_metadata().expect("has metadata");
+
+        assert!(meta.is_field_used("O1", "a"));
     }
 }
