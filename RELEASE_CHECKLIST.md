@@ -438,7 +438,15 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-18. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+18. (Conditional) If this is meant to be marked as the latest version, edit the release and add the "Latest" label:
+
+    > Note: As of this writing, we will only mark 1.x versions as Latest.
+
+    ```
+    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" --latest
+    ```
+
+19. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window)
 
@@ -447,7 +455,7 @@ Start following the steps below to start a release PR.  The process is **not ful
       cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-19. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+20. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content

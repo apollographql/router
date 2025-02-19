@@ -156,16 +156,16 @@ impl DemandControlledSchema {
     pub(crate) fn new(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
         let fed_schema = ValidFederationSchema::new((*schema).clone())?;
         let mut input_field_definitions: HashMap<Name, HashMap<Name, InputDefinition>> =
-            HashMap::new();
+            HashMap::with_capacity(schema.types.len());
         let mut output_field_definitions: HashMap<Name, HashMap<Name, FieldDefinition>> =
-            HashMap::new();
+            HashMap::with_capacity(schema.types.len());
 
         for (type_name, type_) in &schema.types {
             match type_ {
                 ExtendedType::Interface(ty) => {
                     let type_fields = output_field_definitions
                         .entry(type_name.clone())
-                        .or_default();
+                        .or_insert_with(|| HashMap::with_capacity(ty.fields.len()));
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
@@ -176,7 +176,7 @@ impl DemandControlledSchema {
                 ExtendedType::Object(ty) => {
                     let type_fields = output_field_definitions
                         .entry(type_name.clone())
-                        .or_default();
+                        .or_insert_with(|| HashMap::with_capacity(ty.fields.len()));
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
@@ -187,7 +187,7 @@ impl DemandControlledSchema {
                 ExtendedType::InputObject(ty) => {
                     let type_fields = input_field_definitions
                         .entry(type_name.clone())
-                        .or_default();
+                        .or_insert_with(|| HashMap::with_capacity(ty.fields.len()));
                     for (field_name, field_definition) in &ty.fields {
                         type_fields.insert(
                             field_name.clone(),
@@ -201,10 +201,22 @@ impl DemandControlledSchema {
             }
         }
 
+        input_field_definitions.shrink_to_fit();
+        output_field_definitions.shrink_to_fit();
+
         Ok(Self {
             inner: fed_schema,
             input_field_definitions,
             output_field_definitions,
+        })
+    }
+
+    pub(crate) fn empty(schema: Arc<Valid<Schema>>) -> Result<Self, DemandControlError> {
+        let fed_schema = ValidFederationSchema::new((*schema).clone())?;
+        Ok(Self {
+            inner: fed_schema,
+            input_field_definitions: Default::default(),
+            output_field_definitions: Default::default(),
         })
     }
 

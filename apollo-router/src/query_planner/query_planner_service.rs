@@ -24,6 +24,7 @@ use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
+use crate::compute_job::MaybeBackPressureError;
 use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
@@ -127,11 +128,11 @@ impl QueryPlannerService {
         // before we potentially share it in Arc with a background thread
         // for "both" mode.
         init_query_plan_root_node: impl Fn(&mut PlanNode) -> Result<(), ValidationErrors>,
-    ) -> Result<QueryPlanResult, QueryPlannerError> {
+    ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
-        let (plan, mut root_node) = compute_job::execute(priority, move || {
+        let job = move || -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
             let query_plan_options = QueryPlanOptions {
@@ -160,26 +161,28 @@ impl QueryPlannerService {
             let elapsed = start.elapsed().as_secs_f64();
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            result.map(|plan| {
-                let root_node = convert_root_query_plan_node(&plan);
-                (plan, root_node)
-            })
-        })
-        .await
-        // `expect()` propagates any panic that potentially happens in the closure, but:
-        //
-        // * We try to avoid such panics in the first place and consider them bugs
-        // * The panic handler in `apollo-router/src/executable.rs` exits the process
-        //   so this error case should never be reached.
-        .expect("query planner panicked")?;
+            let plan = result?;
+            let root_node = convert_root_query_plan_node(&plan);
+            Ok((plan, root_node))
+        };
+        let (plan, mut root_node) = compute_job::execute(priority, job)
+            .map_err(MaybeBackPressureError::TemporaryError)?
+            .await
+            // `expect()` propagates any panic that potentially happens in the closure, but:
+            //
+            // * We try to avoid such panics in the first place and consider them bugs
+            // * The panic handler in `apollo-router/src/executable.rs` exits the process
+            //   so this error case should never be reached.
+            .expect("query planner panicked")?;
         if let Some(node) = &mut root_node {
-            init_query_plan_root_node(node)?;
+            init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
 
         Ok(QueryPlanResult {
             formatted_query_plan: Some(Arc::new(plan.to_string())),
             query_plan_root_node: root_node.map(Arc::new),
             evaluated_plan_count: plan.statistics.evaluated_plan_count.clone().into_inner() as u64,
+            evaluated_plan_paths: plan.statistics.evaluated_plan_paths.clone().into_inner() as u64,
         })
     }
 
@@ -282,7 +285,7 @@ impl QueryPlannerService {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
         query_metrics: OperationLimits<u32>,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+    ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
             .plan_inner(doc, operation.clone(), plan_options, |root_node| {
                 root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
@@ -294,6 +297,7 @@ impl QueryPlannerService {
             query_plan_root_node,
             formatted_query_plan,
             evaluated_plan_count,
+            evaluated_plan_paths,
         } = plan_result;
 
         // If the query is filtered, we want to generate the signature using the original query and generate the
@@ -324,6 +328,11 @@ impl QueryPlannerService {
                 "Number of query plans evaluated for a query before choosing the best one",
                 evaluated_plan_count
             );
+            u64_histogram!(
+                "apollo.router.query_planning.plan.evaluated_paths",
+                "Number of paths (including intermediate ones) considered to plan a query before starting to generate a plan",
+                evaluated_plan_paths
+            );
 
             Ok(QueryPlannerContent::Plan {
                 plan: Arc::new(super::QueryPlan {
@@ -337,7 +346,7 @@ impl QueryPlannerService {
             })
         } else {
             failfast_debug!("empty query plan");
-            Err(QueryPlannerError::EmptyPlan(usage_reporting))
+            Err(QueryPlannerError::EmptyPlan(usage_reporting).into())
         }
     }
 }
@@ -345,16 +354,12 @@ impl QueryPlannerService {
 impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Response = QueryPlannerResponse;
 
-    type Error = QueryPlannerError;
+    type Error = MaybeBackPressureError<QueryPlannerError>;
 
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if crate::compute_job::is_full() {
-            Poll::Pending
-        } else {
-            Poll::Ready(Ok(()))
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
@@ -376,13 +381,16 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                 Err(e) => {
                     return Err(QueryPlannerError::SpecError(SpecError::TransformError(
                         e.to_string(),
-                    )))
+                    ))
+                    .into())
                 }
                 Ok(modified_query) => {
                     let executable_document = modified_query
                         .to_executable_validate(api_schema)
                         // Assume transformation creates a valid document: ignore conversion errors
-                        .map_err(|e| SpecError::ValidationError(e.into()))?;
+                        .map_err(|e| {
+                            QueryPlannerError::from(SpecError::ValidationError(e.into()))
+                        })?;
                     let hash = this
                         .schema
                         .schema_id
@@ -392,7 +400,8 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                         Arc::new(executable_document),
                         operation_name.as_deref(),
                         Arc::new(hash),
-                    )?;
+                    )
+                    .map_err(QueryPlannerError::from)?;
                 }
             }
 
@@ -436,7 +445,7 @@ impl QueryPlannerService {
         &self,
         mut key: QueryKey,
         mut doc: ParsedDocument,
-    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+    ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
@@ -465,9 +474,9 @@ impl QueryPlannerService {
             .await
         {
             ControlFlow::Continue(()) => (),
-            ControlFlow::Break(response) => {
+            ControlFlow::Break(result) => {
                 return Ok(QueryPlannerContent::CachedIntrospectionResponse {
-                    response: Box::new(response),
+                    response: Box::new(result.map_err(MaybeBackPressureError::TemporaryError)?),
                 })
             }
         }
@@ -510,13 +519,14 @@ impl QueryPlannerService {
             key.filtered_query = new_query;
             let executable_document = new_doc
                 .to_executable_validate(self.schema.api_schema())
-                .map_err(|e| SpecError::ValidationError(e.into()))?;
+                .map_err(|e| QueryPlannerError::from(SpecError::ValidationError(e.into())))?;
             doc = ParsedDocumentInner::new(
                 new_doc,
                 Arc::new(executable_document),
                 key.operation_name.as_deref(),
                 Arc::new(new_hash),
-            )?;
+            )
+            .map_err(QueryPlannerError::from)?;
             selections.unauthorized.paths = unauthorized_paths;
         }
 
@@ -560,6 +570,7 @@ pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan_root_node: Option<Arc<PlanNode>>,
     pub(super) evaluated_plan_count: u64,
+    pub(super) evaluated_plan_paths: u64,
 }
 
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
@@ -693,7 +704,9 @@ mod tests {
                 .unwrap_err();
 
         match err {
-            QueryPlannerError::EmptyPlan(usage_reporting) => {
+            MaybeBackPressureError::PermanentError(QueryPlannerError::EmptyPlan(
+                usage_reporting,
+            )) => {
                 insta::with_settings!({sort_maps => true}, {
                     insta::assert_json_snapshot!("empty_query_plan_usage_reporting", usage_reporting);
                 });
@@ -1083,7 +1096,7 @@ mod tests {
             &configuration,
         )?;
 
-        planner
+        let result = planner
             .get(
                 QueryKey {
                     original_query: original_query.to_string(),
@@ -1094,7 +1107,12 @@ mod tests {
                 },
                 doc,
             )
-            .await
+            .await;
+        match result {
+            Ok(x) => Ok(x),
+            Err(MaybeBackPressureError::PermanentError(e)) => Err(e),
+            Err(MaybeBackPressureError::TemporaryError(e)) => panic!("{e:?}"),
+        }
     }
 
     #[tokio::test]

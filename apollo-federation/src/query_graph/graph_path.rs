@@ -30,6 +30,7 @@ use crate::display_helpers::DisplayOption;
 use crate::display_helpers::DisplaySlice;
 use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::BooleanOrVariable;
@@ -48,6 +49,7 @@ use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
 use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::path_tree::Preference;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
@@ -326,6 +328,34 @@ impl Display for OpPath {
             }
         }
         Ok(())
+    }
+}
+
+impl Preference for OpPathElement {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
+        match (self, other) {
+            (OpPathElement::Field(x), OpPathElement::Field(y)) => {
+                // We prefer the one with a sibling typename (= Less).
+                // Otherwise, not comparable.
+                match (&x.sibling_typename, &y.sibling_typename) {
+                    (Some(_), None) => Some(true),
+                    (None, Some(_)) => Some(false),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl Preference for OpGraphPathTrigger {
+    fn preferred_over(&self, other: &Self) -> Option<bool> {
+        match (self, other) {
+            (OpGraphPathTrigger::OpPathElement(x), OpGraphPathTrigger::OpPathElement(y)) => {
+                x.preferred_over(y)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -3734,9 +3764,12 @@ impl SimultaneousPaths {
                 product.saturating_mul(options.len())
             });
         if num_options > 1_000_000 {
-            return Err(FederationError::internal(format!(
-                "flat_cartesian_product: excessive number of combinations: {num_options}"
-            )));
+            return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                message: format!(
+                    "Excessive number of combinations for a given path: {num_options}"
+                ),
+            }
+            .into());
         }
         let mut product = Vec::with_capacity(num_options);
 
