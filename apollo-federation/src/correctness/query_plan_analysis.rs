@@ -12,6 +12,7 @@ use super::response_shape::compute_response_shape_for_entity_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
 use crate::FederationError;
 use crate::SingleFederationError;
+use crate::bail;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::FetchDataPathElement;
@@ -220,9 +221,14 @@ fn rename_at_path(
             let rename_here = rest.is_empty();
             // Compute the normalized type condition for the type filter.
             let type_filter = if let Some((first_type, rest_of_types)) = type_filter.split_first() {
-                let mut type_condition =
+                let Some(mut type_condition) =
                     NormalizedTypeCondition::from_type_name(first_type.clone(), schema)
-                        .map_err(format_federation_error)?;
+                        .map_err(format_federation_error)?
+                else {
+                    return Err(format!(
+                        "rename_at_path: unexpected empty type condition: {first_type}"
+                    ));
+                };
                 for type_name in rest_of_types {
                     let Some(updated) = type_condition
                         .add_type_name(type_name.clone(), schema)
@@ -351,20 +357,47 @@ fn interpret_fetch_node(
 ) -> Result<ResponseShape, String> {
     let mut result = if let Some(_requires) = &fetch.requires {
         // TODO: check requires
-        compute_response_shape_for_entity_fetch_operation(&fetch.operation_document, schema)
-            .map(|rs| rs.add_boolean_conditions(conditions))
+        // Response shapes per entity selection
+        let response_shapes =
+            compute_response_shape_for_entity_fetch_operation(&fetch.operation_document, schema)
+                .map_err(|e| {
+                    format!(
+                        "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
+                        format_federation_error(e),
+                    )
+                })?;
+
+        // Compute the merged result from the individual entity response shapes.
+        merge_response_shapes(response_shapes.iter()).map_err(|e| {
+            format!(
+                "Failed to merge response shapes in fetch node: {}\nnode: {fetch}",
+                format_federation_error(e),
+            )
+        })
     } else {
-        compute_response_shape_for_operation(&fetch.operation_document, schema)
-            .map(|rs| rs.add_boolean_conditions(conditions))
+        compute_response_shape_for_operation(&fetch.operation_document, schema).map_err(|e| {
+            format!(
+                "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
+                format_federation_error(e),
+            )
+        })
     }
-    .map_err(|e| {
-        format!(
-            "Failed to compute the response shape from fetch node: {e}\
-             node: {fetch}"
-        )
-    })?;
+    .map(|rs| rs.add_boolean_conditions(conditions))?;
     for rewrite in &fetch.output_rewrites {
         result = apply_rewrites(schema, &result, rewrite)?;
+    }
+    Ok(result)
+}
+
+fn merge_response_shapes<'a>(
+    mut iter: impl Iterator<Item = &'a ResponseShape>,
+) -> Result<ResponseShape, FederationError> {
+    let Some(first) = iter.next() else {
+        bail!("No response shapes to merge")
+    };
+    let mut result = first.clone();
+    for rs in iter {
+        result.merge_with(rs)?;
     }
     Ok(result)
 }
@@ -540,9 +573,9 @@ fn normalize_type_condition(
         })
         .collect();
     let obj_types = obj_types.map_err(format_federation_error)?;
-    Ok(Some(NormalizedTypeCondition::from_object_types(
-        obj_types.into_iter(),
-    )))
+    let result = NormalizedTypeCondition::from_object_types(obj_types.into_iter())
+        .map_err(format_federation_error)?;
+    Ok(Some(result))
 }
 
 fn interpret_flatten_node(
