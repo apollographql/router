@@ -79,3 +79,4 @@ tower = { version = "0.4.13", features = ["full"] }
 
 [patch.crates-io]
 "hyper" = { git = "https://github.com/apollographql/hyper.git", tag = "header-customizations-20241108" }
+tungstenite = { git = "https://github.com/bnjjj/tungstenite-rs.git", branch = "fix_utf8_error_0.20.1" }
