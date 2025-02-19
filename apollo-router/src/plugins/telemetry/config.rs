@@ -41,16 +41,6 @@ where
         }
         self
     }
-    fn try_with<B>(
-        self,
-        option: &Option<B>,
-        apply: fn(Self, &B) -> Result<Self, BoxError>,
-    ) -> Result<Self, BoxError> {
-        if let Some(option) = option {
-            return apply(self, option);
-        }
-        Ok(self)
-    }
 }
 
 impl<T> GenericWith<T> for T where Self: Sized {}

@@ -21,7 +21,6 @@ use tonic::transport::Identity;
 use tower::BoxError;
 use url::Url;
 
-use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
@@ -167,21 +166,18 @@ impl GrpcExporter {
             .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e)))?;
         let domain_name = self.default_tls_domain(&endpoint);
 
-        if self.ca.is_some() || self.key.is_some() || self.cert.is_some() || domain_name.is_some() {
-            return ClientTlsConfig::new()
+        if let (Some(ca), Some(key), Some(cert), Some(domain_name)) =
+            (&self.ca, &self.key, &self.cert, domain_name)
+        {
+            Ok(ClientTlsConfig::new()
                 .with_native_roots()
-                .with(&domain_name, |b, d| b.domain_name(*d))
-                .try_with(&self.ca, |b, c| {
-                    Ok(b.ca_certificate(Certificate::from_pem(c)))
-                })?
-                .try_with(
-                    &self.cert.clone().zip(self.key.clone()),
-                    |b, (cert, key)| Ok(b.identity(Identity::from_pem(cert, key))),
-                );
+                .domain_name(domain_name)
+                .ca_certificate(Certificate::from_pem(ca.clone()))
+                .identity(Identity::from_pem(cert.clone(), key.clone())))
+        } else {
+            // This was a breaking change in tonic where we now have to specify native roots.
+            Ok(ClientTlsConfig::new().with_native_roots())
         }
-
-        // This was a breaking change in tonic where we now have to specify native roots.
-        Ok(ClientTlsConfig::new().with_native_roots())
     }
 
     fn default_tls_domain<'a>(&'a self, endpoint: &'a Url) -> Option<&'a str> {
