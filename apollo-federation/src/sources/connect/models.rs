@@ -163,10 +163,18 @@ impl Connector {
             _ => None,
         };
 
-        let request_variables = transport.variables().collect();
-        let request_headers = transport.header_references().collect();
-        let response_variables = connect.selection.external_variables().collect();
-        let response_headers = connect.selection.header_references().collect();
+        let request_variables: HashSet<Namespace> = transport
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+            .collect();
+        let request_headers = extract_header_references(transport.variable_references());
+
+        let response_variables: HashSet<Namespace> = connect
+            .selection
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+            .collect();
+        let response_headers = extract_header_references(connect.selection.variable_references());
 
         let connector = Connector {
             id: id.clone(),
@@ -251,6 +259,34 @@ fn make_label(
     format!("{}{} {}", subgraph_name, source, transport.label())
 }
 
+/// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
+fn extract_header_references<'a>(
+    variable_references: impl Iterator<Item = VariableReference<'a, Namespace>> + 'a,
+) -> HashSet<String> {
+    let headers: HashSet<String> = variable_references
+        .filter_map(|var_ref| {
+            if var_ref.namespace.namespace != Namespace::Request
+                && var_ref.namespace.namespace != Namespace::Response
+            {
+                return None;
+            }
+
+            // We only care if the path references starts with "headers"
+            if !var_ref
+                .path
+                .first()
+                .map_or(false, |path| path.part == "headers")
+            {
+                return None;
+            }
+
+            // Grab the name of the header from the path
+            var_ref.path.get(1).map(|path| path.part.to_string())
+        })
+        .collect();
+    headers
+}
+
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
@@ -309,11 +345,6 @@ impl HttpJsonTransport {
         format!("http: {} {}", self.method.as_str(), self.connect_template)
     }
 
-    fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
-        self.variable_references()
-            .map(|var_ref| var_ref.namespace.namespace)
-    }
-
     fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
         let url_selections = self.connect_template.expressions().map(|e| &e.expression);
         let header_selections = self
@@ -328,29 +359,6 @@ impl HttpJsonTransport {
                     .into_iter()
                     .flat_map(PathSelection::variable_reference)
             })
-    }
-
-    /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
-    fn header_references(&self) -> impl Iterator<Item = String> + '_ {
-        self.variable_references().filter_map(|var_ref| {
-            if var_ref.namespace.namespace != Namespace::Request
-                && var_ref.namespace.namespace != Namespace::Response
-            {
-                return None;
-            }
-
-            // We only care if the path references starts with "headers"
-            if !var_ref
-                .path
-                .first()
-                .map_or(false, |path| path.part == "headers")
-            {
-                return None;
-            }
-
-            // Grab the name of the header from the path
-            var_ref.path.get(1).map(|path| path.part.to_string())
-        })
     }
 }
 

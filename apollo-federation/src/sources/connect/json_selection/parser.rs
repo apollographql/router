@@ -232,39 +232,10 @@ impl JSONSelection {
         }
     }
 
-    pub fn external_variables<'a, N: FromStr + ToString + 'a>(
-        &'a self,
-    ) -> impl Iterator<Item = N> + 'a {
+    pub fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
-            .map(|var_ref| var_ref.namespace.namespace)
-    }
-
-    /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
-    pub fn header_references(&self) -> impl Iterator<Item = String> + '_ {
-        self.external_var_paths()
-            .into_iter()
-            .flat_map(|var_path| var_path.variable_reference())
-            .filter_map(|var_ref: VariableReference<'_, Namespace>| {
-                if var_ref.namespace.namespace != Namespace::Request
-                    && var_ref.namespace.namespace != Namespace::Response
-                {
-                    return None;
-                }
-
-                // We only care if the path references starts with "headers"
-                if !var_ref
-                    .path
-                    .first()
-                    .map_or(false, |path| path.part == "headers")
-                {
-                    return None;
-                }
-
-                // Grab the name of the header from the path
-                var_ref.path.get(1).map(|path| path.part.to_string())
-            })
     }
 }
 

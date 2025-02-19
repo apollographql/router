@@ -1222,7 +1222,10 @@ mod tests {
             config: Default::default(),
             max_requests: None,
             request_variables: Default::default(),
-            response_variables: selection.external_variables().collect(),
+            response_variables: selection
+                .variable_references()
+                .map(|var_ref| var_ref.namespace.namespace)
+                .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
         });
