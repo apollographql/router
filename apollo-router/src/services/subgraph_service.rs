@@ -628,9 +628,45 @@ async fn call_websocket(
         }
         _ => connect_async(request).instrument(subgraph_req_span).await,
     }
-    .map_err(|err| FetchError::SubrequestWsError {
-        service: service_name.clone(),
-        reason: format!("cannot connect websocket to subgraph: {err}"),
+    .map_err(|err| {
+        let error_details = match &err {
+            tokio_tungstenite::tungstenite::Error::Utf8 => {
+                "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
+            }
+
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                let status = response.status();
+                let headers = response
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| {
+                        let header_value = v.to_str().unwrap_or("HTTP Error");
+                        format!("{k:?}: {header_value:?}")
+                    })
+                    .collect::<Vec<String>>()
+                    .join("; ");
+
+                format!("WebSocket upgrade failed. Status: {status}; Headers: [{headers}]")
+            }
+
+            tokio_tungstenite::tungstenite::Error::Protocol(proto_err) => {
+                format!("WebSocket protocol error: {proto_err}")
+            }
+
+            other_error => other_error.to_string(),
+        };
+
+        tracing::debug!(
+            error.type   = "websocket_connection_failed",
+            error.details= %error_details,
+            error.source = %std::any::type_name_of_val(&err),
+            "WebSocket connection failed"
+        );
+
+        FetchError::SubrequestWsError {
+            service: service_name.clone(),
+            reason: format!("cannot connect websocket to subgraph: {error_details}"),
+        }
     })?;
 
     let gql_socket = GraphqlWebSocket::new(
@@ -2684,10 +2720,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Websocket fetch failed from 'test': cannot connect websocket to subgraph: HTTP error: 400 Bad Request".to_string()
-        );
+
+        let err_str = err.to_string();
+        assert!(err_str.starts_with("Websocket fetch failed from 'test': cannot connect websocket to subgraph: WebSocket upgrade failed. Status: 400 Bad Request; Headers: [\"content-type\": \"text/plain; charset=utf-8\"; \"content-length\": \"11\";"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
