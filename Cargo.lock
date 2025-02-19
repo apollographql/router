@@ -1491,6 +1491,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bnf"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "388264829413cc604dc7251a6206b14118855e950dc4f83dc92eb3351a7bece6"
+dependencies = [
+ "getrandom 0.2.15",
+ "nom",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "stacker",
+]
+
+[[package]]
 name = "brotli"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5291,6 +5305,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
+name = "psm"
+version = "0.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "200b9ff220857e53e184257720a14553b2f4aa02577d2ed9842d45d4b9654810"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5821,14 +5844,17 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "apollo-federation",
  "apollo-parser",
  "apollo-router",
  "apollo-smith",
  "async-trait",
+ "bnf",
  "env_logger",
  "http 1.2.0",
  "libfuzzer-sys",
  "log",
+ "rand 0.8.5",
  "reqwest 0.11.27",
  "schemars",
  "serde",
@@ -6502,6 +6528,19 @@ name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
+
+[[package]]
+name = "stacker"
+version = "0.1.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d08feb8f695b465baed819b03c128dc23f57a694510ab1f06c77f763975685e"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "psm",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "static_assertions"
