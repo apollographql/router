@@ -4,10 +4,10 @@ use std::sync::LazyLock;
 
 use apollo_federation::sources::connect::JSONSelection;
 use bnf::Grammar;
-use libfuzzer_sys::{
-    arbitrary::{self, Arbitrary},
-    fuzz_target, Corpus,
-};
+use libfuzzer_sys::arbitrary;
+use libfuzzer_sys::arbitrary::Arbitrary;
+use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::Corpus;
 use rand::rngs::StdRng;
 
 fuzz_target!(|input: GeneratedSelection| -> Corpus {
@@ -82,7 +82,7 @@ const BNF_GRAMMAR: &str = r##"
         <LetterOrDigit>         ::= <Letter> | <Digit>
         <LetterOrDigits>        ::= <LetterOrDigit> | <LetterOrDigit> <LetterOrDigits>
     "##;
-const GRAMMAR: LazyLock<Grammar> = LazyLock::new(|| BNF_GRAMMAR.parse().unwrap());
+static GRAMMAR: LazyLock<Grammar> = LazyLock::new(|| BNF_GRAMMAR.parse().unwrap());
 
 struct GeneratedSelection(Option<String>);
 impl<'a> Arbitrary<'a> for GeneratedSelection {
