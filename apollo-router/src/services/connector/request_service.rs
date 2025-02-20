@@ -7,10 +7,13 @@ use std::task::Poll;
 
 use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
+use http::HeaderMap;
+use http::HeaderValue;
 use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
+use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::buffer::Buffer;
 use tower::BoxError;
@@ -21,7 +24,6 @@ use crate::graphql;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Path;
 use crate::layers::DEFAULT_BUFFER_SIZE;
-use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::connectors::make_requests::ResponseKey;
@@ -37,11 +39,11 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequest;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::EventLevel;
-use crate::query_planner::fetch::OperationKind;
 use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
+use crate::services::router::body::from_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::Plugins;
 use crate::Context;
@@ -80,6 +82,44 @@ pub(crate) struct Request {
     pub(crate) mapping_problems: Vec<Problem>,
 }
 
+#[buildstructor::buildstructor]
+impl Request {
+    #[builder(visibility = "pub")]
+    pub(crate) fn test_new(
+        context: Context,
+        connector: Arc<Connector>,
+        service_name: String,
+        key: ResponseKey,
+        headers: Option<HeaderMap<HeaderValue>>,
+        data: Value,
+        mapping_problems: Vec<Problem>,
+    ) -> Self {
+        let mut request_builder = http::Request::builder();
+        if let Some(headers) = headers {
+            for (header_name, header_value) in headers.iter() {
+                request_builder = request_builder.header(header_name, header_value);
+            }
+        }
+        let body_bytes = serde_json::to_vec(&data).unwrap();
+        let router_body = from_bytes(body_bytes);
+        let request = request_builder.body(router_body).unwrap();
+
+        let http_request = HttpRequest {
+            inner: request,
+            debug: None,
+        };
+
+        Self {
+            context,
+            connector,
+            service_name,
+            transport_request: http_request.into(),
+            key,
+            mapping_problems,
+        }
+    }
+}
+
 /// Response type for a connector
 #[derive(Debug)]
 #[non_exhaustive]
@@ -102,7 +142,7 @@ pub(crate) struct Response {
 #[buildstructor::buildstructor]
 impl Response {
     #[builder(visibility = "pub")]
-    fn error_new(
+    pub(crate) fn error_new(
         context: Context,
         connector: Arc<Connector>,
         error: Error,
@@ -123,6 +163,38 @@ impl Response {
             context,
             connector,
             transport_result: Err(error),
+            mapped_response,
+        }
+    }
+
+    #[builder(visibility = "pub")]
+    pub(crate) fn test_new(
+        context: Context,
+        connector: Arc<Connector>,
+        response_key: ResponseKey,
+        problems: Vec<Problem>,
+        data: Value,
+        headers: Option<HeaderMap<HeaderValue>>,
+    ) -> Self {
+        let mapped_response = MappedResponse::Data {
+            data: data.clone(),
+            problems,
+            key: response_key,
+        };
+
+        let mut response_builder = http::Response::builder();
+        if let Some(headers) = headers {
+            for (header_name, header_value) in headers.iter() {
+                response_builder = response_builder.header(header_name, header_value);
+            }
+        }
+        let (parts, _value) = response_builder.body(data).unwrap().into_parts();
+        let http_response = HttpResponse { inner: parts };
+
+        Self {
+            context,
+            connector,
+            transport_result: Ok(http_response.into()),
             mapped_response,
         }
     }

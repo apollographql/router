@@ -46,7 +46,8 @@ where
 }
 
 /// Get a body's contents as a utf-8 string for use in test assertions, or return an error.
-#[cfg(test)]
+/// TODO: Make this #[cfg(test)] again after connectors no longer use a RouterBody until it needs to (just in time)
+//#[cfg(test)]
 pub(crate) async fn into_string<B>(input: B) -> Result<String, AxumError>
 where
     B: HttpBody,

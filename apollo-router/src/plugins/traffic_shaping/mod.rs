@@ -44,6 +44,9 @@ use crate::services::subgraph;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
+use crate::services::connector::request_service::{
+    Request as ConnectorRequest, Response as ConnectorResponse,
+};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -560,6 +563,13 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 mod test {
     use std::sync::Arc;
 
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
@@ -567,12 +577,15 @@ mod test {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
+    use url::Url;
 
     use super::*;
     use crate::json_ext::Object;
+    use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -586,6 +599,7 @@ mod test {
     use crate::services::SupergraphRequest;
     use crate::spec::Schema;
     use crate::Configuration;
+    use crate::Context;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
@@ -772,6 +786,68 @@ mod test {
 
         let _response = plugin
             .subgraph_service("test", test_service.boxed())
+            .oneshot(request)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_adds_correct_headers_for_compression_for_connector() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        sources:
+            test_subgraph.test_sourcename:
+                compression: gzip
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let request = ConnectorRequest::test_builder().context(Context::default()).connector(Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some("test_sourcename".into()),
+                name!(Query),
+                name!(hello),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        })).service_name("test_subgraph.test_sourcename").key(ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        }).data(json!("testing")).build();
+
+        let test_service = MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
+            let TransportRequest::Http(ref http_request) = req.transport_request;
+
+            assert_eq!(
+                http_request.inner
+                    .headers()
+                    .get(&CONTENT_ENCODING)
+                    .unwrap(),
+                HeaderValue::from_static("gzip")
+            );
+
+            req
+        });
+
+        let _response = plugin
+            .connector_request_service(test_service.boxed(), "test_subgraph.test_sourcename".to_string())
             .oneshot(request)
             .await
             .unwrap();
