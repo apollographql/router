@@ -35,7 +35,8 @@ Starting in v1.49.0, the router can use OpenTelemetry Protocol (OTLP) to report 
 
 You can enable usage reporting via OTLP by an option that can also configure the ratio of traces sent via OTLP and Apollo Usage Reporting protocol:
 
-- In router v1.x, this is controlled using the `otlp_tracing_sampler` option and is disabled by default.
+- In router v1.49-1.60, this is controlled using the `experimental_otlp_tracing_sampler` option and is disabled by default.
+- In router v1.61, v2.x and later, this option is renamed to `otlp_tracing_sampler`.
 - In router v2.x and later, this option is enabled by default.
 
 The supported values of the OTLP sampler option are the following:
