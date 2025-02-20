@@ -475,6 +475,7 @@ impl QueryHash {
     /// This constructor is not public, see [SchemaHash::operation_hash] instead.
     fn new(schema_id: &SchemaHash, query_text: &str, operation_name: Option<&str>) -> Self {
         let mut hasher = Sha256::new();
+        // FIXME: why not calling it schema_hash ?!
         hasher.update(schema_id.as_str());
         // byte separator between each part that is hashed
         hasher.update(&[0xFF][..]);
