@@ -5,6 +5,7 @@ use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use regex::Regex;
 
 use crate::error::FederationError;
 use crate::internal_error;
@@ -68,3 +69,11 @@ pub(crate) static CONTEXT_VERSIONS: LazyLock<SpecDefinitions<ContextSpecDefiniti
         definitions.add(ContextSpecDefinition::new(Version { major: 0, minor: 1 }));
         definitions
     });
+
+pub(crate) fn parse_context(input: &str) -> Option<(&str, &str)> {
+    let regex = Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$"#).expect("regex is valid");
+    let captures = regex.captures(input)?;
+    let context = captures.get(1)?;
+    let selection = captures.get(2)?;
+    Some((context.as_str(), selection.as_str()))
+}

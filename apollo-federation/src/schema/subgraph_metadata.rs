@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::collections::IndexSet;
-use apollo_compiler::parser::Parser;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use regex::Regex;
 
 use crate::error::FederationError;
+use crate::link::context_spec_definition::parse_context;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
@@ -21,7 +19,6 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
 use super::position::CompositeTypeDefinitionPosition;
-use super::position::InterfaceFieldDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
@@ -286,15 +283,11 @@ impl SubgraphMetadata {
                 if let Some((context, selection)) = parse_context(field_value) {
                     if let Some(entry_point) = entry_points.get(context) {
                         for context_type in entry_point {
-                            let field_set = Parser::new().parse_field_set(
-                                Valid::assume_valid_ref(schema.schema()),
+                            used_fields.extend(collect_target_fields_from_field_set(
+                                unwrap_schema(schema),
                                 context_type.type_name().clone(),
                                 selection,
-                                "TBD.graphql",
-                            )?;
-                            let mut visitor = UsedFieldCollector::new(schema.schema());
-                            visitor.visit_field_set(&field_set);
-                            used_fields.extend(visitor.used_fields.drain());
+                            )?);
                         }
                     }
                 }
@@ -310,12 +303,17 @@ impl SubgraphMetadata {
     ) -> Result<(), FederationError> {
         for ty in schema.schema().types.values() {
             if let ExtendedType::Interface(itf) = ty {
+                let possible_runtime_types: Vec<_> = schema
+                    .schema()
+                    .implementers_map()
+                    .get(&itf.name)
+                    .map_or(&Default::default(), |impls| &impls.objects)
+                    .iter()
+                    .filter_map(|ty| schema.schema().get_object(ty))
+                    .collect();
+
                 for field_name in itf.fields.keys() {
-                    let possible_runtime_types = itf
-                        .implements_interfaces
-                        .iter()
-                        .filter_map(|ty| schema.schema().get_object(ty));
-                    for object_type in possible_runtime_types {
+                    for object_type in &possible_runtime_types {
                         used_fields.insert(FieldDefinitionPosition::Object(
                             ObjectFieldDefinitionPosition {
                                 type_name: object_type.name.clone(),
@@ -328,96 +326,6 @@ impl SubgraphMetadata {
         }
 
         Ok(())
-    }
-}
-
-fn parse_context(input: &str) -> Option<(&str, &str)> {
-    let regex = Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$"#).expect("regex is valid");
-    let captures = regex.captures(input)?;
-    let context = captures.get(1)?;
-    let selection = captures.get(2)?;
-    Some((context.as_str(), selection.as_str()))
-}
-
-trait SelectionSetVisitor {
-    fn visit_field_set(&mut self, field_set: &apollo_compiler::executable::FieldSet) {
-        self.visit_selection_set(&field_set.selection_set);
-    }
-
-    fn visit_selection_set(&mut self, selection_set: &apollo_compiler::executable::SelectionSet);
-
-    fn visit_selection(
-        &mut self,
-        parent_ty: &Name,
-        selection: &apollo_compiler::executable::Selection,
-    );
-}
-
-struct UsedFieldCollector<'a> {
-    schema: &'a Schema,
-    used_fields: HashSet<FieldDefinitionPosition>,
-}
-
-impl<'a> UsedFieldCollector<'a> {
-    fn new(schema: &'a Schema) -> Self {
-        Self {
-            schema,
-            used_fields: HashSet::new(),
-        }
-    }
-}
-
-impl<'a> SelectionSetVisitor for UsedFieldCollector<'a> {
-    fn visit_selection_set(&mut self, selection_set: &apollo_compiler::executable::SelectionSet) {
-        for selection in selection_set.selections.iter() {
-            self.visit_selection(&selection_set.ty, selection);
-        }
-    }
-
-    fn visit_selection(
-        &mut self,
-        parent_ty: &Name,
-        selection: &apollo_compiler::executable::Selection,
-    ) {
-        match selection {
-            apollo_compiler::executable::Selection::Field(field) => {
-                if let Some(interface_type) = self.schema.get_interface(parent_ty) {
-                    self.used_fields.insert(FieldDefinitionPosition::Interface(
-                        InterfaceFieldDefinitionPosition {
-                            type_name: parent_ty.clone(),
-                            field_name: field.name.clone(),
-                        },
-                    ));
-                    // TODO: This is used in handling context directive usages, but it may duplicate other logic
-                    // to record all runtime implementer types. Check if this can be removed (ie. if it's duplicated in all paths)
-                    let possible_runtime_types = interface_type
-                        .implements_interfaces
-                        .iter()
-                        .filter_map(|ty| self.schema.get_object(ty));
-                    for object_type in possible_runtime_types {
-                        self.used_fields.insert(FieldDefinitionPosition::Object(
-                            ObjectFieldDefinitionPosition {
-                                type_name: object_type.name.clone(),
-                                field_name: field.name.clone(),
-                            },
-                        ));
-                    }
-                } else {
-                    self.used_fields.insert(FieldDefinitionPosition::Object(
-                        ObjectFieldDefinitionPosition {
-                            type_name: parent_ty.clone(),
-                            field_name: field.name.clone(),
-                        },
-                    ));
-                }
-            }
-            apollo_compiler::executable::Selection::FragmentSpread(_node) => {
-                todo!("Context won't have fragments")
-            }
-            apollo_compiler::executable::Selection::InlineFragment(_node) => {
-                todo!("Context won't have fragments")
-            }
-        }
     }
 }
 
@@ -610,7 +518,7 @@ mod tests {
     use crate::schema::FederationSchema;
 
     #[test]
-    fn interface_implementers_are_used_fields() {
+    fn used_fields() {
         let schema_str = include_str!("fixtures/used_fields.graphqls");
         let schema = apollo_compiler::Schema::parse(schema_str, "used_fields.graphqls")
             .expect("valid schema");
@@ -620,6 +528,23 @@ mod tests {
             .expect("valid federation schema");
         let meta = fed_schema.subgraph_metadata().expect("has metadata");
 
+        assert_eq!(
+            meta.used_fields.len(),
+            6,
+            "ensuring we counted the correct fields in {:?}",
+            meta.used_fields
+        );
+
+        // Fields that can satisfy interface constraints are used
         assert!(meta.is_field_used("O1", "a"));
+
+        // Fields required by @requires are used
+        assert!(meta.is_field_used("O2", "isRequired"));
+        assert!(meta.is_field_used("O2", "isAlsoRequired"));
+
+        // Fields that are part of a @key are used
+        assert!(meta.is_field_used("O3", "keyField1"));
+        assert!(meta.is_field_used("O3", "subKey"));
+        assert!(meta.is_field_used("O3SubKey", "keyField2"))
     }
 }
