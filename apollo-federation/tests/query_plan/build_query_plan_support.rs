@@ -68,7 +68,7 @@ macro_rules! assert_plan {
         .expect("valid graphql document");
         let plan = $planner.build_query_plan(&document, None, $options).expect("query plan generated");
         insta::assert_snapshot!(plan, @$expected);
-        // temporary workaround for FED-508 and FED-509
+        // temporary workaround for correctness errors such as FED-515
         if $validate_correctness {
             apollo_federation::correctness::check_plan($planner.api_schema(), $planner.supergraph_schema(), $planner.subgraph_schemas(), &document, &plan).expect("generated correct plan");
         }

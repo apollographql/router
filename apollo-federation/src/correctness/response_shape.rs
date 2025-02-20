@@ -394,6 +394,10 @@ impl Literal {
 pub struct Clause(Vec<Literal>);
 
 impl Clause {
+    pub fn literals(&self) -> &[Literal] {
+        &self.0
+    }
+
     pub fn is_always_true(&self) -> bool {
         self.0.is_empty()
     }
@@ -438,6 +442,8 @@ impl Clause {
         Clause(buf)
     }
 
+    /// `self` ∧ `other` (logical conjunction of clauses, which is also set-union)
+    /// - Returns None if there is a conflict.
     pub fn concatenate(&self, other: &Clause) -> Option<Clause> {
         let mut variables: IndexMap<Name, bool> = IndexMap::default();
         // Assume that `self` has no conflicts.
@@ -449,6 +455,33 @@ impl Clause {
             let entry = variables.entry(var.clone()).or_insert(lit.polarity());
             if *entry != lit.polarity() {
                 return None; // conflict
+            }
+        }
+        Some(Self::from_variable_map(&variables))
+    }
+
+    /// `self` - `other` (set subtraction)
+    /// - Returns None if `self` and `other` are conflicting.
+    pub fn subtract(&self, other: &Clause) -> Option<Clause> {
+        let mut other_variables: IndexMap<Name, bool> = IndexMap::default();
+        for lit in &other.0 {
+            other_variables.insert(lit.variable().clone(), lit.polarity());
+        }
+
+        let mut variables: IndexMap<Name, bool> = IndexMap::default();
+        for lit in &self.0 {
+            let var = lit.variable();
+            if let Some(pol) = other_variables.get(var) {
+                if *pol == lit.polarity() {
+                    // Match => Skip `lit`
+                    continue;
+                } else {
+                    // Conflict
+                    return None;
+                }
+            } else {
+                // Keep `lit`
+                variables.insert(var.clone(), lit.polarity());
             }
         }
         Some(Self::from_variable_map(&variables))
@@ -657,6 +690,14 @@ impl DefinitionVariant {
 
     pub fn sub_selection_response_shape(&self) -> Option<&ResponseShape> {
         self.sub_selection_response_shape.as_ref()
+    }
+
+    pub fn with_updated_clause(&self, boolean_clause: Clause) -> Self {
+        DefinitionVariant {
+            boolean_clause,
+            representative_field: self.representative_field.clone(),
+            sub_selection_response_shape: self.sub_selection_response_shape.clone(),
+        }
     }
 
     pub fn with_updated_sub_selection_response_shape(&self, new_shape: ResponseShape) -> Self {

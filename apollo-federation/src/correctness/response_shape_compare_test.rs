@@ -80,6 +80,19 @@ fn compare_operation_docs(this: &str, other: &str) -> Result<(), CorrectnessErro
     compare_operations(&schema, &this_op, &other_op)
 }
 
+fn assert_compare_operation_docs(this: &str, other: &str) {
+    if let Err(err) = compare_operation_docs(this, other) {
+        match err {
+            CorrectnessError::FederationError(err) => {
+                panic!("{err}");
+            }
+            CorrectnessError::ComparisonError(err) => {
+                panic!("compare_operation_docs failed: {err}");
+            }
+        }
+    }
+}
+
 #[test]
 fn test_basic_pass() {
     let x = r#"
@@ -154,4 +167,176 @@ fn test_implied_condition2() {
         }
     "#;
     compare_operation_docs(x, y).unwrap();
+}
+
+#[test]
+fn test_boolean_condition_case_split_basic() {
+    // x.test_i has no Boolean conditions.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // x.test_i has multiple variants split over one variable.
+    let y = r#"
+        query($v0: Boolean!) {
+            test_i {
+                id @include(if: $v0)
+                id @skip(if: $v0)
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_boolean_condition_case_split_1() {
+    // x.test_i has no Boolean conditions.
+    let x = r#"
+        query {
+            test_i {
+                id
+            }
+        }
+    "#;
+    // x.test_i has multiple variants split over one variable.
+    let y = r#"
+        query($v0: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+            }
+            test_i @skip(if: $v0) {
+                id
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_boolean_condition_case_split_2() {
+    // x.test_i has a condition with one variable.
+    let x = r#"
+        query($v0: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+                data(arg: 0)
+                data1: data(arg: 1)
+            }
+        }
+    "#;
+    // y.test_i has multiple variants split over two variables.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!) {
+            test_i {
+                id
+            }
+            test_i @include(if: $v0) {
+                data(arg: 0)
+            }
+            ... @include(if: $v1) {
+                test_i @include(if: $v0) {
+                    data1: data(arg: 1)
+                    data2: data(arg: 2) # irrelevant
+                }
+            }
+            test_i @include(if: $v0) @skip(if: $v1) {
+                data1: data(arg: 1)
+                data3: data(arg: 3) # irrelevant
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_boolean_condition_case_split_3() {
+    // x.test_i has no Boolean conditions.
+    let x = r#"
+        query {
+            test_i {
+                id
+                data(arg: 0)
+            }
+        }
+    "#;
+    // y.test_i has multiple variants split over one variable at different levels.
+    let y = r#"
+        query($v0: Boolean!) {
+            test_i {
+                id
+            }
+            test_i @include(if: $v0) {
+                data(arg: 0)
+            }
+            test_i {
+                data(arg: 0) @skip(if: $v0)
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_boolean_condition_case_split_4() {
+    // x.test_i has no Boolean conditions.
+    let x = r#"
+        query {
+            test_j {
+                object(id: "1") {
+                    data(arg: 0)
+                }
+            }
+        }
+    "#;
+    // y.test_i has multiple variants split over one variable at different non-consecutive levels.
+    let y = r#"
+        query($v0: Boolean!) {
+            test_j @include(if: $v0) {
+                object(id: "1") {
+                    data(arg: 0)
+                }
+            }
+            test_j {
+                object(id: "1") {
+                    data(arg: 0) @skip(if: $v0)
+                }
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
+}
+
+#[test]
+fn test_boolean_condition_case_split_5() {
+    // x.test_i has a condition with one variable.
+    let x = r#"
+        query($v0: Boolean!) {
+            test_i @include(if: $v0) {
+                id
+                data(arg: 0)
+                data1: data(arg: 1)
+            }
+        }
+    "#;
+    // y.test_i has multiple variants split over two variables.
+    let y = r#"
+        query($v0: Boolean!, $v1: Boolean!) {
+            test_i {
+                id
+            }
+            test_i @include(if: $v0) {
+                data(arg: 0)
+            }
+            test_i @include(if: $v0) {
+                data1: data(arg: 1) @include(if: $v1)
+            }
+            test_i @include(if: $v0) @skip(if: $v1) {
+                data1: data(arg: 1)
+            }
+        }
+    "#;
+    assert_compare_operation_docs(x, y);
 }
