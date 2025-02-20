@@ -592,7 +592,6 @@ impl CacheService {
                 {
                     ControlFlow::Break(response) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
-                        // Needed for the surrogate cache key feature
                         let _ = response.context.insert(
                             CacheMetricContextKey::new(response.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
@@ -601,7 +600,6 @@ impl CacheService {
                     }
                     ControlFlow::Continue((request, mut root_cache_key)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
-                        // Needed for the surrogate cache key feature
                         let _ = request.context.insert(
                             CacheMetricContextKey::new(request.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
@@ -1091,6 +1089,7 @@ async fn cache_store_root_from_response(
         if response.response.body().errors.is_empty() && cache_control.should_store() {
             let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
+            // Needed for surrogate cache key
             if expose_keys_in_context {
                 let response_id = response.id.clone();
                 let cache_control_header = cache_control.to_cache_control_header()?;
@@ -1225,6 +1224,7 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
 }
 
 // XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
+// FIXME (bnjjj): same question?! Could it be because it's operation_name coming in request body vs the one in the query itself ?
 // This function can be removed outright later at the cost of invalidating all entity caches.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
@@ -1246,6 +1246,7 @@ pub(crate) fn hash_additional_data(
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
+    // FIXME (bnjjj): I think we might also have ordering issue here ?
     digest.update(serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
@@ -1253,6 +1254,7 @@ pub(crate) fn hash_additional_data(
 
     digest.update(serde_json::to_vec(cache_key).unwrap());
 
+    // FIXME (bnjjj): not sure to understand this part ?!
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data.get("all") {
             digest.update(serde_json::to_vec(v).unwrap())
@@ -1294,9 +1296,7 @@ fn extract_cache_key_root(
     // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
-    let mut key = String::new();
-    let _ = write!(
-        &mut key,
+    let mut key = format!(
         "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
@@ -1311,6 +1311,7 @@ fn extract_cache_key_root(
 // build a list of keys to get from the cache in one query
 fn extract_cache_keys(
     subgraph_name: &str,
+    // FIXME (bnjjj): is query_hash the hash of supergraph query or subgraph ?
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
@@ -1319,7 +1320,7 @@ fn extract_cache_keys(
     private_id: Option<&str>,
 ) -> Result<Vec<String>, BoxError> {
     // hash the query and operation name
-    // FIXME: Why don't we have duplicates here ? QueryHash already contains query_text and we're hashing query with subgraph request body ?!
+    // FIXME: Why do we have duplicates here ? QueryHash already contains query_text and we're hashing query with subgraph request body ?!
     let query_hash = hash_query(query_hash, body);
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context, cache_key);
@@ -1330,7 +1331,7 @@ fn extract_cache_keys(
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
 
-    let mut res = Vec::new();
+    let mut res = Vec::with_capacity(representations.len());
     for representation in representations {
         let opt_type = representation
             .as_object_mut()
@@ -1350,8 +1351,7 @@ fn extract_cache_keys(
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-        let mut key = String::new();
-        let _ = write!(&mut key, "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}");
+        let mut key = format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}");
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
