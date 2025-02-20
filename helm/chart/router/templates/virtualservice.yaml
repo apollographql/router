@@ -3,7 +3,6 @@
 {{- $svcPort := .Values.service.port -}}
 {{- $hostName := printf "%s.%s.svc.cluster.local" $fullName .Release.Namespace }}
 
-{{ if .Values.virtualservice.enabled }}
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
@@ -53,5 +52,4 @@ spec:
     {{- toYaml .Values.virtualservice.http.additionals | nindent 4 }}
   {{- end }}
   {{- end }}
-{{- end }}
 {{- end }}
