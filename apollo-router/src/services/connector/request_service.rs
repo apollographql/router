@@ -41,7 +41,6 @@ use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::Plugins;
 use crate::Context;
 
@@ -274,21 +273,24 @@ impl tower::Service<Request> for ConnectorRequestService {
                     TransportRequest::Http(http_request) => {
                         debug_request = http_request.debug;
 
-                        let http_request = log_request(
-                            http_request.inner,
+                        log_request(
+                            &http_request.inner,
                             log_request_level,
                             &request.connector.id.label,
-                        )
-                        .await?;
+                        );
 
                         if let Some(http_client_service_factory) = http_client_service_factory
                             .get(&request.service_name)
                             .cloned()
                         {
+                            let (parts, body) = http_request.inner.into_parts();
+                            let final_request =
+                                http::Request::from_parts(parts, router::body::from_bytes(body));
+
                             http_client_service_factory
                                 .create(&original_subgraph_name)
                                 .oneshot(crate::services::http::HttpRequest {
-                                    http_request,
+                                    http_request: final_request,
                                     context: request.context.clone(),
                                 })
                                 .await
@@ -325,20 +327,18 @@ impl tower::Service<Request> for ConnectorRequestService {
 }
 
 /// Log an event for this request, if configured
-async fn log_request(
-    request: http::Request<RouterBody>,
+fn log_request(
+    request: &http::Request<String>,
     log_request_level: Option<EventLevel>,
     label: &str,
-) -> Result<http::Request<RouterBody>, BoxError> {
+) {
     if let Some(level) = log_request_level {
-        let (parts, body) = request.into_parts();
-
         let mut attrs = Vec::with_capacity(5);
 
         #[cfg(test)]
         let headers = {
-            let mut headers: IndexMap<String, http::HeaderValue> = parts
-                .headers
+            let mut headers: IndexMap<String, http::HeaderValue> = request
+                .headers()
                 .clone()
                 .into_iter()
                 .filter_map(|(name, val)| Some((name?.to_string(), val)))
@@ -347,7 +347,7 @@ async fn log_request(
             headers
         };
         #[cfg(not(test))]
-        let headers = parts.headers.clone();
+        let headers = request.headers().clone();
 
         attrs.push(KeyValue::new(
             HTTP_REQUEST_HEADERS,
@@ -355,24 +355,19 @@ async fn log_request(
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_METHOD,
-            opentelemetry::Value::String(parts.method.as_str().to_string().into()),
+            opentelemetry::Value::String(request.method().as_str().to_string().into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_URI,
-            opentelemetry::Value::String(format!("{}", parts.uri).into()),
+            opentelemetry::Value::String(format!("{}", request.uri()).into()),
         ));
         attrs.push(KeyValue::new(
             HTTP_REQUEST_VERSION,
-            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
         ));
-        let body_bytes = router::body::into_bytes(body).await?;
         attrs.push(KeyValue::new(
             HTTP_REQUEST_BODY,
-            opentelemetry::Value::String(
-                String::from_utf8(body_bytes.clone().to_vec())
-                    .unwrap_or_default()
-                    .into(),
-            ),
+            opentelemetry::Value::String(request.body().clone().into()),
         ));
         log_event(
             level,
@@ -380,13 +375,6 @@ async fn log_request(
             attrs,
             &format!("Request to connector {label:?}"),
         );
-
-        Ok(http::Request::<RouterBody>::from_parts(
-            parts,
-            router::body::from_bytes(body_bytes),
-        ))
-    } else {
-        Ok(request)
     }
 }
 

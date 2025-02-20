@@ -4,7 +4,6 @@ use serde::Serialize;
 use serde_json_bytes::json;
 
 use crate::plugins::connectors::mapping::Problem;
-use crate::services::router::body::RouterBody;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct ConnectorContext {
@@ -124,7 +123,7 @@ struct ConnectorDebugSelection {
 }
 
 pub(crate) fn serialize_request(
-    req: &http::Request<RouterBody>,
+    req: &http::Request<String>,
     kind: String,
     json_body: Option<&serde_json_bytes::Value>,
     selection_data: Option<SelectionData>,
