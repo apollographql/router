@@ -304,7 +304,7 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 
 The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
 
-Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's off by default.
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `otlp_tracing_sampler` (or `experimental_otlp_tracing_sampler` prior to v1.61) flag, and it's off by default.
 
 Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
 
