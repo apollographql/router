@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexSet;
@@ -87,6 +88,20 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
     pub(crate) override_conditions: EnabledOverrideConditions,
+    pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+}
+
+impl QueryPlanningParameters<'_> {
+    pub(crate) fn check_cancellation(&self) -> Result<(), SingleFederationError> {
+        if let Some(check) = self.check_for_cooperative_cancellation {
+            match check() {
+                ControlFlow::Continue(()) => Ok(()),
+                ControlFlow::Break(()) => Err(SingleFederationError::PlanningCancelled),
+            }
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub(crate) struct QueryPlanningTraversal<'a, 'b> {
@@ -339,6 +354,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while !self.open_branches.is_empty() {
+            self.parameters.check_cancellation()?;
             snapshot!(
                 "OpenBranches",
                 snapshot_helper::open_branches_to_string(&self.open_branches),
@@ -1130,6 +1146,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             statistics: self.parameters.statistics,
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
+            check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,

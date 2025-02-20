@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::ops::ControlFlow;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -170,8 +171,8 @@ pub struct QueryPlanningStatistics {
     pub evaluated_plan_paths: Cell<usize>,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct QueryPlanOptions {
+#[derive(Default, Clone)]
+pub struct QueryPlanOptions<'a> {
     /// A set of labels which will be used _during query planning_ to
     /// enable/disable edges with a matching label in their override condition.
     /// Edges with override conditions require their label to be present or absent
@@ -179,6 +180,24 @@ pub struct QueryPlanOptions {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
+
+    pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+}
+
+impl std::fmt::Debug for QueryPlanOptions<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryPlanOptions")
+            .field("override_conditions", &self.override_conditions)
+            .field(
+                "check_for_cooperative_cancellation",
+                if self.check_for_cooperative_cancellation.is_some() {
+                    &"Some(...)"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -414,6 +433,7 @@ impl QueryPlanner {
             override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
                 options.override_conditions,
             )),
+            check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
         };
 
