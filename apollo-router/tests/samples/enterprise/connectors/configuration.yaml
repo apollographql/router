@@ -3,12 +3,10 @@ override_subgraph_url:
 include_subgraph_errors:
   all: true
 
-preview_connectors:
-  subgraphs:
-    connectors:
-      sources:
-        jsonPlaceholder:
-          override_url: http://localhost:4007
+connectors:
+  sources:
+    connectors.jsonPlaceholder:
+      override_url: http://localhost:4007
 
 telemetry:
   exporters:

@@ -9,12 +9,10 @@ demand_control:
       list_size: 1
       max: 100
 
-preview_connectors:
-  subgraphs:
-    connectors:
-      sources:
-        jsonPlaceholder:
-          override_url: http://localhost:4008
+connectors:
+  sources:
+    connectors.jsonPlaceholder:
+      override_url: http://localhost:4008
 
 telemetry:
   exporters:

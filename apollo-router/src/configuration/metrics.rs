@@ -402,7 +402,7 @@ impl InstrumentData {
 
         populate_config_instrument!(
             apollo.router.config.connectors,
-            "$.preview_connectors",
+            "$.connectors",
             opt.debug_extensions,
             "$[?(@.debug_extensions == true)]",
             opt.expose_sources_in_context,

@@ -1075,9 +1075,9 @@ impl Operation {
                         .as_ref()
                         .and_then(|v| parse_hir_value(v)),
                 };
-                Ok((name, variable))
+                (name, variable)
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         Ok(Operation {
             selection_set,
