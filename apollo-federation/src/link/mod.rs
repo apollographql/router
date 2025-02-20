@@ -206,7 +206,7 @@ impl Import {
         }
     }
 
-    pub fn element_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn element_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: &self.element,
             is_directive: self.is_directive,
@@ -217,7 +217,7 @@ impl Import {
         self.alias.as_ref().unwrap_or(&self.element)
     }
 
-    pub fn imported_display_name(&self) -> impl fmt::Display + '_ {
+    pub fn imported_display_name(&self) -> impl fmt::Display {
         DisplayName {
             name: self.imported_name(),
             is_directive: self.is_directive,

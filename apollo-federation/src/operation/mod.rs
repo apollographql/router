@@ -2424,7 +2424,7 @@ fn compute_aliases_for_non_merging_fields(
     let mut seen_response_names: IndexMap<Name, SeenResponseName> = IndexMap::default();
 
     // - `s.selections` must be fragment-spread-free.
-    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
+    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> {
         s.selections.iter().flat_map(|s2| {
             s2.fields_in_set()
                 .into_iter()

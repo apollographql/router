@@ -486,7 +486,7 @@ fn parse_url<Coordinate: Display + Copy>(
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
-) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> + 'a {
+) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> {
     object
         .directives
         .iter()

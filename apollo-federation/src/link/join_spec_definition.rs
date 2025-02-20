@@ -189,7 +189,7 @@ impl JoinSpecDefinition {
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find join spec in schema".to_owned(),
             })?;
-        if let ExtendedType::Enum(ref type_) = type_ {
+        if let ExtendedType::Enum(type_) = type_ {
             Ok(type_)
         } else {
             Err(SingleFederationError::Internal {

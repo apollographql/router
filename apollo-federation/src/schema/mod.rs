@@ -78,7 +78,7 @@ impl FederationSchema {
     }
 
     /// Returns all the types in the schema, minus builtins.
-    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> + '_ {
+    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> {
         self.schema
             .types
             .iter()
@@ -102,7 +102,7 @@ impl FederationSchema {
 
     pub(crate) fn get_directive_definitions(
         &self,
-    ) -> impl Iterator<Item = DirectiveDefinitionPosition> + '_ {
+    ) -> impl Iterator<Item = DirectiveDefinitionPosition> {
         self.schema
             .directive_definitions
             .keys()

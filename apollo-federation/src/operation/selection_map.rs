@@ -235,7 +235,7 @@ pub(crate) type IntoValues = std::vec::IntoIter<Selection>;
 /// matches the given key.
 ///
 /// The returned function panics if the index is out of bounds.
-fn key_eq<'a>(selections: &'a [Selection], key: SelectionKey<'a>) -> impl Fn(&Bucket) -> bool + 'a {
+fn key_eq(selections: &[Selection], key: SelectionKey<'_>) -> impl Fn(&Bucket) -> bool {
     move |bucket| selections[bucket.index].key() == key
 }
 
