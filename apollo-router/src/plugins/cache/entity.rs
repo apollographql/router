@@ -1240,6 +1240,7 @@ pub(crate) fn hash_additional_data(
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
+    body.variables.sort_keys();
     digest.update(serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
