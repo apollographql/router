@@ -1,5 +1,6 @@
 //! Environment variable expansion in the configuration file
 
+use std::collections::HashMap;
 use std::env;
 use std::env::VarError;
 use std::fs;
@@ -17,6 +18,8 @@ pub(crate) struct Expansion {
     prefix: Option<String>,
     supported_modes: Vec<String>,
     override_configs: Vec<Override>,
+    #[cfg(test)]
+    mocked_env_vars: HashMap<String, String>,
 }
 
 #[derive(buildstructor::Builder, Clone)]
@@ -29,6 +32,8 @@ pub(crate) struct Override {
     value: Option<Value>,
     /// The type of the value, used to coerce env variables.
     value_type: ValueType,
+    #[cfg(test)]
+    mocked_env_vars: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -42,15 +47,18 @@ pub(crate) enum ValueType {
 impl Override {
     fn value(&self) -> Option<Value> {
         // Order of precedence is:
-        // 1. If the env variable is set, use that
-        // 2. If the override is set, use that
-        // 3. Don't change the config
-        match (
-            self.env_name
-                .as_ref()
-                .and_then(|name| std::env::var(name).ok()),
-            self.value.clone(),
-        ) {
+        // 1. In tests only, if the mocked env variable is set, use that
+        // 2. If the env variable is set, use that
+        // 3. If the override is set, use that
+        // 4. Don't change the config
+        let env_value = self.env_name.as_ref().and_then(|name| {
+            #[cfg(test)]
+            if let Some(value) = self.mocked_env_vars.get(name) {
+                return Some(value.clone());
+            }
+            std::env::var(name).ok()
+        });
+        match (env_value, self.value.clone()) {
             (Some(value), _) => {
                 // Coerce the env variable into the correct format, otherwise let it through as a string
                 let parsed = Value::from_str(&value);
@@ -67,8 +75,16 @@ impl Override {
     }
 }
 
+#[buildstructor::buildstructor]
 impl Expansion {
     pub(crate) fn default() -> Result<Self, ConfigurationError> {
+        Self::default_builder().build()
+    }
+
+    #[builder]
+    pub(crate) fn default_new(
+        #[cfg_attr(not(test), allow(unused))] mocked_env_vars: HashMap<String, String>,
+    ) -> Result<Self, ConfigurationError> {
         let prefix = Expansion::prefix_from_env()?;
 
         let supported_expansion_modes = match env::var("APOLLO_ROUTER_CONFIG_SUPPORTED_MODES") {
@@ -90,7 +106,10 @@ impl Expansion {
             Vec::new()
         };
 
-        Ok(Expansion::builder()
+        let builder = Expansion::builder();
+        #[cfg(test)]
+        let builder = builder.mocked_env_vars(mocked_env_vars);
+        Ok(builder
             .and_prefix(prefix)
             .supported_modes(supported_modes)
             .override_config(
@@ -211,14 +230,22 @@ impl Expansion {
 
     pub(crate) fn expand_env(&self, key: &str) -> Result<Option<String>, ConfigurationError> {
         match self.prefix.as_ref() {
-            None => env::var(key),
-            Some(prefix) => env::var(format!("{prefix}_{key}")),
+            None => self.get_env(key),
+            Some(prefix) => self.get_env(&format!("{prefix}_{key}")),
         }
         .map(Some)
         .map_err(|cause| ConfigurationError::CannotExpandVariable {
             key: key.to_string(),
             cause: format!("{cause}"),
         })
+    }
+
+    fn get_env(&self, name: &str) -> Result<String, std::env::VarError> {
+        #[cfg(test)]
+        if let Some(value) = self.mocked_env_vars.get(name) {
+            return Ok(value.clone());
+        }
+        env::var(name)
     }
 
     pub(crate) fn expand(
@@ -306,10 +333,10 @@ mod test {
 
     #[test]
     fn test_override_precedence() {
-        std::env::set_var("TEST_OVERRIDE", "env_override");
         assert_eq!(
             None,
             Override::builder()
+                .mocked_env_var("TEST_OVERRIDE", "env_override")
                 .config_path("")
                 .value_type(ValueType::String)
                 .build()
@@ -318,6 +345,7 @@ mod test {
         assert_eq!(
             None,
             Override::builder()
+                .mocked_env_var("TEST_OVERRIDE", "env_override")
                 .config_path("")
                 .env_name("NON_EXISTENT")
                 .value_type(ValueType::String)
@@ -327,6 +355,7 @@ mod test {
         assert_eq!(
             Some(Value::String("override".to_string())),
             Override::builder()
+                .mocked_env_var("TEST_OVERRIDE", "env_override")
                 .config_path("")
                 .env_name("NON_EXISTENT")
                 .value("override")
@@ -337,6 +366,7 @@ mod test {
         assert_eq!(
             Some(Value::String("override".to_string())),
             Override::builder()
+                .mocked_env_var("TEST_OVERRIDE", "env_override")
                 .config_path("")
                 .value("override")
                 .value_type(ValueType::String)
@@ -346,6 +376,7 @@ mod test {
         assert_eq!(
             Some(Value::String("env_override".to_string())),
             Override::builder()
+                .mocked_env_var("TEST_OVERRIDE", "env_override")
                 .config_path("")
                 .env_name("TEST_OVERRIDE")
                 .value("override")
@@ -357,14 +388,10 @@ mod test {
 
     #[test]
     fn test_type_coercion() {
-        std::env::set_var("TEST_DEFAULTED_STRING_VAR", "overridden_string");
-        std::env::set_var("TEST_DEFAULTED_NUMERIC_VAR", "1");
-        std::env::set_var("TEST_DEFAULTED_BOOL_VAR", "true");
-        std::env::set_var("TEST_DEFAULTED_INCORRECT_TYPE", "true");
-
         assert_eq!(
             Some(Value::String("overridden_string".to_string())),
             Override::builder()
+                .mocked_env_var("TEST_DEFAULTED_STRING_VAR", "overridden_string")
                 .config_path("")
                 .env_name("TEST_DEFAULTED_STRING_VAR")
                 .value_type(ValueType::String)
@@ -374,6 +401,7 @@ mod test {
         assert_eq!(
             Some(Value::Number(1.into())),
             Override::builder()
+                .mocked_env_var("TEST_DEFAULTED_NUMERIC_VAR", "1")
                 .config_path("")
                 .env_name("TEST_DEFAULTED_NUMERIC_VAR")
                 .value_type(ValueType::Number)
@@ -383,6 +411,7 @@ mod test {
         assert_eq!(
             Some(Value::Bool(true)),
             Override::builder()
+                .mocked_env_var("TEST_DEFAULTED_BOOL_VAR", "true")
                 .config_path("")
                 .env_name("TEST_DEFAULTED_BOOL_VAR")
                 .value_type(ValueType::Bool)
@@ -392,6 +421,7 @@ mod test {
         assert_eq!(
             Some(Value::String("true".to_string())),
             Override::builder()
+                .mocked_env_var("TEST_DEFAULTED_INCORRECT_TYPE", "true")
                 .config_path("")
                 .env_name("TEST_DEFAULTED_INCORRECT_TYPE")
                 .value_type(ValueType::Number)
@@ -402,13 +432,14 @@ mod test {
 
     #[test]
     fn test_unprefixed() {
-        std::env::set_var("TEST_EXPANSION_VAR", "expanded");
-        std::env::set_var("TEST_OVERRIDDEN_VAR", "overridden");
-
         let expansion = Expansion::builder()
+            .mocked_env_var("TEST_EXPANSION_VAR", "expanded")
+            .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
             .supported_mode("env")
             .override_config(
                 Override::builder()
+                    .mocked_env_var("TEST_EXPANSION_VAR", "expanded")
+                    .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
                     .value("defaulted")
@@ -417,6 +448,8 @@ mod test {
             )
             .override_config(
                 Override::builder()
+                    .mocked_env_var("TEST_EXPANSION_VAR", "expanded")
+                    .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
                     .value("defaulted")
@@ -425,6 +458,8 @@ mod test {
             )
             .override_config(
                 Override::builder()
+                    .mocked_env_var("TEST_EXPANSION_VAR", "expanded")
+                    .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("overridden")
                     .env_name("TEST_OVERRIDDEN_VAR")
                     .value("defaulted")
@@ -442,14 +477,15 @@ mod test {
 
     #[test]
     fn test_prefixed() {
-        std::env::set_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded");
-        std::env::set_var("TEST_OVERRIDDEN_VAR", "overridden");
-
         let expansion = Expansion::builder()
+            .mocked_env_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded")
+            .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
             .prefix("TEST_PREFIX")
             .supported_mode("env")
             .override_config(
                 Override::builder()
+                    .mocked_env_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded")
+                    .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
                     .value("defaulted")
@@ -458,6 +494,8 @@ mod test {
             )
             .override_config(
                 Override::builder()
+                    .mocked_env_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded")
+                    .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
                     .value("defaulted")
@@ -466,6 +504,8 @@ mod test {
             )
             .override_config(
                 Override::builder()
+                    .mocked_env_var("TEST_PREFIX_TEST_EXPANSION_VAR", "expanded")
+                    .mocked_env_var("TEST_OVERRIDDEN_VAR", "overridden")
                     .config_path("overridden")
                     .env_name("TEST_OVERRIDDEN_VAR")
                     .value("defaulted")

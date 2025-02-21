@@ -342,15 +342,6 @@ cors:
 
 #[test]
 fn validate_project_config_files() {
-    std::env::set_var("DATADOG_AGENT_HOST", "http://example.com");
-    std::env::set_var("JAEGER_HOST", "http://example.com");
-    std::env::set_var("JAEGER_USERNAME", "username");
-    std::env::set_var("JAEGER_PASSWORD", "pass");
-    std::env::set_var("ZIPKIN_HOST", "http://example.com");
-    std::env::set_var("TEST_CONFIG_ENDPOINT", "http://example.com");
-    std::env::set_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com");
-    std::env::set_var("PARSER_MAX_RECURSION", "500");
-
     #[cfg(not(unix))]
     let filename_matcher = Regex::from_str("((.+[.])?router\\.yaml)|(.+\\.mdx)").unwrap();
     #[cfg(unix)]
@@ -401,7 +392,18 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                if let Err(e) = validate_yaml_configuration(&yaml, Expansion::default().unwrap()) {
+                let expansion = Expansion::default_builder()
+                    .mocked_env_var("DATADOG_AGENT_HOST", "http://example.com")
+                    .mocked_env_var("JAEGER_HOST", "http://example.com")
+                    .mocked_env_var("JAEGER_USERNAME", "username")
+                    .mocked_env_var("JAEGER_PASSWORD", "pass")
+                    .mocked_env_var("ZIPKIN_HOST", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_ENDPOINT", "http://example.com")
+                    .mocked_env_var("TEST_CONFIG_COLLECTOR_ENDPOINT", "http://example.com")
+                    .mocked_env_var("PARSER_MAX_RECURSION", "500")
+                    .build()
+                    .unwrap();
+                if let Err(e) = validate_yaml_configuration(&yaml, expansion) {
                     panic!(
                         "{} configuration error: \n{}",
                         entry.path().to_string_lossy(),
@@ -415,13 +417,16 @@ fn validate_project_config_files() {
 
 #[test]
 fn it_does_not_leak_env_variable_values() {
-    std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
     let error = validate_yaml_configuration(
         r#"
 supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
-        Expansion::default().unwrap(),
+        expansion,
     )
     .expect_err("Must have an error because we expect a boolean");
     insta::assert_snapshot!(error.to_string());
@@ -429,7 +434,10 @@ supergraph:
 
 #[test]
 fn line_precise_config_errors_with_inline_sequence_env_expansion() {
-    std::env::set_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
     let error = validate_yaml_configuration(
         r#"
 supergraph:
@@ -439,7 +447,7 @@ supergraph:
 cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
-        Expansion::default().unwrap(),
+        expansion,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -447,7 +455,10 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_sequence_env_expansion() {
-    std::env::set_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5");
+    let expansion = Expansion::default_builder()
+        .mocked_env_var("env.TEST_CONFIG_NUMERIC_ENV_UNIQUE", "5")
+        .build()
+        .unwrap();
 
     let error = validate_yaml_configuration(
         r#"
@@ -460,7 +471,7 @@ cors:
     - Content-Type
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
-        Expansion::default().unwrap(),
+        expansion,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -515,13 +526,13 @@ supergraph:
 
 #[test]
 fn expansion_prefixing() {
-    std::env::set_var("TEST_CONFIG_NEEDS_PREFIX", "true");
     validate_yaml_configuration(
         r#"
 supergraph:
   introspection: ${env.NEEDS_PREFIX}
         "#,
         Expansion::builder()
+            .mocked_env_var("TEST_CONFIG_NEEDS_PREFIX", "true")
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
