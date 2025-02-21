@@ -44,9 +44,6 @@ use crate::services::subgraph;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-use crate::services::connector::request_service::{
-    Request as ConnectorRequest, Response as ConnectorResponse,
-};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -160,8 +157,8 @@ impl From<ConnectorShaping> for SubgraphShaping {
                 global_rate_limit: value.global_rate_limit,
                 timeout: value.timeout,
                 experimental_http2: value.experimental_http2,
-                dns_resolution_strategy: value.dns_resolution_strategy
-            }
+                dns_resolution_strategy: value.dns_resolution_strategy,
+            },
         }
     }
 }
@@ -440,7 +437,11 @@ impl PluginPrivate for TrafficShaping {
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
         let all_config = self.config.all.as_ref();
-        let source_config = self.config.sources.get(&source_name).map(|connector_config|connector_config.clone().into());
+        let source_config = self
+            .config
+            .sources
+            .get(&source_name)
+            .map(|connector_config| connector_config.clone().into());
         let final_config = Self::merge_config(all_config, source_config.as_ref());
 
         if let Some(config) = final_config {
@@ -506,7 +507,7 @@ impl PluginPrivate for TrafficShaping {
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
                     req
-                })                
+                })
                 .buffered()
                 .service(service)
                 .boxed()
@@ -544,16 +545,17 @@ impl TrafficShaping {
         &self,
         source_name: &str,
     ) -> crate::configuration::shared::Client {
-        let source_config = self.config.sources.get(source_name).map(|connector_config|connector_config.clone().into());
-        Self::merge_config(
-            self.config.all.as_ref(),
-            source_config.as_ref(),
-        )
-        .map(|config| crate::configuration::shared::Client {
-            experimental_http2: config.shaping.experimental_http2,
-            dns_resolution_strategy: config.shaping.dns_resolution_strategy,
-        })
-        .unwrap_or_default()
+        let source_config = self
+            .config
+            .sources
+            .get(source_name)
+            .map(|connector_config| connector_config.clone().into());
+        Self::merge_config(self.config.all.as_ref(), source_config.as_ref())
+            .map(|config| crate::configuration::shared::Client {
+                experimental_http2: config.shaping.experimental_http2,
+                dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -571,6 +573,7 @@ mod test {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
+    use http::HeaderMap;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
@@ -586,8 +589,11 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::plugins::connectors::make_requests::ResponseKey;
+    use crate::plugins::connectors::mapping::Problem;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
+    use crate::services::connector::request_service::transport::http::HttpRequest;
+    use crate::services::connector::request_service::Request as ConnectorRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
@@ -744,6 +750,38 @@ mod test {
             .expect("Plugin not created")
     }
 
+    fn get_fake_connector_request(
+        context: Context,
+        connector: Arc<Connector>,
+        service_name: String,
+        key: ResponseKey,
+        headers: Option<HeaderMap<HeaderValue>>,
+        data: String,
+        mapping_problems: Vec<Problem>,
+    ) -> ConnectorRequest {
+        let mut request_builder = http::Request::builder();
+        if let Some(headers) = headers {
+            for (header_name, header_value) in headers.iter() {
+                request_builder = request_builder.header(header_name, header_value);
+            }
+        }
+        let request = request_builder.body(data).unwrap();
+
+        let http_request = HttpRequest {
+            inner: request,
+            debug: None,
+        };
+
+        ConnectorRequest {
+            context,
+            connector,
+            service_name,
+            transport_request: http_request.into(),
+            key,
+            mapping_problems,
+        }
+    }
+
     #[tokio::test]
     async fn it_returns_valid_response_for_deduplicated_variables() {
         let config = serde_yaml::from_str::<serde_json::Value>(
@@ -803,51 +841,60 @@ mod test {
         .unwrap();
 
         let plugin = get_traffic_shaping_plugin(&config).await;
-        let request = ConnectorRequest::test_builder().context(Context::default()).connector(Arc::new(Connector {
-            spec: ConnectSpec::V0_1,
-            id: ConnectId::new(
-                "test_subgraph".into(),
-                Some("test_sourcename".into()),
-                name!(Query),
-                name!(hello),
-                0,
-                "test label",
-            ),
-            transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+        let request = get_fake_connector_request(
+            Context::default(),
+            Arc::new(Connector {
+                spec: ConnectSpec::V0_1,
+                id: ConnectId::new(
+                    "test_subgraph".into(),
+                    Some("test_sourcename".into()),
+                    name!(Query),
+                    name!(hello),
+                    0,
+                    "test label",
+                ),
+                transport: HttpJsonTransport {
+                    source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                    connect_template: "/path".parse().unwrap(),
+                    method: HTTPMethod::Get,
+                    headers: Default::default(),
+                    body: Default::default(),
+                },
+                selection: JSONSelection::parse("$.data").unwrap(),
+                entity_resolver: None,
+                config: Default::default(),
+                max_requests: None,
+                request_variables: Default::default(),
+                response_variables: Default::default(),
+            }),
+            "test_subgraph.test_sourcename".into(),
+            ResponseKey::RootField {
+                name: "hello".to_string(),
+                inputs: Default::default(),
+                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
             },
-            selection: JSONSelection::parse("$.data").unwrap(),
-            entity_resolver: None,
-            config: Default::default(),
-            max_requests: None,
-            request_variables: Default::default(),
-            response_variables: Default::default(),
-        })).service_name("test_subgraph.test_sourcename").key(ResponseKey::RootField {
-            name: "hello".to_string(),
-            inputs: Default::default(),
-            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        }).data("testing".to_string()).build();
+            None,
+            "testing".to_string(),
+            Default::default(),
+        );
 
-        let test_service = MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
-            let TransportRequest::Http(ref http_request) = req.transport_request;
+        let test_service =
+            MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
+                let TransportRequest::Http(ref http_request) = req.transport_request;
 
-            assert_eq!(
-                http_request.inner
-                    .headers()
-                    .get(&CONTENT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip")
-            );
+                assert_eq!(
+                    http_request.inner.headers().get(&CONTENT_ENCODING).unwrap(),
+                    HeaderValue::from_static("gzip")
+                );
 
-            req
-        });
+                req
+            });
 
         let _response = plugin
-            .connector_request_service(test_service.boxed(), "test_subgraph.test_sourcename".to_string())
+            .connector_request_service(
+                test_service.boxed(),
+                "test_subgraph.test_sourcename".to_string(),
+            )
             .oneshot(request)
             .await
             .unwrap();

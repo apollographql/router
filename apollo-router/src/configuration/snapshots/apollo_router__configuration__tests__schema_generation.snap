@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1608,6 +1607,14 @@ snapshot_kind: text
           "description": "#/definitions/RouterShaping",
           "nullable": true
         },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorShaping",
+            "description": "#/definitions/ConnectorShaping"
+          },
+          "description": "Applied on specific subgraphs",
+          "type": "object"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphShaping",
@@ -2059,6 +2066,37 @@ snapshot_kind: text
           "type": "object"
         }
       ]
+    },
+    "ConnectorShaping": {
+      "additionalProperties": false,
+      "properties": {
+        "compression": {
+          "$ref": "#/definitions/Compression",
+          "description": "#/definitions/Compression",
+          "nullable": true
+        },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
+        "experimental_http2": {
+          "$ref": "#/definitions/Http2Config",
+          "description": "#/definitions/Http2Config",
+          "nullable": true
+        },
+        "global_rate_limit": {
+          "$ref": "#/definitions/RateLimitConf",
+          "description": "#/definitions/RateLimitConf",
+          "nullable": true
+        },
+        "timeout": {
+          "default": null,
+          "description": "Enable timeout for connectors requests",
+          "type": "string"
+        }
+      },
+      "type": "object"
     },
     "ConnectorSource": {
       "oneOf": [

@@ -68,6 +68,7 @@ pub(crate) struct Request {
     pub(crate) connector: Arc<Connector>,
 
     /// The service name for this connector
+    #[allow(dead_code)]
     pub(crate) service_name: String,
 
     /// The request to the underlying transport
@@ -78,42 +79,6 @@ pub(crate) struct Request {
 
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
-}
-
-#[buildstructor::buildstructor]
-impl Request {
-    #[builder(visibility = "pub")]
-    pub(crate) fn test_new(
-        context: Context,
-        connector: Arc<Connector>,
-        service_name: String,
-        key: ResponseKey,
-        headers: Option<HeaderMap<HeaderValue>>,
-        data: String,
-        mapping_problems: Vec<Problem>,
-    ) -> Self {
-        let mut request_builder = http::Request::builder();
-        if let Some(headers) = headers {
-            for (header_name, header_value) in headers.iter() {
-                request_builder = request_builder.header(header_name, header_value);
-            }
-        }
-        let request = request_builder.body(data).unwrap();
-
-        let http_request = HttpRequest {
-            inner: request,
-            debug: None,
-        };
-
-        Self {
-            context,
-            connector,
-            service_name,
-            transport_request: http_request.into(),
-            key,
-            mapping_problems,
-        }
-    }
 }
 
 /// Response type for a connector

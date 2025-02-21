@@ -1,5 +1,7 @@
 //! Mock connector implementation
 
+#![allow(missing_docs)] // FIXME
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
@@ -13,10 +15,9 @@ use tower::BoxError;
 use tower::Service;
 
 use crate::json_ext::Object;
+use crate::services::connector::request_service::Request as ConnectorRequest;
+use crate::services::connector::request_service::Response as ConnectorResponse;
 use crate::services::connector::request_service::TransportRequest;
-use crate::services::connector::request_service::{
-    Request as ConnectorRequest, Response as ConnectorResponse,
-};
 
 type MockResponses = HashMap<String, String>;
 
@@ -48,15 +49,6 @@ impl MockConnector {
         self.extensions = Some(extensions);
         self
     }
-
-    #[cfg(test)]
-    pub(crate) fn with_map_request<F>(mut self, map_request_fn: F) -> Self
-    where
-        F: (Fn(ConnectorRequest) -> ConnectorRequest) + Send + Sync + 'static,
-    {
-        self.map_request_fn = Some(Arc::new(map_request_fn));
-        self
-    }
 }
 
 /// Builder for `MockConnector`
@@ -76,7 +68,7 @@ impl MockConnectorBuilder {
     ///
     /// the arguments must deserialize to `crate::graphql::Request` and `crate::graphql::Response`
     pub fn with_json(mut self, request: serde_json::Value, response: serde_json::Value) -> Self {
-        let mut request = serde_json::from_value(request).unwrap();
+        let request = serde_json::from_value(request).unwrap();
         self.mocks
             .insert(request, serde_json::from_value(response).unwrap());
         self
