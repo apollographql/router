@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
 use apollo_compiler::Schema;
 
 use crate::error::FederationError;
@@ -33,24 +32,39 @@ fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
 pub(crate) struct SubgraphMetadata {
     federation_spec_definition: &'static FederationSpecDefinition,
     external_metadata: ExternalMetadata,
+    context_fields: IndexSet<FieldDefinitionPosition>,
+    interface_constraint_fields: IndexSet<FieldDefinitionPosition>,
+    key_fields: IndexSet<FieldDefinitionPosition>,
+    provided_fields: IndexSet<FieldDefinitionPosition>,
+    required_fields: IndexSet<FieldDefinitionPosition>,
     shareable_fields: IndexSet<FieldDefinitionPosition>,
-    used_fields: IndexSet<FieldDefinitionPosition>,
 }
 
+#[allow(dead_code)]
 impl SubgraphMetadata {
     pub(super) fn new(
         schema: &Valid<FederationSchema>,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
-        let shareable_fields =
-            Self::collect_shareable_fields(schema, federation_spec_definition, &external_metadata)?;
-        let used_fields = Self::collect_used_fields(schema, federation_spec_definition)?;
+        let context_fields =
+            Self::collect_fields_used_by_context_directive(schema, federation_spec_definition)?;
+        let interface_constraint_fields =
+            Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
+        let key_fields = Self::collect_key_fields(schema, federation_spec_definition)?;
+        let provided_fields = Self::collect_provided_fields(schema, federation_spec_definition)?;
+        let required_fields = Self::collect_required_fields(schema, federation_spec_definition)?;
+        let shareable_fields = Self::collect_shareable_fields(schema, federation_spec_definition)?;
+
         Ok(Self {
             federation_spec_definition,
             external_metadata,
+            context_fields,
+            interface_constraint_fields,
+            key_fields,
+            provided_fields,
+            required_fields,
             shareable_fields,
-            used_fields,
         })
     }
 
@@ -77,23 +91,27 @@ impl SubgraphMetadata {
     }
 
     pub(crate) fn is_field_fully_external(&self, field: &FieldDefinitionPosition) -> bool {
-        self.external_metadata().is_fully_external(field)
+        self.is_field_external(field) && self.provided_fields.contains(field)
     }
 
     pub(crate) fn is_field_partially_external(&self, field: &FieldDefinitionPosition) -> bool {
-        self.external_metadata().is_partially_external(field)
+        self.is_field_external(field) && !self.provided_fields.contains(field)
     }
 
     pub(crate) fn is_field_shareable(&self, field: &FieldDefinitionPosition) -> bool {
-        self.shareable_fields.contains(field)
+        self.key_fields.contains(field)
+            || self.shareable_fields.contains(field)
+            // Fed2 schemas reject provides on non-external field, but fed1 doesn't (at least not always).
+            // We call this on fed1 schema upgrader. So let's make sure we ignore non-external fields.
+            || (self.provided_fields.contains(field) && self.is_field_external(field))
     }
 
     pub(crate) fn is_field_used(&self, field: &FieldDefinitionPosition) -> bool {
-        self.used_fields.contains(field)
-    }
-
-    pub(crate) fn is_interface_object_type(&self, type_: Name) -> bool {
-        todo!()
+        self.context_fields.contains(field)
+            || self.interface_constraint_fields.contains(field)
+            || self.key_fields.contains(field)
+            || self.provided_fields.contains(field)
+            || self.required_fields.contains(field)
     }
 
     pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
@@ -101,80 +119,7 @@ impl SubgraphMetadata {
             .selects_any_external_field(selection)
     }
 
-    fn collect_shareable_fields(
-        schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
-        external_metadata: &ExternalMetadata,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut shareable_fields = IndexSet::default();
-        shareable_fields.extend(Self::collect_fields_used_by_key_directive(
-            schema,
-            federation_spec_definition,
-        )?);
-
-        shareable_fields.extend(
-            Self::collect_fields_used_by_provides_directive(schema, federation_spec_definition)?
-                .iter()
-                .cloned()
-                .filter(|f| external_metadata.is_external(f)),
-        );
-
-        // TODO: No shareable directive is used as a fed1/fed2 indicator in JS, so this case should probably just return the
-        // fields collected by the @key directive check
-        let shareable_directive_definition =
-            federation_spec_definition.shareable_directive_definition(schema)?;
-        let shareable_directive_referencers = schema
-            .referencers
-            .get_directive(&shareable_directive_definition.name)?;
-
-        // Fields of shareable object types are shareable
-        for object_type_position in &shareable_directive_referencers.object_types {
-            shareable_fields.extend(
-                object_type_position
-                    .fields(schema.schema())?
-                    .map(FieldDefinitionPosition::Object),
-            );
-        }
-
-        // Fields with @shareable directly applied are shareable
-        shareable_fields.extend(
-            shareable_directive_referencers
-                .object_fields
-                .iter()
-                .cloned()
-                .map(FieldDefinitionPosition::Object),
-        );
-
-        Ok(shareable_fields)
-    }
-
-    fn collect_used_fields(
-        schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut used_fields = IndexSet::default();
-        used_fields.extend(Self::collect_fields_used_by_key_directive(
-            schema,
-            federation_spec_definition,
-        )?);
-        used_fields.extend(Self::collect_fields_used_by_requires_directive(
-            schema,
-            federation_spec_definition,
-        )?);
-        used_fields.extend(Self::collect_fields_used_by_provides_directive(
-            schema,
-            federation_spec_definition,
-        )?);
-        used_fields.extend(Self::collect_fields_used_by_context_directive(
-            schema,
-            federation_spec_definition,
-        )?);
-        Self::collect_fields_used_to_satisfy_interface_constraints(schema, &mut used_fields)?;
-
-        Ok(used_fields)
-    }
-
-    fn collect_fields_used_by_key_directive(
+    fn collect_key_fields(
         schema: &Valid<FederationSchema>,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
@@ -214,36 +159,7 @@ impl SubgraphMetadata {
         Ok(key_fields)
     }
 
-    fn collect_fields_used_by_requires_directive(
-        schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
-    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let requires_directive_definition =
-            federation_spec_definition.requires_directive_definition(schema)?;
-        let requires_directive_referencers = schema
-            .referencers
-            .get_directive(&requires_directive_definition.name)?;
-
-        let mut required_fields = IndexSet::default();
-        for field_definition_position in &requires_directive_referencers.object_fields {
-            let directives = &field_definition_position.get(schema.schema())?.directives;
-            for requires_directive_application in
-                directives.get_all(&requires_directive_definition.name)
-            {
-                let requires_directive_arguments = federation_spec_definition
-                    .requires_directive_arguments(requires_directive_application)?;
-                required_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    field_definition_position.parent().type_name,
-                    requires_directive_arguments.fields,
-                )?);
-            }
-        }
-
-        Ok(required_fields)
-    }
-
-    fn collect_fields_used_by_provides_directive(
+    fn collect_provided_fields(
         schema: &Valid<FederationSchema>,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
@@ -273,23 +189,95 @@ impl SubgraphMetadata {
         Ok(provided_fields)
     }
 
+    fn collect_required_fields(
+        schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
+    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+        let requires_directive_definition =
+            federation_spec_definition.requires_directive_definition(schema)?;
+        let requires_directive_referencers = schema
+            .referencers
+            .get_directive(&requires_directive_definition.name)?;
+
+        let mut required_fields = IndexSet::default();
+        for field_definition_position in &requires_directive_referencers.object_fields {
+            let directives = &field_definition_position.get(schema.schema())?.directives;
+            for requires_directive_application in
+                directives.get_all(&requires_directive_definition.name)
+            {
+                let requires_directive_arguments = federation_spec_definition
+                    .requires_directive_arguments(requires_directive_application)?;
+                required_fields.extend(collect_target_fields_from_field_set(
+                    unwrap_schema(schema),
+                    field_definition_position.parent().type_name,
+                    requires_directive_arguments.fields,
+                )?);
+            }
+        }
+
+        Ok(required_fields)
+    }
+
+    fn collect_shareable_fields(
+        schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
+    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+        let mut shareable_fields = IndexSet::default();
+        // @shareable is only avalaible on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
+        // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
+        // by default are key fields).
+        let Ok(shareable_directive_definition) =
+            federation_spec_definition.shareable_directive_definition(schema)
+        else {
+            return Ok(shareable_fields);
+        };
+        let shareable_directive_referencers = schema
+            .referencers
+            .get_directive(&shareable_directive_definition.name)?;
+
+        // Fields of shareable object types are shareable
+        for object_type_position in &shareable_directive_referencers.object_types {
+            shareable_fields.extend(
+                object_type_position
+                    .fields(schema.schema())?
+                    .map(FieldDefinitionPosition::Object),
+            );
+        }
+
+        // Fields with @shareable directly applied are shareable
+        shareable_fields.extend(
+            shareable_directive_referencers
+                .object_fields
+                .iter()
+                .cloned()
+                .map(FieldDefinitionPosition::Object),
+        );
+
+        Ok(shareable_fields)
+    }
+
     fn collect_fields_used_by_context_directive(
         schema: &Valid<FederationSchema>,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let context_directive_definition =
-            federation_spec_definition.context_directive_definition(schema)?;
-        let from_context_directive_definition =
-            federation_spec_definition.from_context_directive_definition(schema)?;
+        let Ok(context_directive_definition) =
+            federation_spec_definition.context_directive_definition(schema)
+        else {
+            return Ok(Default::default());
+        };
+        let Ok(from_context_directive_definition) =
+            federation_spec_definition.from_context_directive_definition(schema)
+        else {
+            return Ok(Default::default());
+        };
 
-        // TODO: JS code short-circuits successfully if either of these doesn't exist
         let mut used_context_fields = IndexSet::default();
         let mut entry_points: HashMap<String, HashSet<CompositeTypeDefinitionPosition>> =
             HashMap::new();
         let context_directive_referencers = schema
             .referencers
             .get_directive(&context_directive_definition.name)?;
-        // TODO: These loops are repetitive and brittle to adding new schema targets for a particular directive
+
         for interface_type_position in &context_directive_referencers.interface_types {
             let directives = &interface_type_position.get(schema.schema())?.directives;
             for context_directive_application in
@@ -345,13 +333,14 @@ impl SubgraphMetadata {
         let from_context_directive_referencers = schema
             .referencers
             .get_directive(&from_context_directive_definition.name)?;
-        for argument_definition_position in &from_context_directive_referencers.directive_arguments
+        for argument_definition_position in
+            &from_context_directive_referencers.object_field_arguments
+        // TODO: Also interface field args?
         {
             let directives = &argument_definition_position
                 .get(schema.schema())?
                 .directives;
-            // TODO: JS used this below; are we using a wrong type name somewhere?
-            // let type_ = argument_definition_position.parent();
+
             for from_context_directive_application in
                 directives.get_all(&from_context_directive_definition.name)
             {
@@ -377,8 +366,8 @@ impl SubgraphMetadata {
 
     fn collect_fields_used_to_satisfy_interface_constraints(
         schema: &Valid<FederationSchema>,
-        used_fields: &mut IndexSet<FieldDefinitionPosition>,
-    ) -> Result<(), FederationError> {
+    ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
+        let mut interface_constraint_fields = IndexSet::default();
         for ty in schema.schema().types.values() {
             if let ExtendedType::Interface(itf) = ty {
                 let possible_runtime_types: Vec<_> = schema
@@ -392,7 +381,7 @@ impl SubgraphMetadata {
 
                 for field_name in itf.fields.keys() {
                     for object_type in &possible_runtime_types {
-                        used_fields.insert(FieldDefinitionPosition::Object(
+                        interface_constraint_fields.insert(FieldDefinitionPosition::Object(
                             ObjectFieldDefinitionPosition {
                                 type_name: object_type.name.clone(),
                                 field_name: field_name.clone(),
@@ -403,7 +392,7 @@ impl SubgraphMetadata {
             }
         }
 
-        Ok(())
+        Ok(interface_constraint_fields)
     }
 }
 
@@ -574,14 +563,6 @@ impl ExternalMetadata {
             .contains(field_definition_position)
     }
 
-    pub(crate) fn is_fully_external(&self, field: &FieldDefinitionPosition) -> bool {
-        todo!()
-    }
-
-    pub(crate) fn is_partially_external(&self, field: &FieldDefinitionPosition) -> bool {
-        todo!()
-    }
-
     pub(crate) fn selects_any_external_field(&self, selection_set: &SelectionSet) -> bool {
         for selection in selection_set.selections.values() {
             if let Selection::Field(field_selection) = selection {
@@ -628,12 +609,10 @@ mod tests {
         // Fields marked as @external and provided by some path in the graph are shareable
         assert!(meta.is_field_shareable(&field("O3", "externalField")));
 
-        assert_eq!(
-            meta.shareable_fields.len(),
-            4,
-            "ensure no extra fields in {:?}",
-            meta.shareable_fields
-        );
+        // Remaining fields are not shareable
+        assert!(!meta.is_field_shareable(&field("O2", "c")));
+        assert!(!meta.is_field_shareable(&field("O3", "c")));
+        assert!(!meta.is_field_shareable(&field("O3", "externalFieldNeverProvided")));
     }
 
     #[test]
@@ -663,12 +642,15 @@ mod tests {
         // Fields that are @external and provided by some path in the graph are used
         assert!(meta.is_field_used(&field("O4", "externalField")));
 
-        assert_eq!(
-            meta.used_fields.len(),
-            7,
-            "ensure no extra fields in {:?}",
-            meta.used_fields
-        );
+        // Fields pulled from @context are used
+        // assert!(meta.is_field_used(&field("O5Context", "usedInContext")));
+
+        // Remaining fields are not considered used
+        assert!(!meta.is_field_used(&field("O1", "b")));
+        assert!(!meta.is_field_used(&field("O2", "hasRequirement")));
+        assert!(!meta.is_field_used(&field("O3", "nonKeyField")));
+        assert!(!meta.is_field_used(&field("O4", "c")));
+        assert!(!meta.is_field_used(&field("O4", "externalFieldNeverProvided")));
     }
 
     fn field(type_name: &str, field_name: &str) -> FieldDefinitionPosition {

@@ -94,6 +94,7 @@ type Query {
   o3: O3
   o4WithExternals: O4 @federation__provides(fields: "externalField")
   o4WithoutExternals: O4
+  o5: O5Context
 }
 
 interface I1 {
@@ -126,4 +127,20 @@ type O4 {
   c: String
   externalField: Int @federation__external
   externalFieldNeverProvided: String @federation__external
+}
+
+type O5Context @federation__context(name: "o5_context") {
+  usedInContext: String
+  notUsedInContext: Int
+  wrapper: O5Wrapper
+}
+
+type O5Wrapper {
+  inner: O5
+}
+
+type O5 {
+  usesContext(
+    arg1: String #  @federation__fromContext(field: "$o5_context { usedInContext }")
+  ): String
 }
