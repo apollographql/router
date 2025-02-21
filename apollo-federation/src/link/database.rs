@@ -199,8 +199,7 @@ fn is_core_directive_definition(definition: &DirectiveDefinition) -> bool {
             })
         && definition
             .argument_by_name("as")
-            // Definition may be omitted in old graphs
-            .map_or(true, |argument| *argument.ty == ty!(String))
+            .is_none_or(|argument| *argument.ty == ty!(String))
 }
 
 /// Returns whether a given directive is the @link or @core directive that imports the @link or
@@ -220,7 +219,7 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
                 .specified_argument_by_name("as")
                 .and_then(|value| value.as_str())
                 .unwrap_or(default_link_name.as_str());
-            return url.map_or(false, |url| {
+            return url.is_ok_and(|url| {
                 url.identity == Identity::link_identity() && directive.name == expected_name
             });
         }
@@ -236,7 +235,7 @@ fn is_bootstrap_directive(schema: &Schema, directive: &Directive) -> bool {
                 .specified_argument_by_name("as")
                 .and_then(|value| value.as_str())
                 .unwrap_or("core");
-            return url.map_or(false, |url| {
+            return url.is_ok_and(|url| {
                 url.identity == Identity::core_identity() && directive.name == expected_name
             });
         }

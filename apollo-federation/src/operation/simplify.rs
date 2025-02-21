@@ -175,7 +175,7 @@ impl InlineFragmentSelection {
             // 2. if it's the same type as the current type: it's not restricting types further.
             // 3. if the current type is an object more generally: because in that case the condition
             //   cannot be restricting things further (it's typically a less precise interface/union).
-            let useless_fragment = this_condition.map_or(true, |type_condition| {
+            let useless_fragment = this_condition.is_none_or(|type_condition| {
                 self.inline_fragment.schema == *schema && type_condition == parent_type
             });
             if useless_fragment || parent_type.is_object_type() {
