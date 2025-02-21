@@ -712,7 +712,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -724,14 +724,14 @@ mod tests {
                             "content-type": "application/json",
                             "content-length": "8",
                         },
-                        body: UnsyncBoxBody,
+                        body: "{\"a\":42}",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();
@@ -770,7 +770,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -782,14 +782,14 @@ mod tests {
                             "content-type": "application/x-www-form-urlencoded",
                             "content-length": "4",
                         },
-                        body: UnsyncBoxBody,
+                        body: "a=42",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();
