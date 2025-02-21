@@ -89,40 +89,23 @@ scalar federation__FieldSet
 scalar federation__Scope
 
 type Query {
-  i1: I1
+  o1: O1
   o2: O2
-  o3: O3
-  o4WithExternals: O4 @federation__provides(fields: "externalField")
-  o4WithoutExternals: O4
+  o3WithExternals: [O3] @federation__provides(fields: "externalField")
+  o3WithoutExternals: [O3]
 }
 
-interface I1 {
-  a: Int
-}
-
-type O1 implements I1 {
+type O1 @federation__shareable {
   a: Int
   b: String
 }
 
 type O2 {
-  hasRequirement: String
-    @federation__requires(fields: "isRequired isAlsoRequired")
-  isRequired: Boolean
-  isAlsoRequired: Int
+  c: Int
+  d: String @federation__shareable
 }
 
-type O3 @federation__key(fields: "keyField1 subKey { keyField2 }") {
-  keyField1: String
-  subKey: O3SubKey
-  nonKeyField: String
-}
-
-type O3SubKey {
-  keyField2: String
-}
-
-type O4 {
+type O3 {
   c: String
   externalField: Int @federation__external
   externalFieldNeverProvided: String @federation__external
