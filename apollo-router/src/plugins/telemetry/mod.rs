@@ -163,7 +163,7 @@ pub(crate) mod metrics;
 pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
-mod resource;
+pub(crate) mod resource;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;

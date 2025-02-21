@@ -124,4 +124,8 @@ pub mod _private {
     pub fn compute_job_queued_count() -> &'static std::sync::atomic::AtomicUsize {
         &crate::compute_job::queue().queued_count
     }
+    pub mod telemetry {
+        pub use crate::plugins::telemetry::config::AttributeValue;
+        pub use crate::plugins::telemetry::resource::ConfigResource;
+    }
 }

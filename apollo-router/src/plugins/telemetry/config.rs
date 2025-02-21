@@ -428,7 +428,8 @@ fn default_max_attributes_per_link() -> u32 {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
-pub(crate) enum AttributeValue {
+#[allow(missing_docs)] // only public-but-hidden for tests
+pub enum AttributeValue {
     /// bool values
     Bool(bool),
     /// i64 values
@@ -438,6 +439,7 @@ pub(crate) enum AttributeValue {
     /// String values
     String(String),
     /// Array of homogeneous values
+    #[allow(private_interfaces)]
     Array(AttributeArray),
 }
 

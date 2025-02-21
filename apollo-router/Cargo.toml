@@ -312,7 +312,6 @@ rhai = { version = "1.17.1", features = [
     "testing-environ",
 ] }
 serde_regex = { version = "1.1.0" }
-serial_test = { version = "3.1.1" }
 tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
@@ -370,6 +369,11 @@ harness = false
 # nextest does this by default, but using a separate [[test]] also makes it work with `cargo test`.
 name = "compute_backpressure"
 path = "tests/compute_backpressure.rs"
+
+[[test]]
+name = "telemetry_resources"
+path = "tests/telemetry_resource_tests.rs"
+harness = false
 
 [[bin]]
 name = "snapshot"
