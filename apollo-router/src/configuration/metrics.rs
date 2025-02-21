@@ -445,10 +445,13 @@ impl InstrumentData {
         }
 
         let mut attributes = HashMap::new();
-        attributes.insert("opt.apollo.key".to_string(), env_var_exists("APOLLO_KEY"));
+        attributes.insert(
+            "opt.apollo.key".to_string(),
+            crate::services::APOLLO_KEY.lock().is_some().into(),
+        );
         attributes.insert(
             "opt.apollo.graph_ref".to_string(),
-            env_var_exists("APOLLO_GRAPH_REF"),
+            crate::services::APOLLO_GRAPH_REF.lock().is_some().into(),
         );
         attributes.insert(
             "opt.apollo.license".to_string(),

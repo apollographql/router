@@ -333,7 +333,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
-                if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
+                if crate::services::APOLLO_KEY.lock().is_some()
+                    && crate::services::APOLLO_GRAPH_REF.lock().is_some()
                 {
                     tracing::error!("License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
                 } else {

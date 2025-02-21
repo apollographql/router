@@ -406,6 +406,8 @@ impl Executable {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         copy_args_to_env();
+        *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
+        *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
 
         let apollo_telemetry_initialized = if graph_os() {
             init_telemetry(&opt.log_level)?;
@@ -722,7 +724,8 @@ impl Executable {
 }
 
 fn graph_os() -> bool {
-    std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
+    crate::services::APOLLO_KEY.lock().is_some()
+        && crate::services::APOLLO_GRAPH_REF.lock().is_some()
 }
 
 fn setup_panic_handler() {

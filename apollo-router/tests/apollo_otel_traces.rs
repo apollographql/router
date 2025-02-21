@@ -48,8 +48,8 @@ async fn config(
     batch: bool,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
 ) -> (JoinHandle<()>, serde_json::Value) {
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
