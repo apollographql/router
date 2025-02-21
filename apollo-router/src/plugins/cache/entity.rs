@@ -1359,6 +1359,7 @@ fn extract_cache_keys(
     Ok(res)
 }
 
+/// Returns a hash for the given representation, independent of field order. Destructively sorts any objects in the input.
 pub(crate) fn hash_entity_key(representation: &mut Value) -> String {
     // We have to hash the representation because it can contains PII
     let mut digest = Sha256::new();

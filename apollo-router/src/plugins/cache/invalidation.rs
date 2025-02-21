@@ -230,6 +230,7 @@ pub(crate) enum InvalidationRequest {
 }
 
 impl InvalidationRequest {
+    /// Compute a cache key prefix. For entity keys, this destructively sorts all objects.
     fn key_prefix(&mut self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
