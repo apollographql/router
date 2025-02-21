@@ -397,7 +397,6 @@ impl Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,
@@ -569,7 +568,9 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    let Ok(log) = serde_json::from_str::<Log>(&line) else {
+                        panic!("line: '{line}' isn't JSON, might you have some debug output in the logging?");
+                    };
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(
