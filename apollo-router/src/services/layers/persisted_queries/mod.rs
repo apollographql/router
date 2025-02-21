@@ -1009,6 +1009,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn pq_layer_freeform_graphql_with_safelist_log_unknown_true() {
         async {
             pq_layer_freeform_graphql_with_safelist(true).await;

@@ -589,7 +589,6 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::plugins::connectors::make_requests::ResponseKey;
-    use crate::plugins::connectors::mapping::Problem;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
     use crate::services::connector::request_service::transport::http::HttpRequest;
@@ -751,14 +750,42 @@ mod test {
     }
 
     fn get_fake_connector_request(
-        context: Context,
-        connector: Arc<Connector>,
         service_name: String,
-        key: ResponseKey,
         headers: Option<HeaderMap<HeaderValue>>,
         data: String,
-        mapping_problems: Vec<Problem>,
     ) -> ConnectorRequest {
+        let context = Context::default();
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "test_subgraph".into(),
+                Some("test_sourcename".into()),
+                name!(Query),
+                name!(hello),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("$.data").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        });
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+        let mapping_problems = Default::default();
+
         let mut request_builder = http::Request::builder();
         if let Some(headers) = headers {
             for (header_name, header_value) in headers.iter() {
@@ -842,40 +869,9 @@ mod test {
 
         let plugin = get_traffic_shaping_plugin(&config).await;
         let request = get_fake_connector_request(
-            Context::default(),
-            Arc::new(Connector {
-                spec: ConnectSpec::V0_1,
-                id: ConnectId::new(
-                    "test_subgraph".into(),
-                    Some("test_sourcename".into()),
-                    name!(Query),
-                    name!(hello),
-                    0,
-                    "test label",
-                ),
-                transport: HttpJsonTransport {
-                    source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                    connect_template: "/path".parse().unwrap(),
-                    method: HTTPMethod::Get,
-                    headers: Default::default(),
-                    body: Default::default(),
-                },
-                selection: JSONSelection::parse("$.data").unwrap(),
-                entity_resolver: None,
-                config: Default::default(),
-                max_requests: None,
-                request_variables: Default::default(),
-                response_variables: Default::default(),
-            }),
             "test_subgraph.test_sourcename".into(),
-            ResponseKey::RootField {
-                name: "hello".to_string(),
-                inputs: Default::default(),
-                selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-            },
             None,
             "testing".to_string(),
-            Default::default(),
         );
 
         let test_service =
@@ -1076,6 +1072,83 @@ mod test {
             .body()
             .errors
             .is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_rate_limit_connector_requests() {
+        let config = serde_yaml::from_str::<serde_json::Value>(
+            r#"
+        sources:
+            test_subgraph.test_sourcename:
+                global_rate_limit:
+                    capacity: 1
+                    interval: 100ms
+                timeout: 500ms
+        "#,
+        )
+        .unwrap();
+
+        let plugin = get_traffic_shaping_plugin(&config).await;
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+
+        let test_service = MockConnector::new(hashmap! {
+            "test_request".into() => "test_request".into()
+        });
+
+        let mut svc = plugin.connector_request_service(
+            test_service.boxed(),
+            "test_subgraph.test_sourcename".to_string(),
+        );
+
+        assert!(svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(request)
+            .await
+            .unwrap()
+            .transport_result
+            .is_ok());
+
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+        let response = svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(request)
+            .await
+            .expect("it responded");
+
+        assert!(response.transport_result.is_err());
+        assert!(matches!(
+            response.transport_result.err().unwrap(),
+            Error::RateLimited
+        ));
+
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let request = get_fake_connector_request(
+            "test_subgraph.test_sourcename".into(),
+            None,
+            "testing".to_string(),
+        );
+        assert!(svc
+            .ready()
+            .await
+            .expect("it is ready")
+            .call(request)
+            .await
+            .unwrap()
+            .transport_result
+            .is_ok());
     }
 
     #[tokio::test(flavor = "multi_thread")]
