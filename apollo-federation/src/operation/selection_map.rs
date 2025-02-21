@@ -8,18 +8,18 @@ use apollo_compiler::Name;
 use hashbrown::DefaultHashBuilder;
 use hashbrown::HashTable;
 use itertools::Itertools;
-use serde::ser::SerializeSeq;
 use serde::Serialize;
+use serde::ser::SerializeSeq;
 
 use crate::error::FederationError;
-use crate::operation::field_selection::FieldSelection;
-use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
-use crate::operation::inline_fragment_selection::InlineFragmentSelection;
 use crate::operation::DirectiveList;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
+use crate::operation::field_selection::FieldSelection;
+use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
+use crate::operation::inline_fragment_selection::InlineFragmentSelection;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
 /// (field, inline fragment, or fragment spread) that is used to determine whether two selections
@@ -447,7 +447,7 @@ impl SelectionMap {
                     ))),
                 },
                 Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal("unexpected fragment spread"))
+                    return Err(FederationError::internal("unexpected fragment spread"));
                 }
             })
         }

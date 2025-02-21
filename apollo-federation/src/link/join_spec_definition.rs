@@ -1,13 +1,13 @@
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
 use super::argument::directive_optional_list_argument;

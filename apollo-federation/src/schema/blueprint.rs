@@ -1,13 +1,13 @@
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::NamedType;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 
 use crate::error::FederationError;
-use crate::link::spec::Url;
 use crate::link::Import;
 use crate::link::Purpose;
+use crate::link::spec::Url;
 
 #[allow(dead_code)]
 struct CoreFeature {

@@ -1,30 +1,30 @@
-use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Value;
-use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Value;
+use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
-use super::schema::ConnectDirectiveArguments;
-use super::schema::ConnectHTTPArguments;
-use super::schema::SourceDirectiveArguments;
-use super::schema::SourceHTTPArguments;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use super::schema::ConnectDirectiveArguments;
+use super::schema::ConnectHTTPArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
+use super::schema::SourceDirectiveArguments;
+use super::schema::SourceHTTPArguments;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::sources::connect::ObjectFieldDefinitionPosition;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::models::Header;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::sources::connect::ObjectFieldDefinitionPosition;
 
 macro_rules! internal {
     ($s:expr) => {
@@ -302,15 +302,15 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
 
+    use crate::ValidFederationSubgraphs;
     use crate::schema::FederationSchema;
-    use crate::sources::connect::spec::schema::SourceDirectiveArguments;
     use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+    use crate::sources::connect::spec::schema::SourceDirectiveArguments;
     use crate::supergraph::extract_subgraphs_from_supergraph;
-    use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
 
