@@ -1157,7 +1157,7 @@ impl Telemetry {
                     custom_events.on_response_event(resp, &ctx);
                     custom_graphql_instruments.on_response_event(resp, &ctx);
                 });
-                let (first_response, rest) = stream.into_future().await;
+                let (first_response, rest) = StreamExt::into_future(stream).await;
 
                 let response = http::Response::from_parts(
                     parts,

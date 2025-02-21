@@ -4,7 +4,7 @@ use std::mem;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use schemars::gen::SchemaGenerator;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
@@ -78,10 +78,10 @@ where
         format!("conditional_attribute_{}", type_name::<T>())
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Add condition to each variant in the schema.
         //Maybe we can rearrange this for a smaller schema
-        let selector = gen.subschema_for::<T>();
+        let selector = generator.subschema_for::<T>();
 
         Schema::Object(SchemaObject {
             metadata: None,
@@ -108,7 +108,7 @@ where
                             required: Default::default(),
                             properties: [(
                                 "condition".to_string(),
-                                gen.subschema_for::<Condition<T>>(),
+                                generator.subschema_for::<Condition<T>>(),
                             )]
                             .into(),
                             pattern_properties: Default::default(),

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use futures::prelude::*;
+use futures::StreamExt;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -474,7 +475,7 @@ impl DeferredNode {
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
         deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
-    ) -> impl Future<Output = ()> {
+    ) -> impl Future<Output = ()> + use<> {
         let mut deferred_receivers = Vec::new();
 
         for d in self.depends.iter() {
@@ -482,11 +483,11 @@ impl DeferredNode {
                 None => {
                     let (sender, receiver) = tokio::sync::broadcast::channel(1);
                     deferred_fetches.insert(d.id.clone(), sender.clone());
-                    deferred_receivers.push(BroadcastStream::new(receiver).into_future());
+                    deferred_receivers.push(StreamExt::into_future(BroadcastStream::new(receiver)));
                 }
                 Some(sender) => {
                     let receiver = sender.subscribe();
-                    deferred_receivers.push(BroadcastStream::new(receiver).into_future());
+                    deferred_receivers.push(StreamExt::into_future(BroadcastStream::new(receiver)));
                 }
             }
         }

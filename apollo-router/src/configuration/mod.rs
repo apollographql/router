@@ -23,7 +23,7 @@ use regex::Regex;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::ServerConfig;
-use schemars::gen::SchemaGenerator;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
@@ -579,7 +579,7 @@ impl JsonSchema for ApolloPlugins {
         stringify!(Plugins).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
@@ -589,7 +589,7 @@ impl JsonSchema for ApolloPlugins {
             .map(|factory| {
                 (
                     factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
-                    factory.create_schema(gen),
+                    factory.create_schema(generator),
                 )
             })
             .collect::<schemars::Map<String, Schema>>();
@@ -612,14 +612,14 @@ impl JsonSchema for UserPlugins {
         stringify!(Plugins).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|factory| (factory.name.to_string(), factory.create_schema(gen)))
+            .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
     }

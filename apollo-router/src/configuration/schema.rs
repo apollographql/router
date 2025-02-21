@@ -10,7 +10,7 @@ use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
-use schemars::gen::SchemaSettings;
+use schemars::r#gen::SchemaSettings;
 use schemars::schema::Metadata;
 use schemars::schema::RootSchema;
 use schemars::schema::SchemaObject;
@@ -68,8 +68,8 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     // Manually patch up the schema
     // We don't want to allow unknown fields, but serde doesn't work if we put the annotation on Configuration as the struct has a flattened type.
     // It's fine to just add it here.
-    let gen = settings.into_generator();
-    let mut schema = gen.into_root_schema_for::<Configuration>();
+    let generator = settings.into_generator();
+    let mut schema = generator.into_root_schema_for::<Configuration>();
     let root = schema.schema.object.as_mut().expect("schema not generated");
     root.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
     schema

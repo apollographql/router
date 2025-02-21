@@ -603,7 +603,7 @@ macro_rules! gen_map_deferred_response {
                     // for which we will implement mapping later
                     let $base::Response { response, context } = mapped_response;
                     let (parts, stream) = response.into_parts();
-                    let (first, rest) = stream.into_future().await;
+                    let (first, rest) = StreamExt::into_future(stream).await;
 
                     if first.is_none() {
                         let error_details = ErrorDetails {

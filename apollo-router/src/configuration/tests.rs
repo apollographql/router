@@ -8,7 +8,7 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-use schemars::gen::SchemaSettings;
+use schemars::r#gen::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
@@ -353,7 +353,7 @@ fn validate_project_config_files() {
     let embedded_yaml_matcher =
         Regex::from_str(r#"(?ms)```yaml title="router(_unix)?.yaml"(.+?)```"#).unwrap();
 
-    fn it(path: &str) -> impl Iterator<Item = DirEntry> {
+    fn it(path: &str) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
     }
 
@@ -757,8 +757,8 @@ fn test_subgraph_override() {
         s.option_add_null_type = false;
         s.inline_subschemas = true;
     });
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    let generator = settings.into_generator();
+    let schema = generator.into_root_schema_for::<TestSubgraphOverride>();
     insta::assert_json_snapshot!(schema);
 }
 
@@ -836,7 +836,7 @@ fn test_deserialize_derive_default() {
     // Walk every source file and check that #[derive(Default)] is not used.
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("src");
-    fn it(path: &Path) -> impl Iterator<Item = DirEntry> {
+    fn it(path: &Path) -> impl Iterator<Item = DirEntry> + use<> {
         WalkDir::new(path).into_iter().filter_map(|e| e.ok())
     }
 

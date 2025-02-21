@@ -349,7 +349,7 @@ where
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
     let (first, rest): (Option<graphql::Response>, graphql::ResponseStream) =
-        body.into_future().await;
+        StreamExt::into_future(body).await;
 
     // If first is None, we return an error
     let first = first.ok_or_else(|| {

@@ -391,3 +391,20 @@ harness = false
 
 [[example]]
 name = "planner"
+
+[lints.rust]
+
+# Compatibility with the 2024 edition, remove after switching to it:
+boxed-slice-into-iter = "warn"
+dependency-on-unit-never-type-fallback = "warn"
+deprecated-safe-2024 = "warn"
+impl-trait-overcaptures = "warn"
+keyword-idents-2024 = "warn"
+missing-unsafe-on-extern = "warn"
+never-type-fallback-flowing-into-unsafe = "warn"
+rust-2024-guarded-string-incompatible-syntax = "warn"
+rust-2024-incompatible-pat = "warn"
+rust-2024-prelude-collisions = "warn"
+static-mut-refs = "warn"
+unsafe-attr-outside-unsafe = "warn"
+unsafe-op-in-unsafe-fn = "warn"

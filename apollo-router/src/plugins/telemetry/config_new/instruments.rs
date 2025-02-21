@@ -2638,7 +2638,7 @@ mod tests {
     use http::Uri;
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
-    use schemars::gen::SchemaGenerator;
+    use schemars::r#gen::SchemaGenerator;
     use serde::Deserialize;
     use serde_json::json;
     use serde_json_bytes::ByteString;

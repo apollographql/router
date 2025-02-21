@@ -131,7 +131,7 @@ impl Plugin for ExposeQueryPlan {
                     Ok(mut res) => {
                         if !matches!(setting, Setting::Disabled) {
                             let (parts, stream) = res.response.into_parts();
-                            let (mut first, rest) = stream.into_future().await;
+                            let (mut first, rest) = StreamExt::into_future(stream).await;
 
                             if let Some(first) = &mut first {
                                 if let Some(plan) =
