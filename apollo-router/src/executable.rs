@@ -1,6 +1,5 @@
 //! Main entry point for CLI command to start server.
 
-use std::env;
 use std::fmt::Debug;
 use std::net::SocketAddr;
 #[cfg(unix)]
@@ -15,11 +14,11 @@ use anyhow::Result;
 use clap::builder::FalseyValueParser;
 use clap::ArgAction;
 use clap::Args;
-use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
+use parking_lot::Mutex;
 use regex::Captures;
 use regex::Regex;
 use url::ParseError;
@@ -60,8 +59,13 @@ pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::n
 #[cfg(feature = "dhat-ad-hoc")]
 pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
 
-pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
-pub(crate) const APOLLO_TELEMETRY_DISABLED: &str = "APOLLO_TELEMETRY_DISABLED";
+pub(crate) static APOLLO_ROUTER_DEV_MODE: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_LICENCE_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_LICENCE_PATH_IS_SET: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_TELEMETRY_DISABLED: AtomicBool = AtomicBool::new(false);
+pub(crate) static APOLLO_ROUTER_LISTEN_ADDRESS: Mutex<Option<SocketAddr>> = Mutex::new(None);
 
 const INITIAL_UPLINK_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
@@ -183,11 +187,7 @@ pub struct Opt {
     config_path: Option<PathBuf>,
 
     /// Enable development mode.
-    #[clap(
-        env = APOLLO_ROUTER_DEV_ENV,
-        long = "dev",
-        action(ArgAction::SetTrue)
-    )]
+    #[clap(env = "APOLLO_ROUTER_DEV", long = "dev", action(ArgAction::SetTrue))]
     dev: bool,
 
     /// Schema location relative to the project directory.
@@ -234,7 +234,7 @@ pub struct Opt {
     apollo_uplink_endpoints: Option<String>,
 
     /// Disable sending anonymous usage information to Apollo.
-    #[clap(long, env = APOLLO_TELEMETRY_DISABLED, value_parser = FalseyValueParser::new())]
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED", value_parser = FalseyValueParser::new())]
     anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
@@ -291,10 +291,6 @@ impl Opt {
             poll_interval: INITIAL_UPLINK_POLL_INTERVAL,
             timeout: self.apollo_uplink_timeout,
         })
-    }
-
-    pub(crate) fn is_telemetry_disabled(&self) -> bool {
-        self.anonymous_telemetry_disabled
     }
 
     fn parse_endpoints(endpoints: &str) -> std::result::Result<Endpoints, anyhow::Error> {
@@ -405,9 +401,18 @@ impl Executable {
         // Enable crypto
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-        copy_args_to_env();
         *crate::services::APOLLO_KEY.lock() = opt.apollo_key.clone();
         *crate::services::APOLLO_GRAPH_REF.lock() = opt.apollo_graph_ref.clone();
+        *APOLLO_ROUTER_LISTEN_ADDRESS.lock() = opt.listen_address;
+        APOLLO_ROUTER_DEV_MODE.store(opt.dev, Ordering::Relaxed);
+        APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET
+            .store(opt.supergraph_path.is_some(), Ordering::Relaxed);
+        APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET
+            .store(opt.supergraph_urls.is_some(), Ordering::Relaxed);
+        APOLLO_ROUTER_LICENCE_IS_SET.store(opt.apollo_router_license.is_some(), Ordering::Relaxed);
+        APOLLO_ROUTER_LICENCE_PATH_IS_SET
+            .store(opt.apollo_router_license_path.is_some(), Ordering::Relaxed);
+        APOLLO_TELEMETRY_DISABLED.store(opt.anonymous_telemetry_disabled, Ordering::Relaxed);
 
         let apollo_telemetry_initialized = if graph_os() {
             init_telemetry(&opt.log_level)?;
@@ -707,7 +712,7 @@ impl Executable {
         }
 
         let router = RouterHttpServer::builder()
-            .is_telemetry_disabled(opt.is_telemetry_disabled())
+            .is_telemetry_disabled(opt.anonymous_telemetry_disabled)
             .configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
@@ -748,30 +753,6 @@ fn setup_panic_handler() {
         // We've logged out the panic details. Terminate with an error code
         std::process::exit(1);
     }));
-}
-
-static COPIED: AtomicBool = AtomicBool::new(false);
-
-fn copy_args_to_env() {
-    if Ok(false) != COPIED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
-        panic!("`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen");
-    }
-    // Copy all the args to env.
-    // This way, Clap is still responsible for the definitive view of what the current options are.
-    // But if we have code that relies on env variable then it will still work.
-    // Env variables should disappear over time as we move to plugins.
-    let matches = Opt::command().get_matches();
-    Opt::command().get_arguments().for_each(|a| {
-        if let Some(env) = a.get_env() {
-            if let Some(raw) = matches
-                .get_raw(a.get_id().as_str())
-                .unwrap_or_default()
-                .next()
-            {
-                env::set_var(env, raw);
-            }
-        }
-    });
 }
 
 #[cfg(test)]

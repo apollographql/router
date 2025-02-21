@@ -1,6 +1,6 @@
-use std::env;
 use std::env::consts::ARCH;
 use std::env::consts::OS;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -224,11 +224,9 @@ impl PluginPrivate for FleetDetector {
 
     async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
-        if let Ok(val) = env::var(APOLLO_TELEMETRY_DISABLED) {
-            if val == "true" {
-                debug!("fleet detection disabled, no telemetry will be sent");
-                return Ok(FleetDetector::default());
-            }
+        if APOLLO_TELEMETRY_DISABLED.load(Ordering::Relaxed) {
+            debug!("fleet detection disabled, no telemetry will be sent");
+            return Ok(FleetDetector::default());
         }
 
         let gauge_options = GaugeOptions {

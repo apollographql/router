@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use jsonpath_rust::JsonPathInst;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use paste::paste;
 use serde_json::Value;
 
@@ -37,7 +40,7 @@ impl Metrics {
         let mut data = InstrumentData::default();
 
         // Env variables and unit tests don't mix.
-        data.populate_env_instrument();
+        data.populate_cli_instrument();
         data.populate_config_instruments(
             configuration
                 .validated_yaml
@@ -431,48 +434,49 @@ impl InstrumentData {
         }
     }
 
-    fn populate_env_instrument(&mut self) {
-        #[cfg(not(test))]
-        fn env_var_exists(env_name: &str) -> opentelemetry::Value {
-            std::env::var(env_name)
-                .map(|_| true)
-                .unwrap_or(false)
-                .into()
+    fn populate_cli_instrument(&mut self) {
+        fn mutex_is_some(mutex: &Mutex<Option<String>>) -> opentelemetry::Value {
+            if cfg!(test) {
+                true.into()
+            } else {
+                mutex.lock().is_some().into()
+            }
         }
-        #[cfg(test)]
-        fn env_var_exists(_env_name: &str) -> opentelemetry::Value {
-            true.into()
+        fn atomic_is_true(atomic: &AtomicBool) -> opentelemetry::Value {
+            if cfg!(test) {
+                true.into()
+            } else {
+                atomic.load(Ordering::Relaxed).into()
+            }
         }
-
         let mut attributes = HashMap::new();
         attributes.insert(
             "opt.apollo.key".to_string(),
-            crate::services::APOLLO_KEY.lock().is_some().into(),
+            mutex_is_some(&crate::services::APOLLO_KEY),
         );
         attributes.insert(
             "opt.apollo.graph_ref".to_string(),
-            crate::services::APOLLO_GRAPH_REF.lock().is_some().into(),
+            mutex_is_some(&crate::services::APOLLO_GRAPH_REF),
         );
         attributes.insert(
             "opt.apollo.license".to_string(),
-            env_var_exists("APOLLO_ROUTER_LICENSE"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_LICENCE_IS_SET),
         );
         attributes.insert(
             "opt.apollo.license.path".to_string(),
-            env_var_exists("APOLLO_ROUTER_LICENSE_PATH"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_LICENCE_PATH_IS_SET),
         );
         attributes.insert(
             "opt.apollo.supergraph.urls".to_string(),
-            env_var_exists("APOLLO_ROUTER_SUPERGRAPH_URLS"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_SUPERGRAPH_URLS_IS_SET),
         );
         attributes.insert(
             "opt.apollo.supergraph.path".to_string(),
-            env_var_exists("APOLLO_ROUTER_SUPERGRAPH_PATH"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_SUPERGRAPH_PATH_IS_SET),
         );
-
         attributes.insert(
             "opt.apollo.dev".to_string(),
-            env_var_exists("APOLLO_ROUTER_DEV_ENV"),
+            atomic_is_true(&crate::executable::APOLLO_ROUTER_DEV_MODE),
         );
 
         self.data
@@ -571,7 +575,7 @@ mod test {
     #[test]
     fn test_env_metrics() {
         let mut data = InstrumentData::default();
-        data.populate_env_instrument();
+        data.populate_cli_instrument();
         let _metrics: Metrics = data.into();
         assert_non_zero_metrics_snapshot!();
     }

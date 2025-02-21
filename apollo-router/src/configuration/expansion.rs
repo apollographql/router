@@ -5,13 +5,13 @@ use std::env;
 use std::env::VarError;
 use std::fs;
 use std::str::FromStr;
+use std::sync::atomic::Ordering;
 
 use proteus::Parser;
 use proteus::TransformBuilder;
 use serde_json::Value;
 
 use super::ConfigurationError;
-use crate::executable::APOLLO_ROUTER_DEV_ENV;
 
 #[derive(buildstructor::Builder, Clone)]
 pub(crate) struct Expansion {
@@ -97,8 +97,7 @@ impl Expansion {
             .map(|mode| mode.trim().to_string())
             .collect::<Vec<String>>();
 
-        let dev_mode_defaults = if std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref()
-            == Some("true")
+        let dev_mode_defaults = if crate::executable::APOLLO_ROUTER_DEV_MODE.load(Ordering::Relaxed)
         {
             tracing::info!("Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)");
             dev_mode_defaults()
@@ -109,6 +108,15 @@ impl Expansion {
         let builder = Expansion::builder();
         #[cfg(test)]
         let builder = builder.mocked_env_vars(mocked_env_vars);
+        let listen_override = Override::builder()
+            .config_path("supergraph.listen")
+            .value_type(ValueType::String);
+        let listen = *crate::executable::APOLLO_ROUTER_LISTEN_ADDRESS.lock();
+        let listen_override = if let Some(listen) = listen {
+            listen_override.value(listen.to_string()).build()
+        } else {
+            listen_override.build()
+        };
         Ok(builder
             .and_prefix(prefix)
             .supported_modes(supported_modes)
@@ -127,13 +135,7 @@ impl Expansion {
                     .value_type(ValueType::String)
                     .build(),
             )
-            .override_config(
-                Override::builder()
-                    .config_path("supergraph.listen")
-                    .env_name("APOLLO_ROUTER_LISTEN_ADDRESS")
-                    .value_type(ValueType::String)
-                    .build(),
-            )
+            .override_config(listen_override)
             .override_configs(dev_mode_defaults)
             .build())
     }
