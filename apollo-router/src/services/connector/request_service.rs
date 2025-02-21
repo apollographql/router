@@ -284,13 +284,13 @@ impl tower::Service<Request> for ConnectorRequestService {
                             .cloned()
                         {
                             let (parts, body) = http_request.inner.into_parts();
-                            let final_request =
+                            let http_request =
                                 http::Request::from_parts(parts, router::body::from_bytes(body));
 
                             http_client_service_factory
                                 .create(&original_subgraph_name)
                                 .oneshot(crate::services::http::HttpRequest {
-                                    http_request: final_request,
+                                    http_request,
                                     context: request.context.clone(),
                                 })
                                 .await
