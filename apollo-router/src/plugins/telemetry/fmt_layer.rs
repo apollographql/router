@@ -812,7 +812,7 @@ connector:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1163,7 +1163,7 @@ subgraph:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
