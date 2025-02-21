@@ -239,7 +239,6 @@ impl Response {
     /// The parameters are not optional, because in a live situation all of these properties must be
     /// set and be correct to create a Response.
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -288,7 +287,6 @@ impl Response {
     /// Response. It's usually enough for testing, when a fully constructed Response is
     /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn fake_new(
         label: Option<String>,
         data: Option<Value>,
@@ -323,7 +321,6 @@ impl Response {
     /// Response. It's usually enough for testing, when a fully constructed Response is
     /// difficult to construct and not required for the purposes of the test.
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     fn fake2_new(
         label: Option<String>,
         data: Option<Value>,

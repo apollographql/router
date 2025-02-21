@@ -26,7 +26,6 @@ use crate::plugins::connectors::plugin::debug::SelectionData;
 use crate::services::connect;
 use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::TransportRequest;
-use crate::services::router;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
@@ -64,19 +63,20 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (router::body::from_bytes(encoded), len)
+                    (encoded, len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (router::body::from_bytes(bytes), len)
+                    let body_string = serde_json::to_string(json_body)?;
+                    (body_string, len)
                 }
             } else {
-                (router::body::empty(), 0)
+                ("".into(), 0)
             };
             (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            (None, None, router::body::empty(), 0, vec![])
+            (None, None, "".into(), 0, vec![])
         };
 
     match transport.method {
@@ -711,7 +711,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -723,14 +723,14 @@ mod tests {
                             "content-type": "application/json",
                             "content-length": "8",
                         },
-                        body: UnsyncBoxBody,
+                        body: "{\"a\":42}",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();
@@ -769,7 +769,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -781,14 +781,14 @@ mod tests {
                             "content-type": "application/x-www-form-urlencoded",
                             "content-length": "4",
                         },
-                        body: UnsyncBoxBody,
+                        body: "a=42",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();

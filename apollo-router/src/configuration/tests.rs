@@ -468,6 +468,7 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
+    #[allow(clippy::literal_string_with_formatting_args)]
     let error = validate_yaml_configuration(
         r#"
 supergraph:

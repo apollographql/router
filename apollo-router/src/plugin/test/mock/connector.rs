@@ -17,7 +17,6 @@ use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::{
     Request as ConnectorRequest, Response as ConnectorResponse,
 };
-use crate::services::router::body::into_string;
 
 type MockResponses = HashMap<String, String>;
 
@@ -114,11 +113,9 @@ impl Service<ConnectorRequest> for MockConnector {
             req = map_request_fn.clone()(req);
         }
         let TransportRequest::Http(http) = req.transport_request;
-        // TODO: This does not work... fix me!
-        let mut body = http.inner.into_body();
-        let body_str = into_string(&mut body);
+        let body = http.inner.body();
 
-        let response = if let Some(response) = self.mocks.get(&body_str) {
+        let response = if let Some(response) = self.mocks.get(body) {
             let context = req.context;
             let connector = req.connector;
             let response_key = req.key;
@@ -136,7 +133,7 @@ impl Service<ConnectorRequest> for MockConnector {
         } else {
             let error_message = format!(
                 "couldn't find mock for query {}",
-                serde_json::to_string(&body_str).unwrap()
+                serde_json::to_string(&body).unwrap()
             );
             let context = req.context;
             let connector = req.connector;

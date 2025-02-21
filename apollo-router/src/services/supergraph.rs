@@ -69,7 +69,6 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         query: Option<String>,
@@ -193,7 +192,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -242,7 +240,6 @@ impl Response {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -329,7 +326,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,

@@ -23,6 +23,7 @@ use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::RateLimitFormatter;
@@ -147,6 +148,12 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+        event.record(&mut visitor);
+        if visitor.omit_from_logs {
+            return;
+        }
+
         thread_local! {
             static BUF: RefCell<String> = const { RefCell::new(String::new()) };
         }
@@ -180,6 +187,7 @@ where
 pub(crate) struct FieldsVisitor<'a, 'b> {
     pub(crate) values: HashMap<&'a str, serde_json::Value>,
     excluded_attributes: &'b HashSet<&'static str>,
+    omit_from_logs: bool,
 }
 
 impl<'b> FieldsVisitor<'_, 'b> {
@@ -187,6 +195,7 @@ impl<'b> FieldsVisitor<'_, 'b> {
         Self {
             values: HashMap::with_capacity(0),
             excluded_attributes,
+            omit_from_logs: false,
         }
     }
 }
@@ -214,6 +223,10 @@ impl field::Visit for FieldsVisitor<'_, '_> {
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.values
             .insert(field.name(), serde_json::Value::from(value));
+
+        if field.name() == EVENT_ATTRIBUTE_OMIT_LOG && value {
+            self.omit_from_logs = true;
+        }
     }
 
     /// Visit a string value.
@@ -799,7 +812,7 @@ connector:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1150,7 +1163,7 @@ subgraph:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));

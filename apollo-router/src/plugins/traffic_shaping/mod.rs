@@ -830,7 +830,7 @@ mod test {
             name: "hello".to_string(),
             inputs: Default::default(),
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
-        }).data(json!("testing")).build();
+        }).data("testing".into()).build();
 
         let test_service = MockConnector::new(HashMap::new()).map_request(|req: ConnectorRequest| {
             let TransportRequest::Http(ref http_request) = req.transport_request;
