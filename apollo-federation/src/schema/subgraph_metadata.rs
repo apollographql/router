@@ -1,6 +1,6 @@
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -8,10 +8,10 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
-use crate::schema::FederationSchema;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.

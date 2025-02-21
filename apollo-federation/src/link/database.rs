@@ -1,20 +1,20 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::ty;
-use apollo_compiler::Schema;
 
-use crate::link::spec::Identity;
-use crate::link::spec::Url;
+use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
 use crate::link::LinksMetadata;
-use crate::link::DEFAULT_LINK_NAME;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
 use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
 use crate::subgraph::spec::FEDERATION_V2_ELEMENT_NAMES;
 
@@ -248,10 +248,10 @@ mod tests {
     use apollo_compiler::name;
 
     use super::*;
-    use crate::link::spec::Version;
-    use crate::link::spec::APOLLO_SPEC_DOMAIN;
     use crate::link::Import;
     use crate::link::Purpose;
+    use crate::link::spec::APOLLO_SPEC_DOMAIN;
+    use crate::link::spec::Version;
 
     #[test]
     fn explicit_root_directive_import() -> Result<(), LinkError> {
@@ -277,9 +277,10 @@ mod tests {
         let meta = links_metadata(&schema)?;
         let meta = meta.expect("should have metadata");
 
-        assert!(meta
-            .source_link_of_directive(&name!("inaccessible"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("inaccessible"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -306,9 +307,10 @@ mod tests {
         let schema = Schema::parse(schema, "lonk.graphqls").unwrap();
 
         let meta = links_metadata(&schema)?.expect("should have metadata");
-        assert!(meta
-            .source_link_of_directive(&name!("inaccessible"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("inaccessible"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -345,9 +347,10 @@ mod tests {
         let schema = Schema::parse(schema, "care.graphqls").unwrap();
 
         let meta = links_metadata(&schema)?.expect("should have metadata");
-        assert!(meta
-            .source_link_of_directive(&name!("join__graph"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("join__graph"))
+                .is_some()
+        );
 
         Ok(())
     }
@@ -384,9 +387,10 @@ mod tests {
         let meta = links_metadata(&schema)?;
         let meta = meta.expect("should have metadata");
 
-        assert!(meta
-            .source_link_of_directive(&name!("myDirective"))
-            .is_some());
+        assert!(
+            meta.source_link_of_directive(&name!("myDirective"))
+                .is_some()
+        );
 
         Ok(())
     }
