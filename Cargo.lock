@@ -7024,7 +7024,7 @@ dependencies = [
 [[package]]
 name = "tungstenite"
 version = "0.20.1"
-source = "git+https://github.com/apollographql/tungstenite-rs.git?branch=fix_utf8_error_0.20.1#b5bd18a392c2c2f03fb4c083a5226d8175ec6028"
+source = "git+https://github.com/apollographql/tungstenite-rs.git?branch=fix_utf8_error_0.20.1#5864df3b5e4c4ff7c5e8ed389e7bc815be42e611"
 dependencies = [
  "byteorder",
  "bytes",
