@@ -4,6 +4,7 @@ use std::hash::Hasher;
 
 use apollo_compiler::Name;
 
+pub mod api;
 pub mod expand;
 mod header;
 mod json_selection;
