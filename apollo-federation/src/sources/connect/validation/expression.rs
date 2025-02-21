@@ -59,6 +59,7 @@ impl<'schema> Context<'schema> {
             ),
             (Namespace::Config, Shape::unknown([])),
             (Namespace::Context, Shape::unknown([])),
+            (Namespace::Request, Shape::unknown([])),
         ]
         .into_iter()
         .collect();
@@ -461,6 +462,23 @@ mod tests {
     #[case::size_of_entries("$config->entries->size")]
     #[case::size_of_slice("$([1, 2, 3])->slice(0, 2)->size")]
     #[case::slice_after_match("$config->match([1, \"something\"], [2, \"another\"])->slice(0, 2)")]
+    #[case("$args.int")]
+    #[case("$config.abc")]
+    #[case("$context.def")]
+    #[case("$request.headers.'apollo-client-name'")]
+    fn valid_variables(#[case] selection: &str) {
+        validate_with_context(selection, scalars()).unwrap();
+    }
+
+    #[rstest]
+    #[case("$status")]
+    #[case("$response.headers.etag")]
+    fn invalid_variables(#[case] selection: &str) {
+        let err = validate_with_context(selection, scalars());
+        assert!(err.is_err());
+    }
+
+    #[rstest]
     #[case("$args.int")]
     #[case("$args.string")]
     #[case("$args.customScalar")]

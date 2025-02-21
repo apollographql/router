@@ -313,6 +313,7 @@ mod tests {
     use super::ConnectorSelector;
     use super::ConnectorSource;
     use super::MappingProblems;
+    use crate::graphql;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::mapping::Problem;
@@ -362,6 +363,8 @@ mod tests {
             spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         }
     }
 
@@ -394,6 +397,12 @@ mod tests {
         http_request: http::Request<RouterBody>,
         mapping_problems: Vec<Problem>,
     ) -> Request {
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         Request {
             context: context(),
             connector: Arc::new(connector()),
@@ -404,6 +413,7 @@ mod tests {
             }),
             key: response_key(),
             mapping_problems,
+            supergraph_request,
         }
     }
 

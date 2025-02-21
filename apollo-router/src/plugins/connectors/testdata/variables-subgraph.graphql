@@ -1,9 +1,6 @@
 extend schema
   @link(url: "https://specs.apollo.dev/federation/v2.10")
-  @link(
-    url: "https://specs.apollo.dev/connect/v0.1"
-    import: ["@connect", "@source"]
-  )
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"])
   @source(
     name: "v1"
     http: {
@@ -20,7 +17,7 @@ type Query {
     @connect(
       source: "v1"
       http: {
-        POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}"
+        POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}&header={$request.headers.value->first}"
         headers: [
           { name: "x-connect-context", value: "{$context.value}" }
           { name: "x-connect-config", value: "{$config.value}" }
@@ -30,6 +27,7 @@ type Query {
         arg: $args.arg
         context: $context.value
         config: $config.value
+        request: $request.headers.value->first
         """
       }
       selection: """
@@ -39,6 +37,8 @@ type Query {
       status: $status
       sibling: $("D")
       extra: $->echo({ arg: $args.arg, context: $context.value, config: $config.value, status: $status })
+      request: $request.headers.value->first
+      response: $response.headers.value->first
       """
     )
 }
@@ -50,6 +50,8 @@ type T {
   status: Int
   sibling: String
   extra: JSON
+  request: String
+  response: String
   f(arg: String): U
     @connect(
       source: "v1"
