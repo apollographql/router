@@ -238,7 +238,7 @@ impl Connector {
             .id
             .source_name
             .clone()
-            .unwrap_or("anonymous".to_string());
+            .unwrap_or(self.id.synthetic_name());
         format!("{}.{}", self.id.subgraph_name, source_name)
     }
 }
