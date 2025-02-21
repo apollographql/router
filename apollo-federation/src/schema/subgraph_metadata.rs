@@ -6,7 +6,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use serde_json::value::Index;
 
 use crate::error::FederationError;
 use crate::link::context_spec_definition::parse_context;
@@ -43,7 +42,7 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
-        let used_fields = Self::collect_used_fields(federation_spec_definition, schema)?;
+        let used_fields = Self::collect_used_fields(schema, federation_spec_definition)?;
         Ok(Self {
             federation_spec_definition,
             external_metadata,
@@ -59,37 +58,64 @@ impl SubgraphMetadata {
         &self.external_metadata
     }
 
+    pub(crate) fn is_fed_2_schema(&self) -> bool {
+        self.federation_spec_definition()
+            .version()
+            .satisfies(&Version { major: 2, minor: 0 })
+    }
+
     pub(crate) fn is_field_external(&self, field: &FieldDefinitionPosition) -> bool {
         self.external_metadata().is_external(field)
+    }
+
+    pub(crate) fn is_field_fake_external(&self, field: &FieldDefinitionPosition) -> bool {
+        self.external_metadata().is_fake_external(field)
+    }
+
+    pub(crate) fn is_field_fully_external(&self, field: &FieldDefinitionPosition) -> bool {
+        self.external_metadata().is_fully_external(field)
+    }
+
+    pub(crate) fn is_field_partially_external(&self, field: &FieldDefinitionPosition) -> bool {
+        self.external_metadata().is_partially_external(field)
     }
 
     pub(crate) fn is_field_used(&self, field: &FieldDefinitionPosition) -> bool {
         self.used_fields.contains(field)
     }
 
+    pub(crate) fn is_interface_object_type(&self, type_: Name) -> bool {
+        todo!()
+    }
+
+    pub(crate) fn selection_selects_any_external_field(&self, selection: &SelectionSet) -> bool {
+        self.external_metadata()
+            .selects_any_external_field(selection)
+    }
+
     fn collect_used_fields(
-        federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut used_fields = IndexSet::default();
         Self::collect_fields_used_by_key_directive(
-            federation_spec_definition,
             schema,
+            federation_spec_definition,
             &mut used_fields,
         )?;
         Self::collect_fields_used_by_requires_directive(
-            federation_spec_definition,
             schema,
+            federation_spec_definition,
             &mut used_fields,
         )?;
         Self::collect_fields_used_by_provides_directive(
-            federation_spec_definition,
             schema,
+            federation_spec_definition,
             &mut used_fields,
         )?;
         Self::collect_fields_used_by_context_directive(
-            federation_spec_definition,
             schema,
+            federation_spec_definition,
             &mut used_fields,
         )?;
         Self::collect_fields_used_to_satisfy_interface_constraints(schema, &mut used_fields)?;
@@ -97,10 +123,9 @@ impl SubgraphMetadata {
         Ok(used_fields)
     }
 
-    // TODO: Could probably be reused
     fn collect_fields_used_by_key_directive(
-        federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
         used_fields: &mut IndexSet<FieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
         let key_directive_definition =
@@ -139,8 +164,8 @@ impl SubgraphMetadata {
     }
 
     fn collect_fields_used_by_requires_directive(
-        federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
         used_fields: &mut IndexSet<FieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
         let requires_directive_definition =
@@ -167,8 +192,8 @@ impl SubgraphMetadata {
     }
 
     fn collect_fields_used_by_provides_directive(
-        federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
         used_fields: &mut IndexSet<FieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
         let provides_directive_definition =
@@ -195,8 +220,8 @@ impl SubgraphMetadata {
     }
 
     fn collect_fields_used_by_context_directive(
-        federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
+        federation_spec_definition: &'static FederationSpecDefinition,
         used_fields: &mut IndexSet<FieldDefinitionPosition>,
     ) -> Result<(), FederationError> {
         let context_directive_definition =
@@ -496,6 +521,14 @@ impl ExternalMetadata {
             .contains(field_definition_position)
     }
 
+    pub(crate) fn is_fully_external(&self, field: &FieldDefinitionPosition) -> bool {
+        todo!()
+    }
+
+    pub(crate) fn is_partially_external(&self, field: &FieldDefinitionPosition) -> bool {
+        todo!()
+    }
+
     pub(crate) fn selects_any_external_field(&self, selection_set: &SelectionSet) -> bool {
         for selection in selection_set.selections.values() {
             if let Selection::Field(field_selection) = selection {
@@ -549,6 +582,8 @@ mod tests {
         assert!(meta.is_field_used(&field("O3", "keyField1")));
         assert!(meta.is_field_used(&field("O3", "subKey")));
         assert!(meta.is_field_used(&field("O3SubKey", "keyField2")));
+
+        // TODO: Assertions about @provides
     }
 
     fn field(type_name: &str, field_name: &str) -> FieldDefinitionPosition {
