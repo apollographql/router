@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use serde_json::value::Index;
 
 use crate::error::FederationError;
 use crate::link::context_spec_definition::parse_context;
@@ -57,14 +59,12 @@ impl SubgraphMetadata {
         &self.external_metadata
     }
 
-    pub(crate) fn is_field_used(&self, type_name: &str, field_name: &str) -> bool {
-        // TODO: Put these in a proper lookup
-        for position in &self.used_fields {
-            if position.type_name() == type_name && position.field_name() == field_name {
-                return true;
-            }
-        }
-        return false;
+    pub(crate) fn is_field_external(&self, field: &FieldDefinitionPosition) -> bool {
+        self.external_metadata().is_external(field)
+    }
+
+    pub(crate) fn is_field_used(&self, field: &FieldDefinitionPosition) -> bool {
+        self.used_fields.contains(field)
     }
 
     fn collect_used_fields(
@@ -515,7 +515,10 @@ impl ExternalMetadata {
 
 #[cfg(test)]
 mod tests {
+    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::FederationSchema;
+    use apollo_compiler::Name;
 
     #[test]
     fn used_fields() {
@@ -536,15 +539,22 @@ mod tests {
         );
 
         // Fields that can satisfy interface constraints are used
-        assert!(meta.is_field_used("O1", "a"));
+        assert!(meta.is_field_used(&field("O1", "a")));
 
         // Fields required by @requires are used
-        assert!(meta.is_field_used("O2", "isRequired"));
-        assert!(meta.is_field_used("O2", "isAlsoRequired"));
+        assert!(meta.is_field_used(&field("O2", "isRequired")));
+        assert!(meta.is_field_used(&field("O2", "isAlsoRequired")));
 
         // Fields that are part of a @key are used
-        assert!(meta.is_field_used("O3", "keyField1"));
-        assert!(meta.is_field_used("O3", "subKey"));
-        assert!(meta.is_field_used("O3SubKey", "keyField2"))
+        assert!(meta.is_field_used(&field("O3", "keyField1")));
+        assert!(meta.is_field_used(&field("O3", "subKey")));
+        assert!(meta.is_field_used(&field("O3SubKey", "keyField2")));
+    }
+
+    fn field(type_name: &str, field_name: &str) -> FieldDefinitionPosition {
+        FieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
+            type_name: Name::new_unchecked(type_name),
+            field_name: Name::new_unchecked(field_name),
+        })
     }
 }
