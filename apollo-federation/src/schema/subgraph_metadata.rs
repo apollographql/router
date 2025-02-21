@@ -19,6 +19,7 @@ use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
 use super::position::CompositeTypeDefinitionPosition;
+use super::position::FieldArgumentDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
@@ -333,13 +334,26 @@ impl SubgraphMetadata {
         let from_context_directive_referencers = schema
             .referencers
             .get_directive(&from_context_directive_definition.name)?;
-        for argument_definition_position in
+        let mut from_context_positions: Vec<FieldArgumentDefinitionPosition> = Vec::new();
+        for object_field_argument_position in
             &from_context_directive_referencers.object_field_arguments
-        // TODO: Also interface field args?
         {
-            let directives = &argument_definition_position
-                .get(schema.schema())?
-                .directives;
+            from_context_positions.push(object_field_argument_position.clone().into());
+        }
+        for interface_field_argument_position in
+            &from_context_directive_referencers.interface_field_arguments
+        {
+            from_context_positions.push(interface_field_argument_position.clone().into());
+        }
+        for argument_definition_position in from_context_positions {
+            let directives = match &argument_definition_position {
+                FieldArgumentDefinitionPosition::Interface(pos) => {
+                    &pos.get(schema.schema())?.directives
+                }
+                FieldArgumentDefinitionPosition::Object(pos) => {
+                    &pos.get(schema.schema())?.directives
+                }
+            };
 
             for from_context_directive_application in
                 directives.get_all(&from_context_directive_definition.name)
@@ -347,15 +361,14 @@ impl SubgraphMetadata {
                 let field_value = federation_spec_definition
                     .from_context_directive_arguments(from_context_directive_application)?
                     .field;
-                if let Some((context, selection)) = parse_context(field_value) {
-                    if let Some(entry_point) = entry_points.get(context) {
-                        for context_type in entry_point {
-                            used_context_fields.extend(collect_target_fields_from_field_set(
-                                unwrap_schema(schema),
-                                context_type.type_name().clone(),
-                                selection,
-                            )?);
-                        }
+                let (context, selection) = parse_context(field_value)?;
+                if let Some(entry_point) = entry_points.get(context.as_str()) {
+                    for context_type in entry_point {
+                        used_context_fields.extend(collect_target_fields_from_field_set(
+                            unwrap_schema(schema),
+                            context_type.type_name().clone(),
+                            selection.as_str(),
+                        )?);
                     }
                 }
             }
@@ -643,7 +656,7 @@ mod tests {
         assert!(meta.is_field_used(&field("O4", "externalField")));
 
         // Fields pulled from @context are used
-        // assert!(meta.is_field_used(&field("O5Context", "usedInContext")));
+        assert!(meta.is_field_used(&field("O5Context", "usedInContext")));
 
         // Remaining fields are not considered used
         assert!(!meta.is_field_used(&field("O1", "b")));
@@ -651,6 +664,7 @@ mod tests {
         assert!(!meta.is_field_used(&field("O3", "nonKeyField")));
         assert!(!meta.is_field_used(&field("O4", "c")));
         assert!(!meta.is_field_used(&field("O4", "externalFieldNeverProvided")));
+        assert!(!meta.is_field_used(&field("O5Context", "notUsedInContext")));
     }
 
     fn field(type_name: &str, field_name: &str) -> FieldDefinitionPosition {

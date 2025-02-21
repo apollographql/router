@@ -141,6 +141,7 @@ type O5Wrapper {
 
 type O5 {
   usesContext(
-    arg1: String #  @federation__fromContext(field: "$o5_context { usedInContext }")
+    arg1: String
+      @federation__fromContext(field: "$o5_context { usedInContext }")
   ): String
 }

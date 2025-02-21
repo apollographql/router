@@ -1730,6 +1730,21 @@ impl Debug for ObjectTypeDefinitionPosition {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum FieldArgumentDefinitionPosition {
+    Interface(InterfaceFieldArgumentDefinitionPosition),
+    Object(ObjectFieldArgumentDefinitionPosition),
+}
+
+impl Debug for FieldArgumentDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct ObjectFieldDefinitionPosition {
     pub(crate) type_name: Name,
