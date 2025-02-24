@@ -1,10 +1,10 @@
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::internal_error;

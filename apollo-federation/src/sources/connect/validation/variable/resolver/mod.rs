@@ -1,13 +1,13 @@
+use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Schema;
 
-use crate::sources::connect::validation::graphql::GraphQLString;
-use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
+use crate::sources::connect::validation::graphql::GraphQLString;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::variable::Namespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;

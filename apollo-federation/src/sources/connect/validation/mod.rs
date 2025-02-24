@@ -28,6 +28,9 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Range;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
@@ -41,12 +44,9 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use coordinates::source_http_argument_coordinate;
-use entity::field_set_error;
 use entity::EntityKeyChecker;
+use entity::field_set_error;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
 use source_name::SourceName;
@@ -56,12 +56,13 @@ use strum_macros::IntoStaticStr;
 use url::Url;
 
 use super::Connector;
+use crate::link::Import;
+use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
-use crate::link::Import;
-use crate::link::Link;
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
@@ -71,7 +72,6 @@ use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers;
-use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -486,7 +486,7 @@ fn parse_url<Coordinate: Display + Copy>(
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
-) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> + 'a {
+) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> {
     object
         .directives
         .iter()
