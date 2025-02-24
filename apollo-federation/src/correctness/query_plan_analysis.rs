@@ -358,10 +358,13 @@ fn interpret_fetch_node(
 ) -> Result<ResponseShape, String> {
     let mut result = if let Some(_requires) = &fetch.requires {
         // TODO: check requires
-        compute_response_shape_for_entity_fetch_operation(&fetch.operation_document, schema)
-            .map(|rs| rs.add_boolean_conditions(conditions))
+        compute_response_shape_for_entity_fetch_operation(
+            fetch.operation_document.as_parsed().unwrap(),
+            schema,
+        )
+        .map(|rs| rs.add_boolean_conditions(conditions))
     } else {
-        compute_response_shape_for_operation(&fetch.operation_document, schema)
+        compute_response_shape_for_operation(fetch.operation_document.as_parsed().unwrap(), schema)
             .map(|rs| rs.add_boolean_conditions(conditions))
     }
     .map_err(|e| {

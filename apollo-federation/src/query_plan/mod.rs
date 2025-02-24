@@ -3,7 +3,6 @@ use std::sync::Arc;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::executable;
-use apollo_compiler::validation::Valid;
 use serde::Serialize;
 
 use crate::query_plan::query_planner::QueryPlanningStatistics;
@@ -86,8 +85,7 @@ pub struct FetchNode {
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
-    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_valid_executable_document")]
-    pub operation_document: Valid<ExecutableDocument>,
+    pub operation_document: serializable_document::SerializableDocument,
     pub operation_name: Option<Name>,
     #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_operation_type")]
     pub operation_kind: executable::OperationType,

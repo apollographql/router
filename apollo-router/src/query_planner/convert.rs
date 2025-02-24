@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
-use apollo_federation::query_plan::serializable_document::SerializableDocument;
 
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
@@ -77,8 +76,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             service_name: subgraph_name.clone(),
             requires: requires.as_deref().map(vec).unwrap_or_default(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SerializableDocument::from_parsed(Arc::new(operation_document.clone())),
+            operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             id: id.map(|id| id.to_string()),
@@ -157,8 +155,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
         Self {
             service_name: subgraph_name.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
-            // TODO: use Arc in apollo_federation to avoid this clone
-            operation: SerializableDocument::from_parsed(Arc::new(operation_document.clone())),
+            operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
             operation_kind: (*operation_kind).into(),
             input_rewrites: option_vec(input_rewrites),

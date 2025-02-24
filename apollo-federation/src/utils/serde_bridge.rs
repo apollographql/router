@@ -1,9 +1,8 @@
-use apollo_compiler::ExecutableDocument;
+//! This module contains functions used to bridge the apollo compiler serialization methods with
+//! serialization with serde.
+
 use apollo_compiler::Node;
-/// This module contains functions used to bridge the apollo compiler serialization methods with
-/// serialization with serde.
 use apollo_compiler::executable;
-use apollo_compiler::validation::Valid;
 use serde::Serializer;
 use serde::ser::SerializeSeq;
 
@@ -72,13 +71,6 @@ pub(crate) fn serialize_optional_vec_of_exe_selection<S: Serializer>(
         ser.serialize_element(&selection.serialize().no_indent().to_string())
     })?;
     ser.end()
-}
-
-pub(crate) fn serialize_valid_executable_document<S: Serializer>(
-    doc: &Valid<ExecutableDocument>,
-    ser: S,
-) -> Result<S::Ok, S::Error> {
-    ser.serialize_str(&doc.serialize().no_indent().to_string())
 }
 
 pub(crate) fn serialize_exe_operation_type<S: Serializer>(

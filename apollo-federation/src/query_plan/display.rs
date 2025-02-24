@@ -103,7 +103,10 @@ impl FetchNode {
                 state.new_line()?;
             }
         }
-        write_operation(state, operation_document)?;
+        write_operation(
+            state,
+            operation_document.as_parsed().map_err(|_| fmt::Error)?,
+        )?;
 
         state.dedent()?;
         state.write("},")

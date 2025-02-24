@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
@@ -16,6 +17,7 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
+use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
@@ -65,6 +67,7 @@ use crate::query_plan::conditions::Conditions;
 use crate::query_plan::conditions::remove_conditions_from_selection_set;
 use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::serializable_document::SerializableDocument;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -2657,14 +2660,15 @@ impl FetchDependencyGraphNode {
             )?
         };
         let operation = operation_compression.compress(operation)?;
-        let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
-                diagnostics,
-            }) => internal_error!(
-                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            ),
-            _ => err,
-        })?;
+        let operation_document: Valid<ExecutableDocument> =
+            operation.try_into().map_err(|err| match err {
+                FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
+                    diagnostics,
+                }) => internal_error!(
+                    "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+                ),
+                _ => err,
+            })?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
@@ -2707,7 +2711,7 @@ impl FetchDependencyGraphNode {
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
                 .map(|selection_set| trim_requires_selection_set(&selection_set)),
-            operation_document,
+            operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name,
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
