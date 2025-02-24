@@ -28,10 +28,10 @@ struct Config {
     subgraphs: HashMap<String, SubgraphConfig>,
 }
 
-#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
-#[serde(untagged)]
+#[derive(Clone, Debug, JsonSchema, Serialize)]
+// Remove the untagged attribute since we're implementing custom deserialization
 enum ErrorMode {
-    /// Propagate original error or redact everything
+    /// Include full error or redact everything
     Included(bool),
     /// Allow specific extension keys with required redact_message
     Allow {
@@ -43,6 +43,96 @@ enum ErrorMode {
         deny_extensions_keys: Vec<String>,
         redact_message: bool,
     },
+}
+
+// Add custom deserializer to enforce mutual exclusivity
+impl<'de> Deserialize<'de> for ErrorMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum BoolOrObject {
+            Bool(bool),
+            Object(serde_json::Value),
+        }
+
+        struct ErrorModeVisitor;
+
+        impl<'de> Visitor<'de> for ErrorModeVisitor {
+            type Value = ErrorMode;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("boolean or object with mutually exclusive allow_extensions_keys or deny_extensions_keys")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(ErrorMode::Included(value))
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut redact_message = None;
+                let mut allow_extensions_keys = None;
+                let mut deny_extensions_keys = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "redact_message" => {
+                            redact_message = Some(map.next_value()?);
+                        }
+                        "allow_extensions_keys" => {
+                            if deny_extensions_keys.is_some() {
+                                return Err(de::Error::custom(
+                                    "cannot specify both allow_extensions_keys and deny_extensions_keys",
+                                ));
+                            }
+                            allow_extensions_keys = Some(map.next_value()?);
+                        }
+                        "deny_extensions_keys" => {
+                            if allow_extensions_keys.is_some() {
+                                return Err(de::Error::custom(
+                                    "cannot specify both allow_extensions_keys and deny_extensions_keys",
+                                ));
+                            }
+                            deny_extensions_keys = Some(map.next_value()?);
+                        }
+                        _ => return Err(de::Error::unknown_field(&key, &["redact_message", "allow_extensions_keys", "deny_extensions_keys"])),
+                    }
+                }
+
+                let redact_message = redact_message.ok_or_else(|| {
+                    de::Error::missing_field("redact_message")
+                })?;
+
+                match (allow_extensions_keys, deny_extensions_keys) {
+                    (Some(allow), None) => Ok(ErrorMode::Allow {
+                        allow_extensions_keys: allow,
+                        redact_message,
+                    }),
+                    (None, Some(deny)) => Ok(ErrorMode::Deny {
+                        deny_extensions_keys: deny,
+                        redact_message,
+                    }),
+                    (None, None) => Err(de::Error::custom(
+                        "must specify either allow_extensions_keys or deny_extensions_keys",
+                    )),
+                    _ => unreachable!(), // We already handle this case above
+                }
+            }
+        }
+
+        deserializer.deserialize_any(ErrorModeVisitor)
+    }
 }
 
 impl Default for ErrorMode {
@@ -290,9 +380,9 @@ impl Plugin for IncludeSubgraphErrors {
                     }
                 }
             }
-            // When global is object (Allow or Deny), subgraphs can use bool, allow, or deny.
-            // Single subgraph config can't have both allow and deny.
-            _ => {}
+            ErrorMode::Allow { .. } | ErrorMode::Deny { .. } => {
+                // No additional validation needed for Allow or Deny modes
+            }
         }
 
         Ok(IncludeSubgraphErrors {
