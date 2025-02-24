@@ -2,8 +2,6 @@
 pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
 
 // Failure of the test can be diagnosed using the dhat-heap.json file.
-// Here is a write up on analysing dhat-heap.json:
-// https://apollographql.atlassian.net/wiki/spaces/Router/pages/1285226499/Using+dhat+to+profile+memory+utilisation+in+the+router#Analysing-dhat-heap.json
 
 // These values should be kept slightly larger (~10%) than the current heap usage to catch
 // significant increases.
