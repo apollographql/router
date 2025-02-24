@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::name;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use futures::StreamExt;
 use http::Method;
 use serde_json_bytes::json;
@@ -25,7 +26,6 @@ use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::subgraph_service::MakeSubgraphService;
@@ -292,7 +292,7 @@ async fn defer() {
                         service_name: "X".into(),
                         requires: vec![],
                         variable_usages: vec![],
-                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
+                        operation: SerializableDocument::from_string("{ t { id __typename x } }"),
                         operation_name: Some("t".into()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".into()),
@@ -336,7 +336,7 @@ async fn defer() {
                                 },
                             )],
                             variable_usages: vec![],
-                            operation: SubgraphOperation::from_string(
+                            operation: SerializableDocument::from_string(
                                 "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
                             ),
                             operation_name: None,
@@ -1866,7 +1866,7 @@ fn broken_plan_does_not_panic() {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
-            operation: SubgraphOperation::from_string(operation),
+            operation: SerializableDocument::from_string(operation),
             operation_name: Some("t".into()),
             operation_kind: OperationKind::Query,
             id: Some("fetch1".into()),

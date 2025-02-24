@@ -12,6 +12,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
+use apollo_federation::query_plan::serializable_document::SerializableDocumentNotInitialized;
 use displaydoc::Display;
 use futures::future::Either;
 use futures::stream;
@@ -125,7 +126,7 @@ pub(crate) enum DemandControlError {
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
     /// {0}
-    SubgraphOperationNotInitialized(crate::query_planner::fetch::SubgraphOperationNotInitialized),
+    SubgraphOperationNotInitialized(SerializableDocumentNotInitialized),
     /// {0}
     ContextSerializationError(String),
     /// {0}
@@ -165,7 +166,12 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
-            DemandControlError::SubgraphOperationNotInitialized(e) => Ok(e.into_graphql_errors()),
+            DemandControlError::SubgraphOperationNotInitialized(e) => {
+                Ok(vec![graphql::Error::builder()
+                    .extension_code("SUBGRAPH_OPERATION_NOT_INITIALIZED")
+                    .message(e.to_string())
+                    .build()])
+            }
             DemandControlError::ContextSerializationError(_) => Ok(vec![graphql::Error::builder()
                 .extension_code(self.code())
                 .message(self.to_string())
@@ -184,7 +190,9 @@ impl DemandControlError {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
-            DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
+            DemandControlError::SubgraphOperationNotInitialized(_) => {
+                "SUBGRAPH_OPERATION_NOT_INITIALIZED"
+            }
             DemandControlError::ContextSerializationError(_) => "COST_CONTEXT_SERIALIZATION_ERROR",
             DemandControlError::FederationError(_) => "FEDERATION_ERROR",
         }

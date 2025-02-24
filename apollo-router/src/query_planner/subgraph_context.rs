@@ -12,10 +12,10 @@ use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
-use super::fetch::SubgraphOperation;
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
 use crate::json_ext::Path;
@@ -204,7 +204,7 @@ impl<'a> SubgraphContext<'a> {
 // Take the existing subgraph operation and rewrite it to use aliasing. This will occur in the case
 // where we are collecting entites and different entities may have different variables passed to the resolver.
 pub(crate) fn build_operation_with_aliasing(
-    subgraph_operation: &SubgraphOperation,
+    subgraph_operation: &SerializableDocument,
     contextual_arguments: &ContextualArguments,
     subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {

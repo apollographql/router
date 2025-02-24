@@ -11,6 +11,7 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use serde_json_bytes::Value;
 
 use super::directives::IncludeDirective;
@@ -22,7 +23,6 @@ use crate::graphql::Response;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
 use crate::plugins::demand_control::cost_calculator::directives::ListSizeDirective;
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
@@ -414,7 +414,7 @@ impl StaticCostCalculator {
     fn estimated_cost_of_operation(
         &self,
         subgraph: &str,
-        operation: &SubgraphOperation,
+        operation: &SerializableDocument,
         variables: &Object,
     ) -> Result<f64, DemandControlError> {
         tracing::debug!("On subgraph {}, scoring operation: {}", subgraph, operation);
