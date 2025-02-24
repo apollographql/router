@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for ErrorMode {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 struct SubgraphConfigCommon {
     #[serde(skip_serializing_if = "Option::is_none")]
     redact_message: Option<bool>,
@@ -96,7 +96,7 @@ struct SubgraphConfigCommon {
     exclude_global_keys: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(untagged)]
 enum SubgraphConfig {
     /// Enable or disable error inclusion for a subgraph
@@ -119,106 +119,6 @@ enum SubgraphConfig {
     }
 }
 
-impl JsonSchema for SubgraphConfig {
-    fn schema_name() -> String {
-        "SubgraphConfig".to_string()
-    }
-
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        use schemars::schema::{InstanceType, ObjectValidation, Schema, SchemaObject};
-
-        let bool_schema = Schema::Object(SchemaObject {
-            instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
-                InstanceType::Boolean,
-            ))),
-            ..Default::default()
-        });
-
-        let common_props = {
-            let mut props = schemars::Map::new();
-            props.insert(
-                "redact_message".to_string(),
-                gen.subschema_for::<Option<bool>>(),
-            );
-            props.insert(
-                "exclude_global_keys".to_string(),
-                gen.subschema_for::<Option<Vec<String>>>(),
-            );
-            props
-        };
-
-        let allow_schema = Schema::Object(SchemaObject {
-            instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
-                InstanceType::Object,
-            ))),
-            object: Some(Box::new(ObjectValidation {
-                properties: {
-                    let mut props = common_props.clone();
-                    props.insert(
-                        "allow_extensions_keys".to_string(),
-                        gen.subschema_for::<Vec<String>>(),
-                    );
-                    props
-                },
-                required: vec!["allow_extensions_keys".to_string()]
-                    .into_iter()
-                    .collect(),
-                additional_properties: Some(Box::new(Schema::Bool(false))),
-                ..Default::default()
-            })),
-            ..Default::default()
-        });
-
-        let deny_schema = Schema::Object(SchemaObject {
-            instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
-                InstanceType::Object,
-            ))),
-            object: Some(Box::new(ObjectValidation {
-                properties: {
-                    let mut props = common_props.clone();
-                    props.insert(
-                        "deny_extensions_keys".to_string(),
-                        gen.subschema_for::<Vec<String>>(),
-                    );
-                    props
-                },
-                required: vec!["deny_extensions_keys".to_string()]
-                    .into_iter()
-                    .collect::<std::collections::BTreeSet<String>>(),
-                additional_properties: Some(Box::new(Schema::Bool(false))),
-                ..Default::default()
-            })),
-            ..Default::default()
-        });
-
-        let common_schema = Schema::Object(SchemaObject {
-            instance_type: Some(schemars::schema::SingleOrVec::Single(Box::new(
-                InstanceType::Object,
-            ))),
-            object: Some(Box::new(ObjectValidation {
-                properties: common_props.clone(),
-                // Prevent additional properties
-                additional_properties: Some(Box::new(Schema::Bool(false))),
-                ..Default::default()
-            })),
-            ..Default::default()
-        });
-
-        Schema::Object(SchemaObject {
-            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
-                one_of: Some(vec![
-                    bool_schema,
-                    allow_schema,
-                    deny_schema,
-                    common_schema,
-                ]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        })
-    }
-}
-
 // Custom deserializer to handle both boolean and object types
 impl<'de> Deserialize<'de> for SubgraphConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -235,7 +135,7 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
                 formatter.write_str(
-                    "boolean or object with allow_extensions_keys or deny_extensions_keys",
+                    "boolean or object with either allow_extensions_keys or deny_extensions_keys, but not both",
                 )
             }
 
@@ -250,44 +150,50 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
             where
                 M: de::MapAccess<'de>,
             {
+                // Deserialize into a helper struct that captures all possible fields
                 #[derive(Deserialize)]
-                #[serde(untagged)]
-                enum Helper {
-                    Allow {
-                        allow_extensions_keys: Vec<String>,
-                        #[serde(flatten)]
-                        common: SubgraphConfigCommon,
-                    },
-                    Deny {
-                        deny_extensions_keys: Vec<String>,
-                        #[serde(flatten)]
-                        common: SubgraphConfigCommon,
-                    },
-                    Common {
-                        #[serde(flatten)]
-                        common: SubgraphConfigCommon,
-                    },
+                struct FullConfig {
+                    allow_extensions_keys: Option<Vec<String>>,
+                    deny_extensions_keys: Option<Vec<String>>,
+                    redact_message: Option<bool>,
+                    exclude_global_keys: Option<Vec<String>>,
+                    #[serde(flatten)]
+                    extra: HashMap<String, serde_json::Value>,  // Add this to catch unknown fields
                 }
-
-                let helper: Helper =
-                    Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))?;
-
-                match helper {
-                    Helper::Allow {
-                        allow_extensions_keys,
-                        common,
-                    } => Ok(SubgraphConfig::Allow {
-                        allow_extensions_keys,
+            
+                let config: FullConfig = Deserialize::deserialize(
+                    de::value::MapAccessDeserializer::new(map)
+                )?;
+            
+                if !config.extra.is_empty() {
+                    return Err(de::Error::custom(format!(
+                        "Unknown field(s): {}",
+                        config.extra.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")
+                    )));
+                }
+            
+                if config.allow_extensions_keys.is_some() && config.deny_extensions_keys.is_some() {
+                    return Err(de::Error::custom(
+                        "Subgraph config cannot have both allow_extensions_keys and deny_extensions_keys"
+                    ));
+                }
+            
+                let common = SubgraphConfigCommon {
+                    redact_message: config.redact_message,
+                    exclude_global_keys: config.exclude_global_keys,
+                };
+            
+                match (config.allow_extensions_keys, config.deny_extensions_keys) {
+                    (Some(allow), None) => Ok(SubgraphConfig::Allow {
+                        allow_extensions_keys: allow,
                         common,
                     }),
-                    Helper::Deny {
-                        deny_extensions_keys,
-                        common,
-                    } => Ok(SubgraphConfig::Deny {
-                        deny_extensions_keys,
+                    (None, Some(deny)) => Ok(SubgraphConfig::Deny {
+                        deny_extensions_keys: deny,
                         common,
                     }),
-                    Helper::Common { common } => Ok(SubgraphConfig::CommonOnly { common }),
+                    (None, None) => Ok(SubgraphConfig::CommonOnly { common }),
+                    (Some(_), Some(_)) => unreachable!(), // Already checked above
                 }
             }
         }
