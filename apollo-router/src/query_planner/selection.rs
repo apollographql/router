@@ -1,7 +1,7 @@
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use serde::Deserialize;
-use serde::Serialize;
+use apollo_federation::query_plan::requires_selection::Field;
+use apollo_federation::query_plan::requires_selection::InlineFragment;
+use apollo_federation::query_plan::requires_selection::Selection;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Entry;
 
@@ -10,46 +10,6 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 use crate::spec::TYPENAME;
-
-/// A selection that is part of a fetch.
-/// Selections are used to propagate data to subgraph fetches.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "PascalCase", tag = "kind")]
-pub(crate) enum Selection {
-    /// A field selection.
-    Field(Field),
-
-    /// An inline fragment selection.
-    InlineFragment(InlineFragment),
-}
-
-/// The field that is used
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Field {
-    /// An optional alias for the field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) alias: Option<Name>,
-
-    /// The name of the field.
-    pub(crate) name: Name,
-
-    /// The selections for the field.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) selections: Option<Vec<Selection>>,
-}
-
-/// An inline fragment.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InlineFragment {
-    /// The required fragment type.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) type_condition: Option<Name>,
-
-    /// The selections from the fragment.
-    pub(crate) selections: Vec<Selection>,
-}
 
 pub(crate) fn execute_selection_set<'a>(
     input_content: &'a Value,
@@ -123,25 +83,28 @@ pub(crate) fn execute_selection_set<'a>(
                         if let Some(elements) = value.as_array() {
                             let selected = elements
                                 .iter()
-                                .map(|element| match selections {
-                                    Some(sels) => execute_selection_set(
-                                        element,
-                                        sels,
-                                        schema,
-                                        field_type
-                                            .as_ref()
-                                            .map(|ty| ty.inner_named_type().as_str()),
-                                    ),
-                                    None => element.clone(),
+                                .map(|element| {
+                                    if !selections.is_empty() {
+                                        execute_selection_set(
+                                            element,
+                                            selections,
+                                            schema,
+                                            field_type
+                                                .as_ref()
+                                                .map(|ty| ty.inner_named_type().as_str()),
+                                        )
+                                    } else {
+                                        element.clone()
+                                    }
                                 })
                                 .collect::<Vec<_>>();
                             output.insert(key.clone(), Value::Array(selected));
-                        } else if let Some(sels) = selections {
+                        } else if !selections.is_empty() {
                             output.insert(
                                 key.clone(),
                                 execute_selection_set(
                                     value,
-                                    sels,
+                                    selections,
                                     schema,
                                     field_type.as_ref().map(|ty| ty.inner_named_type().as_str()),
                                 ),

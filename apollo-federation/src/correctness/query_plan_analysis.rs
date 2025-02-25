@@ -356,7 +356,7 @@ fn interpret_fetch_node(
     conditions: &[Literal],
     fetch: &FetchNode,
 ) -> Result<ResponseShape, String> {
-    let mut result = if let Some(_requires) = &fetch.requires {
+    let mut result = if !fetch.requires.is_empty() {
         // TODO: check requires
         compute_response_shape_for_entity_fetch_operation(
             fetch.operation_document.as_parsed().unwrap(),

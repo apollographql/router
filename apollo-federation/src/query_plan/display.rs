@@ -96,12 +96,10 @@ impl FetchNode {
         state.write(") {")?;
         state.indent()?;
 
-        if let Some(v) = requires.as_ref() {
-            if !v.is_empty() {
-                write_selections(state, v)?;
-                state.write(" =>")?;
-                state.new_line()?;
-            }
+        if !requires.is_empty() {
+            write_requires_selections(state, requires)?;
+            state.write(" =>")?;
+            state.new_line()?;
         }
         write_operation(
             state,
@@ -365,6 +363,69 @@ fn write_selections(
     state.dedent()?;
 
     state.write("}")
+}
+
+fn write_requires_selections(
+    state: &mut State<'_, '_>,
+    mut selections: &[requires_selection::Selection],
+) -> fmt::Result {
+    if let Some(requires_selection::Selection::Field(field)) = selections.first() {
+        if field.name == "_entities" {
+            selections = &field.selections
+        }
+    }
+    state.write("{")?;
+
+    // Manually indent and write the newline
+    // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
+    state.indent()?;
+    if let Some((first, rest)) = selections.split_first() {
+        write_requires_selection(state, first)?;
+        for sel in rest {
+            state.new_line()?;
+            write_requires_selection(state, sel)?;
+        }
+    }
+    state.dedent()?;
+
+    state.write("}")
+}
+
+fn write_requires_selection(
+    state: &mut State<'_, '_>,
+    selection: &requires_selection::Selection,
+) -> fmt::Result {
+    match selection {
+        requires_selection::Selection::Field(requires_selection::Field {
+            alias,
+            name,
+            selections,
+        }) => {
+            if let Some(alias) = alias {
+                state.write(alias)?;
+                state.write(": ")?;
+            }
+            state.write(name)?;
+            if !selections.is_empty() {
+                state.write(" ")?;
+                write_requires_selections(state, selections)?;
+            }
+        }
+        requires_selection::Selection::InlineFragment(requires_selection::InlineFragment {
+            type_condition,
+            selections,
+        }) => {
+            if let Some(type_name) = type_condition {
+                state.write("... on ")?;
+                state.write(type_name)?;
+                state.write(" ")?;
+            } else {
+                state.write("... ")?;
+            }
+            write_requires_selections(state, selections)?;
+        }
+    }
+    Ok(())
 }
 
 /// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`

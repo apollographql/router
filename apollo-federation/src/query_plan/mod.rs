@@ -14,6 +14,7 @@ pub(crate) mod fetch_dependency_graph_processor;
 pub mod generate;
 pub mod query_planner;
 pub(crate) mod query_planning_traversal;
+pub mod requires_selection;
 pub mod serializable_document;
 
 pub type QueryPlanCost = f64;
@@ -73,15 +74,9 @@ pub struct FetchNode {
     /// guaranteed to have a unique `id`.
     pub id: Option<u64>,
     pub variable_usages: Vec<Name>,
-    /// `Selection`s in apollo-rs _can_ have a `FragmentSpread`, but this `Selection` is
-    /// specifically typing the `requires` key in a built query plan, where there can't be
-    /// `FragmentSpread`.
-    // PORT_NOTE: This was its own type in the JS codebase, but it's likely simpler to just have the
-    // constraint be implicit for router instead of creating a new type.
-    #[serde(
-        serialize_with = "crate::utils::serde_bridge::serialize_optional_vec_of_exe_selection"
-    )]
-    pub requires: Option<Vec<executable::Selection>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
+    pub requires: Vec<requires_selection::Selection>,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.

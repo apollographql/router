@@ -5,6 +5,7 @@ use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -18,7 +19,6 @@ use tracing::Instrument;
 
 use super::rewrites;
 use super::selection::execute_selection_set;
-use super::selection::Selection;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
 use crate::error::Error;
@@ -125,7 +125,7 @@ pub(crate) struct FetchNode {
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
-    pub(crate) requires: Vec<Selection>,
+    pub(crate) requires: Vec<requires_selection::Selection>,
 
     /// The variables that are used for the subgraph fetch.
     pub(crate) variable_usages: Vec<Arc<str>>,
@@ -172,7 +172,7 @@ impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        requires: &[Selection],
+        requires: &[requires_selection::Selection],
         variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,

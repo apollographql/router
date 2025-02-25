@@ -4,6 +4,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use apollo_compiler::name;
+use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use futures::StreamExt;
 use http::Method;
@@ -314,22 +315,22 @@ async fn defer() {
                         path: Path(vec![PathElement::Key("t".to_string(), None)]),
                         node: Box::new(PlanNode::Fetch(FetchNode {
                             service_name: "Y".into(),
-                            requires: vec![query_planner::selection::Selection::InlineFragment(
-                                query_planner::selection::InlineFragment {
+                            requires: vec![requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
                                     type_condition: Some(name!("T")),
                                     selections: vec![
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
                                                 alias: None,
                                                 name: name!("id"),
-                                                selections: None,
+                                                selections: Vec::new(),
                                             },
                                         ),
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
                                                 alias: None,
                                                 name: name!("__typename"),
-                                                selections: None,
+                                                selections: Vec::new(),
                                             },
                                         ),
                                     ],

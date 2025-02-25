@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
 
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
-use crate::query_planner::selection;
 use crate::query_planner::subscription;
 
 pub(crate) fn convert_root_query_plan_node(js: &next::QueryPlan) -> Option<plan::PlanNode> {
@@ -74,7 +72,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
         } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
-            requires: requires.as_deref().map(vec).unwrap_or_default(),
+            requires: requires.clone(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             operation: operation_document.clone(),
             operation_name: operation_name.clone().map(|n| n.into()),
@@ -218,54 +216,6 @@ impl From<&'_ next::DeferredDependency> for plan::Depends {
     fn from(value: &'_ next::DeferredDependency) -> Self {
         let next::DeferredDependency { id } = value;
         Self { id: id.clone() }
-    }
-}
-
-impl From<&'_ executable::Selection> for selection::Selection {
-    fn from(value: &'_ executable::Selection) -> Self {
-        match value {
-            executable::Selection::Field(field) => Self::Field(field.as_ref().into()),
-            executable::Selection::InlineFragment(inline) => {
-                Self::InlineFragment(inline.as_ref().into())
-            }
-            executable::Selection::FragmentSpread(_) => unreachable!(),
-        }
-    }
-}
-
-impl From<&'_ executable::Field> for selection::Field {
-    fn from(value: &'_ executable::Field) -> Self {
-        let executable::Field {
-            definition: _,
-            alias,
-            name,
-            arguments: _,
-            directives: _,
-            selection_set,
-        } = value;
-        Self {
-            alias: alias.clone(),
-            name: name.clone(),
-            selections: if selection_set.selections.is_empty() {
-                None
-            } else {
-                Some(vec(&selection_set.selections))
-            },
-        }
-    }
-}
-
-impl From<&'_ executable::InlineFragment> for selection::InlineFragment {
-    fn from(value: &'_ executable::InlineFragment) -> Self {
-        let executable::InlineFragment {
-            type_condition,
-            directives: _,
-            selection_set,
-        } = value;
-        Self {
-            type_condition: type_condition.clone(),
-            selections: vec(&selection_set.selections),
-        }
     }
 }
 

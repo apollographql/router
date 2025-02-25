@@ -67,6 +67,7 @@ use crate::query_plan::conditions::Conditions;
 use crate::query_plan::conditions::remove_conditions_from_selection_set;
 use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::requires_selection;
 use crate::query_plan::serializable_document::SerializableDocument;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -2674,29 +2675,27 @@ impl FetchDependencyGraphNode {
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
         fn trim_requires_selection_set(
             selection_set: &executable::SelectionSet,
-        ) -> Vec<executable::Selection> {
+        ) -> Vec<requires_selection::Selection> {
             selection_set
                 .selections
                 .iter()
                 .filter_map(|s| match s {
-                    executable::Selection::Field(field) => Some(executable::Selection::from(
-                        executable::Field::new(field.name.clone(), field.definition.clone())
-                            .with_selections(trim_requires_selection_set(&field.selection_set)),
-                    )),
+                    executable::Selection::Field(field) => Some(
+                        requires_selection::Selection::Field(requires_selection::Field {
+                            alias: None,
+                            name: field.name.clone(),
+                            selections: trim_requires_selection_set(&field.selection_set),
+                        }),
+                    ),
                     executable::Selection::InlineFragment(inline_fragment) => {
-                        let new_fragment = inline_fragment
-                            .type_condition
-                            .clone()
-                            .map(executable::InlineFragment::with_type_condition)
-                            .unwrap_or_else(|| {
-                                executable::InlineFragment::without_type_condition(
-                                    inline_fragment.selection_set.ty.clone(),
-                                )
-                            })
-                            .with_selections(trim_requires_selection_set(
-                                &inline_fragment.selection_set,
-                            ));
-                        Some(executable::Selection::from(new_fragment))
+                        Some(requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: inline_fragment.type_condition.clone(),
+                                selections: trim_requires_selection_set(
+                                    &inline_fragment.selection_set,
+                                ),
+                            },
+                        ))
                     }
                     executable::Selection::FragmentSpread(_) => None,
                 })
@@ -2710,7 +2709,8 @@ impl FetchDependencyGraphNode {
                 .as_ref()
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
-                .map(|selection_set| trim_requires_selection_set(&selection_set)),
+                .map(|selection_set| trim_requires_selection_set(&selection_set))
+                .unwrap_or_default(),
             operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name,
             operation_kind: self.root_kind.into(),

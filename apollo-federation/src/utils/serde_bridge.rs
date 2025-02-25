@@ -59,20 +59,6 @@ pub(crate) fn serialize_exe_directive_list<S: Serializer>(
     ser.serialize_str(&list.serialize().no_indent().to_string())
 }
 
-pub(crate) fn serialize_optional_vec_of_exe_selection<S: Serializer>(
-    selection: &Option<Vec<executable::Selection>>,
-    ser: S,
-) -> Result<S::Ok, S::Error> {
-    let Some(selections) = selection else {
-        return ser.serialize_none();
-    };
-    let mut ser = ser.serialize_seq(Some(selections.len()))?;
-    selections.iter().try_for_each(|selection| {
-        ser.serialize_element(&selection.serialize().no_indent().to_string())
-    })?;
-    ser.end()
-}
-
 pub(crate) fn serialize_exe_operation_type<S: Serializer>(
     ty: &executable::OperationType,
     ser: S,
