@@ -4,6 +4,119 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.0] - 2025-02-25
+
+## 🚀 Features
+
+### feat: query planner dry-run option ([PR #6656](https://github.com/apollographql/router/pull/6656))
+
+This PR adds a new `dry-run` option to the `Apollo-Expose-Query-Plan` header value that emits the query plans back to Studio for visualizations. This new value will *only* emit the query plan, and abort execution. This can be helpful for tools like `rover`, where query plan generation is needed but not full runtime, or for potentially prewarming query plan caches out of band.
+
+By [@aaronArinder](https://github.com/aaronArinder) and [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/6656.
+
+### Enable Remote Proxy Downloads
+
+This enables users without direct download access to specify a remote proxy mirror location for the github download of
+the Apollo Router releases.
+
+By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apollographql/router/pull/6667
+
+## 🐛 Fixes
+
+### Header propagation rules passthrough ([PR #6690](https://github.com/apollographql/router/pull/6690))
+
+Header propagation contains logic to prevent headers from being propagated more than once. This was broken
+in https://github.com/apollographql/router/pull/6281 which always considered a header propagated regardless if a rule
+actually matched.
+
+This PR alters the logic so that only when a header is populated then the header is marked as fixed.
+
+The following will now work again:
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
+```
+
+Note that defaulting a head WILL populate a header, so make sure to include your defaults last in your propagation
+rules.
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+          default: defaulted # This will prevent any further rule evaluation for header `b`
+      - propagate:
+          named: b
+```
+
+Instead, make sure that your headers are defaulted last:
+
+```
+headers:
+  all:
+    request:
+      - propagate:
+          named: a
+          rename: b
+      - propagate:
+          named: b
+          default: defaulted # OK
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6690
+
+### Entity cache: fix directive conflicts in cache-control header ([Issue #6441](https://github.com/apollographql/router/issues/6441))
+
+Unnecessary cache-control directives are created in cache-control header.  The router will now filter out unnecessary values from the `cache-control` header when the request resolves. So if there's `max-age=10, no-cache, must-revalidate, no-store`, the expected value for the cache-control header would simply be `no-store`. Please see the MDN docs for justification of this reasoning: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6543
+
+### Fixed a query planner bug where some `__typename` selections could be missing in query plans
+
+The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. The bug was that, when there are multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection. The query planner now favors the one with a `__typename` attached, so that the attached `__typename` selections won't be lost anymore.
+
+By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/6824
+
+## 📃 Configuration
+
+### promote experimental_otlp_tracing_sampler from experimental ([PR #6070](https://github.com/apollographql/router/pull/6070))
+
+The router's otlp tracing sampler feature that was previously [experimental](https://www.apollographql.com/docs/resources/product-launch-stages/#experimental-features) is now [generally available](https://www.apollographql.com/docs/resources/product-launch-stages/#general-availability).
+
+If you used its experimental configuration, you should migrate to the new configuration option:
+
+* `telemetry.apollo.experimental_otlp_tracing_sampler` is now `telemetry.apollo.otlp_tracing_sampler`
+
+The experimental configuration option is now deprecated. It remains functional but will log warnings.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/6070
+
+### Remove `experimental_` prefix for PQ `local_manifests` configuration
+
+The `experimental_local_manifests` PQ configuration option is being promoted to stable. This change updates the configuration option name and any references to it, as well as the related documentation. The `experimental_` usage remains valid as an alias for existing usages.
+
+By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/6564
+
+## 🛠 Maintenance
+
+### Reduce demand control allocations on start/reload ([PR #6754](https://github.com/apollographql/router/pull/6754))
+
+When enabled, preallocates capacity for demand control's processed schema and shrinks to fit after processing. When disabled, skips the type processing entirely to minimize startup impact.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/6754
+
+
+
 # [1.60.1] - 2025-02-12
 
 ## 🐛 Fixes
