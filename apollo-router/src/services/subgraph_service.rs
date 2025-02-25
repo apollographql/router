@@ -1557,7 +1557,6 @@ async fn do_fetch(
     } else {
         get_graphql_content_type(service_name, &parts)
     };
-    // let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
         let body = body
