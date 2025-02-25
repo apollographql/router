@@ -1549,7 +1549,15 @@ async fn do_fetch(
 
     let (parts, body) = response.http_response.into_parts();
 
-    let content_type = get_graphql_content_type(service_name, &parts);
+    // More tolorent content-type handling for chunked responses
+    let content_type = if parts.headers.contains_key("transfer-encoding") 
+        && parts.headers.get("transfer-encoding").map(|v| v.as_bytes()) == Some(b"chunked") {
+        // Assume JSON for chunked responses when content-type is missing
+        Ok(ContentType::ApplicationJson)
+    } else {
+        get_graphql_content_type(service_name, &parts)
+    };
+    // let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
         let body = body
