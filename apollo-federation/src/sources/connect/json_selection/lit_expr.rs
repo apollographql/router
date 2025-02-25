@@ -17,18 +17,18 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 
+use super::ExternalVarPaths;
+use super::ParseResult;
 use super::helpers::spaces_or_comments;
-use super::location::merge_ranges;
-use super::location::ranged_span;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
+use super::location::merge_ranges;
+use super::location::ranged_span;
 use super::nom_error_message;
-use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
-use super::ExternalVarPaths;
-use super::ParseResult;
+use super::parser::parse_string_literal;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -282,10 +282,10 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::sources::connect::json_selection::PathList;
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
-    use crate::sources::connect::json_selection::PathList;
 
     #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {

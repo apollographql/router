@@ -50,10 +50,10 @@ fn vec_includes_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T)
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Schema;
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
     use apollo_compiler::validation::Valid;
-    use apollo_compiler::Schema;
     use rstest::rstest;
 
     use super::field_set_is_subset;

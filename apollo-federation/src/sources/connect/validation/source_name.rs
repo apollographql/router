@@ -1,19 +1,19 @@
 use std::fmt::Display;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
-use super::coordinates::connect_directive_name_coordinate;
-use super::coordinates::source_name_argument_coordinate;
-use super::coordinates::source_name_value_coordinate;
 use super::Code;
 use super::DirectiveName;
 use super::Message;
+use super::coordinates::connect_directive_name_coordinate;
+use super::coordinates::source_name_argument_coordinate;
+use super::coordinates::source_name_value_coordinate;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
@@ -140,27 +140,40 @@ impl SourceName {
 
     pub(crate) fn into_value_or_error(self, sources: &SourceMap) -> Result<Node<Value>, Message> {
         match self {
-            Self::Valid { value, ..} => Ok(value),
+            Self::Valid { value, .. } => Ok(value),
             Self::Invalid {
                 value,
                 directive_name,
             } => Err(Message {
                 // This message is the same as Studio when trying to publish a subgraph with an invalid name
-                message: format!("{coordinate} is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{{0,63}}$", coordinate = source_name_value_coordinate(&directive_name, &value)),
+                message: format!(
+                    "{coordinate} is invalid; all source names must follow pattern '^[a-zA-Z][a-zA-Z0-9_-]{{0,63}}$",
+                    coordinate = source_name_value_coordinate(&directive_name, &value)
+                ),
                 code: Code::InvalidSourceName,
                 locations: value.line_column_range(sources).into_iter().collect(),
             }),
-            Self::Empty { directive_name, value } => {
-                Err(Message {
-                    code: Code::EmptySourceName,
-                    message: format!("The value for {coordinate} can't be empty.", coordinate = source_name_argument_coordinate(&directive_name))   ,
-                    locations: value.line_column_range(sources).into_iter().collect(),
-                })
-            }
-            Self::Missing { directive_name, ast_node } => Err(Message {
+            Self::Empty {
+                directive_name,
+                value,
+            } => Err(Message {
+                code: Code::EmptySourceName,
+                message: format!(
+                    "The value for {coordinate} can't be empty.",
+                    coordinate = source_name_argument_coordinate(&directive_name)
+                ),
+                locations: value.line_column_range(sources).into_iter().collect(),
+            }),
+            Self::Missing {
+                directive_name,
+                ast_node,
+            } => Err(Message {
                 code: Code::GraphQLError,
-                message: format!("The {coordinate} argument is required.", coordinate = source_name_argument_coordinate(&directive_name)),
-                locations: ast_node.line_column_range(sources).into_iter().collect()
+                message: format!(
+                    "The {coordinate} argument is required.",
+                    coordinate = source_name_argument_coordinate(&directive_name)
+                ),
+                locations: ast_node.line_column_range(sources).into_iter().collect(),
             }),
         }
     }

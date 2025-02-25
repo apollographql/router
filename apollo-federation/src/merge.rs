@@ -5,6 +5,9 @@ use std::fmt::Formatter;
 use std::iter;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
@@ -31,15 +34,15 @@ use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
 use indexmap::map::Iter;
 use itertools::Itertools;
 
+use crate::ValidFederationSubgraph;
+use crate::ValidFederationSubgraphs;
 use crate::error::FederationError;
+use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
@@ -49,17 +52,14 @@ use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
-use crate::ValidFederationSubgraph;
-use crate::ValidFederationSubgraphs;
 
 type MergeWarning = String;
 type MergeError = String;

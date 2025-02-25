@@ -7,15 +7,15 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use apollo_compiler::collections::IndexSet;
-use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
 use serde::Serialize;
 
-use super::sort_arguments;
 use super::DEFER_DIRECTIVE_NAME;
 use super::DEFER_LABEL_ARGUMENT_NAME;
+use super::sort_arguments;
 
 /// Compare sorted input values, which means specifically establishing an order between the variants
 /// of input values, and comparing values for the same variants accordingly.

@@ -1,16 +1,17 @@
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
-use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec::Identity;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
-use crate::link::Link;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::Link;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
+use crate::link::spec::Identity;
+use crate::schema::FederationSchema;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -27,7 +28,6 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
-use crate::schema::FederationSchema;
 use crate::sources::connect::ConnectSpec;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
@@ -302,11 +302,13 @@ fn copy_directive_definition(
 
 impl Link {
     fn to_directive_application(&self) -> Directive {
-        let mut arguments: Vec<Node<Argument>> = vec![Argument {
-            name: name!(url),
-            value: self.url.to_string().into(),
-        }
-        .into()];
+        let mut arguments: Vec<Node<Argument>> = vec![
+            Argument {
+                name: name!(url),
+                value: self.url.to_string().into(),
+            }
+            .into(),
+        ];
 
         // purpose: link__Purpose
         if let Some(purpose) = &self.purpose {
