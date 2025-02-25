@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### feat: query planner dry-run option ([PR #6656](https://github.com/apollographql/router/pull/6656))
+### Query planner dry-run option ([PR #6656](https://github.com/apollographql/router/pull/6656))
 
 This PR adds a new `dry-run` option to the `Apollo-Expose-Query-Plan` header value that emits the query plans back to Studio for visualizations. This new value will *only* emit the query plan, and abort execution. This can be helpful for tools like `rover`, where query plan generation is needed but not full runtime, or for potentially prewarming query plan caches out of band.
 
@@ -29,7 +29,7 @@ Header propagation contains logic to prevent headers from being propagated more 
 in https://github.com/apollographql/router/pull/6281 which always considered a header propagated regardless if a rule
 actually matched.
 
-This PR alters the logic so that only when a header is populated then the header is marked as fixed.
+This PR alters the logic so that a header is marked as fixed only when it's populated.
 
 The following will now work again:
 
@@ -44,7 +44,7 @@ headers:
           named: b
 ```
 
-Note that defaulting a head WILL populate a header, so make sure to include your defaults last in your propagation
+Note that defaulting a header WILL populate it, so make sure to include your defaults last in your propagation
 rules.
 
 ```
@@ -81,9 +81,13 @@ Unnecessary cache-control directives are created in cache-control header.  The r
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6543
 
-### Fixed a query planner bug where some `__typename` selections could be missing in query plans
+### Query Planning: fix `__typename` selections in sibling typename optimization 
 
-The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. The bug was that, when there are multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection. The query planner now favors the one with a `__typename` attached, so that the attached `__typename` selections won't be lost anymore.
+The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. 
+
+Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection. 
+
+Now, the query planner favors the one with a `__typename` attached without losing the `__typename` selection.
 
 By [@duckki](https://github.com/duckki) in https://github.com/apollographql/router/pull/6824
 
@@ -111,7 +115,7 @@ By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apol
 
 ### Reduce demand control allocations on start/reload ([PR #6754](https://github.com/apollographql/router/pull/6754))
 
-When enabled, preallocates capacity for demand control's processed schema and shrinks to fit after processing. When disabled, skips the type processing entirely to minimize startup impact.
+When demand control is enabled, the router now preallocates capacity for demand control's processed schema and shrinks to fit after processing. When it's disabled, the router skips the type processing entirely to minimize startup impact.
 
 By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/6754
 
