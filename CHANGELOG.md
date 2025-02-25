@@ -12,6 +12,14 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 This PR adds a new `dry-run` option to the `Apollo-Expose-Query-Plan` header value that emits the query plans back to Studio for visualizations. This new value will *only* emit the query plan, and abort execution. This can be helpful for tools like `rover`, where query plan generation is needed but not full runtime, or for potentially prewarming query plan caches out of band.
 
+```bash
+curl --request POST --include \
+     --header 'Accept: application/json' \
+     --header 'Apollo-Expose-Query-Plan: dry-run' \
+     --url 'http://127.0.0.1:4000/' \
+     --data '{"query": "{ topProducts { upc name } }"}'
+```
+
 By [@aaronArinder](https://github.com/aaronArinder) and [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/6656.
 
 ### Enable Remote Proxy Downloads
