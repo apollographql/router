@@ -7,6 +7,7 @@ use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
@@ -194,6 +195,10 @@ macro_rules! filter_observable_instrument_fn {
 impl InstrumentProvider for FilteredInstrumentProvider {
     filter_instrument_fn!(u64_counter, u64, Counter);
     filter_instrument_fn!(f64_counter, f64, Counter);
+
+    filter_instrument_fn!(u64_gauge, u64, Gauge);
+    filter_instrument_fn!(i64_gauge, i64, Gauge);
+    filter_instrument_fn!(f64_gauge, f64, Gauge);
 
     filter_observable_instrument_fn!(f64_observable_counter, f64, ObservableCounter);
     filter_observable_instrument_fn!(u64_observable_counter, u64, ObservableCounter);
