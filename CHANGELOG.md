@@ -115,7 +115,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Promote `experimental_local_manifess` config for persisted queries to stable
 
-The `experimental_local_manifests` PQ configuration option is being promoted to stable. This change updates the configuration option name and any references to it, as well as the related documentation. The `experimental_` usage remains valid as an alias for existing usages.
+The `experimental_local_manifests` persisted queries configuration option is being promoted to stable and is therefore renamed to `local_manifests`. This change updates the configuration option name and any references to it, as well as the related documentation. The `experimental_` usage remains valid as an alias for existing usages.
 
 By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/6564
 
