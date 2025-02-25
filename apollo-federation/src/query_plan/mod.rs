@@ -151,8 +151,7 @@ pub struct PrimaryDeferBlock {
     /// sub-selection will start at that parent `DeferredNode.query_path`. Note that this can be
     /// `None` in the rare case that everything in the original query is deferred (which is not very
     /// useful  in practice, but not disallowed by the @defer spec at the moment).
-    #[serde(skip)]
-    pub sub_selection: Option<executable::SelectionSet>,
+    pub sub_selection: Option<String>,
     /// The plan to get all the data for the primary block. Same notes as for subselection: usually
     /// defined, but can be undefined in some corner cases where nothing is to be done in the
     /// primary block.
@@ -172,8 +171,7 @@ pub struct DeferredDeferBlock {
     pub query_path: Vec<QueryPathElement>,
     /// The part of the original query that "selects" the data to send in the deferred response
     /// (once the plan in `node` completes). Will be set _unless_ `node` is a `DeferNode` itself.
-    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_optional_exe_selection_set")]
-    pub sub_selection: Option<executable::SelectionSet>,
+    pub sub_selection: Option<String>,
     /// The plan to get all the data for this deferred block. Usually set, but can be `None` for a
     /// `@defer` application where everything has been fetched in the "primary block" (i.e. when
     /// this deferred block only exists to expose what should be send to the upstream client in a
@@ -255,8 +253,6 @@ pub type Conditions = Vec<Name>;
 /// an inline fragment in a query.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum QueryPathElement {
-    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_field")]
-    Field(executable::Field),
-    #[serde(serialize_with = "crate::utils::serde_bridge::serialize_exe_inline_fragment")]
-    InlineFragment(executable::InlineFragment),
+    Field { response_key: Name },
+    InlineFragment { type_condition: Name },
 }

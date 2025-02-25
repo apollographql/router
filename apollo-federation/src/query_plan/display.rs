@@ -237,16 +237,8 @@ impl PrimaryDeferBlock {
         state.write("Primary {")?;
         if sub_selection.is_some() || node.is_some() {
             if let Some(sub_selection) = sub_selection {
-                // Manually indent and write the newline
-                // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
-                state.indent_no_new_line();
-                state.write("\n")?;
-
-                state.write(
-                    sub_selection
-                        .serialize()
-                        .initial_indent_level(state.indent_level()),
-                )?;
+                state.indent()?;
+                state.write(sub_selection)?;
                 if node.is_some() {
                     state.write(":")?;
                     state.new_line()?;
@@ -302,7 +294,7 @@ impl DeferredDeferBlock {
             state.indent()?;
 
             if let Some(sub_selection) = sub_selection {
-                write_selections(state, &sub_selection.selections)?;
+                state.write(sub_selection)?;
                 state.write(":")?;
             }
             if sub_selection.is_some() && node.is_some() {
@@ -457,14 +449,8 @@ fn write_conditions(conditions: &Option<Vec<Name>>, f: &mut fmt::Formatter<'_>) 
 impl fmt::Display for QueryPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Field(field) => f.write_str(field.response_key()),
-            Self::InlineFragment(inline) => {
-                if let Some(cond) = &inline.type_condition {
-                    write!(f, "... on {cond}")
-                } else {
-                    Ok(())
-                }
-            }
+            Self::Field { response_key } => f.write_str(response_key),
+            Self::InlineFragment { type_condition } => write!(f, "... on {type_condition}"),
         }
     }
 }

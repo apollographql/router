@@ -6,30 +6,6 @@ use apollo_compiler::executable;
 use serde::Serializer;
 use serde::ser::SerializeSeq;
 
-pub(crate) fn serialize_exe_field<S: Serializer>(
-    field: &executable::Field,
-    ser: S,
-) -> Result<S::Ok, S::Error> {
-    ser.serialize_str(&field.serialize().no_indent().to_string())
-}
-
-pub(crate) fn serialize_exe_inline_fragment<S: Serializer>(
-    fragment: &executable::InlineFragment,
-    ser: S,
-) -> Result<S::Ok, S::Error> {
-    ser.serialize_str(&fragment.serialize().no_indent().to_string())
-}
-
-pub(crate) fn serialize_optional_exe_selection_set<S: Serializer>(
-    set: &Option<executable::SelectionSet>,
-    ser: S,
-) -> Result<S::Ok, S::Error> {
-    match set {
-        Some(set) => ser.serialize_str(&set.serialize().no_indent().to_string()),
-        None => ser.serialize_none(),
-    }
-}
-
 pub(crate) fn serialize_optional_slice_of_exe_argument_nodes<
     S: Serializer,
     Args: AsRef<[Node<executable::Argument>]>,

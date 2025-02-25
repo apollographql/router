@@ -190,18 +190,15 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
             query_path: crate::json_ext::Path(
                 query_path
                     .iter()
-                    .filter_map(|e| match e {
-                        next::QueryPathElement::Field(field) => Some(
-                            // TODO: type conditioned fetching once it s available in the rust planner
-                            crate::graphql::JsonPathElement::Key(
-                                field.response_key().to_string(),
-                                None,
-                            ),
-                        ),
-                        next::QueryPathElement::InlineFragment(inline) => {
-                            inline.type_condition.as_ref().map(|cond| {
-                                crate::graphql::JsonPathElement::Fragment(cond.to_string())
-                            })
+                    .map(|e| match e {
+                        next::QueryPathElement::Field { response_key } =>
+                        // TODO: type conditioned fetching once it s available in the rust planner
+                        {
+                            crate::graphql::JsonPathElement::Key(response_key.to_string(), None)
+                        }
+
+                        next::QueryPathElement::InlineFragment { type_condition } => {
+                            crate::graphql::JsonPathElement::Fragment(type_condition.to_string())
                         }
                     })
                     .collect(),
