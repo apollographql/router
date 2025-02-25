@@ -101,7 +101,7 @@ By [@duckki](https://github.com/duckki) in https://github.com/apollographql/rout
 
 ## 📃 Configuration
 
-### promote experimental_otlp_tracing_sampler from experimental ([PR #6070](https://github.com/apollographql/router/pull/6070))
+### Promote `experimental_otlp_tracing_sampler` config to stable ([PR #6070](https://github.com/apollographql/router/pull/6070))
 
 The router's otlp tracing sampler feature that was previously [experimental](https://www.apollographql.com/docs/resources/product-launch-stages/#experimental-features) is now [generally available](https://www.apollographql.com/docs/resources/product-launch-stages/#general-availability).
 
@@ -113,7 +113,7 @@ The experimental configuration option is now deprecated. It remains functional b
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/6070
 
-### Remove `experimental_` prefix for PQ `local_manifests` configuration
+### Promote `experimental_local_manifess` config for persisted queries to stable
 
 The `experimental_local_manifests` PQ configuration option is being promoted to stable. This change updates the configuration option name and any references to it, as well as the related documentation. The `experimental_` usage remains valid as an alias for existing usages.
 
