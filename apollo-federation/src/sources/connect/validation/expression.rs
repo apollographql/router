@@ -7,20 +7,20 @@ use std::str::FromStr;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
-use shape::graphql::shape_for_arguments;
-use shape::location::Location;
-use shape::location::SourceId;
 use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::graphql::shape_for_arguments;
+use shape::location::Location;
+use shape::location::SourceId;
 
+use crate::sources::connect::Namespace;
 use crate::sources::connect::string_template::Expression;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::Code;
-use crate::sources::connect::validation::Message;
-use crate::sources::connect::Namespace;
 
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
@@ -334,14 +334,14 @@ fn shape_name(shape: &Shape) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
-    use crate::sources::connect::validation::coordinates::FieldCoordinate;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::validation::coordinates::FieldCoordinate;
 
     fn expression(selection: &str) -> Expression {
         Expression {
@@ -481,25 +481,27 @@ mod tests {
     #[rstest]
     #[case::array("$([])")]
     #[case::object("$({\"a\": 1})")]
-    // #[case::missing_property_of_object("$({\"a\": 1}).b")]  // TODO: catch this error
-    #[case::echo_invalid_constants("$->echo([])")]
-    #[case::map_scalar("$(1)->map(@)")]
-    #[case::map_array("$([])->map(@)")]
+    #[case::missing_property_of_object("$({\"a\": 1}).b")]
+    #[case::missing_property_of_in_array("$([{\"a\": 1}]).b")]
     #[case::last("$([1, 2])")]
-    #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
-    #[case::slice_of_array("$([])->slice(0, 2)")]
-    #[case::entries("$config.something->entries")]
     #[case::unknown_var("$args.unknown")]
     #[case::arg_is_array("$args.array")]
     #[case::arg_is_object("$args.object")]
     #[case::unknown_field_on_object("$args.object.unknown")]
-    #[case::map_array("$args.array->map(@)")]
-    #[case::slice_array("$args.array->slice(0, 2)")]
-    #[case::entries_scalar("$args.int->entries")]
-    #[case::first("$args.array->first")]
-    #[case::last("$args.array->last")]
     #[case::this_on_query("$this.something")]
     #[case::bare_field_no_var("something")]
+    // TODO: Re-enable these tests when method type checking is back
+    // #[case::echo_invalid_constants("$->echo([])")]
+    // #[case::map_scalar("$(1)->map(@)")]
+    // #[case::map_array("$([])->map(@)")]
+    // #[case::match_some_invalid_values("$config->match([1, 1], [2, {}])")]
+    // #[case::slice_of_array("$([])->slice(0, 2)")]
+    // #[case::entries("$config.something->entries")]
+    // #[case::map_array("$args.array->map(@)")]
+    // #[case::slice_array("$args.array->slice(0, 2)")]
+    // #[case::entries_scalar("$args.int->entries")]
+    // #[case::first("$args.array->first")]
+    // #[case::last("$args.array->last")]
     fn invalid_expressions(#[case] selection: &str) {
         let err = validate_with_context(selection, scalars());
         assert!(err.is_err());
@@ -582,6 +584,42 @@ mod tests {
         assert!(
             err.locations
                 .contains(&location_of_expression("$blahblahblah", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn subselection_of_literal_with_missing_field() {
+        let selection = r#"$({"a": 1}) { b }"#;
+        let err = validate_with_context(selection, Shape::unknown([]))
+            .expect_err("invalid property is an error");
+        assert!(
+            err.message.contains("`b`"),
+            "{} didn't reference variable",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("b", selection)),
+            "The relevant piece of the expression wasn't included in {:?}",
+            err.locations
+        );
+    }
+
+    #[test]
+    fn subselection_of_literal_in_array_with_missing_field() {
+        let selection = r#"$([{"a": 1}]) { b }"#;
+        let err = validate_with_context(selection, Shape::unknown([]))
+            .expect_err("invalid property is an error");
+        assert!(
+            err.message.contains("`b`"),
+            "{} didn't reference variable",
+            err.message
+        );
+        assert!(
+            err.locations
+                .contains(&location_of_expression("b", selection)),
             "The relevant piece of the expression wasn't included in {:?}",
             err.locations
         );

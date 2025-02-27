@@ -89,7 +89,7 @@ pub(crate) fn upgrade_configuration(
         config = new_config;
     }
     if !effective_migrations.is_empty() && log_warnings {
-        tracing::warn!("router configuration contains deprecated options: \n\n{}\n\nThese will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.", effective_migrations.iter().enumerate().map(|(idx, m)|format!("  {}. {}", idx + 1, m.description)).join("\n\n"));
+        tracing::error!("router configuration contains unsupported options and needs to be upgraded to run the router: \n\n{}\n\n", effective_migrations.iter().enumerate().map(|(idx, m)|format!("  {}. {}", idx + 1, m.description)).join("\n\n"));
     }
     Ok(config)
 }

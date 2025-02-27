@@ -7,24 +7,24 @@ use std::iter::empty;
 use apollo_compiler::collections::IndexMap;
 use serde_json::Number;
 use serde_json_bytes::Value as JSON;
-use shape::location::SourceId;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::SourceId;
 
 use crate::impl_arrow_method;
-use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
-use crate::sources::connect::json_selection::helpers::json_type_name;
-use crate::sources::connect::json_selection::helpers::vec_push;
-use crate::sources::connect::json_selection::immutable::InputPath;
-use crate::sources::connect::json_selection::lit_expr::LitExpr;
-use crate::sources::connect::json_selection::location::merge_ranges;
-use crate::sources::connect::json_selection::location::Ranged;
-use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
 use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
+use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
+use crate::sources::connect::json_selection::helpers::json_type_name;
+use crate::sources::connect::json_selection::helpers::vec_push;
+use crate::sources::connect::json_selection::immutable::InputPath;
+use crate::sources::connect::json_selection::lit_expr::LitExpr;
+use crate::sources::connect::json_selection::location::Ranged;
+use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::location::merge_ranges;
 
 impl_arrow_method!(TypeOfMethod, typeof_method, typeof_shape);
 fn typeof_method(
@@ -52,6 +52,7 @@ fn typeof_method(
         tail.apply_to_path(&typeof_string, vars, input_path)
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn typeof_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -109,6 +110,7 @@ fn eq_method(
         )],
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn eq_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -173,6 +175,7 @@ fn match_if_method(
         ),
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn match_if_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -295,6 +298,7 @@ infix_math_op!(mul_op, *);
 infix_math_op!(div_op, /);
 infix_math_op!(rem_op, %);
 
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn math_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -422,6 +426,7 @@ fn has_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn has_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -632,6 +637,7 @@ fn get_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn get_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -789,6 +795,7 @@ fn keys_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn keys_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -867,6 +874,7 @@ fn values_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn values_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -911,6 +919,7 @@ fn not_method(
         tail.apply_to_path(&JSON::Bool(!is_truthy(data)), vars, input_path)
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn not_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -940,7 +949,7 @@ fn not_shape(
 fn is_truthy(data: &JSON) -> bool {
     match data {
         JSON::Bool(b) => *b,
-        JSON::Number(n) => n.as_f64().map_or(false, |n| n != 0.0),
+        JSON::Number(n) => n.as_f64().is_some_and(|n| n != 0.0),
         JSON::Null => false,
         JSON::String(s) => !s.as_str().is_empty(),
         JSON::Object(_) | JSON::Array(_) => true,
@@ -982,6 +991,7 @@ fn or_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn or_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -1070,6 +1080,7 @@ fn and_method(
         )
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn and_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,

@@ -1,21 +1,18 @@
 use std::sync::Arc;
 
-use apollo_compiler::collections::IndexSet;
-use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::VariableDefinition;
 
+use super::QueryPathElement;
 use super::conditions::ConditionKind;
 use super::query_planner::SubgraphOperationCompression;
-use super::QueryPathElement;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
 use crate::operation::SelectionSet;
-use crate::query_graph::graph_path::OpPathElement;
 use crate::query_graph::QueryGraph;
-use crate::query_plan::conditions::Conditions;
-use crate::query_plan::fetch_dependency_graph::DeferredInfo;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
+use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -25,6 +22,9 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::PrimaryDeferBlock;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::SequenceNode;
+use crate::query_plan::conditions::Conditions;
+use crate::query_plan::fetch_dependency_graph::DeferredInfo;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
 
 /// Constant used during query plan cost computation to account for the base cost of doing a fetch,
 /// that is the fact any fetch imply some networking cost, request serialization/deserialization,

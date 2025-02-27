@@ -23,6 +23,7 @@ use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::RateLimitFormatter;
@@ -106,47 +107,53 @@ where
         id: &tracing_core::span::Id,
         ctx: Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-        // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
-        if !span.is_sampled() {
-            attrs.record(&mut visitor);
-        }
-        let mut extensions = span.extensions_mut();
-        if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
-            log_attrs.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
+        if let Some(span) = ctx.span(id) {
+            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+            // We're checking if it's sampled to not add both attributes in OtelData and our LogAttributes
+            if !span.is_sampled() {
+                attrs.record(&mut visitor);
+            }
+            let mut extensions = span.extensions_mut();
+            if let Some(log_attrs) = extensions.get_mut::<LogAttributes>() {
+                log_attrs.extend(visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
+                }));
+            } else {
+                let mut fields = LogAttributes::default();
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
+                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
+                }));
+                extensions.insert(fields);
+            }
         } else {
-            let mut fields = LogAttributes::default();
-            fields.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
-                    Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
-            extensions.insert(fields);
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if let Some(fields) = extensions.get_mut::<LogAttributes>() {
-            let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
-            values.record(&mut visitor);
-            fields.extend(
-                visitor.values.into_iter().filter_map(|(k, v)| {
+        if let Some(span) = ctx.span(id) {
+            let mut extensions = span.extensions_mut();
+            if let Some(fields) = extensions.get_mut::<LogAttributes>() {
+                let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+                values.record(&mut visitor);
+                fields.extend(visitor.values.into_iter().filter_map(|(k, v)| {
                     Some(KeyValue::new(Key::new(k), v.maybe_to_otel_value()?))
-                }),
-            );
+                }));
+            } else {
+                eprintln!("cannot access to LogAttributes, this is a bug");
+            }
         } else {
-            eprintln!("cannot access to LogAttributes, this is a bug");
+            tracing::error!("Span not found, this is a bug");
         }
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+        event.record(&mut visitor);
+        if visitor.omit_from_logs {
+            return;
+        }
+
         thread_local! {
             static BUF: RefCell<String> = const { RefCell::new(String::new()) };
         }
@@ -180,6 +187,7 @@ where
 pub(crate) struct FieldsVisitor<'a, 'b> {
     pub(crate) values: HashMap<&'a str, serde_json::Value>,
     excluded_attributes: &'b HashSet<&'static str>,
+    omit_from_logs: bool,
 }
 
 impl<'b> FieldsVisitor<'_, 'b> {
@@ -187,6 +195,7 @@ impl<'b> FieldsVisitor<'_, 'b> {
         Self {
             values: HashMap::with_capacity(0),
             excluded_attributes,
+            omit_from_logs: false,
         }
     }
 }
@@ -214,6 +223,10 @@ impl field::Visit for FieldsVisitor<'_, '_> {
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.values
             .insert(field.name(), serde_json::Value::from(value));
+
+        if field.name() == EVENT_ATTRIBUTE_OMIT_LOG && value {
+            self.omit_from_logs = true;
+        }
     }
 
     /// Visit a string value.
@@ -431,7 +444,7 @@ connector:
 
     impl std::fmt::Display for LogBuffer {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let content = String::from_utf8(self.0.lock().clone()).unwrap();
+            let content = String::from_utf8(self.0.lock().clone()).map_err(|_e| std::fmt::Error)?;
 
             write!(f, "{content}")
         }
@@ -799,7 +812,7 @@ connector:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1150,7 +1163,7 @@ subgraph:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));

@@ -13,21 +13,23 @@
 //! [`Field`], and the selection type is [`FieldSelection`].
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
-use std::sync::atomic;
 use std::sync::Arc;
+use std::sync::atomic;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
 use crate::compat::coerce_executable_values;
@@ -36,17 +38,17 @@ use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::conditions::Conditions;
+use crate::schema::ValidFederationSchema;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
 
 mod contains;
@@ -259,6 +261,12 @@ impl PartialEq for SelectionSet {
 
 impl Eq for SelectionSet {}
 
+impl Hash for SelectionSet {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.selections.hash(state);
+    }
+}
+
 mod selection_map;
 
 pub(crate) use selection_map::FieldSelectionValue;
@@ -271,7 +279,7 @@ pub(crate) use selection_map::SelectionValue;
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::IsVariant, serde::Serialize)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -539,6 +547,76 @@ impl HasSelectionKey for Selection {
     }
 }
 
+impl Ord for Selection {
+    fn cmp(&self, other: &Self) -> Ordering {
+        fn compare_directives(d1: &DirectiveList, d2: &DirectiveList) -> Ordering {
+            if d1 == d2 {
+                Ordering::Equal
+            } else if d1.is_empty() {
+                Ordering::Less
+            } else if d2.is_empty() {
+                Ordering::Greater
+            } else {
+                d1.to_string().cmp(&d2.to_string())
+            }
+        }
+
+        match (self, other) {
+            (Selection::Field(f1), Selection::Field(f2)) => {
+                // cannot have two fields with the same response name so no need to check args or directives
+                f1.field.response_name().cmp(f2.field.response_name())
+            }
+            (Selection::Field(_), _) => Ordering::Less,
+            (Selection::InlineFragment(_), Selection::Field(_)) => Ordering::Greater,
+            (Selection::InlineFragment(i1), Selection::InlineFragment(i2)) => {
+                // compare type conditions and then directives
+                let first_type_position = &i1.inline_fragment.type_condition_position;
+                let second_type_position = &i2.inline_fragment.type_condition_position;
+                match (first_type_position, second_type_position) {
+                    (Some(t1), Some(t2)) => {
+                        let compare_type_conditions = t1.type_name().cmp(t2.type_name());
+                        if compare_type_conditions == Ordering::Equal {
+                            // compare directive lists
+                            compare_directives(
+                                &i1.inline_fragment.directives,
+                                &i2.inline_fragment.directives,
+                            )
+                        } else {
+                            compare_type_conditions
+                        }
+                    }
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => {
+                        // compare directive lists
+                        compare_directives(
+                            &i1.inline_fragment.directives,
+                            &i2.inline_fragment.directives,
+                        )
+                    }
+                }
+            }
+            (Selection::InlineFragment(_), Selection::FragmentSpread(_)) => Ordering::Less,
+            (Selection::FragmentSpread(f1), Selection::FragmentSpread(f2)) => {
+                // compare fragment names
+                let compare_fragment_names = f1.spread.fragment_name.cmp(&f2.spread.fragment_name);
+                if compare_fragment_names == Ordering::Equal {
+                    compare_directives(&f1.spread.directives, &f2.spread.directives)
+                } else {
+                    compare_fragment_names
+                }
+            }
+            (Selection::FragmentSpread(_), _) => Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for Selection {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
 pub(crate) enum SelectionOrSet {
     Selection(Selection),
@@ -595,10 +673,10 @@ mod field_selection {
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
+    use crate::schema::ValidFederationSchema;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
-    use crate::schema::ValidFederationSchema;
 
     /// An analogue of the apollo-compiler type `Field` with these changes:
     /// - Makes the selection set optional. This is because `SelectionSet` requires a type of
@@ -609,7 +687,7 @@ mod field_selection {
     /// - For the field definition, stores the schema and the position in that schema instead of just
     ///   the `FieldDefinition` (which contains no references to the parent type or schema).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct FieldSelection {
         pub(crate) field: Field,
         pub(crate) selection_set: Option<SelectionSet>,
@@ -788,9 +866,9 @@ mod field_selection {
                             CompositeTypeDefinitionPosition::try_from(field_type)
                         {
                             debug_assert_eq!(
-                                field_type_position,
-                                selection_set.type_position,
-                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]", field_type_position, selection_set.type_position,
+                                field_type_position, selection_set.type_position,
+                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]",
+                                field_type_position, selection_set.type_position,
                             );
                             debug_assert_eq!(
                                 self.schema, selection_set.schema,
@@ -833,19 +911,22 @@ pub(crate) use field_selection::FieldSelection;
 pub(crate) use field_selection::SiblingTypename;
 
 mod fragment_spread_selection {
+    use std::hash::Hash;
+    use std::hash::Hasher;
+
     use apollo_compiler::Name;
     use serde::Serialize;
 
-    use crate::operation::is_deferred_selection;
     use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
+    use crate::operation::is_deferred_selection;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
 
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct FragmentSpreadSelection {
         pub(crate) spread: FragmentSpread,
         pub(crate) selection_set: SelectionSet,
@@ -884,6 +965,12 @@ mod fragment_spread_selection {
     }
 
     impl Eq for FragmentSpread {}
+
+    impl Hash for FragmentSpread {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.key().hash(state);
+        }
+    }
 
     impl HasSelectionKey for FragmentSpread {
         fn key(&self) -> SelectionKey<'_> {
@@ -980,17 +1067,17 @@ mod inline_fragment_selection {
     use serde::Serialize;
 
     use crate::error::FederationError;
-    use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
-    use crate::operation::is_deferred_selection;
+    use crate::link::graphql_definition::defer_directive_arguments;
     use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
+    use crate::operation::is_deferred_selection;
     use crate::query_plan::FetchDataPathElement;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
 
     /// An analogue of the apollo-compiler type `InlineFragment` with these changes:
     /// - Stores the inline fragment data (other than the selection set) in `InlineFragment`,
@@ -1000,7 +1087,7 @@ mod inline_fragment_selection {
     /// - Stores the parent type explicitly, which means storing the position (in apollo-compiler, this
     ///   is in the parent selection set).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct InlineFragmentSelection {
         pub(crate) inline_fragment: InlineFragment,
         pub(crate) selection_set: SelectionSet,
@@ -1584,12 +1671,10 @@ impl SelectionSet {
                 }
                 SelectionValue::FragmentSpread(fragment_spread) => {
                     // at this point in time all fragment spreads should have been converted into inline fragments
-                    return Err(FederationError::internal(
-                        format!(
-                            "Error while optimizing sibling typename information, selection set contains {} named fragment",
-                            fragment_spread.get().spread.fragment_name
-                        )
-                    ));
+                    return Err(FederationError::internal(format!(
+                        "Error while optimizing sibling typename information, selection set contains {} named fragment",
+                        fragment_spread.get().spread.fragment_name
+                    )));
                 }
             }
         }
@@ -2148,7 +2233,7 @@ impl SelectionSet {
                     }
                 }
                 Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal("unexpected fragment spread"))
+                    return Err(FederationError::internal("unexpected fragment spread"));
                 }
             }
         }
@@ -2337,7 +2422,7 @@ fn compute_aliases_for_non_merging_fields(
     let mut seen_response_names: IndexMap<Name, SeenResponseName> = IndexMap::default();
 
     // - `s.selections` must be fragment-spread-free.
-    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
+    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> {
         s.selections.iter().flat_map(|s2| {
             s2.fields_in_set()
                 .into_iter()

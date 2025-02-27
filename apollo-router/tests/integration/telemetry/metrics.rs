@@ -44,6 +44,9 @@ async fn test_metrics_reloading() {
 
         router.touch_config().await;
         router.assert_reloaded().await;
+        router
+            .assert_log_not_contained("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down")
+            .await;
     }
 
     let metrics = router
@@ -169,7 +172,12 @@ async fn test_bad_queries() {
         )
         .await;
     router
-        .execute_query(Query::default().with_bad_content_type())
+        .execute_query(
+            Query::builder()
+                .header("apollo-require-preflight", "true")
+                .build()
+                .with_bad_content_type(),
+        )
         .await;
 
     router

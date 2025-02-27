@@ -24,19 +24,19 @@ use super::schema::URL_PATH_TEMPLATE_SCALAR_NAME;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::Link;
+use crate::schema::FederationSchema;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
-use crate::schema::FederationSchema;
+use crate::sources::connect::spec::ConnectSpec;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use crate::sources::connect::spec::ConnectSpec;
 
 pub(super) fn check_or_add(
     link: &Link,

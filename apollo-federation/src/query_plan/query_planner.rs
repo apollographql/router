@@ -3,43 +3,46 @@ use std::num::NonZeroU32;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
 use itertools::Itertools;
 use serde::Serialize;
 use tracing::trace;
 
-use super::fetch_dependency_graph::FetchIdGenerator;
 use super::ConditionNode;
+use super::fetch_dependency_graph::FetchIdGenerator;
+use crate::ApiSchemaOptions;
+use crate::Supergraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
-use crate::query_graph::build_federated_query_graph;
-use crate::query_graph::path_tree::OpPathTree;
+use crate::operation::normalize_operation;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
-use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
-use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
-use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
-use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
-use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
+use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
+use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
+use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
+use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
+use crate::query_plan::query_planning_traversal::convert_type_from_subgraph;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -47,16 +50,12 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 use crate::utils::logging::snapshot;
-use crate::ApiSchemaOptions;
-use crate::Supergraph;
 
 #[derive(Debug, Clone, Hash, Serialize)]
 pub struct QueryPlannerConfig {
-    /// If enabled, the query planner will extract inline fragments into fragment
-    /// definitions before sending queries to subgraphs. This can significantly
-    /// reduce the size of the query sent to subgraphs.
+    /// If enabled, the query planner will attempt to extract common subselections into named
+    /// fragments. This can significantly reduce the size of the query sent to subgraphs.
     ///
     /// Defaults to false.
     pub generate_query_fragments: bool,
@@ -168,6 +167,7 @@ impl Default for QueryPlannerDebugConfig {
 #[derive(Debug, PartialEq, Default, Serialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
+    pub evaluated_plan_paths: Cell<usize>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -486,6 +486,10 @@ impl QueryPlanner {
     pub fn api_schema(&self) -> &ValidFederationSchema {
         &self.api_schema
     }
+
+    pub fn supergraph_schema(&self) -> &ValidFederationSchema {
+        &self.supergraph_schema
+    }
 }
 
 fn compute_root_serial_dependency_graph(
@@ -606,7 +610,7 @@ pub(crate) fn compute_root_fetch_groups(
             ty => {
                 return Err(FederationError::internal(format!(
                     "expected an object type for the root of a subgraph, found {ty}"
-                )))
+                )));
             }
         };
         let fetch_dependency_node = dependency_graph.get_or_create_root_node(

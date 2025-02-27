@@ -26,6 +26,7 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
 use crate::services::connector::request_service::transport::http::HttpResponse;
@@ -181,6 +182,16 @@ impl RawResponse {
                 MappedResponse::Error { error, key }
             }
         };
+
+        if let MappedResponse::Error {
+            error: ref mapped_error,
+            key: _,
+        } = mapped_response
+        {
+            if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
+                emit_error_event(error_code.as_str(), "Connector error occurred");
+            }
+        }
 
         connector::request_service::Response {
             context: context.clone(),

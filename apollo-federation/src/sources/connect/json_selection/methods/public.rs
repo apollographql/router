@@ -4,25 +4,25 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
-use shape::location::SourceId;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::SourceId;
 
 use crate::impl_arrow_method;
+use crate::sources::connect::json_selection::ApplyToError;
+use crate::sources::connect::json_selection::ApplyToInternal;
+use crate::sources::connect::json_selection::MethodArgs;
+use crate::sources::connect::json_selection::PathList;
+use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::known_var::KnownVariable;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
-use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
-use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
-use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
-use crate::sources::connect::json_selection::VarsWithPathsMap;
+use crate::sources::connect::json_selection::location::merge_ranges;
 
 impl_arrow_method!(EchoMethod, echo_method, echo_shape);
 fn echo_method(
@@ -49,6 +49,7 @@ fn echo_method(
         )],
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn echo_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -133,6 +134,7 @@ fn map_method(
         )],
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn map_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -236,6 +238,7 @@ fn match_method(
         ),
     )
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 pub(super) fn match_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -343,6 +346,7 @@ fn first_method(
         _ => tail.apply_to_path(data, vars, input_path),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn first_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -427,6 +431,7 @@ fn last_method(
         _ => tail.apply_to_path(data, vars, input_path),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn last_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -579,6 +584,7 @@ fn slice_method(
         (Some(data.clone()), vec![])
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn slice_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
@@ -669,6 +675,7 @@ fn size_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn size_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -772,6 +779,7 @@ fn entries_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn entries_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -898,6 +906,7 @@ fn json_stringify_method(
         ),
     }
 }
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn json_stringify_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,

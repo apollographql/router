@@ -24,7 +24,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:current
-      - image: cimg/redis:7.4.1
+      - image: cimg/redis:7.4.2
       - image: openzipkin/zipkin:3.4.3
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.20.0
     resource_class: 2xlarge
@@ -367,14 +367,11 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
-            # Until we are able to update rustc to at least 1.81.0,
-            # we need special handling of the cargo-about command.
-            rustup install 1.83.0
-            cargo +1.83.0 install --locked --version 0.6.6 cargo-about
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
               cargo install --locked --version 0.14.21 cargo-deny
               cargo install --locked --version 0.12.2 cargo-edit
               cargo install --locked --version 0.12.0 cargo-fuzz
+              cargo install --locked --version 0.6.6 cargo-about
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
@@ -967,17 +964,10 @@ jobs:
                   cd artifacts && sha1sum *.tar.gz > sha1sums.txt
             - run:
                 name: Create GitHub Release
+                # We always create the version as a "pre-release" version.
+                # It is promoted to latest in a separate step in RELEASE_CHECKLIST.md
                 command: >
-                  case "$VERSION" in
-
-                    # If the VERSION contains a dash, consider it a pre-release version.
-                    # This is in-line with SemVer's expectations/designations!
-                    *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
-
-                    # In all other cases, publish it as the latest version.
-                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
-
-                  esac
+                  gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/*
             - run:
                 name: Docker build
                 command: |

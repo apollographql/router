@@ -18,11 +18,22 @@
 //!
 //! Any requests made to the snapshot server will be proxied on to the given base URL, and the
 //! responses will be saved to the given file. The next time the snapshot server receives the
-//! same request (same relative path, HTTP method, and request body), it will respond with the
-//! response recorded in the file rather than sending the request to the upstream server.
+//! same request, it will respond with the response recorded in the file rather than sending the
+//! request to the upstream server.
 //!
 //! The snapshot file can be manually edited to manipulate responses for testing purposes, or to
 //! redact information that you don't want to include in source-controlled snapshot files.
+//!
+//! Requests are matched to snapshots based on the URL path, HTTP method, and base64 encoding of
+//! the request body (if there is one). If the snapshot specifies the `path` field, the URL path
+//! must match exactly. Alternatively, a snapshot containing a `regex` field will match any URL
+//! path that matches the regular expression. A snapshot with an exact `path` match takes
+//! precedence over a snapshot with `regex`. Snapshots recorded by the server will always specify
+//! `path`. The only way to use `regex` is to manually edit a snapshot file. A typical pattern is
+//! to record a snapshot from a REST API, then manually change `path` to `regex` and replace the
+//! variable part of the path with `.*`. Note that any special characters in the path that have
+//! meaning to the `regex` crate must be escaped with `\\`, such as the `?` in a URL query
+//! parameter.
 //!
 //! The offline mode will never call the upstream server, and will always return a saved snapshot
 //! response. If one is not available, a `500` error is returned. This is useful for tests, for
@@ -36,10 +47,7 @@
 //! This is typically desirable, as headers may contain ephemeral information like dates or tokens.
 //!
 //! **IMPORTANT:** this module stores HTTP responses to the local file system in plain text. It
-//! should not be used with production APIs that return sensitive data.
-//!
-//! This module should also not be used in conjunction with performance testing, as returning
-//! snapshot data locally will be much faster than sending HTTP requests to an external server.
+//! should not be used with APIs that return sensitive data.
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -49,10 +57,17 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::Path as AxumPath;
+use axum::extract::RawQuery;
 use axum::extract::State;
 use axum::routing::any;
 use axum::Router;
 use base64::Engine;
+use http::header::CONNECTION;
+use http::header::CONTENT_LENGTH;
+use http::header::HOST;
+use http::header::TRAILER;
+use http::header::TRANSFER_ENCODING;
+use http::header::UPGRADE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -62,6 +77,7 @@ use hyper::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use indexmap::IndexMap;
 use parking_lot::Mutex;
+use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
@@ -78,15 +94,28 @@ use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
+/// Headers that will not be passed on to the upstream API
+static FILTERED_HEADERS: [HeaderName; 6] = [
+    CONNECTION,
+    TRAILER,
+    TRANSFER_ENCODING,
+    UPGRADE,
+    HOST,
+    HeaderName::from_static("keep-alive"),
+];
+
 /// An error from the snapshot server
 #[derive(Debug, thiserror::Error)]
 enum SnapshotError {
     /// Unable to load snapshots
-    #[error("unable to load snapshots")]
+    #[error("unable to load snapshot file - {0}")]
     IoError(#[from] std::io::Error),
     /// Unable to parse snapshots
-    #[error("unable to parse snapshots")]
+    #[error("unable to parse snapshots - {0}")]
     ParseError(#[from] serde_json::Error),
+    /// Invalid snapshot
+    #[error("invalid snapshot - {0}")]
+    InvalidSnapshot(String),
 }
 
 /// A server that mocks an API using snapshots recorded from actual HTTP responses.
@@ -101,7 +130,8 @@ pub struct SnapshotServer {
 struct SnapshotServerState {
     client: HttpClientService,
     base_url: Uri,
-    snapshots: Arc<Mutex<BTreeMap<String, Snapshot>>>,
+    snapshots_by_key: Arc<Mutex<BTreeMap<String, Snapshot>>>,
+    snapshots_by_regex: Arc<Mutex<Vec<Snapshot>>>,
     snapshot_file: Box<Path>,
     offline: bool,
     update: bool,
@@ -112,26 +142,46 @@ async fn root_handler(
     State(state): State<SnapshotServerState>,
     req: http::Request<axum::body::Body>,
 ) -> Result<http::Response<RouterBody>, StatusCode> {
-    handle(State(state), req, "/".to_string()).await
+    handle(State(state), req, "/".to_string(), None).await
 }
 
 async fn handler(
     State(state): State<SnapshotServerState>,
     AxumPath(path): AxumPath<String>,
+    RawQuery(query): RawQuery,
     req: http::Request<axum::body::Body>,
 ) -> Result<http::Response<RouterBody>, StatusCode> {
-    handle(State(state), req, path).await
+    handle(State(state), req, path, query).await
 }
 
 async fn handle(
     State(state): State<SnapshotServerState>,
     req: http::Request<axum::body::Body>,
     path: String,
+    query: Option<String>,
 ) -> Result<http::Response<RouterBody>, StatusCode> {
+    let path = if let Some(query) = query {
+        format!("{path}?{query}")
+    } else {
+        path
+    };
     let uri = [state.base_url.to_string(), path.clone()].concat();
     let method = req.method().clone();
     let version = req.version();
-    let request_headers = req.headers().clone();
+    let request_headers: HeaderMap = req
+        .headers()
+        .clone()
+        .drain()
+        .filter_map(|(name, value)| {
+            name.and_then(|name| {
+                if !FILTERED_HEADERS.contains(&name) {
+                    Some((name, value))
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
     let body_bytes = axum::body::to_bytes(req.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -163,7 +213,7 @@ async fn handle(
             .uri(uri.clone())
             .body(router::body::from_bytes(body_bytes))
             .unwrap();
-        *request.headers_mut() = request_headers.clone();
+        *request.headers_mut() = request_headers;
         let response = state
             .client
             .oneshot(HttpRequest {
@@ -180,6 +230,7 @@ async fn handle(
                     request: Request {
                         method: Some(method.to_string()),
                         path: Some(path),
+                        regex: None,
                         body: request_json_body,
                     },
                     response: Response {
@@ -195,9 +246,14 @@ async fn handle(
                     },
                 };
                 {
-                    let mut snapshots = state.snapshots.lock();
-                    snapshots.insert(key, snapshot.clone());
-                    if let Err(e) = save(state.snapshot_file, &mut snapshots) {
+                    let mut snapshots_by_key = state.snapshots_by_key.lock();
+                    let mut snapshots_by_regex = state.snapshots_by_regex.lock();
+                    snapshots_by_key.insert(key, snapshot.clone());
+                    if let Err(e) = save(
+                        state.snapshot_file,
+                        &mut snapshots_by_key,
+                        &mut snapshots_by_regex,
+                    ) {
                         error!(
                             url = %uri,
                             method = %method,
@@ -206,7 +262,7 @@ async fn handle(
                         );
                     }
                 }
-                if let Ok(response) = snapshot.into_body() {
+                if let Ok(response) = snapshot.into_response() {
                     Ok(response)
                 } else {
                     fail(uri, method, "Unable to convert snapshot into response body")
@@ -226,23 +282,46 @@ fn response_from_snapshot(
     method: &Method,
     key: &String,
 ) -> Option<http::Response<RouterBody>> {
-    let mut snapshots = state.snapshots.lock();
+    let mut snapshots_by_key = state.snapshots_by_key.lock();
+    let snapshots_by_regex = state.snapshots_by_regex.lock();
     if state.update {
-        snapshots.remove(key);
+        snapshots_by_key.remove(key);
         None
     } else {
-        snapshots.get(key).and_then(|snapshot| {
-            debug!(
-                url = %uri,
-                method = %method,
-                "Found existing snapshot"
-            );
-            snapshot
-                .clone()
-                .into_body()
-                .map_err(|e| error!("Unable to convert snapshot into HTTP response: {:?}", e))
-                .ok()
-        })
+        snapshots_by_key
+            .get(key)
+            .inspect(|snapshot| {
+                debug!(
+                    url = %uri,
+                    method = %method,
+                    path = %snapshot.request.path.as_ref().unwrap_or(&String::from("")),
+                    "Found existing snapshot"
+                );
+            })
+            .or_else(|| {
+                // Look up snapshot using regex
+                for snapshot in snapshots_by_regex.iter() {
+                    if let Some(regex) = &snapshot.request.regex {
+                        if regex.is_match(uri) {
+                            debug!(
+                                url = %uri,
+                                method = %method,
+                                regex = %regex.to_string(),
+                                "Found existing snapshot"
+                            );
+                            return Some(snapshot);
+                        }
+                    }
+                }
+                None
+            })
+            .and_then(|snapshot| {
+                snapshot
+                    .clone()
+                    .into_response()
+                    .map_err(|e| error!("Unable to convert snapshot into HTTP response: {:?}", e))
+                    .ok()
+            })
     }
 }
 
@@ -283,24 +362,41 @@ fn map_headers<F: Fn(&str) -> bool>(
 
 fn save<P: AsRef<Path>>(
     path: P,
-    snapshots: &mut BTreeMap<String, Snapshot>,
+    snapshots_by_key: &mut BTreeMap<String, Snapshot>,
+    snapshots_by_regex: &mut [Snapshot],
 ) -> Result<(), SnapshotError> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let snapshots = snapshots.values().cloned().collect::<Vec<_>>();
+    let snapshots = snapshots_by_key
+        .values()
+        .cloned()
+        .chain(snapshots_by_regex.iter().cloned())
+        .collect::<Vec<_>>();
     std::fs::write(path, serde_json::to_string_pretty(&snapshots)?).map_err(Into::into)
 }
 
-fn load<P: AsRef<Path>>(path: P) -> Result<BTreeMap<String, Snapshot>, SnapshotError> {
+fn load<P: AsRef<Path>>(
+    path: P,
+) -> Result<(BTreeMap<String, Snapshot>, Vec<Snapshot>), SnapshotError> {
     let str = std::fs::read_to_string(path)?;
     let snapshots: Vec<Snapshot> = serde_json::from_str(&str)?;
-    info!("Loaded {} snapshots", snapshots.len());
-    Ok(snapshots
-        .into_iter()
-        .map(|snapshot| (snapshot.key(), snapshot))
-        .collect())
+    let mut snapshots_by_key: BTreeMap<String, Snapshot> = Default::default();
+    let mut snapshots_by_regex: Vec<Snapshot> = Default::default();
+    for snapshot in snapshots.into_iter() {
+        if snapshot.request.regex.is_some() {
+            if snapshot.request.path.is_some() {
+                return Err(SnapshotError::InvalidSnapshot(String::from(
+                    "snapshot cannot specify both regex and path",
+                )));
+            }
+            snapshots_by_regex.push(snapshot);
+        } else {
+            snapshots_by_key.insert(snapshot.key(), snapshot);
+        }
+    }
+    Ok((snapshots_by_key, snapshots_by_regex))
 }
 
 impl SnapshotServer {
@@ -375,12 +471,31 @@ impl SnapshotServer {
 
         let snapshot_file = snapshot_path.as_ref();
 
-        let snapshots = load(snapshot_file).unwrap_or_else(|_| {
-            if offline {
-                warn!("Unable to load snapshot file in offline mode - all requests will fail");
+        let (snapshots_by_key, snapshots_by_regex) = match load(snapshot_file) {
+            Err(SnapshotError::IoError(ioe)) if ioe.kind() == std::io::ErrorKind::NotFound => {
+                if offline {
+                    warn!("Snapshot file not found in offline mode - all requests will fail");
+                } else {
+                    info!("Snapshot file not found - new snapshot file will be recorded");
+                }
+                (BTreeMap::default(), vec![])
             }
-            BTreeMap::default()
-        });
+            Err(e) => {
+                if offline {
+                    warn!("Unable to load snapshot file in offline mode - all requests will fail: {e}");
+                } else {
+                    warn!("Unable to load snapshot file - new snapshot file will be recorded: {e}");
+                }
+                (BTreeMap::default(), vec![])
+            }
+            Ok((snapshots_by_key, snapshots_by_regex)) => {
+                info!(
+                    "Loaded {} snapshots",
+                    snapshots_by_key.len() + snapshots_by_regex.len()
+                );
+                (snapshots_by_key, snapshots_by_regex)
+            }
+        };
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
@@ -399,7 +514,8 @@ impl SnapshotServer {
             .with_state(SnapshotServerState {
                 client: http_service,
                 base_url: base_url.clone(),
-                snapshots: Arc::new(Mutex::new(snapshots.clone())),
+                snapshots_by_key: Arc::new(Mutex::new(snapshots_by_key)),
+                snapshots_by_regex: Arc::new(Mutex::new(snapshots_by_regex)),
                 snapshot_file: Box::from(snapshot_file),
                 offline,
                 update,
@@ -442,8 +558,9 @@ struct Snapshot {
 }
 
 impl Snapshot {
-    fn into_body(self) -> Result<http::Response<RouterBody>, ()> {
+    fn into_response(self) -> Result<http::Response<RouterBody>, ()> {
         let mut response = http::Response::builder().status(self.response.status);
+        let body_string = self.response.body.to_string();
         if let Some(headers) = response.headers_mut() {
             for (name, values) in self.response.headers.into_iter() {
                 if let Ok(name) = HeaderName::from_str(&name.clone()) {
@@ -456,8 +573,12 @@ impl Snapshot {
                     warn!("Invalid header name `{}` in snapshot", name);
                 }
             }
+
+            // Rewrite the content length header to the actual body length. Serializing and
+            // deserializing the snapshot may result in a different length due to formatting
+            // differences.
+            headers.insert(CONTENT_LENGTH, HeaderValue::from(body_string.len()));
         }
-        let body_string = self.response.body.to_string();
         if let Ok(response) = response.body(router::body::from_bytes(body_string)) {
             return Ok(response);
         }
@@ -491,6 +612,8 @@ fn snapshot_key(method: Option<&str>, path: Option<&str>, body: &Value) -> Strin
 struct Request {
     method: Option<String>,
     path: Option<String>,
+    #[serde(with = "serde_regex", skip_serializing_if = "Option::is_none", default)]
+    regex: Option<Regex>,
     body: Value,
 }
 

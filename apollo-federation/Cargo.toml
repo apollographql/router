@@ -1,8 +1,8 @@
 [package]
 name = "apollo-federation"
-version = "2.0.0-preview.4"
+version = "2.0.0"
 authors = ["The Apollo GraphQL Contributors"]
-edition = "2021"
+edition = "2024"
 description = "Apollo Federation"
 documentation = "https://docs.rs/apollo-federation"
 repository = "https://github.com/apollographql/router"
@@ -15,6 +15,8 @@ autotests = false                                      # Integration tests are m
 # This logging is gated behind a feature to avoid any unnecessary (even if
 # small) runtime costs where this data will not be desired.
 snapshot_tracing = ["ron"]
+# `correctness` feature enables the `correctness` module.
+correctness = []
 
 [dependencies]
 apollo-compiler.workspace = true
@@ -43,7 +45,7 @@ url = "2"
 either = "1.13.0"
 tracing = "0.1.40"
 ron = { version = "0.8.1", optional = true }
-shape = "0.5.0"
+shape = "0.5.1"
 
 [dev-dependencies]
 hex.workspace = true
@@ -52,6 +54,19 @@ sha1.workspace = true
 tempfile.workspace = true
 pretty_assertions = "1.4.0"
 rstest = "0.22.0"
+dhat = "0.3.3"
 
 [[test]]
 name = "main"
+
+[[test]]
+name = "connectors_validation_profiling"
+path = "tests/dhat_profiling/connectors_validation.rs"
+
+[[test]]
+name = "supergraph_creation_profiling"
+path = "tests/dhat_profiling/supergraph.rs"
+
+[[test]]
+name = "query_plan_creation_profiling"
+path = "tests/dhat_profiling/query_plan.rs"

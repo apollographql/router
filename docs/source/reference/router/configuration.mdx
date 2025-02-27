@@ -298,8 +298,9 @@ If set, the router prints its version number, then exits.
 </td>
 </tr>
 
-<tr>
-<td style="min-width: 150px;">
+</tbody>
+</table>
+
 
 ### Dev mode defaults
 
@@ -1250,12 +1251,7 @@ After you generate the schema, configure your text editor. Here are the instruct
 
 New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
 
-**If you run a new version of your router with a configuration file that it no longer supports:**
-
-1. The router emits a warning on startup.
-2. The router attempts to translate your provided configuration to the new expected format.
-   - If the translation succeeds without errors, the router starts up as usual.
-   - If the translation fails, the router terminates.
+**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.** 
 
 If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
 

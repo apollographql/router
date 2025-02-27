@@ -192,10 +192,11 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.0.0-preview.4"
+version = "2.0.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
+ "dhat",
  "either",
  "hashbrown 0.15.2",
  "hex",
@@ -237,6 +238,7 @@ dependencies = [
  "insta",
  "serde",
  "serde_json",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -252,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.0.0-preview.4"
+version = "2.0.0"
 dependencies = [
  "ahash",
  "anyhow",
@@ -375,6 +377,7 @@ dependencies = [
  "serde_derive_default",
  "serde_json",
  "serde_json_bytes",
+ "serde_regex",
  "serde_urlencoded",
  "serde_yaml",
  "serial_test",
@@ -423,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.0.0-preview.4"
+version = "2.0.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -792,9 +795,9 @@ checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
 name = "async-trait"
-version = "0.1.83"
+version = "0.1.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "721cae7de5c34fbb2acd27e21e6d2cf7b886dce0c27388d46c4e6c47ea4318dd"
+checksum = "644dd749086bf3771a2fbc5f256fdb982d53f011c7d5d560304eafeecebce79d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1544,16 +1547,14 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3907aac66c65520545ae3cb3c195306e20d5ed5c90bfbb992e061cf12a104d0"
+checksum = "caabaaee17b2a78d7aa349a33edc9090c6bb47e6dfb25b0da281df57628bba68"
 dependencies = [
- "lazy_static",
  "proc-macro2",
  "quote",
  "str_inflector",
  "syn 2.0.90",
- "thiserror 1.0.69",
  "try_match",
 ]
 
@@ -3207,9 +3208,9 @@ dependencies = [
 
 [[package]]
 name = "hickory-proto"
-version = "0.24.1"
+version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07698b8420e2f0d6447a436ba999ec85d8fbf2a398bbd737b82cac4a2e96e512"
+checksum = "2ad3d6d98c648ed628df039541a5577bee1a7c83e9e16fe3dbedeea4cdfeb971"
 dependencies = [
  "async-trait",
  "cfg-if",
@@ -3218,7 +3219,7 @@ dependencies = [
  "futures-channel",
  "futures-io",
  "futures-util",
- "idna 0.4.0",
+ "idna",
  "ipnet",
  "once_cell",
  "rand 0.8.5",
@@ -3677,16 +3678,6 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "idna"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d20d6b07bfbc108882d88ed8e37d39636dcc260e15e30c45e6ba089610b917c"
-dependencies = [
- "unicode-bidi",
- "unicode-normalization",
-]
-
-[[package]]
-name = "idna"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "686f825264d630750a544639377bae737628043f20d38bbc029e8f29ea968a7e"
@@ -3755,16 +3746,17 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.41.1"
+version = "1.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e9ffc4d4892617c50a928c52b2961cb5174b6fc6ebf252b2fac9d21955c48b8"
+checksum = "71c1b125e30d93896b365e156c33dadfffab45ee8400afcbba4752f59de08a86"
 dependencies = [
  "console",
  "globset",
- "lazy_static",
  "linked-hash-map",
+ "once_cell",
  "pest",
  "pest_derive",
+ "pin-project",
  "serde",
  "similar",
  "walkdir",
@@ -4048,7 +4040,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -6293,6 +6285,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_regex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8136f1a4ea815d7eac4101cfd0b16dc0cb5e1fe1b8609dfd728058656b7badf"
+dependencies = [
+ "regex",
+ "serde",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6365,9 +6367,9 @@ dependencies = [
 
 [[package]]
 name = "shape"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7972158d973c49bb15d99b3a9e02fd17a6036e1b27144b395d96e7430ba9ca70"
+checksum = "27e114fc498dd1dcc20b12a9571a7b9b78396760e44b7a9024afa3a04ce26763"
 dependencies = [
  "apollo-compiler",
  "indexmap 2.7.0",
@@ -7523,25 +7525,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e51b68083f157f853b6379db119d1c1be0e6e4dec98101079dec41f6f5cf6df"
 
 [[package]]
-name = "unicode-bidi"
-version = "0.3.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ab17db44d7388991a428b2ee655ce0c212e862eff1768a455c58f9aad6e7893"
-
-[[package]]
 name = "unicode-ident"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
-
-[[package]]
-name = "unicode-normalization"
-version = "0.1.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5033c97c4262335cded6d6fc3e5c18ab755e1a3dc96376350f3d8e9f009ad956"
-dependencies = [
- "tinyvec",
-]
 
 [[package]]
 name = "unicode-width"
@@ -7562,7 +7549,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32f8b686cadd1473f4bd0117a5d28d36b1ade384ea9b5069a1c40aefed7fda60"
 dependencies = [
  "form_urlencoded",
- "idna 1.0.3",
+ "idna",
  "percent-encoding",
  "serde",
 ]
@@ -7824,7 +7811,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

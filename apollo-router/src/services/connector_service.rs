@@ -1,5 +1,6 @@
 //! Tower service for connectors.
 
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
@@ -97,6 +98,23 @@ impl TryFrom<&Connector> for ConnectorSourceRef {
             subgraph_name: value.id.subgraph_name.to_string(),
             source_name: value.id.source_name.clone().ok_or(())?,
         })
+    }
+}
+
+impl TryFrom<&mut Connector> for ConnectorSourceRef {
+    type Error = ();
+
+    fn try_from(value: &mut Connector) -> Result<Self, Self::Error> {
+        Ok(Self {
+            subgraph_name: value.id.subgraph_name.to_string(),
+            source_name: value.id.source_name.clone().ok_or(())?,
+        })
+    }
+}
+
+impl Display for ConnectorSourceRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.subgraph_name, self.source_name)
     }
 }
 

@@ -103,6 +103,9 @@ async fn test_basic() -> Result<(), BoxError> {
             .await?;
         router.touch_config().await;
         router.assert_reloaded().await;
+        router
+            .assert_log_not_contained("OpenTelemetry metric error occurred: Metrics error: metrics provider already shut down")
+            .await;
     }
     router.graceful_shutdown().await;
     Ok(())

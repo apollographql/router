@@ -465,6 +465,7 @@ where
     // That's deeply confusing and very hard to debug. Let's try to help by printing out a helpful error message here
     let res = client
         .post(url)
+        .header("x-router-version", env!("CARGO_PKG_VERSION"))
         .json(request_body)
         .send()
         .await
