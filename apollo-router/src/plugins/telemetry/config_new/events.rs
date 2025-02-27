@@ -1201,7 +1201,7 @@ mod tests {
 
         async {
             let context = crate::Context::default();
-            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+            let mut http_request = http::Request::builder().body("".into()).unwrap();
             http_request
                 .headers_mut()
                 .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1283,7 +1283,7 @@ mod tests {
 
         async {
             let context = crate::Context::default();
-            let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+            let mut http_request = http::Request::builder().body("".into()).unwrap();
             http_request
                 .headers_mut()
                 .insert("x-log-response", HeaderValue::from_static("log"));

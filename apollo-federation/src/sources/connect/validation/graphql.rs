@@ -1,9 +1,9 @@
 //! Helper structs & functions for dealing with GraphQL schemas
 use std::ops::Deref;
 
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::collections::IndexMap;
 use line_col::LineColLookup;
 use shape::Shape;
 

@@ -113,11 +113,9 @@ impl<T> Externalizable<T>
 where
     T: Debug + DeserializeOwned + Serialize + Send + Sync,
 {
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Router
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -154,11 +152,9 @@ where
         }
     }
 
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Supergraph
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -195,11 +191,9 @@ where
         }
     }
 
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing an Execution
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn execution_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -237,11 +231,9 @@ where
         }
     }
 
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Subgraph
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -306,7 +298,7 @@ where
             );
         });
 
-        let response = client.call(request).await.map_err(BoxError::from)?;
+        let response = client.call(request).await?;
         router::body::into_bytes(response.into_body())
             .await
             .map_err(BoxError::from)

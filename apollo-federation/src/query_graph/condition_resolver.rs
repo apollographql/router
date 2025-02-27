@@ -3,10 +3,10 @@
 //            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
-use apollo_compiler::ast::Type;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Type;
+use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
@@ -172,15 +172,17 @@ mod tests {
         let empty_destinations = ExcludedDestinations::default();
         let empty_conditions = ExcludedConditions::default();
 
-        assert!(cache
-            .contains(
-                edge1,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_miss());
+        assert!(
+            cache
+                .contains(
+                    edge1,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_miss()
+        );
 
         cache.insert(
             edge1,
@@ -188,26 +190,30 @@ mod tests {
             empty_destinations.clone(),
         );
 
-        assert!(cache
-            .contains(
-                edge1,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_hit(),);
+        assert!(
+            cache
+                .contains(
+                    edge1,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_hit(),
+        );
 
         let edge2 = EdgeIndex::new(2);
 
-        assert!(cache
-            .contains(
-                edge2,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_miss());
+        assert!(
+            cache
+                .contains(
+                    edge2,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_miss()
+        );
     }
 }

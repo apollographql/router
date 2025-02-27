@@ -28,7 +28,6 @@ struct TraceSpec {
 
 #[buildstructor::buildstructor]
 impl TraceSpec {
-    #[allow(clippy::too_many_arguments)]
     #[builder]
     pub fn new(
         operation_name: Option<String>,

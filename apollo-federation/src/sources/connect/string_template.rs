@@ -250,21 +250,24 @@ mod test_parse {
     }
     #[test]
     fn mixed_constant_and_expression() {
-        assert_debug_snapshot!(StringTemplate::<String>::parse("text{$config.one}text", 0).unwrap());
+        assert_debug_snapshot!(
+            StringTemplate::<String>::parse("text{$config.one}text", 0).unwrap()
+        );
     }
 
     #[test]
     fn offset() {
-        assert_debug_snapshot!(StringTemplate::<String>::parse("text{$config.one}text", 9).unwrap());
+        assert_debug_snapshot!(
+            StringTemplate::<String>::parse("text{$config.one}text", 9).unwrap()
+        );
     }
 
     #[test]
     fn expressions_with_nested_braces() {
-        assert_debug_snapshot!(StringTemplate::<String>::parse(
-            "const{$config.one { two { three } }}another-const",
-            0
-        )
-        .unwrap());
+        assert_debug_snapshot!(
+            StringTemplate::<String>::parse("const{$config.one { two { three } }}another-const", 0)
+                .unwrap()
+        );
     }
 
     #[test]

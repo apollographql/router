@@ -1,14 +1,14 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
-use shape::location::SourceId;
 use shape::Shape;
+use shape::location::SourceId;
 
-use super::immutable::InputPath;
-use super::location::WithRange;
 use super::ApplyToError;
 use super::MethodArgs;
 use super::PathList;
 use super::VarsWithPathsMap;
+use super::immutable::InputPath;
+use super::location::WithRange;
 
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the

@@ -10,10 +10,10 @@
 
 use std::ops::Range;
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::Node;
 use nom::AsChar;
 
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -212,11 +212,11 @@ impl<'schema> GraphQLString<'schema> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Node;
+    use apollo_compiler::Schema;
     use apollo_compiler::ast::Value;
     use apollo_compiler::parser::LineColumn;
     use apollo_compiler::schema::ExtendedType;
-    use apollo_compiler::Node;
-    use apollo_compiler::Schema;
     use pretty_assertions::assert_eq;
 
     use crate::sources::connect::validation::graphql::GraphQLString;

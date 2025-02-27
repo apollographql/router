@@ -1,21 +1,21 @@
 use std::collections::HashMap;
 
-use apollo_compiler::ast::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
 
+use crate::sources::connect::HeaderSource;
 use crate::sources::connect::models::Header;
 use crate::sources::connect::models::HeaderParseError;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::Code;
-use crate::sources::connect::validation::Message;
-use crate::sources::connect::HeaderSource;
 
 pub(crate) fn validate_arg<'a>(
     http_arg: &'a [(Name, Node<Value>)],
