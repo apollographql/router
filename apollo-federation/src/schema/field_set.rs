@@ -110,11 +110,23 @@ pub(crate) fn collect_target_fields_from_field_set(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
     field_set: &str,
+    validate: bool,
 ) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
-    // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
-    // string.
-    let field_set =
-        FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?;
+    // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the string.
+    let field_set = if validate {
+        FieldSet::parse_and_validate(schema, parent_type_name, field_set, "field_set.graphql")?
+    } else {
+        // This case exists for when a directive's field set uses an interface I with implementer O, and conditions
+        // I on O, but the actual phrase "type O implements I" only exists in another subgraph. Ideally, this wouldn't
+        // be allowed, but it would be a breaking change to remove it, thus it's supported for legacy reasons.
+        // TODO: Check if we need to take this path for other directives as well
+        Valid::assume_valid(FieldSet::parse(
+            schema,
+            parent_type_name,
+            field_set,
+            "field_set.graphql",
+        )?)
+    };
     let mut stack = vec![&field_set.selection_set];
     let mut fields = vec![];
     while let Some(selection_set) = stack.pop() {

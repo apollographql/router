@@ -153,6 +153,7 @@ impl SubgraphMetadata {
                     unwrap_schema(schema),
                     type_position.type_name().clone(),
                     key_directive_arguments.fields,
+                    false,
                 )?);
             }
         }
@@ -182,6 +183,7 @@ impl SubgraphMetadata {
                     unwrap_schema(schema),
                     field_definition.ty.inner_named_type().clone(),
                     provides_directive_arguments.fields,
+                    false,
                 )?);
             }
         }
@@ -211,6 +213,7 @@ impl SubgraphMetadata {
                     unwrap_schema(schema),
                     field_definition_position.parent().type_name,
                     requires_directive_arguments.fields,
+                    false,
                 )?);
             }
         }
@@ -367,6 +370,7 @@ impl SubgraphMetadata {
                             unwrap_schema(schema),
                             context_type.type_name().clone(),
                             selection.as_str(),
+                            false,
                         )?);
                     }
                 }
@@ -525,6 +529,7 @@ impl ExternalMetadata {
                         unwrap_schema(schema),
                         type_position.type_name().clone(),
                         key_directive_arguments.fields,
+                        false,
                     )?);
                 }
             }
