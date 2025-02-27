@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::iter::once;
 use std::ops::Range;
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::parser::LineColumn;
@@ -9,17 +10,19 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::Node;
 use itertools::Itertools;
 use shape::Shape;
 
-use super::coordinates::ConnectDirectiveCoordinate;
-use super::coordinates::SelectionCoordinate;
-use super::expression;
 use super::Code;
 use super::Message;
 use super::Name;
 use super::Value;
+use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::SelectionCoordinate;
+use super::expression;
+use crate::sources::connect::JSONSelection;
+use crate::sources::connect::PathSelection;
+use crate::sources::connect::SubSelection;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::json_selection::ExternalVarPaths;
@@ -35,9 +38,6 @@ use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
-use crate::sources::connect::JSONSelection;
-use crate::sources::connect::PathSelection;
-use crate::sources::connect::SubSelection;
 
 pub(super) fn validate_selection(
     coordinate: ConnectDirectiveCoordinate,
@@ -110,7 +110,7 @@ pub(super) fn validate_body_selection(
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            }]
+            }];
         }
     };
     let selection = match JSONSelection::parse(selection_str.as_str()) {
@@ -123,7 +123,7 @@ pub(super) fn validate_body_selection(
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            }]
+            }];
         }
     };
     if selection.is_empty() {
@@ -290,9 +290,15 @@ impl SelectionValidator<'_, '_> {
                         new_object_name = object.name,
                     ),
                     // TODO: make a helper function for easier range collection
-                    locations: self.get_range_location(field.inner_range())
+                    locations: self
+                        .get_range_location(field.inner_range())
                         // Skip over fields which duplicate the location of the selection
-                        .chain(if depth > 1 { ancestor_field.and_then(|def| def.line_column_range(&self.schema.sources)) } else { None })
+                        .chain(if depth > 1 {
+                            ancestor_field
+                                .and_then(|def| def.line_column_range(&self.schema.sources))
+                        } else {
+                            None
+                        })
                         .chain(field.definition.line_column_range(&self.schema.sources))
                         .collect(),
                 });
@@ -464,7 +470,10 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
                     "{coordinate} selects field `{parent_type}.{field_name}`, which has arguments. Only fields with a connector can have arguments.",
                     parent_type = self.last_field().ty().name,
                 ),
-                locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
+                locations: self
+                    .get_range_location(field.inner_range())
+                    .chain(field.definition.line_column_range(&self.schema.sources))
+                    .collect(),
             });
         }
 
@@ -472,26 +481,28 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
             (ExtendedType::Object(object), true) => {
                 self.check_for_circular_reference(field, object)
             }
-            (_, true) => {
-                Err(Message {
-                    code: Code::GroupSelectionIsNotObject,
-                    message: format!(
-                        "{coordinate} selects a group `{field_name}{{}}`, but `{parent_type}.{field_name}` is of type `{type_name}` which is not an object.",
-                        parent_type = self.last_field().ty().name,
-                    ),
-                    locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
-                })
-            }
-            (ExtendedType::Object(_), false) => {
-                Err(Message {
-                    code: Code::GroupSelectionRequiredForObject,
-                    message: format!(
-                        "`{parent_type}.{field_name}` is an object, so {coordinate} must select a group `{field_name}{{}}`.",
-                        parent_type = self.last_field().ty().name,
-                    ),
-                    locations: self.get_range_location(field.inner_range()).chain(field.definition.line_column_range(&self.schema.sources)).collect(),
-                })
-            }
+            (_, true) => Err(Message {
+                code: Code::GroupSelectionIsNotObject,
+                message: format!(
+                    "{coordinate} selects a group `{field_name}{{}}`, but `{parent_type}.{field_name}` is of type `{type_name}` which is not an object.",
+                    parent_type = self.last_field().ty().name,
+                ),
+                locations: self
+                    .get_range_location(field.inner_range())
+                    .chain(field.definition.line_column_range(&self.schema.sources))
+                    .collect(),
+            }),
+            (ExtendedType::Object(_), false) => Err(Message {
+                code: Code::GroupSelectionRequiredForObject,
+                message: format!(
+                    "`{parent_type}.{field_name}` is an object, so {coordinate} must select a group `{field_name}{{}}`.",
+                    parent_type = self.last_field().ty().name,
+                ),
+                locations: self
+                    .get_range_location(field.inner_range())
+                    .chain(field.definition.line_column_range(&self.schema.sources))
+                    .collect(),
+            }),
             (_, false) => Ok(()),
         }
     }

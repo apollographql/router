@@ -5,10 +5,10 @@ use std::fmt::Formatter;
 use std::ops::Range;
 use std::str::FromStr;
 
+use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
 use crate::sources::connect::validation::Code;

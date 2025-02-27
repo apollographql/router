@@ -2637,7 +2637,6 @@ mod tests {
     use http::StatusCode;
     use http::Uri;
     use multimap::MultiMap;
-    use router::body;
     use rust_embed::RustEmbed;
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
@@ -3241,7 +3240,7 @@ mod tests {
                                     let mut http_request = http::Request::builder()
                                         .method(Method::from_str(&http_method).expect("method"))
                                         .uri(Uri::from_str(&uri).expect("uri"))
-                                        .body(body.map(body::from_bytes).unwrap_or(body::empty()))
+                                        .body(body.unwrap_or("".into()))
                                         .unwrap();
                                     *http_request.headers_mut() = convert_http_headers(headers);
                                     let transport_request =

@@ -7,20 +7,20 @@ use std::str::FromStr;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
 use itertools::Itertools;
-use shape::graphql::shape_for_arguments;
-use shape::location::Location;
-use shape::location::SourceId;
 use shape::NamedShapePathKey;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::graphql::shape_for_arguments;
+use shape::location::Location;
+use shape::location::SourceId;
 
+use crate::sources::connect::Namespace;
 use crate::sources::connect::string_template::Expression;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::Code;
-use crate::sources::connect::validation::Message;
-use crate::sources::connect::Namespace;
 
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
@@ -334,14 +334,14 @@ fn shape_name(shape: &Shape) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
-    use crate::sources::connect::validation::coordinates::FieldCoordinate;
     use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::validation::coordinates::FieldCoordinate;
 
     fn expression(selection: &str) -> Expression {
         Expression {

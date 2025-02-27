@@ -398,7 +398,8 @@ fn test_indirect_branch_merging_with_typename_sibling() {
     // This operation has two `f` selection instances: One with __typename sibling and one without.
     // It creates multiple identical branches in the form of `... on A { f }` with different `f`.
     // The query plan must chose one over the other, which is implementation specific.
-    // Currently, the last one is chosen.
+    // This test is to make sure we choose the one with a typename sibling attached, thus
+    // we won't lose the requested `__typename` selection.
     assert_plan!(
         &planner,
         r#"
@@ -444,6 +445,7 @@ fn test_indirect_branch_merging_with_typename_sibling() {
             } =>
             {
               ... on A {
+                __typename
                 f
               }
               ... on B {

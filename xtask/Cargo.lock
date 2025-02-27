@@ -97,9 +97,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.95"
+version = "1.0.96"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
+checksum = "6b964d184e89d9b6b67dd2715bc8e74cf3107fb2b529990c90cf517326150bf4"
 
 [[package]]
 name = "ascii"
@@ -786,15 +786,16 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.42.0"
+version = "1.42.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6513e4067e16e69ed1db5ab56048ed65db32d10ba5fc1217f5393f8f17d8b5a5"
+checksum = "71c1b125e30d93896b365e156c33dadfffab45ee8400afcbba4752f59de08a86"
 dependencies = [
  "console",
  "linked-hash-map",
  "once_cell",
  "pest",
  "pest_derive",
+ "pin-project",
  "serde",
  "similar",
 ]
@@ -958,9 +959,9 @@ dependencies = [
 
 [[package]]
 name = "once_cell"
-version = "1.20.2"
+version = "1.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1261fe7e33c73b354eab43b1273a57c8f967d0391e80353e51f764ac02cf6775"
+checksum = "945462a4b81e43c4e3ba96bd7b49d834c6f61198356aa858733bc4acf3cbe62e"
 
 [[package]]
 name = "openssl-probe"
@@ -1039,6 +1040,26 @@ dependencies = [
  "once_cell",
  "pest",
  "sha2",
+]
+
+[[package]]
+name = "pin-project"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e2ec53ad785f4d35dac0adea7f7dc6f1bb277ad84a680c7afefeae05d1f5916"
+dependencies = [
+ "pin-project-internal",
+]
+
+[[package]]
+name = "pin-project-internal"
+version = "1.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56a66c0c55993aa927429d0f8a0abfd74f084e4d9c192cffed01e418d83eefb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
 ]
 
 [[package]]

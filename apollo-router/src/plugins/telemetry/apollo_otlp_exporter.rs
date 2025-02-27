@@ -2,6 +2,7 @@ use derivative::Derivative;
 use futures::future;
 use futures::future::BoxFuture;
 use futures::TryFutureExt;
+use opentelemetry::trace::Event;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
@@ -157,6 +158,23 @@ impl ApolloOtlpExporter {
         }
     }
 
+    fn extract_span_events(span: &LightSpanData) -> SpanEvents {
+        let mut span_events = SpanEvents::default();
+        for light_event in &span.events {
+            span_events.events.push(Event::new(
+                light_event.name.clone(),
+                light_event.timestamp,
+                light_event
+                    .attributes
+                    .iter()
+                    .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
+                    .collect(),
+                0,
+            ));
+        }
+        span_events
+    }
+
     fn base_prepare_span(&self, span: LightSpanData) -> SpanData {
         SpanData {
             span_context: SpanContext::new(
@@ -176,7 +194,7 @@ impl ApolloOtlpExporter {
                 .iter()
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
-            events: SpanEvents::default(),
+            events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status: span.status,
             instrumentation_lib: self.intrumentation_library.clone(),
@@ -229,7 +247,7 @@ impl ApolloOtlpExporter {
                 .iter()
                 .map(|(k, v)| KeyValue::new(k.clone(), v.clone()))
                 .collect(),
-            events: SpanEvents::default(),
+            events: Self::extract_span_events(&span),
             links: SpanLinks::default(),
             status,
             instrumentation_lib: self.intrumentation_library.clone(),

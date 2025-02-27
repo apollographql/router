@@ -1,6 +1,8 @@
 use std::fmt;
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
@@ -12,8 +14,6 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::FieldDefinition;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::Value;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -23,6 +23,7 @@ use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::FederationSchema;
 use crate::schema::position;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -33,7 +34,6 @@ use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::FederationSchema;
 
 pub(crate) const INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("inaccessible");
 

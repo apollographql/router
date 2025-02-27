@@ -171,7 +171,7 @@ impl Plugin for Rhai {
                             ) {
                                 let mut proceed = false;
                                 for path in event.paths {
-                                    if path.extension().map_or(false, |ext| ext == "rhai") {
+                                    if path.extension().is_some_and(|ext| ext == "rhai") {
                                         proceed = true;
                                         break;
                                     }
