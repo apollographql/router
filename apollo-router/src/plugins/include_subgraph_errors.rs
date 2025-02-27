@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde::de::Deserializer;
+use serde::{Deserialize, Serialize};
 use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -66,7 +66,8 @@ impl<'de> Deserialize<'de> for ErrorMode {
             type Value = ErrorMode;
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("boolean or object with allow_extensions_keys/deny_extensions_keys")
+                formatter
+                    .write_str("boolean or object with allow_extensions_keys/deny_extensions_keys")
             }
 
             fn visit_bool<E>(self, value: bool) -> Result<ErrorMode, E>
@@ -81,6 +82,7 @@ impl<'de> Deserialize<'de> for ErrorMode {
                 M: de::MapAccess<'de>,
             {
                 #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
                 struct Helper {
                     allow_extensions_keys: Option<Vec<String>>,
                     deny_extensions_keys: Option<Vec<String>>,
@@ -88,7 +90,7 @@ impl<'de> Deserialize<'de> for ErrorMode {
                 }
 
                 let helper = Helper::deserialize(de::value::MapAccessDeserializer::new(map))?;
-                
+
                 match (helper.allow_extensions_keys, helper.deny_extensions_keys) {
                     (Some(_), Some(_)) => {
                         return Err(de::Error::custom(
@@ -113,6 +115,7 @@ impl<'de> Deserialize<'de> for ErrorMode {
 }
 
 #[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SubgraphConfigCommon {
     #[serde(skip_serializing_if = "Option::is_none")]
     redact_message: Option<bool>,
@@ -140,7 +143,7 @@ enum SubgraphConfig {
     CommonOnly {
         #[serde(flatten)]
         common: SubgraphConfigCommon,
-    }
+    },
 }
 
 // Custom deserializer to handle both boolean and object types
@@ -175,26 +178,17 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
                 M: de::MapAccess<'de>,
             {
                 #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
                 struct FullConfig {
                     allow_extensions_keys: Option<Vec<String>>,
                     deny_extensions_keys: Option<Vec<String>>,
                     redact_message: Option<bool>,
                     exclude_global_keys: Option<Vec<String>>,
-                    #[serde(flatten)]
-                    extra: HashMap<String, serde_json::Value>,
                 }
-            
-                let config: FullConfig = Deserialize::deserialize(
-                    de::value::MapAccessDeserializer::new(map)
-                )?;
-            
-                if !config.extra.is_empty() {
-                    return Err(de::Error::custom(format!(
-                        "Unknown field(s): {}",
-                        config.extra.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(", ")
-                    )));
-                }
-            
+
+                let config: FullConfig =
+                    Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))?;
+
                 // Ensure error stops deserialization
                 match (config.allow_extensions_keys, config.deny_extensions_keys) {
                     (Some(_), Some(_)) => {
@@ -256,7 +250,7 @@ impl Plugin for IncludeSubgraphErrors {
                 }
             }
         }
-    
+
         Ok(IncludeSubgraphErrors {
             config: init.config,
         })
@@ -294,10 +288,11 @@ impl Plugin for IncludeSubgraphErrors {
                 match sub_config {
                     SubgraphConfig::Allow {
                         allow_extensions_keys: sub_allow,
-                        common: SubgraphConfigCommon {
-                            redact_message: sub_redact,
-                            exclude_global_keys,
-                        },
+                        common:
+                            SubgraphConfigCommon {
+                                redact_message: sub_redact,
+                                exclude_global_keys,
+                            },
                     } => {
                         let redact = sub_redact.unwrap_or(should_redact_message);
                         match &global_allow {
@@ -321,10 +316,11 @@ impl Plugin for IncludeSubgraphErrors {
                     }
                     SubgraphConfig::Deny {
                         deny_extensions_keys: sub_deny,
-                        common: SubgraphConfigCommon {
-                            redact_message: sub_redact,
-                            exclude_global_keys,
-                        },
+                        common:
+                            SubgraphConfigCommon {
+                                redact_message: sub_redact,
+                                exclude_global_keys,
+                            },
                     } => {
                         let redact = sub_redact.unwrap_or(should_redact_message);
                         match &global_deny {
@@ -350,17 +346,29 @@ impl Plugin for IncludeSubgraphErrors {
                         if *enabled {
                             false // no redaction when subgraph is true
                         } else {
-                            true  // full redaction when subgraph is false
+                            true // full redaction when subgraph is false
                         },
                     ),
                     SubgraphConfig::CommonOnly {
-                        common: SubgraphConfigCommon {
-                            redact_message: sub_redact,
-                            exclude_global_keys: _,
-                        },
+                        common:
+                            SubgraphConfigCommon {
+                                redact_message: sub_redact,
+                                exclude_global_keys: _,
+                            },
                     } => {
                         let redact = sub_redact.unwrap_or(should_redact_message);
-                        (None, None, redact)
+                        // Inherit global allow/deny lists when using CommonOnly
+                        match self.config.all.clone() {
+                            ErrorMode::Allow {
+                                allow_extensions_keys,
+                                ..
+                            } => (Some(allow_extensions_keys), None, redact),
+                            ErrorMode::Deny { 
+                                deny_extensions_keys,
+                                ..
+                            } => (None, Some(deny_extensions_keys), redact),
+                            _ => (None, None, redact),
+                        }
                     }
                 }
             } else {
@@ -413,7 +421,16 @@ impl Plugin for IncludeSubgraphErrors {
                             error.message = REDACTED_ERROR_MESSAGE.to_string();
                         }
 
-                        // Always include service name
+                        // Always include service name unless explicitly denied
+                        if !effective_deny
+                            .as_ref()
+                            .map_or(false, |deny| deny.contains(&"service".to_string()))
+                        {
+                            error
+                            .extensions
+                            .entry("service")
+                            .or_insert(sub_name_response.clone().into());
+                        }
 
                         // Filter extensions based on effective_allow if specified
                         if let Some(allow_keys) = &effective_allow {
@@ -459,7 +476,6 @@ impl Plugin for IncludeSubgraphErrors {
             .boxed()
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -625,19 +641,20 @@ mod test {
         .boxed()
     }
 
-    async fn get_redacting_plugin(config: &jValue) -> Result<Box<dyn DynPlugin>, BoxError> {
+    async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
+            .expect("Plugin not created")
     }
 
     #[tokio::test]
     async fn it_returns_valid_response() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await.unwrap();
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
@@ -645,7 +662,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_explicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await.unwrap();
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -653,7 +670,7 @@ mod test {
     #[tokio::test]
     async fn it_redacts_all_subgraphs_implicit_redact() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({})).await.unwrap();
+        let plugin = get_redacting_plugin(&serde_json::json!({})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -661,7 +678,7 @@ mod test {
     #[tokio::test]
     async fn it_does_not_redact_all_subgraphs_explicit_allow() {
         // Build a redacting plugin
-        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await.unwrap();
+        let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -670,7 +687,7 @@ mod test {
     async fn it_does_not_redact_all_implicit_redact_product_explict_allow_for_product_query() {
         // Build a redacting plugin
         let plugin =
-            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await.unwrap();
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -679,7 +696,7 @@ mod test {
     async fn it_does_redact_all_implicit_redact_product_explict_allow_for_review_query() {
         // Build a redacting plugin
         let plugin =
-            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await.unwrap();
+            get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -690,7 +707,7 @@ mod test {
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"reviews": false }}),
         )
-        .await.unwrap();
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -701,7 +718,7 @@ mod test {
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"products": false }}),
         )
-        .await.unwrap();
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -712,7 +729,7 @@ mod test {
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
         )
-        .await.unwrap();
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
@@ -723,85 +740,77 @@ mod test {
         let plugin = get_redacting_plugin(
             &serde_json::json!({ "all": true, "subgraphs": {"accounts": false }}),
         )
-        .await.unwrap();
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_ACCOUNT_QUERY, &REDACTED_ACCOUNT_RESPONSE, router).await;
     }
 
-    // new test cases for allow and deny list config
+    // Below are test cases for allow and deny list
+    static PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"code":"FETCH_ERROR"}}]}"#.as_bytes())
+    });
+
+    static PRODUCT_RESPONSE_WITH_REDACTED_MESSAGE_AND_FILTERED_EXTENSIONS: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted","path":[],"extensions":{"code":"FETCH_ERROR"}}]}"#.as_bytes())
+    });
+
+    async fn create_plugin_with_object_config(config: &jValue) -> Result<Box<dyn DynPlugin>, BoxError> {
+        crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.include_subgraph_errors")
+            .expect("Plugin not found")
+            .create_instance_without_schema(config)
+            .await
+    }
+
     #[tokio::test]
-    async fn it_rejects_object_config_when_global_is_boolean() {
-        let result = get_redacting_plugin(&serde_json::json!({
-            "all": true,
-            "subgraphs": {
-                "products": {
-                    "deny_extensions_keys": ["code"]
-                }
+    async fn it_does_not_allow_both_allow_and_deny_list_in_global_config() {
+        let result = create_plugin_with_object_config(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "allow_extensions_keys": [],
+                "deny_extensions_keys": []
             }
-        })).await;
+        }))
+        .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn it_requires_redact_message_when_global_is_object() {
-        let result = get_redacting_plugin(&serde_json::json!({
+    async fn it_does_not_allow_both_allow_and_deny_list_in_a_subgraph_config() {
+        let result = create_plugin_with_object_config(&serde_json::json!({
             "all": {
-                "deny_extensions_keys": ["code"]
-            }
-        })).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn it_rejects_global_with_both_allow_and_deny() {
-        let result = get_redacting_plugin(&serde_json::json!({
-            "all": {
-                "redact_message": true,
-                "allow_extensions_keys": ["code"],
-                "deny_extensions_keys": ["reason"]
-            }
-        })).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn it_rejects_subgraph_with_both_allow_and_deny() {
-        let result = get_redacting_plugin(&serde_json::json!({
-            "all": {
-                "redact_message": true,
-                "deny_extensions_keys": ["code"]
+                "redact_message": false,
+                "allow_extensions_keys": [],
             },
             "subgraphs": {
                 "products": {
-                    "allow_extensions_keys": ["code"],
-                    "deny_extensions_keys": ["service"]
+                    "redact_message": false,
+                    "allow_extensions_keys": [],
+                    "deny_extensions_keys": []
                 }
             }
-        })).await;
+        }))
+        .await;
         assert!(result.is_err());
     }
 
-    // test case that needs responses
-
-    static PRODUCT_RESPONSE_WITH_FILTERED_EXTENSIONS: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock","path":[],"extensions":{"code":"ERROR"}}]}"#.as_bytes())
-    });
-
     #[tokio::test]
-    async fn it_filters_extensions_based_on_allow_list() {
-        let plugin = get_redacting_plugin(&serde_json::json!({
-            "all": {
-                "redact_message": false,
-                "allow_extensions_keys": ["code"]
+    async fn it_does_not_allow_subgraph_config_with_object_when_global_is_boolean() {
+        let result = create_plugin_with_object_config(&serde_json::json!({
+            "all": false,
+            "subgraphs": {
+                "products": {
+                    "redact_message": true
+                }
             }
-        })).await.unwrap();
-        let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_FILTERED_EXTENSIONS, router).await;
+        }))
+        .await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]
     async fn it_allows_any_config_type_when_global_is_object() {
-        let plugin = get_redacting_plugin(&serde_json::json!({
+        let result = create_plugin_with_object_config(&serde_json::json!({
             "all": {
                 "redact_message": true,
                 "deny_extensions_keys": ["code"]
@@ -819,83 +828,154 @@ mod test {
                 "accounts": true  // Boolean is allowed
             }
         })).await;
-        assert!(plugin.is_ok());
-    }
-    
-    #[tokio::test]
-    async fn a_subgraph_allows_explicit_deny_or_allow_list_when_global_is_object() {
-        let plugin = get_redacting_plugin(&serde_json::json!({
-            "all": {
-                "redact_message": true,
-                "deny_extensions_keys": ["code", "reason"]
-            },
-            "subgraphs": {
-                "products": {
-                    "redact_message": true,
-                    "allow_extensions_keys": ["code"],
-                    "exclude_global_keys": ["reason"],
-                },
-                "reviews": {
-                    "redact_message": false,
-                    "deny_extensions_keys": ["reason"],
-                    "exclude_global_keys": ["code"],
-                }
-            }
-        })).await;
-        assert!(plugin.is_ok());
-    }
-    
-    #[tokio::test]
-    async fn it_allows_common_only_config_when_global_is_object() {
-        let plugin = get_redacting_plugin(&serde_json::json!({
-            "all": {
-                "redact_message": true,
-                "deny_extensions_keys": ["code", "reason"]
-            },
-            "subgraphs": {
-                "products": {
-                    "redact_message": true,
-                },
-                "reviews": {
-                    "redact_message": true,
-                    "exclude_global_keys": ["code"]
-                }
-            }
-        })).await;
-        assert!(plugin.is_ok());
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn subgraph_with_boolean_overrides_global_object() {
+    async fn it_filters_extensions_based_on_global_allow_list() {
         let plugin = get_redacting_plugin(&serde_json::json!({
             "all": {
-                "redact_message": true,
-                "deny_extensions_keys": ["code", "service"]
+                "redact_message": false,
+                "allow_extensions_keys": ["code"]
+            }    
+        })).await;    
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+    }        
+
+    #[tokio::test]
+    async fn it_allows_subgraph_bool_override_global_config_1() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "deny_extensions_keys": ["code"],
             },
             "subgraphs": {
                 "products": true
             }
-        })).await.unwrap();
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
-    
+
     #[tokio::test]
-    async fn it_overrides_global_list_with_subgraph_opposite_list_type() {
+    async fn it_allows_subgraph_bool_override_global_config_2() {
         let plugin = get_redacting_plugin(&serde_json::json!({
             "all": {
                 "redact_message": true,
-                "deny_extensions_keys": ["code", "service"]
+                "allow_extensions_keys": ["code"],
+            },
+            "subgraphs": {
+                "products": false
+            }
+        }))
+        .await;
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
+    }
+
+    #[tokio::test]
+    async fn it_allows_subgraph_config_as_object_overrides_global_config_explicitly() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "allow_extensions_keys": ["code"],
+            },
+            "subgraphs": {
+                "products": {
+                    "redact_message": true
+                }
+            }
+        }))
+        .await;
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_REDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+    }
+
+    #[tokio::test]
+    async fn it_allows_subgraph_to_exclude_key_from_global_allow_list() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "allow_extensions_keys": ["code", "reason"]
+            },
+            "subgraphs": {
+                "products": {
+                    "allow_extensions_keys": ["code"],
+                    "exclude_global_keys": ["reason"],
+                },
+            }
+        })).await;
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+    }
+ 
+    #[tokio::test]
+    async fn it_allows_subgraph_deny_list_to_override_global_allow_list() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "allow_extensions_keys": ["code", "reason"]
+            },
+            "subgraphs": {
+                "products": {
+                    "deny_extensions_keys": ["reason", "test", "service"]
+                },
+            }
+        })).await;
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+    }
+ 
+    #[tokio::test]
+    async fn it_allows_subgraph_allow_list_to_override_global_deny_list() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "deny_extensions_keys": ["reason", "test", "service"]
             },
             "subgraphs": {
                 "products": {
                     "allow_extensions_keys": ["code"]
-                }
+                },
             }
-        })).await.unwrap();
+        })).await;
         let router = build_mock_router(plugin).await;
-        // Would need to create a specific response that shows only code extension passed through
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_FILTERED_EXTENSIONS, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
     }
-
+ 
+    #[tokio::test]
+    async fn it_allows_subgraph_deny_list_to_extend_global_deny_list() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": true,
+                "deny_extensions_keys": ["reason", "test", "service"]
+            },
+            "subgraphs": {
+                "products": {
+                    "deny_extensions_keys": ["code"]
+                },
+            }
+        })).await;
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
+    }
+ 
+    #[tokio::test]
+    async fn it_allows_subgraph_allow_list_to_extend_global_allow_list() {
+        let plugin = get_redacting_plugin(&serde_json::json!({
+            "all": {
+                "redact_message": false,
+                "allow_extensions_keys": []
+            },
+            "subgraphs": {
+                "products": {
+                    "allow_extensions_keys": ["code"]
+                },
+            }
+        })).await;
+        let router = build_mock_router(plugin).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+    }
 }
