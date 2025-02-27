@@ -179,6 +179,6 @@ impl Plugin for Connectors {
     }
 }
 
-pub(crate) const PLUGIN_NAME: &str = "preview_connectors";
+pub(crate) const PLUGIN_NAME: &str = "connectors";
 
 register_plugin!("apollo", PLUGIN_NAME, Connectors);

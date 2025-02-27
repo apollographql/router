@@ -3,18 +3,18 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use referencer::Referencers;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -27,6 +27,7 @@ use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod argument_composition_strategies;
+pub(crate) mod blueprint;
 pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
@@ -77,7 +78,7 @@ impl FederationSchema {
     }
 
     /// Returns all the types in the schema, minus builtins.
-    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> + '_ {
+    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> {
         self.schema
             .types
             .iter()
@@ -101,7 +102,7 @@ impl FederationSchema {
 
     pub(crate) fn get_directive_definitions(
         &self,
-    ) -> impl Iterator<Item = DirectiveDefinitionPosition> + '_ {
+    ) -> impl Iterator<Item = DirectiveDefinitionPosition> {
         self.schema
             .directive_definitions
             .keys()

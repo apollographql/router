@@ -42,7 +42,6 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
-use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
@@ -289,7 +288,6 @@ fn default_graphql_listen() -> ListenAddr {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -412,7 +410,6 @@ impl Default for Configuration {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -549,7 +546,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
     }
 }
 
@@ -683,7 +680,6 @@ fn default_defer_support() -> bool {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
@@ -712,7 +708,6 @@ impl Supergraph {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
@@ -1423,7 +1418,7 @@ impl Batching {
                     subgraph_batching_config
                         .subgraphs
                         .get(service_name)
-                        .map_or(true, |x| x.enabled)
+                        .is_none_or(|x| x.enabled)
                 } else {
                     // If it isn't, require:
                     // - an enabled subgraph entry

@@ -1,21 +1,21 @@
 use std::fmt;
 use std::fmt::Formatter;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use itertools::Itertools;
 
-use super::compare_keys::field_set_is_subset;
 use super::VariableReference;
+use super::compare_keys::field_set_is_subset;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::Namespace;
 
 /// Collects keys and entity connectors for comparison and validation.
 #[derive(Default)]
@@ -122,7 +122,11 @@ pub(crate) fn field_set_error(
 ) -> Message {
     Message {
         code: Code::GraphQLError,
-        message: format!("Variables used in connector (`{}`) for `{}` cannot be used to create a valid `@key` directive.", variables.iter().join("`, `"), type_name),
+        message: format!(
+            "Variables used in connector (`{}`) for `{}` cannot be used to create a valid `@key` directive.",
+            variables.iter().join("`, `"),
+            type_name
+        ),
         locations: vec![],
     }
 }

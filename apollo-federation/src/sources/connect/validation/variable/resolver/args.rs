@@ -3,12 +3,12 @@ use std::format;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::variable::resolver;
 use crate::sources::connect::validation::variable::resolver::NamespaceResolver;
-use crate::sources::connect::validation::Code;
-use crate::sources::connect::validation::Message;
 use crate::sources::connect::variable::Namespace;
 use crate::sources::connect::variable::VariableReference;
 

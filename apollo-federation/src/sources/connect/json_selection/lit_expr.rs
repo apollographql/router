@@ -17,18 +17,18 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::tuple;
 
+use super::ExternalVarPaths;
+use super::ParseResult;
 use super::helpers::spaces_or_comments;
-use super::location::merge_ranges;
-use super::location::ranged_span;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
+use super::location::merge_ranges;
+use super::location::ranged_span;
 use super::nom_error_message;
-use super::parser::parse_string_literal;
 use super::parser::Key;
 use super::parser::PathSelection;
-use super::ExternalVarPaths;
-use super::ParseResult;
+use super::parser::parse_string_literal;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum LitExpr {
@@ -96,7 +96,17 @@ impl LitExpr {
                         );
 
                         let mut s = String::new();
-                        s.push_str(int.fragment());
+
+                        // Remove leading zeros to avoid failing the stricter
+                        // number.parse() below, but allow a single zero.
+                        let mut int_chars_without_leading_zeros =
+                            int.fragment().chars().skip_while(|c| *c == '0');
+                        if let Some(first_non_zero) = int_chars_without_leading_zeros.next() {
+                            s.push(first_non_zero);
+                            s.extend(int_chars_without_leading_zeros);
+                        } else {
+                            s.push('0');
+                        }
 
                         let full_range = if let Some((_, dot, _, frac)) = frac {
                             let frac_range = merge_ranges(
@@ -272,11 +282,12 @@ mod tests {
     use super::super::known_var::KnownVariable;
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
+    use crate::sources::connect::json_selection::PathList;
     use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
-    use crate::sources::connect::json_selection::PathList;
 
+    #[track_caller]
     fn check_parse(input: &str, expected: LitExpr) {
         match LitExpr::parse(new_span(input)) {
             Ok((remainder, parsed)) => {
@@ -316,6 +327,50 @@ mod tests {
         check_parse(
             "-123.",
             LitExpr::Number(serde_json::Number::from_f64(-123.0).unwrap()),
+        );
+        check_parse("00", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            "-00",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse("0", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            "-0",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse(" 00 ", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(" 0 ", LitExpr::Number(serde_json::Number::from(0)));
+        check_parse(
+            " - 0 ",
+            LitExpr::Number(serde_json::Number::from_f64(-0.0).unwrap()),
+        );
+        check_parse("001", LitExpr::Number(serde_json::Number::from(1)));
+        check_parse(
+            "00.1",
+            LitExpr::Number(serde_json::Number::from_f64(0.1).unwrap()),
+        );
+        check_parse("0010", LitExpr::Number(serde_json::Number::from(10)));
+        check_parse(
+            "00.10",
+            LitExpr::Number(serde_json::Number::from_f64(0.1).unwrap()),
+        );
+        check_parse("-001 ", LitExpr::Number(serde_json::Number::from(-1)));
+        check_parse(
+            "-00.1",
+            LitExpr::Number(serde_json::Number::from_f64(-0.1).unwrap()),
+        );
+        check_parse(" - 0010 ", LitExpr::Number(serde_json::Number::from(-10)));
+        check_parse(
+            "- 00.10",
+            LitExpr::Number(serde_json::Number::from_f64(-0.1).unwrap()),
+        );
+        check_parse(
+            "007.",
+            LitExpr::Number(serde_json::Number::from_f64(7.0).unwrap()),
+        );
+        check_parse(
+            "-007.",
+            LitExpr::Number(serde_json::Number::from_f64(-7.0).unwrap()),
         );
 
         check_parse("true", LitExpr::Bool(true));

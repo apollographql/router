@@ -34,6 +34,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::demand_control::cost_calculator::schema::DemandControlledSchema;
 use crate::plugins::demand_control::strategy::Strategy;
 use crate::plugins::demand_control::strategy::StrategyFactory;
+use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
@@ -43,10 +44,14 @@ use crate::Context;
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
-pub(crate) static COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
-pub(crate) static COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
-pub(crate) static COST_RESULT_KEY: &str = "apollo::demand_control::result";
-pub(crate) static COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+pub(crate) const COST_ESTIMATED_KEY: &str = "apollo::demand_control::estimated_cost";
+pub(crate) const DEPRECATED_COST_ESTIMATED_KEY: &str = "cost.estimated";
+pub(crate) const COST_ACTUAL_KEY: &str = "apollo::demand_control::actual_cost";
+pub(crate) const DEPRECATED_COST_ACTUAL_KEY: &str = "cost.actual";
+pub(crate) const COST_RESULT_KEY: &str = "apollo::demand_control::result";
+pub(crate) const DEPRECATED_COST_RESULT_KEY: &str = "cost.result";
+pub(crate) const COST_STRATEGY_KEY: &str = "apollo::demand_control::strategy";
+pub(crate) const DEPRECATED_COST_STRATEGY_KEY: &str = "cost.strategy";
 
 /// Algorithm for calculating the cost of an incoming query.
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -306,6 +311,19 @@ impl Plugin for DemandControl {
     type Config = DemandControlConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if !init.config.enabled {
+            return Ok(DemandControl {
+                strategy_factory: StrategyFactory::new(
+                    init.config.clone(),
+                    Arc::new(DemandControlledSchema::empty(
+                        init.supergraph_schema.clone(),
+                    )?),
+                    Arc::new(HashMap::new()),
+                ),
+                config: init.config,
+            });
+        }
+
         let demand_controlled_supergraph_schema =
             DemandControlledSchema::new(init.supergraph_schema.clone())?;
         let mut demand_controlled_subgraph_schemas = HashMap::new();
@@ -342,16 +360,19 @@ impl Plugin for DemandControl {
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
-                        Err(err) => ControlFlow::Break(
-                            execution::Response::builder()
-                                .errors(
-                                    err.into_graphql_errors()
-                                        .expect("must be able to convert to graphql error"),
-                                )
-                                .context(req.context.clone())
-                                .build()
-                                .expect("Must be able to build response"),
-                        ),
+                        Err(err) => {
+                            emit_error_event(err.code(), "Demand control execution error");
+                            ControlFlow::Break(
+                                execution::Response::builder()
+                                    .errors(
+                                        err.into_graphql_errors()
+                                            .expect("must be able to convert to graphql error"),
+                                    )
+                                    .context(req.context.clone())
+                                    .build()
+                                    .expect("Must be able to build response"),
+                            )
+                        }
                     })
                 })
                 .map_response(|mut resp: execution::Response| {

@@ -1,6 +1,6 @@
+use apollo_compiler::Node;
 use apollo_compiler::coord;
 use apollo_compiler::schema::Value;
-use apollo_compiler::Node;
 use apollo_federation::Supergraph;
 
 #[test]

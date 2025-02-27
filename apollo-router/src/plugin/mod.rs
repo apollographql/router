@@ -119,7 +119,6 @@ where
 {
     /// Create a new PluginInit builder
     #[builder(entry = "builder", exit = "build", visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     /// Build a new PluginInit for the supplied configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -146,7 +145,6 @@ where
     }
 
     #[builder(entry = "try_builder", exit = "build", visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     /// Try to build a new PluginInit for the supplied json configuration and SDL.
     ///
     /// You can reuse a notify instance, or Build your own.
@@ -176,7 +174,6 @@ where
 
     /// Create a new PluginInit builder
     #[builder(entry = "fake_builder", exit = "build", visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     fn fake_new_builder(
         config: T,
         supergraph_sdl: Option<Arc<String>>,

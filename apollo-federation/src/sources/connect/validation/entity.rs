@@ -1,6 +1,8 @@
 mod compare_keys;
 mod keys;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
@@ -10,16 +12,14 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-pub(super) use keys::field_set_error;
 pub(super) use keys::EntityKeyChecker;
+pub(super) use keys::field_set_error;
 
+use super::Code;
+use super::Message;
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::coordinates::field_with_connect_directive_entity_true_coordinate;
 use super::extended_type::ObjectCategory;
-use super::Code;
-use super::Message;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
@@ -50,18 +50,22 @@ pub(super) fn validate_entity_arg(
     }
 
     if category != ObjectCategory::Query {
-        return Err(
-            Message {
-                code: Code::EntityNotOnRootQuery,
-                message: format!(
-                    "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
-                    coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
-                ),
-                locations: entity_arg.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }
-        );
+        return Err(Message {
+            code: Code::EntityNotOnRootQuery,
+            message: format!(
+                "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
+                coordinate = connect_directive_entity_argument_coordinate(
+                    connect_directive_name,
+                    entity_arg_value.as_ref(),
+                    object,
+                    &field.name
+                )
+            ),
+            locations: entity_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
     }
 
     let Some(object_type) = schema.get_object(field.ty.inner_named_type()) else {
@@ -84,24 +88,22 @@ pub(super) fn validate_entity_arg(
     };
 
     if field.ty.is_list() || field.ty.is_non_null() {
-        return Err(
-            Message {
-                code: Code::EntityTypeInvalid,
-                message: format!(
-                    "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
-                    coordinate = connect_directive_entity_argument_coordinate(
-                        connect_directive_name,
-                        entity_arg_value.as_ref(),
-                        object,
-                        &field.name
-                    )
-                ),
-                locations: entity_arg
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }
-        );
+        return Err(Message {
+            code: Code::EntityTypeInvalid,
+            message: format!(
+                "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                coordinate = connect_directive_entity_argument_coordinate(
+                    connect_directive_name,
+                    entity_arg_value.as_ref(),
+                    object,
+                    &field.name
+                )
+            ),
+            locations: entity_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        });
     }
 
     if field.arguments.is_empty() {
@@ -238,7 +240,8 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
                     input_type = field.input_type.name(),
                     entity_type = field.entity_type.name(),
                 ),
-                locations: field.node
+                locations: field
+                    .node
                     .line_column_range(&self.schema.sources)
                     .into_iter()
                     .chain(self.entity_arg.line_column_range(&self.schema.sources))
