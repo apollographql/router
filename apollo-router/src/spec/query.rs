@@ -17,11 +17,11 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
-use self::change::QueryHashVisitor;
 use self::subselections::BooleanValues;
 use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use super::Fragment;
+use super::QueryHash;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -32,7 +32,6 @@ use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
 use crate::services::layers::query_analysis::get_operation;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -45,7 +44,6 @@ use crate::spec::Selection;
 use crate::spec::SpecError;
 use crate::Configuration;
 
-pub(crate) mod change;
 pub(crate) mod subselections;
 pub(crate) mod transform;
 pub(crate) mod traverse;
@@ -74,12 +72,9 @@ pub(crate) struct Query {
 
     /// This is a hash that depends on:
     /// - the query itself
-    /// - the relevant parts of the schema
-    ///
-    /// if a schema update does not affect a query, then this will be the same hash
-    /// with the old and new schema
+    /// - the schema
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) schema_aware_hash: Vec<u8>,
+    pub(crate) schema_aware_hash: QueryHash,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -95,7 +90,11 @@ pub(crate) struct DeferStats {
 }
 
 impl Query {
-    pub(crate) fn empty() -> Self {
+    /// Returns an empty query. This should be used somewhat carefully and only in tests.
+    /// Other parts of the router may not handle empty queries properly.
+    ///
+    /// FIXME: This should be marked cfg(test) but it's used in places where adding cfg(test) is tricky.
+    pub(crate) fn empty_for_tests() -> Self {
         Self {
             string: String::new(),
             fragments: Fragments {
@@ -111,7 +110,7 @@ impl Query {
                 conditional_defer_variable_names: IndexSet::default(),
             },
             is_original: true,
-            schema_aware_hash: vec![],
+            schema_aware_hash: QueryHash::default(),
         }
     }
 
@@ -266,38 +265,30 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let hash = QueryHashVisitor::hash_query(
-            schema.supergraph_schema(),
-            &schema.raw_sdl,
-            &schema.implementers_map,
-            &executable_document,
-            operation_name,
-        )
-        .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
-
+        let hash = schema.schema_id.operation_hash(query, operation_name);
         ParsedDocumentInner::new(
             ast,
             Arc::new(executable_document),
             operation_name,
-            Arc::new(QueryHash(hash)),
+            Arc::new(hash),
         )
     }
 
     #[cfg(test)]
     pub(crate) fn parse(
-        query: impl Into<String>,
+        query_text: impl Into<String>,
         operation_name: Option<&str>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, tower::BoxError> {
-        let query = query.into();
+        let query_text = query_text.into();
 
-        let doc = Self::parse_document(&query, operation_name, schema, configuration)?;
+        let doc = Self::parse_document(&query_text, operation_name, schema, configuration)?;
         let (fragments, operation, defer_stats, schema_aware_hash) =
-            Self::extract_query_information(schema, &doc.executable, operation_name)?;
+            Self::extract_query_information(schema, &query_text, &doc.executable, operation_name)?;
 
         Ok(Query {
-            string: query,
+            string: query_text,
             fragments,
             operation,
             subselections: HashMap::new(),
@@ -312,9 +303,10 @@ impl Query {
     /// Extract serializable data structures from the apollo-compiler HIR.
     pub(crate) fn extract_query_information(
         schema: &Schema,
+        query_text: &str,
         document: &ExecutableDocument,
         operation_name: Option<&str>,
-    ) -> Result<(Fragments, Operation, DeferStats, Vec<u8>), SpecError> {
+    ) -> Result<(Fragments, Operation, DeferStats, QueryHash), SpecError> {
         let mut defer_stats = DeferStats {
             has_defer: false,
             has_unconditional_defer: false,
@@ -323,18 +315,7 @@ impl Query {
         let fragments = Fragments::from_hir(document, schema, &mut defer_stats)?;
         let operation = get_operation(document, operation_name)?;
         let operation = Operation::from_hir(&operation, schema, &mut defer_stats, &fragments)?;
-
-        let mut visitor = QueryHashVisitor::new(
-            schema.supergraph_schema(),
-            &schema.raw_sdl,
-            &schema.implementers_map,
-            document,
-        )
-        .map_err(|e| SpecError::QueryHashing(format!("could not calculate the query hash: {e}")))?;
-        traverse::document(&mut visitor, document, operation_name).map_err(|e| {
-            SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
-        })?;
-        let hash = visitor.finish();
+        let hash = schema.schema_id.operation_hash(query_text, operation_name);
 
         Ok((fragments, operation, defer_stats, hash))
     }
@@ -1094,9 +1075,9 @@ impl Operation {
                         .as_ref()
                         .and_then(|v| parse_hir_value(v)),
                 };
-                Ok((name, variable))
+                (name, variable)
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
 
         Ok(Operation {
             selection_set,

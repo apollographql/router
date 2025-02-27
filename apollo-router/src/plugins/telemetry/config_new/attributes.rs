@@ -72,10 +72,10 @@ pub(crate) const HTTP_REQUEST_URI: Key = Key::from_static_str("http.request.uri"
 pub(crate) const HTTP_REQUEST_VERSION: Key = Key::from_static_str("http.request.version");
 pub(crate) const HTTP_REQUEST_BODY: Key = Key::from_static_str("http.request.body");
 
-pub(super) const HTTP_RESPONSE_HEADERS: Key = Key::from_static_str("http.response.headers");
-pub(super) const HTTP_RESPONSE_STATUS: Key = Key::from_static_str("http.response.status");
-pub(super) const HTTP_RESPONSE_VERSION: Key = Key::from_static_str("http.response.version");
-pub(super) const HTTP_RESPONSE_BODY: Key = Key::from_static_str("http.response.body");
+pub(crate) const HTTP_RESPONSE_HEADERS: Key = Key::from_static_str("http.response.headers");
+pub(crate) const HTTP_RESPONSE_STATUS: Key = Key::from_static_str("http.response.status");
+pub(crate) const HTTP_RESPONSE_VERSION: Key = Key::from_static_str("http.response.version");
+pub(crate) const HTTP_RESPONSE_BODY: Key = Key::from_static_str("http.response.body");
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -1139,9 +1139,7 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes
             .as_ref()
             .and_then(|a| a.key(SUBGRAPH_NAME))
         {
-            if let Some(subgraph_name) = &request.subgraph_name {
-                attrs.push(KeyValue::new(key, subgraph_name.clone()));
-            }
+            attrs.push(KeyValue::new(key, request.subgraph_name.clone()));
         }
 
         attrs

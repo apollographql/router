@@ -1,16 +1,17 @@
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
-use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec::Identity;
-use crate::link::spec::APOLLO_SPEC_DOMAIN;
-use crate::link::Link;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::link::Link;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec::APOLLO_SPEC_DOMAIN;
+use crate::link::spec::Identity;
+use crate::schema::FederationSchema;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -27,13 +28,14 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
-use crate::schema::FederationSchema;
 use crate::sources::connect::ConnectSpec;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
 const REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC: Name = name!("requiresScopes");
 const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
+const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
+const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
 
 pub(super) fn carryover_directives(
     from: &FederationSchema,
@@ -181,6 +183,42 @@ pub(super) fn carryover_directives(
             })?;
     }
 
+    // @cost
+
+    if let Some(link) = metadata.for_identity(&Identity {
+        domain: APOLLO_SPEC_DOMAIN.to_string(),
+        name: COST_DIRECTIVE_NAME_IN_SPEC,
+    }) {
+        let mut insert_link = false;
+
+        let directive_name = link.directive_name_in_schema(&COST_DIRECTIVE_NAME_IN_SPEC);
+        from.referencers()
+            .get_directive(&directive_name)
+            .and_then(|referencers| {
+                if referencers.len() > 0 {
+                    insert_link = true;
+                    copy_directive_definition(from, to, directive_name.clone())?;
+                }
+                referencers.copy_directives(from, to, &directive_name)
+            })?;
+
+        let directive_name = link.directive_name_in_schema(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
+        from.referencers()
+            .get_directive(&directive_name)
+            .and_then(|referencers| {
+                if referencers.len() > 0 {
+                    insert_link = true;
+                    copy_directive_definition(from, to, directive_name.clone())?;
+                }
+                referencers.copy_directives(from, to, &directive_name)
+            })?;
+
+        if insert_link {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+        }
+    }
+
     // compose directive
 
     metadata
@@ -264,11 +302,13 @@ fn copy_directive_definition(
 
 impl Link {
     fn to_directive_application(&self) -> Directive {
-        let mut arguments: Vec<Node<Argument>> = vec![Argument {
-            name: name!(url),
-            value: self.url.to_string().into(),
-        }
-        .into()];
+        let mut arguments: Vec<Node<Argument>> = vec![
+            Argument {
+                name: name!(url),
+                value: self.url.to_string().into(),
+            }
+            .into(),
+        ];
 
         // purpose: link__Purpose
         if let Some(purpose) = &self.purpose {

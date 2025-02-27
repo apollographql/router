@@ -67,7 +67,9 @@ pub(crate) mod subgraph;
 mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
-pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
+pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo::authentication::jwt_claims";
+pub(crate) const DEPRECATED_APOLLO_AUTHENTICATION_JWT_CLAIMS: &str =
+    "apollo_authentication::JWT::claims";
 const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
@@ -564,13 +566,12 @@ impl PluginPrivate for AuthenticationPlugin {
         }
     }
 
-    fn http_client_service(
+    fn connector_request_service(
         &self,
-        subgraph_name: &str,
-        service: crate::services::http::BoxService,
-    ) -> crate::services::http::BoxService {
+        service: crate::services::connector::request_service::BoxService,
+    ) -> crate::services::connector::request_service::BoxService {
         if let Some(auth) = &self.connector {
-            auth.http_client_service(subgraph_name, service)
+            auth.connector_request_service(service)
         } else {
             service
         }
@@ -590,12 +591,6 @@ fn authenticate(
         status: StatusCode,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
-        u64_counter!(
-            "apollo_authentication_failure_count",
-            "Number of requests with failed JWT authentication (deprecated)",
-            1,
-            kind = "JWT"
-        );
         u64_counter!(
             "apollo.router.operations.authentication.jwt",
             "Number of requests with JWT authentication",
@@ -702,12 +697,6 @@ fn authenticate(
             );
         }
         // This is a metric and will not appear in the logs
-        u64_counter!(
-            "apollo_authentication_success_count",
-            "Number of requests with successful JWT authentication (deprecated)",
-            1,
-            kind = "JWT"
-        );
         u64_counter!(
             "apollo.router.operations.jwt",
             "Number of requests with JWT authentication",

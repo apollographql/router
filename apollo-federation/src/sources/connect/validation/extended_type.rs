@@ -1,3 +1,5 @@
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Selection;
@@ -6,25 +8,22 @@ use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
+use super::Code;
+use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::entity::validate_entity_arg;
-use super::expression;
 use super::http::headers;
 use super::http::method;
 use super::resolvable_key_fields;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
-use super::source_name::validate_source_name_arg;
 use super::source_name::SourceName;
-use super::Code;
-use super::Message;
+use super::source_name::validate_source_name_arg;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -232,14 +231,11 @@ fn validate_field(
             return errors;
         };
 
-        let expression_context =
-            expression::Context::for_connect_request(schema, connect_coordinate);
-
         let url_template = match method::validate(
             http_arg,
             ConnectHTTPCoordinate::from(connect_coordinate),
             http_arg_node,
-            &expression_context,
+            schema,
         ) {
             Ok(method) => Some(method),
             Err(errs) => {
@@ -252,16 +248,14 @@ fn validate_field(
             .iter()
             .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
         {
-            if let Err(err) = validate_body_selection(
+            errors.extend(validate_body_selection(
                 connect_directive,
                 connect_coordinate,
                 object,
                 field,
                 schema,
                 body,
-            ) {
-                errors.push(err);
-            }
+            ));
         }
 
         if let Some(source_name) = connect_directive
@@ -307,12 +301,12 @@ fn validate_field(
 
         errors.extend(headers::validate_arg(
             http_arg,
-            &expression_context,
             HttpHeadersCoordinate::Connect {
                 connect: connect_coordinate,
                 object: &object.name,
                 field: &field.name,
             },
+            schema,
         ));
     }
     errors
@@ -325,8 +319,11 @@ fn validate_abstract_type(
 ) -> Message {
     Message {
         code: Code::ConnectorsUnsupportedAbstractType,
-        message: format!("Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."),
-        locations: node.and_then(|location| location.line_column_range(source_map))
+        message: format!(
+            "Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."
+        ),
+        locations: node
+            .and_then(|location| location.line_column_range(source_map))
             .into_iter()
             .collect(),
     }

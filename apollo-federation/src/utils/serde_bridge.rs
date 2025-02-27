@@ -1,11 +1,11 @@
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 /// This module contains functions used to bridge the apollo compiler serialization methods with
 /// serialization with serde.
 use apollo_compiler::executable;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
-use serde::ser::SerializeSeq;
 use serde::Serializer;
+use serde::ser::SerializeSeq;
 
 pub(crate) fn serialize_exe_field<S: Serializer>(
     field: &executable::Field,

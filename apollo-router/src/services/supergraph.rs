@@ -16,6 +16,7 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::Error;
 use crate::graphql;
 use crate::http_ext::header_map;
@@ -68,7 +69,6 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         query: Option<String>,
@@ -179,12 +179,19 @@ pub struct Response {
     pub context: Context,
 }
 
+impl std::fmt::Debug for Response {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Response")
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -197,6 +204,9 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        }
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -230,7 +240,6 @@ impl Response {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -243,6 +252,12 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Option<Context>,
     ) -> Result<Self, BoxError> {
+        if !errors.is_empty() {
+            if let Some(context) = &context {
+                context
+                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+            }
+        }
         Response::new(
             label,
             data,
@@ -293,6 +308,9 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        }
         Response::new(
             Default::default(),
             Default::default(),
@@ -308,7 +326,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,
@@ -321,6 +338,9 @@ impl Response {
         headers: MultiMap<HeaderName, HeaderValue>,
         context: Context,
     ) -> Self {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        }
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)

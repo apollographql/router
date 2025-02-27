@@ -293,14 +293,17 @@ impl PrettyPrintable for NamedSelection {
                     result.push_str(sub.as_str());
                 }
             }
-            Self::Path {
-                inline,
-                alias,
-                path,
-            } => {
-                if *inline {
-                    result.push_str("... ");
-                }
+            Self::Path { alias, path, .. } => {
+                // TODO Once we reintroduce conditional selections, I believe we
+                // should print the ... even for PathWithSubSelection selections
+                // which were not originally written with the ... (but for which
+                // *inline is nevertheless true), because the version with ...
+                // will be equivalent to the version without, and using the ...
+                // makes it much more obvious that the output of the selection
+                // will be inlined into the parent object.
+                // if *inline {
+                //     result.push_str("...");
+                // }
                 if let Some(alias) = alias {
                     result.push_str(alias.pretty_print().as_str());
                     result.push(' ');
@@ -348,13 +351,13 @@ impl PrettyPrintable for Key {
 
 #[cfg(test)]
 mod tests {
-    use crate::sources::connect::json_selection::location::new_span;
-    use crate::sources::connect::json_selection::pretty::indent_chars;
-    use crate::sources::connect::json_selection::NamedSelection;
-    use crate::sources::connect::json_selection::PrettyPrintable;
     use crate::sources::connect::JSONSelection;
     use crate::sources::connect::PathSelection;
     use crate::sources::connect::SubSelection;
+    use crate::sources::connect::json_selection::NamedSelection;
+    use crate::sources::connect::json_selection::PrettyPrintable;
+    use crate::sources::connect::json_selection::location::new_span;
+    use crate::sources::connect::json_selection::pretty::indent_chars;
 
     // Test all valid pretty print permutations
     fn test_permutations(selection: impl PrettyPrintable, expected: &str) {
@@ -452,6 +455,18 @@ mod tests {
         );
 
         test_permutations(sub_selection, sub);
+    }
+
+    #[test]
+    fn it_prints_an_inline_path_with_subselection() {
+        // This test ensures we do not print a leading ... before some.path,
+        // even though we will probably want to do so once ... and conditional
+        // selections are implemented. The printing of the leading ... was due
+        // to an incomplete removal of experimental support for conditional
+        // selections, which was put on hold to de-risk the GA release.
+        let source = "before\nsome.path {\n  inline\n  me\n}\nafter";
+        let sel = JSONSelection::parse(source).unwrap();
+        test_permutations(sel, source);
     }
 
     #[test]

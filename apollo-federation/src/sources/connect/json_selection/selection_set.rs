@@ -16,11 +16,12 @@
     )
 )]
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
+use apollo_compiler::name;
 use multimap::MultiMap;
 
 use super::known_var::KnownVariable;
@@ -29,11 +30,11 @@ use super::location::Ranged;
 use super::location::WithRange;
 use super::parser::MethodArgs;
 use super::parser::PathList;
-use crate::sources::connect::json_selection::Alias;
-use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::Alias;
+use crate::sources::connect::json_selection::NamedSelection;
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
@@ -61,11 +62,14 @@ impl SubSelection {
 
         // When the operation contains __typename, it might be used to complete
         // an entity reference (e.g. `__typename id`) for a subsequent fetch.
-        // This encodes the typename selection as `__typename: $->echo("Product")`
+        //
+        // NOTE: For reasons I don't understand, persisted queries may contain
+        // `__typename` for `_entities` queries. We never want to emit
+        // `__typename: "_Entity"`, so we'll guard against that case.
         //
         // TODO: this must change before we support interfaces and unions
         // because it will emit the abstract type's name which is invalid.
-        if field_map.contains_key("__typename") {
+        if field_map.contains_key("__typename") && selection_set.ty != name!(_Entity) {
             new_selections.push(NamedSelection::Path {
                 alias: Some(Alias::new("__typename")),
                 path: PathSelection {
@@ -268,10 +272,10 @@ fn map_fields_by_name_impl<'a>(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::validation::Valid;
     use pretty_assertions::assert_eq;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {

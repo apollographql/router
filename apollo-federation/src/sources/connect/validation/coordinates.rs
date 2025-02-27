@@ -2,13 +2,13 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use super::DirectiveName;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
@@ -164,7 +164,10 @@ pub(super) fn connect_directive_http_body_coordinate(
     object: &Node<ObjectType>,
     field: &Name,
 ) -> String {
-    format!("`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{object_name}.{field}`", object_name = object.name)
+    format!(
+        "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{object_name}.{field}`",
+        object_name = object.name
+    )
 }
 
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
@@ -188,7 +191,9 @@ pub(super) fn connect_directive_name_coordinate(
     object_name: &Name,
     field_name: &Name,
 ) -> String {
-    format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field_name}`")
+    format!(
+        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field_name}`"
+    )
 }
 
 /// Coordinate for an `HTTP.headers` argument in `@source` or `@connect`.
@@ -219,7 +224,9 @@ impl Display for HttpHeadersCoordinate<'_> {
                 write!(
                     f,
                     "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)` on `{}.{}`",
-                    object, field, connect_directive_name = directive.name
+                    object,
+                    field,
+                    connect_directive_name = directive.name
                 )
             }
             Self::Source { directive_name } => {
@@ -238,7 +245,10 @@ pub(super) fn connect_directive_entity_argument_coordinate(
     object: &Node<ObjectType>,
     field: &Name,
 ) -> String {
-    format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object_name}.{field}`", object_name = object.name)
+    format!(
+        "`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object_name}.{field}`",
+        object_name = object.name
+    )
 }
 
 pub(super) fn field_with_connect_directive_entity_true_coordinate(
@@ -247,5 +257,8 @@ pub(super) fn field_with_connect_directive_entity_true_coordinate(
     object: &Node<ObjectType>,
     field: &Name,
 ) -> String {
-    format!("`{object_name}.{field}` with `@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})`", object_name = object.name)
+    format!(
+        "`{object_name}.{field}` with `@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})`",
+        object_name = object.name
+    )
 }

@@ -104,7 +104,7 @@ This reference lists and describes the options supported by the `router` binary.
 </td>
 <td>
 
-The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`--supergraph-urls <urls>`, or `APOLLO_ROUTER_SUPERGRAPH_URLS`).
 
 > &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages.
 
@@ -298,23 +298,9 @@ If set, the router prints its version number, then exits.
 </td>
 </tr>
 
-<tr>
-<td style="min-width: 150px;">
-
-##### `--schema`
-
-</td>
-<td>
-
-**Deprecated**—use [`./router config schema`](#configuration-awareness-in-your-text-editor) instead.
-
-If set, the router prints a JSON schema representation of its full supported configuration format, then exits.
-
-</td>
-</tr>
-
 </tbody>
 </table>
+
 
 ### Dev mode defaults
 
@@ -485,6 +471,20 @@ By default, the router does _not_ resolve introspection queries. You can enable 
 # Do not enable introspection in production!
 supergraph:
   introspection: true
+```
+
+The [schema-intropsection schema](https://spec.graphql.org/draft/#sec-Schema-Introspection.Schema-Introspection-Schema) is recursive: a client can query the fields of the types of some other fields, and so on arbitrarily deep. This can produce responses that grow much faster than the size of the request.
+
+To protect against abusive Router now refuses to execute introspection queries that nest list fields too deep and returns an error instead. The criteria matches `MaxIntrospectionDepthRule` in graphql-js, but may change in future versions.
+
+In case it rejects legitimate queries, this check can be disabled in Router configuration:
+
+```yaml title="router.yaml"
+# Do not enable introspection in production!
+supergraph:
+  introspection: true
+limits:
+  introspection_max_depth: false
 ```
 
 ### Debugging
@@ -865,6 +865,10 @@ To configure the shape of traffic between clients, routers, and subgraphs, see [
 ### Cross-Origin Resource Sharing (CORS)
 
 See [Configuring CORS in the router](/router/configuration/cors).
+
+### Connectors support
+
+See [Working with Router](/graphos/schema-design/connectors/router) in the Apollo Connectors documentation.
 
 ### Defer support
 
@@ -1247,12 +1251,7 @@ After you generate the schema, configure your text editor. Here are the instruct
 
 New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
 
-**If you run a new version of your router with a configuration file that it no longer supports:**
-
-1. The router emits a warning on startup.
-2. The router attempts to translate your provided configuration to the new expected format.
-   - If the translation succeeds without errors, the router starts up as usual.
-   - If the translation fails, the router terminates.
+**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.** 
 
 If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
 

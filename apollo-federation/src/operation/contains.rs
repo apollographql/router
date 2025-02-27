@@ -99,7 +99,10 @@ impl FieldSelection {
                 self_selection.containment(other_selection, options)
             }
             (None, Some(_)) | (Some(_), None) => {
-                debug_assert!(false, "field selections have the same element, so if one does not have a subselection, neither should the other one");
+                debug_assert!(
+                    false,
+                    "field selections have the same element, so if one does not have a subselection, neither should the other one"
+                );
                 Containment::NotContained
             }
         }

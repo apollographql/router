@@ -15,13 +15,13 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
-use super::http::Request;
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
+use crate::services::connector::request_service::Request;
 use crate::Context;
 
 const REPRESENTATIONS_VAR: &str = "representations";
@@ -169,27 +169,41 @@ impl From<&ResponseKey> for Path {
 
 pub(crate) fn make_requests(
     request: connect::Request,
-    connector: &Connector,
+    context: &Context,
+    connector: Arc<Connector>,
+    service_name: &str,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
-        Some(EntityResolver::Explicit) => entities_from_request(connector, &request),
-        Some(EntityResolver::Implicit) => entities_with_fields_from_request(connector, &request),
-        None => root_fields(connector, &request),
+        Some(EntityResolver::Explicit) => entities_from_request(connector.clone(), &request),
+        Some(EntityResolver::Implicit) => {
+            entities_with_fields_from_request(connector.clone(), &request)
+        }
+        None => root_fields(connector.clone(), &request),
     }?;
 
-    request_params_to_requests(connector, request_params, &request, debug)
+    request_params_to_requests(
+        context,
+        connector,
+        service_name,
+        request_params,
+        &request,
+        debug,
+    )
 }
 
 fn request_params_to_requests(
-    connector: &Connector,
+    context: &Context,
+    connector: Arc<Connector>,
+    service_name: &str,
     request_params: Vec<ResponseKey>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let mut results = vec![];
     for response_key in request_params {
-        let (request, debug_request) = make_request(
+        let connector = connector.clone();
+        let (transport_request, mapping_problems) = make_request(
             &connector.transport,
             response_key.inputs().merge(
                 &connector.request_variables,
@@ -202,9 +216,12 @@ fn request_params_to_requests(
         )?;
 
         results.push(Request {
-            request,
+            context: context.clone(),
+            connector,
+            service_name: service_name.to_string(),
+            transport_request,
             key: response_key,
-            debug_request,
+            mapping_problems,
         });
     }
 
@@ -253,7 +270,7 @@ pub(crate) enum MakeRequestError {
 /// }
 /// ```
 fn root_fields(
-    connector: &Connector,
+    connector: Arc<Connector>,
     request: &connect::Request,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
@@ -329,7 +346,7 @@ fn root_fields(
 ///
 /// Returns a list of request inputs and the response key (index in the array).
 fn entities_from_request(
-    connector: &Connector,
+    connector: Arc<Connector>,
     request: &connect::Request,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
@@ -398,7 +415,7 @@ fn entities_from_request(
 /// Return a list of request inputs with the response key (index in list and
 /// name/alias of field) for each.
 fn entities_with_fields_from_request(
-    connector: &Connector,
+    connector: Arc<Connector>,
     request: &connect::Request,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
@@ -564,6 +581,7 @@ mod tests {
 
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
+    use crate::services::connector::request_service::TransportRequest;
     use crate::Context;
 
     #[test]
@@ -620,7 +638,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
         Ok(
             [
                 RootField {
@@ -751,7 +769,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
         Ok(
             [
                 RootField {
@@ -910,7 +928,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::root_fields(&connector, &req), @r###"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
         Ok(
             [
                 RootField {
@@ -1139,64 +1157,13 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             Entity {
                 index: 0,
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1254,57 +1221,6 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1457,64 +1373,13 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             Entity {
                 index: 0,
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1572,57 +1437,6 @@ mod tests {
                 selection: Named(
                     SubSelection {
                         selections: [
-                            Path {
-                                alias: Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "__typename",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                inline: false,
-                                path: PathSelection {
-                                    path: WithRange {
-                                        node: Var(
-                                            WithRange {
-                                                node: $,
-                                                range: None,
-                                            },
-                                            WithRange {
-                                                node: Method(
-                                                    WithRange {
-                                                        node: "echo",
-                                                        range: None,
-                                                    },
-                                                    Some(
-                                                        MethodArgs {
-                                                            args: [
-                                                                WithRange {
-                                                                    node: String(
-                                                                        "_Entity",
-                                                                    ),
-                                                                    range: None,
-                                                                },
-                                                            ],
-                                                            range: None,
-                                                        },
-                                                    ),
-                                                    WithRange {
-                                                        node: Empty,
-                                                        range: None,
-                                                    },
-                                                ),
-                                                range: None,
-                                            },
-                                        ),
-                                        range: None,
-                                    },
-                                },
-                            },
                             Field(
                                 None,
                                 WithRange {
@@ -1756,7 +1570,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(&connector, &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             RootField {
                 name: "a",
@@ -1975,7 +1789,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
@@ -2253,7 +2067,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&connector, &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
@@ -2528,7 +2342,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&connector ,&req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
         [
             EntityField {
                 index: 0,
@@ -2619,9 +2433,9 @@ mod tests {
     #[test]
     fn make_requests() {
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
-
+        let service_name = String::from("subgraph_Query_a_0");
         let req = crate::services::connect::Request::builder()
-            .service_name("subgraph_Query_a_0".into())
+            .service_name(service_name.clone().into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -2668,16 +2482,23 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        let requests: Vec<_> = super::make_requests(req, &connector, &None)
-            .unwrap()
-            .into_iter()
-            .map(|req| {
-                let (parts, _body) = req.request.into_parts();
-                let new_req =
-                    http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
-                (new_req, req.key, req.debug_request)
-            })
-            .collect();
+        let requests: Vec<_> = super::make_requests(
+            req,
+            &Context::default(),
+            Arc::new(connector),
+            &service_name,
+            &None,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|req| {
+            let TransportRequest::Http(http_request) = req.transport_request;
+            let (parts, _body) = http_request.inner.into_parts();
+            let new_req =
+                http::Request::from_parts(parts, http_body_util::Empty::<bytes::Bytes>::new());
+            (new_req, req.key, http_request.debug)
+        })
+        .collect();
 
         assert_debug_snapshot!(requests, @r###"
         [

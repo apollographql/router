@@ -5,7 +5,6 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
@@ -18,11 +17,6 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use mediatype::names::BOUNDARY;
-use mediatype::names::FORM_DATA;
-use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
@@ -43,6 +37,7 @@ use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::TracerProvider;
 use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use parking_lot::Mutex;
 use regex::Regex;
 use reqwest::Request;
 use serde_json::json;
@@ -167,7 +162,6 @@ impl IntegrationTest {
     pub(crate) fn bind_address(&self) -> SocketAddr {
         self.bind_address
             .lock()
-            .expect("lock poisoned")
             .expect("no bind address set, router must be started first.")
     }
 }
@@ -186,8 +180,7 @@ impl Respond for TracedResponder {
         let context = self.telemetry.extract_context(request, &Context::new());
         let context = self.extra_propagator.extract_context(request, &context);
 
-        *self.subgraph_context.lock().expect("lock poisoned") =
-            Some(context.span().span_context().clone());
+        *self.subgraph_context.lock() = Some(context.span().span_context().clone());
         tracing_core::dispatcher::with_default(&self.subscriber_subgraph, || {
             let _context_guard = context.attach();
             let span = info_span!("subgraph server");
@@ -384,7 +377,6 @@ impl Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,
@@ -503,12 +495,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub fn subgraph_context(&self) -> SpanContext {
-        self.subgraph_context
-            .lock()
-            .expect("lock poisoned")
-            .as_ref()
-            .unwrap()
-            .clone()
+        self.subgraph_context.lock().as_ref().unwrap().clone()
     }
 
     pub fn router_location() -> PathBuf {
@@ -550,11 +537,10 @@ impl IntegrationTest {
             let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                println!("{line}");
                 // Extract the bind address from a log line that looks like this: GraphQL endpoint exposed at http://127.0.0.1:51087/
                 if let Some(captures) = bind_address_regex.captures(&line) {
                     let address = captures.name("address").unwrap().as_str();
-                    let mut bind_address = bind_address.lock().unwrap();
+                    let mut bind_address = bind_address.lock();
                     *bind_address = Some(address.parse().unwrap());
                 }
 
@@ -566,7 +552,9 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    let Ok(log) = serde_json::from_str::<Log>(&line) else {
+                        panic!("line: '{line}' isn't JSON, might you have some debug output in the logging?");
+                    };
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(
@@ -686,7 +674,6 @@ impl IntegrationTest {
                             (
                                 subgraph_context
                                     .lock()
-                                    .expect("poisoned")
                                     .as_ref()
                                     .expect("subgraph context")
                                     .trace_id(),
@@ -724,19 +711,11 @@ impl IntegrationTest {
 
             async move {
                 let client = reqwest::Client::new();
-                let mime = {
-                    let mut m = MediaType::new(MULTIPART, FORM_DATA);
-                    m.set_param(BOUNDARY, mediatype::Value::new(request.boundary()).unwrap());
-
-                    m
-                };
-
                 let mut request = client
                     .post(url)
-                    .header(CONTENT_TYPE, mime.to_string())
                     .header("apollographql-client-name", "custom_name")
                     .header("apollographql-client-version", "1.0")
-                    .header("x-my-header", "test")
+                    .header("apollo-require-preflight", "test")
                     .multipart(request)
                     .build()
                     .unwrap();
@@ -879,7 +858,10 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         self.dump_stack_traces();
-        panic!("'{msg}' not detected in logs");
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -890,7 +872,10 @@ impl IntegrationTest {
             }
         }
 
-        panic!("'{msg}' not detected in logs");
+        panic!(
+            "'{msg}' not detected in logs. Log dump below:\n\n{logs}",
+            logs = self.logs.join("\n")
+        );
     }
 
     #[allow(dead_code)]
@@ -900,10 +885,25 @@ impl IntegrationTest {
             if let Ok(line) = self.stdio_rx.try_recv() {
                 if line.contains(msg) {
                     self.dump_stack_traces();
-                    panic!("'{msg}' detected in logs");
+                    panic!(
+                        "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                        logs = self.logs.join("\n")
+                    );
                 }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_log_not_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
         }
     }
 
@@ -1167,10 +1167,6 @@ fn merge_overrides(
     }
     if let Some(sources) = config
         .as_object_mut()
-        .and_then(|o| o.get_mut("preview_connectors"))
-        .and_then(|o| o.as_object_mut())
-        .and_then(|o| o.get_mut("subgraphs"))
-        .and_then(|o| o.as_object_mut())
         .and_then(|o| o.get_mut("connectors"))
         .and_then(|o| o.as_object_mut())
         .and_then(|o| o.get_mut("sources"))
@@ -1179,7 +1175,7 @@ fn merge_overrides(
         for (name, url) in overrides2 {
             let mut obj = serde_json::Map::new();
             obj.insert("override_url".to_string(), url.clone());
-            sources.insert(name.to_string(), Value::Object(obj));
+            sources.insert(format!("connectors.{}", name), Value::Object(obj));
         }
     }
 

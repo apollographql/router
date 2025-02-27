@@ -42,8 +42,6 @@ mod rearrange_query_plan;
 
 type Result<T> = std::result::Result<T, error::FileUploadError>;
 
-// FIXME: check if we need to hide docs
-#[doc(hidden)] // Only public for integration tests
 struct FileUploadsPlugin {
     enabled: bool,
     limits: MultipartRequestLimits,
@@ -68,7 +66,7 @@ impl PluginPrivate for FileUploadsPlugin {
         }
         let limits = self.limits;
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: router::Request| {
+            .checkpoint_async(move |req: router::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match router_layer(req, limits).await {
@@ -83,6 +81,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -92,7 +91,7 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(move |req: supergraph::Request| {
+            .checkpoint_async(move |req: supergraph::Request| {
                 async move {
                     let context = req.context.clone();
                     Ok(match supergraph_layer(req).await {
@@ -107,6 +106,7 @@ impl PluginPrivate for FileUploadsPlugin {
                 }
                 .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -141,12 +141,13 @@ impl PluginPrivate for FileUploadsPlugin {
             return service;
         }
         ServiceBuilder::new()
-            .oneshot_checkpoint_async(|req: subgraph::Request| {
+            .checkpoint_async(|req: subgraph::Request| {
                 subgraph_layer(req)
                     .boxed()
                     .map(|req| Ok(ControlFlow::Continue(req)))
                     .boxed()
             })
+            .buffered()
             .service(service)
             .boxed()
     }
@@ -162,6 +163,11 @@ fn get_multipart_mime(req: &router::Request) -> Option<MediaType> {
         .filter(|mime| mime.ty == MULTIPART && mime.subty == FORM_DATA)
 }
 
+/// Takes in multipart request bodies, and turns them into serialized JSON bodies that the rest of the router
+/// pipeline can understand.
+///
+/// # Context
+/// Adds a [`MultipartRequest`] value to context.
 async fn router_layer(
     req: router::Request,
     limits: MultipartRequestLimits,
@@ -179,7 +185,7 @@ async fn router_layer(
 
         req.context
             .extensions()
-            .with_lock(|mut lock| lock.insert(multipart));
+            .with_lock(|lock| lock.insert(multipart));
 
         let content_type = operations_stream
             .headers()
@@ -201,6 +207,14 @@ async fn router_layer(
     Ok(req)
 }
 
+/// Patch up the variable values in file upload requests.
+///
+/// File uploads do something funky: They use *required* GraphQL field arguments (`file: Upload!`),
+/// but then pass `null` as the variable value. This is invalid GraphQL, but it is how the file
+/// uploads spec works.
+///
+/// To make all this work in the router, we stick some placeholder value in the variables used for
+/// file uploads, and then remove them before we pass on the files to subgraphs.
 async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Request> {
     let multipart = req
         .context
@@ -227,7 +241,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context.extensions().with_lock(|mut lock| {
+        req.context.extensions().with_lock(|lock| {
             lock.insert(SupergraphLayerResult {
                 multipart,
                 map: Arc::new(map_field),

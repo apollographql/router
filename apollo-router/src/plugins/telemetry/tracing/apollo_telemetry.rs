@@ -14,7 +14,6 @@ use base64::Engine as _;
 use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
 use opentelemetry::metrics::MeterProvider;
@@ -35,6 +34,7 @@ use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use tracing::Level;
 use url::Url;
 
 use crate::metrics::meter_provider;
@@ -70,6 +70,7 @@ use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ACTUAL;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ESTIMATED;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
 use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_STRATEGY;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
@@ -130,6 +131,7 @@ const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
+pub(crate) const GRAPHQL_ERROR_EXT_CODE: &str = "graphql.error.extensions.code";
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
 const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
@@ -178,6 +180,9 @@ const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
     APOLLO_CONNECTOR_SOURCE_DETAIL,
 ];
 
+/// Attributes on events to include when sending to the OTLP protocol.
+const OTLP_EXT_INCLUDE_EVENT_ATTRS: [Key; 1] = [Key::from_static_str(GRAPHQL_ERROR_EXT_CODE)];
+
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     PARALLEL_SPAN_NAME,
     SEQUENCE_SPAN_NAME,
@@ -196,6 +201,15 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIBE_SPAN_NAME,
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
+
+pub(crate) fn emit_error_event(error_code: &str, error_description: &str) {
+    tracing::event!(
+        Level::ERROR,
+        { GRAPHQL_ERROR_EXT_CODE } = error_code,
+        { EVENT_ATTRIBUTE_OMIT_LOG } = true,
+        error_description
+    );
+}
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -216,6 +230,13 @@ pub(crate) enum Error {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct LightSpanEventData {
+    pub(crate) timestamp: SystemTime,
+    pub(crate) name: Cow<'static, str>,
+    pub(crate) attributes: HashMap<Key, Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
     pub(crate) trace_id: TraceId,
     pub(crate) span_id: SpanId,
@@ -227,12 +248,17 @@ pub(crate) struct LightSpanData {
     pub(crate) attributes: HashMap<Key, Value>,
     pub(crate) status: Status,
     pub(crate) droppped_attribute_count: u32,
+    pub(crate) events: Vec<LightSpanEventData>,
 }
 
 impl LightSpanData {
     /// Convert from a full Span into a lighter more memory-efficient span for caching purposes.
     /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
-    fn from_span_data(value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
+    fn from_span_data(
+        value: SpanData,
+        include_attr_names: &Option<HashSet<Key>>,
+        include_attr_event_names: &Option<HashSet<Key>>,
+    ) -> Self {
         let filtered_attributes = match include_attr_names {
             None => value
                 .attributes
@@ -251,6 +277,31 @@ impl LightSpanData {
                 })
                 .collect(),
         };
+
+        let filtered_events = match include_attr_event_names {
+            None => vec![],
+            Some(event_names) => value
+                .events
+                .into_iter()
+                .map(|event| LightSpanEventData {
+                    timestamp: event.timestamp,
+                    name: event.name,
+                    attributes: event
+                        .attributes
+                        .into_iter()
+                        .filter_map(|kv| {
+                            if event_names.contains(&kv.key) {
+                                Some((kv.key, kv.value))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect(),
+                })
+                .filter(|event| !event.attributes.is_empty())
+                .collect(),
+        };
+
         Self {
             trace_id: value.span_context.trace_id(),
             span_id: value.span_context.span_id(),
@@ -262,11 +313,12 @@ impl LightSpanData {
             attributes: filtered_attributes,
             status: value.status,
             droppped_attribute_count: value.dropped_attributes_count,
+            events: filtered_events,
         }
     }
 }
 
-/// An externally updateable gauge for "apollo_router_span_lru_size".
+/// An externally updateable gauge for "apollo.router.exporter.span.lru.size".
 ///
 /// When observed, it reports the most recently stored value (give or take atomicity looseness).
 ///
@@ -286,7 +338,7 @@ impl SpanLruSizeInstrument {
 
         let meter = meter_provider().meter("apollo/router");
         let gauge = meter
-            .u64_observable_gauge("apollo_router_span_lru_size")
+            .u64_observable_gauge("apollo.router.exporter.span.lru.size")
             .with_callback({
                 let value = Arc::clone(&value);
                 move |gauge| {
@@ -319,13 +371,14 @@ pub(crate) struct Exporter {
     #[derivative(Debug = "ignore")]
     report_exporter: Option<Arc<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
-    otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
+    otlp_exporter: Option<ApolloOtlpExporter>,
     otlp_tracing_ratio: f64,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
     include_span_names: HashSet<&'static str>,
     include_attr_names: Option<HashSet<Key>>,
+    include_attr_event_names: Option<HashSet<Key>>,
 }
 
 #[derive(Debug)]
@@ -356,7 +409,6 @@ enum TreeData {
 #[buildstructor::buildstructor]
 impl Exporter {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new<'a>(
         endpoint: &'a Url,
         otlp_endpoint: &'a Url,
@@ -407,7 +459,7 @@ impl Exporter {
                 None
             },
             otlp_exporter: if otlp_tracing_ratio > 0f64 {
-                Some(Arc::new(ApolloOtlpExporter::new(
+                Some(ApolloOtlpExporter::new(
                     otlp_endpoint,
                     otlp_tracing_protocol,
                     batch_config,
@@ -415,7 +467,7 @@ impl Exporter {
                     apollo_graph_ref,
                     schema_id,
                     errors_configuration,
-                )?))
+                )?)
             } else {
                 None
             },
@@ -434,6 +486,11 @@ impl Exporter {
                 ))
             } else {
                 Some(HashSet::from(REPORTS_INCLUDE_ATTRS))
+            },
+            include_attr_event_names: if otlp_tracing_ratio > 0f64 {
+                Some(HashSet::from(OTLP_EXT_INCLUDE_EVENT_ATTRS))
+            } else {
+                None
             },
         })
     }
@@ -1098,8 +1155,11 @@ impl SpanExporter for Exporter {
                     .iter()
                     .any(|kv| kv.key == APOLLO_PRIVATE_REQUEST)
             {
-                let root_span: LightSpanData =
-                    LightSpanData::from_span_data(span, &self.include_attr_names);
+                let root_span: LightSpanData = LightSpanData::from_span_data(
+                    span,
+                    &self.include_attr_names,
+                    &self.include_attr_event_names,
+                );
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
                     if let Some(trace) = self
@@ -1148,7 +1208,11 @@ impl SpanExporter for Exporter {
                     .expect("capacity of cache was zero")
                     .push(
                         len,
-                        LightSpanData::from_span_data(span, &self.include_attr_names),
+                        LightSpanData::from_span_data(
+                            span,
+                            &self.include_attr_names,
+                            &self.include_attr_event_names,
+                        ),
                     );
             }
         }
@@ -1158,51 +1222,42 @@ impl SpanExporter for Exporter {
         self.span_lru_size_instrument
             .update(self.spans_by_parent_id.len() as u64);
 
-        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
-        let report_exporter = match self.report_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
-        #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
-        let otlp_exporter = match self.otlp_exporter.as_ref() {
-            Some(exporter) => Some(exporter.clone()),
-            None => None,
-        };
-
-        let fut = async move {
-            if send_otlp && !otlp_trace_spans.is_empty() {
-                otlp_exporter
-                    .as_ref()
-                    .expect("expected an otel exporter")
-                    .export(otlp_trace_spans.into_iter().flatten().collect())
-                    .await
-            } else if send_reports && !traces.is_empty() {
-                let mut report = telemetry::apollo::Report::default();
-                report += SingleReport::Traces(TracesReport { traces });
-                report_exporter
-                    .as_ref()
-                    .expect("expected an apollo exporter")
+        if send_otlp && !otlp_trace_spans.is_empty() {
+            self.otlp_exporter
+                .as_mut()
+                .expect("expected an otel exporter")
+                .export(otlp_trace_spans.into_iter().flatten().collect())
+        } else if send_reports && !traces.is_empty() {
+            let mut report = telemetry::apollo::Report::default();
+            report += SingleReport::Traces(TracesReport { traces });
+            let exporter = self
+                .report_exporter
+                .as_ref()
+                .expect("expected an apollo exporter")
+                .clone();
+            async move {
+                exporter
                     .submit_report(report)
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                     .await
-            } else {
-                ExportResult::Ok(())
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
             }
-        };
-        fut.boxed()
+            .boxed()
+        } else {
+            async { ExportResult::Ok(()) }.boxed()
+        }
     }
 
     fn shutdown(&mut self) {
         // Currently only handled in the OTLP case.
-        if let Some(exporter) = &self.otlp_exporter {
+        if let Some(exporter) = &mut self.otlp_exporter {
             exporter.shutdown()
         };
     }
 
-    fn set_resource(&mut self, resource: &Resource) {
-        if let Some(exporter) = &self.otlp_exporter {
-            exporter.set_resource(resource);
-        }
+    fn set_resource(&mut self, _resource: &Resource) {
+        // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
+        // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
+        tracing::warn!("setting resource attributes is not allowed for Apollo telemetry");
     }
 }
 
@@ -1660,6 +1715,7 @@ mod test {
             attributes: HashMap::with_capacity(10),
             status: Default::default(),
             droppped_attribute_count: 0,
+            events: Default::default(),
         };
 
         span.attributes

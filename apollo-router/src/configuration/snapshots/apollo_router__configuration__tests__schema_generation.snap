@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -342,7 +343,7 @@ expression: "&schema"
     },
     "CSRFConfig": {
       "additionalProperties": false,
-      "description": "CSRF Configuration.",
+      "description": "CSRF protection configuration.\n\nSee <https://owasp.org/www-community/attacks/csrf> for an explanation on CSRF attacks.",
       "properties": {
         "required_headers": {
           "default": [
@@ -357,7 +358,7 @@ expression: "&schema"
         },
         "unsafe_disabled": {
           "default": false,
-          "description": "The CSRF plugin is enabled by default; set unsafe_disabled = true to disable the plugin behavior Note that setting this to true is deemed unsafe. See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.",
+          "description": "The CSRF plugin is enabled by default.\n\nSetting `unsafe_disabled: true` *disables* CSRF protection.",
           "type": "boolean"
         }
       },
@@ -1232,8 +1233,8 @@ expression: "&schema"
           "nullable": true
         },
         "subgraph": {
-          "$ref": "#/definitions/Config4",
-          "description": "#/definitions/Config4",
+          "$ref": "#/definitions/Config5",
+          "description": "#/definitions/Config5",
           "nullable": true
         }
       },
@@ -1334,8 +1335,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config9",
-          "description": "#/definitions/Config9"
+          "$ref": "#/definitions/Config10",
+          "description": "#/definitions/Config10"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1350,127 +1351,11 @@ expression: "&schema"
     },
     "Config": {
       "additionalProperties": false,
-      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
-      "properties": {
-        "http1_max_request_buf_size": {
-          "default": null,
-          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
-          "nullable": true,
-          "type": "string"
-        },
-        "http1_max_request_headers": {
-          "default": null,
-          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
-          "format": "uint",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "http_max_request_bytes": {
-          "default": 2000000,
-          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "max_aliases": {
-          "default": null,
-          "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_depth": {
-          "default": null,
-          "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛ including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_height": {
-          "default": null,
-          "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "max_root_fields": {
-          "default": null,
-          "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
-          "format": "uint32",
-          "minimum": 0.0,
-          "nullable": true,
-          "type": "integer"
-        },
-        "parser_max_recursion": {
-          "default": 500,
-          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "parser_max_tokens": {
-          "default": 15000,
-          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "warn_only": {
-          "default": false,
-          "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
-    "Config10": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enabled": {
-          "description": "Enable otlp",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "grpc": {
-          "$ref": "#/definitions/GrpcExporter",
-          "description": "#/definitions/GrpcExporter"
-        },
-        "http": {
-          "$ref": "#/definitions/HttpExporter",
-          "description": "#/definitions/HttpExporter"
-        },
-        "protocol": {
-          "$ref": "#/definitions/Protocol",
-          "description": "#/definitions/Protocol"
-        },
-        "temporality": {
-          "$ref": "#/definitions/Temporality",
-          "description": "#/definitions/Temporality"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config11": {
-      "additionalProperties": false,
-      "description": "Prometheus configuration",
+      "description": "Configuration options pertaining to the health component.",
       "properties": {
         "enabled": {
-          "default": false,
-          "description": "Set to true to enable",
+          "default": true,
+          "description": "Set to false to disable the health check",
           "type": "boolean"
         },
         "listen": {
@@ -1478,247 +1363,18 @@ expression: "&schema"
           "description": "#/definitions/ListenAddr"
         },
         "path": {
-          "default": "/metrics",
-          "description": "The path where prometheus will be exposed",
+          "default": "/health",
+          "description": "Optionally set a custom healthcheck path Defaults to /health",
           "type": "string"
+        },
+        "readiness": {
+          "$ref": "#/definitions/ReadinessConfig",
+          "description": "#/definitions/ReadinessConfig"
         }
       },
       "type": "object"
     },
-    "Config12": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enabled": {
-          "description": "Enable zipkin",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config13": {
-      "additionalProperties": false,
-      "properties": {
-        "batch_processor": {
-          "$ref": "#/definitions/BatchProcessorConfig",
-          "description": "#/definitions/BatchProcessorConfig"
-        },
-        "enable_span_mapping": {
-          "default": true,
-          "description": "Enable datadog span mapping for span name and resource name.",
-          "type": "boolean"
-        },
-        "enabled": {
-          "description": "Enable datadog",
-          "type": "boolean"
-        },
-        "endpoint": {
-          "$ref": "#/definitions/UriEndpoint",
-          "description": "#/definitions/UriEndpoint"
-        },
-        "fixed_span_names": {
-          "default": true,
-          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
-          "type": "boolean"
-        },
-        "resource_mapping": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {},
-          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
-          "type": "object"
-        },
-        "span_metrics": {
-          "additionalProperties": {
-            "type": "boolean"
-          },
-          "default": {
-            "execution": true,
-            "http_request": true,
-            "parse_query": true,
-            "query_planning": true,
-            "request": true,
-            "router": true,
-            "subgraph": true,
-            "subgraph_request": true,
-            "supergraph": true
-          },
-          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.",
-          "type": "object"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config14": {
-      "additionalProperties": false,
-      "description": "Configuration for the experimental traffic shaping plugin",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/SubgraphShaping",
-          "description": "#/definitions/SubgraphShaping",
-          "nullable": true
-        },
-        "deduplicate_variables": {
-          "default": null,
-          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "nullable": true,
-          "type": "boolean"
-        },
-        "router": {
-          "$ref": "#/definitions/RouterShaping",
-          "description": "#/definitions/RouterShaping",
-          "nullable": true
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/SubgraphShaping",
-            "description": "#/definitions/SubgraphShaping"
-          },
-          "description": "Applied on specific subgraphs",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config2": {
-      "description": "This is a broken plugin for testing purposes only.",
-      "properties": {
-        "enabled": {
-          "description": "Enable the broken plugin.",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config3": {
-      "description": "Restricted plugin (for testing purposes only)",
-      "properties": {
-        "enabled": {
-          "description": "Enable the restricted plugin (for testing purposes only)",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "enabled"
-      ],
-      "type": "object"
-    },
-    "Config4": {
-      "additionalProperties": false,
-      "description": "Configure subgraph authentication",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/AuthConfig",
-          "description": "#/definitions/AuthConfig",
-          "nullable": true
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/AuthConfig",
-            "description": "#/definitions/AuthConfig"
-          },
-          "default": {},
-          "description": "Create a configuration that will apply only to a specific subgraph.",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config5": {
-      "additionalProperties": false,
-      "description": "Configuration for header propagation",
-      "properties": {
-        "all": {
-          "$ref": "#/definitions/HeadersLocation",
-          "description": "#/definitions/HeadersLocation",
-          "nullable": true
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/HeadersLocation",
-            "description": "#/definitions/HeadersLocation"
-          },
-          "description": "Rules to specific subgraphs",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config6": {
-      "additionalProperties": false,
-      "description": "Configuration for exposing errors that originate from subgraphs",
-      "properties": {
-        "all": {
-          "default": false,
-          "description": "Include errors from all subgraphs",
-          "type": "boolean"
-        },
-        "subgraphs": {
-          "additionalProperties": {
-            "type": "boolean"
-          },
-          "default": {},
-          "description": "Include errors from specific subgraphs",
-          "type": "object"
-        }
-      },
-      "type": "object"
-    },
-    "Config7": {
-      "additionalProperties": false,
-      "description": "Configuration for entity caching",
-      "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable or disable the entity caching feature",
-          "type": "boolean"
-        },
-        "expose_keys_in_context": {
-          "default": false,
-          "description": "Expose cache keys in context",
-          "type": "boolean"
-        },
-        "invalidation": {
-          "$ref": "#/definitions/InvalidationEndpointConfig",
-          "description": "#/definitions/InvalidationEndpointConfig",
-          "nullable": true
-        },
-        "metrics": {
-          "$ref": "#/definitions/Metrics",
-          "description": "#/definitions/Metrics"
-        },
-        "subgraph": {
-          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
-          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
-        }
-      },
-      "required": [
-        "subgraph"
-      ],
-      "type": "object"
-    },
-    "Config8": {
-      "description": "Configuration for the progressive override plugin",
-      "type": "object"
-    },
-    "Config9": {
+    "Config10": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1794,6 +1450,383 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Config11": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enabled": {
+          "description": "Enable otlp",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        },
+        "grpc": {
+          "$ref": "#/definitions/GrpcExporter",
+          "description": "#/definitions/GrpcExporter"
+        },
+        "http": {
+          "$ref": "#/definitions/HttpExporter",
+          "description": "#/definitions/HttpExporter"
+        },
+        "protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "temporality": {
+          "$ref": "#/definitions/Temporality",
+          "description": "#/definitions/Temporality"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config12": {
+      "additionalProperties": false,
+      "description": "Prometheus configuration",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Set to true to enable",
+          "type": "boolean"
+        },
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr"
+        },
+        "path": {
+          "default": "/metrics",
+          "description": "The path where prometheus will be exposed",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Config13": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enabled": {
+          "description": "Enable zipkin",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config14": {
+      "additionalProperties": false,
+      "properties": {
+        "batch_processor": {
+          "$ref": "#/definitions/BatchProcessorConfig",
+          "description": "#/definitions/BatchProcessorConfig"
+        },
+        "enable_span_mapping": {
+          "default": true,
+          "description": "Enable datadog span mapping for span name and resource name.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "description": "Enable datadog",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/definitions/UriEndpoint",
+          "description": "#/definitions/UriEndpoint"
+        },
+        "fixed_span_names": {
+          "default": true,
+          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
+          "type": "boolean"
+        },
+        "resource_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
+          "type": "object"
+        },
+        "span_metrics": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {
+            "connect": true,
+            "connect_request": true,
+            "execution": true,
+            "http_request": true,
+            "parse_query": true,
+            "query_planning": true,
+            "request": true,
+            "router": true,
+            "subgraph": true,
+            "subgraph_request": true,
+            "supergraph": true
+          },
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request`, `connect`, `connect_request` and `http_request`.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config15": {
+      "additionalProperties": false,
+      "description": "Configuration for the experimental traffic shaping plugin",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/SubgraphShaping",
+          "description": "#/definitions/SubgraphShaping",
+          "nullable": true
+        },
+        "deduplicate_variables": {
+          "default": null,
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "router": {
+          "$ref": "#/definitions/RouterShaping",
+          "description": "#/definitions/RouterShaping",
+          "nullable": true
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SubgraphShaping",
+            "description": "#/definitions/SubgraphShaping"
+          },
+          "description": "Applied on specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config2": {
+      "additionalProperties": false,
+      "description": "Configuration for operation limits, parser limits, HTTP limits, etc.",
+      "properties": {
+        "http1_max_request_buf_size": {
+          "default": null,
+          "description": "Limit the maximum buffer size for the HTTP1 connection.\n\nDefault is ~400kib.",
+          "nullable": true,
+          "type": "string"
+        },
+        "http1_max_request_headers": {
+          "default": null,
+          "description": "Limit the maximum number of headers of incoming HTTP1 requests. Default is 100.\n\nIf router receives more headers than the buffer size, it responds to the client with \"431 Request Header Fields Too Large\".",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "http_max_request_bytes": {
+          "default": 2000000,
+          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "introspection_max_depth": {
+          "default": true,
+          "description": "Limit the depth of nested list fields in introspection queries to protect avoid generating huge responses. Returns a GraphQL error with `{ message: \"Maximum introspection depth exceeded\" }` when nested fields exceed the limit. Default: true",
+          "type": "boolean"
+        },
+        "max_aliases": {
+          "default": null,
+          "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": null,
+          "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets,˛ including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_height": {
+          "default": null,
+          "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "max_root_fields": {
+          "default": null,
+          "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
+        "parser_max_recursion": {
+          "default": 500,
+          "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 500",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "parser_max_tokens": {
+          "default": 15000,
+          "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "warn_only": {
+          "default": false,
+          "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Config3": {
+      "description": "This is a broken plugin for testing purposes only.",
+      "properties": {
+        "enabled": {
+          "description": "Enable the broken plugin.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config4": {
+      "description": "Restricted plugin (for testing purposes only)",
+      "properties": {
+        "enabled": {
+          "description": "Enable the restricted plugin (for testing purposes only)",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "Config5": {
+      "additionalProperties": false,
+      "description": "Configure subgraph authentication",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/AuthConfig",
+          "description": "#/definitions/AuthConfig",
+          "nullable": true
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AuthConfig",
+            "description": "#/definitions/AuthConfig"
+          },
+          "default": {},
+          "description": "Create a configuration that will apply only to a specific subgraph.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config6": {
+      "additionalProperties": false,
+      "description": "Configuration for header propagation",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Rules to specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config7": {
+      "additionalProperties": false,
+      "description": "Configuration for exposing errors that originate from subgraphs",
+      "properties": {
+        "all": {
+          "default": false,
+          "description": "Include errors from all subgraphs",
+          "type": "boolean"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {},
+          "description": "Include errors from specific subgraphs",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config8": {
+      "additionalProperties": false,
+      "description": "Configuration for entity caching",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
+          "type": "boolean"
+        },
+        "expose_keys_in_context": {
+          "default": false,
+          "description": "Expose cache keys in context",
+          "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig",
+          "nullable": true
+        },
+        "metrics": {
+          "$ref": "#/definitions/Metrics",
+          "description": "#/definitions/Metrics"
+        },
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
+        }
+      },
+      "required": [
+        "subgraph"
+      ],
+      "type": "object"
+    },
+    "Config9": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
     "ConnectorAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -1828,6 +1861,7 @@ expression: "&schema"
             "description": "#/definitions/AuthConfig"
           },
           "default": {},
+          "description": "Map of subgraph_name.connector_source_name to configuration",
           "type": "object"
         }
       },
@@ -1997,6 +2031,32 @@ expression: "&schema"
             "error"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_request_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_request_mapping_problems"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connector_response_mapping_problems": {
+              "$ref": "#/definitions/MappingProblems",
+              "description": "#/definitions/MappingProblems"
+            }
+          },
+          "required": [
+            "connector_response_mapping_problems"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2054,17 +2114,40 @@ expression: "&schema"
           "nullable": true,
           "type": "integer"
         },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/SourceConfiguration",
+            "description": "#/definitions/SourceConfiguration"
+          },
+          "default": {},
+          "description": "Map of subgraph_name.connector_source_name to source configuration",
+          "type": "object"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/SubgraphConnectorConfiguration",
             "description": "#/definitions/SubgraphConnectorConfiguration"
           },
           "default": {},
+          "deprecated": true,
           "description": "A map of subgraph name to connectors config for that subgraph",
           "type": "object"
         }
       },
       "type": "object"
+    },
+    "ContextConf": {
+      "anyOf": [
+        {
+          "description": "Deprecated configuration using a boolean",
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/definitions/NewContextConf",
+          "description": "#/definitions/NewContextConf"
+        }
+      ],
+      "description": "Configures the context"
     },
     "Cors": {
       "additionalProperties": false,
@@ -2573,6 +2656,10 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
+        "experimental_otlp_error_metrics": {
+          "$ref": "#/definitions/OtlpErrorMetricsMode",
+          "description": "#/definitions/OtlpErrorMetricsMode"
+        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphErrorConfig",
           "description": "#/definitions/SubgraphErrorConfig"
@@ -2811,9 +2898,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -2848,9 +2934,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -3316,27 +3401,6 @@ expression: "&schema"
       "required": [
         "request"
       ],
-      "type": "object"
-    },
-    "HealthCheck": {
-      "additionalProperties": false,
-      "description": "Configuration options pertaining to the http server component.",
-      "properties": {
-        "enabled": {
-          "default": true,
-          "description": "Set to false to disable the health check",
-          "type": "boolean"
-        },
-        "listen": {
-          "$ref": "#/definitions/ListenAddr",
-          "description": "#/definitions/ListenAddr"
-        },
-        "path": {
-          "default": "/health",
-          "description": "Optionally set a custom healthcheck path Defaults to /health",
-          "type": "string"
-        }
-      },
       "type": "object"
     },
     "HeartbeatInterval": {
@@ -3909,6 +3973,9 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "LicenseEnforcementConfig": {
+      "type": "object"
+    },
     "ListLength": {
       "oneOf": [
         {
@@ -3974,6 +4041,13 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "MappingProblems": {
+      "enum": [
+        "problems",
+        "count"
+      ],
+      "type": "string"
     },
     "MetricAggregation": {
       "oneOf": [
@@ -4080,12 +4154,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config10",
-          "description": "#/definitions/Config10"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config11",
           "description": "#/definitions/Config11"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         }
       },
       "type": "object"
@@ -4207,6 +4281,46 @@ expression: "&schema"
         }
       ]
     },
+    "MyTestPluginConfig": {
+      "description": "Config for the test plugin",
+      "type": "object"
+    },
+    "NewContextConf": {
+      "description": "Configures the context",
+      "oneOf": [
+        {
+          "description": "Send all context keys to coprocessor",
+          "enum": [
+            "all"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send all context keys using deprecated names (from router 1.x) to coprocessor",
+          "enum": [
+            "deprecated"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Only send the list of context keys to coprocessor",
+          "properties": {
+            "selective": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "selective"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Operation": {
       "oneOf": [
         {
@@ -4279,6 +4393,25 @@ expression: "&schema"
         }
       ]
     },
+    "OtlpErrorMetricsMode": {
+      "description": "Open Telemetry error metrics mode",
+      "oneOf": [
+        {
+          "description": "Do not store OTLP error metrics",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send OTLP error metrics to Apollo Studio",
+          "enum": [
+            "enabled"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "PersistedQueries": {
       "additionalProperties": false,
       "description": "Persisted Queries (PQ) configuration",
@@ -4288,7 +4421,11 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
-        "experimental_local_manifests": {
+        "experimental_prewarm_query_plan_cache": {
+          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
+          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
+        },
+        "local_manifests": {
           "default": null,
           "description": "Enables using a local copy of the persisted query manifest to safelist operations",
           "items": {
@@ -4296,10 +4433,6 @@ expression: "&schema"
           },
           "nullable": true,
           "type": "array"
-        },
-        "experimental_prewarm_query_plan_cache": {
-          "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
-          "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
         },
         "log_unknown": {
           "default": false,
@@ -4350,9 +4483,13 @@ expression: "&schema"
     "Plugins": {
       "additionalProperties": false,
       "properties": {
+        "apollo_testing.my_test_plugin": {
+          "$ref": "#/definitions/MyTestPluginConfig",
+          "description": "#/definitions/MyTestPluginConfig"
+        },
         "experimental.broken": {
-          "$ref": "#/definitions/Config2",
-          "description": "#/definitions/Config2"
+          "$ref": "#/definitions/Config3",
+          "description": "#/definitions/Config3"
         },
         "experimental.expose_query_plan": {
           "$ref": "#/definitions/ExposeQueryPlanConfig",
@@ -4363,8 +4500,8 @@ expression: "&schema"
           "description": "#/definitions/RecordConfig"
         },
         "experimental.restricted": {
-          "$ref": "#/definitions/Config3",
-          "description": "#/definitions/Config3"
+          "$ref": "#/definitions/Config4",
+          "description": "#/definitions/Config4"
         },
         "test.always_fails_to_start": {
           "$ref": "#/definitions/Conf",
@@ -4676,6 +4813,43 @@ expression: "&schema"
         "capacity",
         "interval"
       ],
+      "type": "object"
+    },
+    "ReadinessConfig": {
+      "additionalProperties": false,
+      "description": "Configuration options pertaining to the readiness health sub-component.",
+      "properties": {
+        "allowed": {
+          "default": 100,
+          "description": "How many rejections are allowed in an interval (default: 100) If this number is exceeded, the router will start to report unready.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "interval": {
+          "$ref": "#/definitions/ReadinessIntervalConfig",
+          "description": "#/definitions/ReadinessIntervalConfig"
+        }
+      },
+      "type": "object"
+    },
+    "ReadinessIntervalConfig": {
+      "additionalProperties": false,
+      "description": "Configuration options pertaining to the readiness health interval sub-component.",
+      "properties": {
+        "sampling": {
+          "default": "0s",
+          "description": "The sampling interval (default: 5s)",
+          "nullable": true,
+          "type": "string"
+        },
+        "unready": {
+          "default": null,
+          "description": "The unready interval (default: 2 * sampling interval)",
+          "nullable": true,
+          "type": "string"
+        }
+      },
       "type": "object"
     },
     "RecordConfig": {
@@ -5034,9 +5208,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -5076,9 +5249,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -5337,6 +5509,13 @@ expression: "&schema"
     "RouterShaping": {
       "additionalProperties": false,
       "properties": {
+        "concurrency_limit": {
+          "description": "The global concurrency limit",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "global_rate_limit": {
           "$ref": "#/definitions/RateLimitConf",
           "description": "#/definitions/RateLimitConf",
@@ -5541,6 +5720,12 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration for a `@source` directive",
       "properties": {
+        "$config": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "Other values that can be used by connectors via `{$config.<key>}`",
+          "type": "object"
+        },
         "max_requests_per_operation": {
           "default": null,
           "description": "The maximum number of requests for this source",
@@ -6117,9 +6302,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6164,9 +6348,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6270,25 +6453,6 @@ expression: "&schema"
           },
           "required": [
             "subgraph_query_variable"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Deprecated, use SubgraphResponseData and SubgraphResponseError instead",
-          "properties": {
-            "default": {
-              "$ref": "#/definitions/AttributeValue",
-              "description": "#/definitions/AttributeValue",
-              "nullable": true
-            },
-            "subgraph_response_body": {
-              "description": "The subgraph response body json path.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "subgraph_response_body"
           ],
           "type": "object"
         },
@@ -6891,9 +7055,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -6928,9 +7091,8 @@ expression: "&schema"
           "nullable": true
         },
         "context": {
-          "default": false,
-          "description": "Send the context",
-          "type": "boolean"
+          "$ref": "#/definitions/ContextConf",
+          "description": "#/definitions/ContextConf"
         },
         "headers": {
           "default": false,
@@ -7453,24 +7615,24 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config10",
-          "description": "#/definitions/Config10"
+          "$ref": "#/definitions/Config11",
+          "description": "#/definitions/Config11"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config12",
-          "description": "#/definitions/Config12"
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         }
       },
       "type": "object"
@@ -8591,6 +8753,10 @@ expression: "&schema"
       "$ref": "#/definitions/Batching",
       "description": "#/definitions/Batching"
     },
+    "connectors": {
+      "$ref": "#/definitions/ConnectorsConfig",
+      "description": "#/definitions/ConnectorsConfig"
+    },
     "coprocessor": {
       "$ref": "#/definitions/Conf4",
       "description": "#/definitions/Conf4"
@@ -8625,24 +8791,28 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config5",
-      "description": "#/definitions/Config5"
+      "$ref": "#/definitions/Config6",
+      "description": "#/definitions/Config6"
     },
     "health_check": {
-      "$ref": "#/definitions/HealthCheck",
-      "description": "#/definitions/HealthCheck"
+      "$ref": "#/definitions/Config",
+      "description": "#/definitions/Config"
     },
     "homepage": {
       "$ref": "#/definitions/Homepage",
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config6",
-      "description": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
+    },
+    "license_enforcement": {
+      "$ref": "#/definitions/LicenseEnforcementConfig",
+      "description": "#/definitions/LicenseEnforcementConfig"
     },
     "limits": {
-      "$ref": "#/definitions/Config",
-      "description": "#/definitions/Config"
+      "$ref": "#/definitions/Config2",
+      "description": "#/definitions/Config2"
     },
     "override_subgraph_url": {
       "$ref": "#/definitions/Conf6",
@@ -8656,21 +8826,17 @@ expression: "&schema"
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
     },
-    "preview_connectors": {
-      "$ref": "#/definitions/ConnectorsConfig",
-      "description": "#/definitions/ConnectorsConfig"
-    },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -8697,8 +8863,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config14",
-      "description": "#/definitions/Config14"
+      "$ref": "#/definitions/Config15",
+      "description": "#/definitions/Config15"
     }
   },
   "title": "Configuration",

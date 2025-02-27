@@ -28,6 +28,9 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Range;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexSet;
@@ -39,27 +42,27 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use coordinates::source_http_argument_coordinate;
-use entity::field_set_error;
 use entity::EntityKeyChecker;
+use entity::field_set_error;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
 use source_name::SourceName;
+use strum::IntoEnumIterator;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 use url::Url;
 
 use super::Connector;
+use crate::link::Import;
+use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
-use crate::link::Import;
-use crate::link::Link;
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
@@ -69,7 +72,6 @@ use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers;
-use crate::sources::connect::ConnectSpec;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -94,7 +96,10 @@ pub struct ValidationResult {
 pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
     // TODO: Use parse_and_validate (adding in directives as needed)
     // TODO: Handle schema errors rather than relying on JavaScript to catch it later
-    let schema = Schema::parse(source_text, file_name)
+    let schema = SchemaBuilder::new()
+        .adopt_orphan_extensions()
+        .parse(source_text, file_name)
+        .build()
         .unwrap_or_else(|schema_with_errors| schema_with_errors.partial);
     let connect_identity = ConnectSpec::identity();
     let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
@@ -105,6 +110,32 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
             schema,
         };
     };
+
+    if let Err(err) = ConnectSpec::try_from(&link.url.version) {
+        let available_versions = ConnectSpec::iter().map(ConnectSpec::as_str).collect_vec();
+        let message = if available_versions.len() == 1 {
+            // TODO: No need to branch here once multiple spec versions are available
+            format!("{err}; should be {version}.", version = ConnectSpec::V0_1)
+        } else {
+            // This won't happen today, but it's prepping for 0.2 so we don't forget
+            format!(
+                "{err}; should be one of {available_versions}.",
+                available_versions = available_versions.join(", "),
+            )
+        };
+        return ValidationResult {
+            errors: vec![Message {
+                code: Code::UnknownConnectorsVersion,
+                message,
+                locations: link_directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }],
+            has_connectors: true,
+            schema,
+        };
+    }
 
     let federation = Link::for_identity(&schema, &Identity::federation_identity());
     let external_directive_name = federation
@@ -390,13 +421,12 @@ fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> Sou
             }
         }
 
-        let expression_context = expression::Context::for_source(schema);
         errors.extend(headers::validate_arg(
             http_arg,
-            &expression_context,
             HttpHeadersCoordinate::Source {
                 directive_name: &directive.name,
             },
+            schema,
         ));
     } else {
         errors.push(Message {
@@ -456,7 +486,7 @@ fn parse_url<Coordinate: Display + Copy>(
 fn resolvable_key_fields<'a>(
     object: &'a Node<ObjectType>,
     schema: &'a Schema,
-) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> + 'a {
+) -> impl Iterator<Item = (FieldSet, &'a Component<Directive>)> {
     object
         .directives
         .iter()
@@ -536,28 +566,33 @@ pub enum Code {
     /// A problem with GraphQL syntax or semantics was found. These will usually be caught before
     /// this validation process.
     GraphQLError,
+    /// Indicates two connector sources with the same name were created.
     DuplicateSourceName,
+    /// The `name` provided for a `@source` was invalid.
     InvalidSourceName,
+    /// No `name` was provided when creating a connector source with `@source`.
     EmptySourceName,
-    /// A provided URL was not valid
+    /// A URL provided to `@source` or `@connect` was not valid.
     InvalidUrl,
-    /// A URL scheme is not `http` or `https`
+    /// A URL scheme provided to `@source` or `@connect` was not `http` or `https`.
     InvalidUrlScheme,
+    /// The `source` argument used in a `@connect` directive doesn't match any named connecter
+    /// sources created with `@source`.
     SourceNameMismatch,
+    /// Connectors currently don't support subscription operations.
     SubscriptionInConnectors,
-    /// Query field is missing the `@connect` directive
+    /// A query field is missing the `@connect` directive.
     QueryFieldMissingConnect,
-    /// Mutation field is missing the `@connect` directive
+    /// A mutation field is missing the `@connect` directive.
     MutationFieldMissingConnect,
-    /// The `@connect` is using a `source`, but the URL is absolute. This is trouble because
+    /// The `@connect` is using a `source`, but the URL is absolute. This is not allowed because
     /// the `@source` URL will be joined with the `@connect` URL, so the `@connect` URL should
-    /// actually be a path only.
+    /// only be a path.
     AbsoluteConnectUrlWithSource,
     /// The `@connect` directive is using a relative URL (path only) but does not define a `source`.
-    /// This is just a specialization of [`Self::InvalidUrl`] that provides a better suggestion for
-    /// the user.
+    /// This is a specialization of [`Self::InvalidUrl`].
     RelativeConnectUrlWithoutSource,
-    /// This is a specialization of [`Self::SourceNameMismatch`] that provides a better suggestion.
+    /// This is a specialization of [`Self::SourceNameMismatch`] that indicates no sources were defined.
     NoSourcesDefined,
     /// The subgraph doesn't import the `@source` directive. This isn't necessarily a problem, but
     /// is likely a mistake.
@@ -566,44 +601,48 @@ pub enum Code {
     MultipleHttpMethods,
     /// The `@connect` directive is missing an HTTP method.
     MissingHttpMethod,
-    /// The `entity` argument should only be used on the root `Query` field.
+    /// The `@connect` directive's `entity` argument should only be used on the root `Query` field.
     EntityNotOnRootQuery,
     /// The arguments to the entity reference resolver do not match the entity type.
     EntityResolverArgumentMismatch,
-    /// The `entity` argument should only be used with non-list, nullable, object types.
+    /// The `@connect` directive's `entity` argument should only be used with non-list, nullable, object types.
     EntityTypeInvalid,
-    /// A @key is defined without a cooresponding entity connector.
+    /// A `@key` was defined without a corresponding entity connector.
     MissingEntityConnector,
-    /// A syntax error in `selection`
-    InvalidJsonSelection,
-    /// A cycle was detected within a `selection`
+    /// The provided selection mapping in a `@connect`s `selection` was not valid.
+    InvalidSelection,
+    /// The `http.body` provided in `@connect` was not valid.
+    InvalidBody,
+    /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
-    /// A field was selected but is not defined on the type
+    /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
     SelectedFieldNotFound,
-    /// A group selection (`a { b }`) was used, but the field is not an object
+    /// A group selection mapping (`a { b }`) was used, but the field is not an object.
     GroupSelectionIsNotObject,
     /// The `name` mapping must be unique for all headers.
     HttpHeaderNameCollision,
-    /// A provided header in `@source` or `@connect` was not valid
+    /// A provided header in `@source` or `@connect` was not valid.
     InvalidHeader,
-    /// Certain directives are not allowed when using connectors
+    /// Certain directives are not allowed when using connectors.
     ConnectorsUnsupportedFederationDirective,
-    /// Abstract types are not allowed when using connectors
+    /// Abstract types are not allowed when using connectors.
     ConnectorsUnsupportedAbstractType,
-    /// Fields that return an object type must use a group JSONSelection `{}`
+    /// Fields that return an object type must use a group selection mapping `{}`.
     GroupSelectionRequiredForObject,
-    /// Fields in the schema that aren't resolved by a connector
+    /// The schema includes fields that aren't resolved by a connector.
     ConnectorsUnresolvedField,
-    /// A field resolved by a connector has arguments defined
+    /// A field resolved by a connector has arguments defined.
     ConnectorsFieldWithArguments,
-    /// Part of the `@connect` refers to an `$args` which is not defined
+    /// Part of the `@connect` refers to an `$args` which is not defined.
     UndefinedArgument,
-    /// Part of the `@connect` refers to an `$this` which is not defined
+    /// Part of the `@connect` refers to an `$this` which is not defined.
     UndefinedField,
-    /// A type used in a variable is not yet supported (i.e., unions)
+    /// A type used in a variable is not yet supported (i.e., unions).
     UnsupportedVariableType,
-    /// A variable is nullable in a location which requires non-null at runtime
+    /// A variable is nullable in a location which requires non-null at runtime.
     NullabilityMismatch,
+    /// The version set in the connectors `@link` URL is not recognized.
+    UnknownConnectorsVersion,
 }
 
 impl Code {
@@ -638,8 +677,11 @@ mod test_validate_source {
         insta::with_settings!({prepend_module_to_snapshot => false}, {
             glob!("test_data", "**/*.graphql", |path| {
                 let schema = read_to_string(path).unwrap();
+                let start_time = std::time::Instant::now();
                 let result = validate(&schema, path.to_str().unwrap());
+                let end_time = std::time::Instant::now();
                 assert_snapshot!(format!("{:#?}", result.errors));
+                assert!(end_time - start_time < std::time::Duration::from_millis(100));
             });
         });
     }

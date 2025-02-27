@@ -6,8 +6,8 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
-use std::sync::Mutex;
 
+use apollo_router::Context;
 use apollo_router::_private::create_test_service_factory_from_yaml;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
@@ -17,7 +17,6 @@ use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
 use apollo_router::Configuration;
-use apollo_router::Context;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -27,6 +26,7 @@ use http::StatusCode;
 use http::Uri;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
+use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -1039,7 +1039,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -1065,7 +1065,7 @@ async fn query_operation_id() {
         expected_apollo_operation_id,
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .unwrap()
             .as_str()
@@ -1085,7 +1085,7 @@ async fn query_operation_id() {
         // "## GraphQLParseFailure\n"
         response
             .context
-            .get::<_, String>("apollo_operation_id".to_string())
+            .get::<_, String>("apollo::supergraph::operation_id")
             .unwrap()
             .is_none()
     );
@@ -1109,7 +1109,7 @@ async fn query_operation_id() {
     // "## GraphQLUnknownOperationName\n"
     assert!(response
         .context
-        .get::<_, String>("apollo_operation_id".to_string())
+        .get::<_, String>("apollo::supergraph::operation_id")
         .unwrap()
         .is_none());
 
@@ -1132,7 +1132,7 @@ async fn query_operation_id() {
     // "## GraphQLValidationFailure\n"
     assert!(response
         .context
-        .get::<_, String>("apollo_operation_id".to_string())
+        .get::<_, String>("apollo::supergraph::operation_id")
         .unwrap()
         .is_none());
 }
@@ -1255,7 +1255,7 @@ impl CountingServiceRegistry {
     }
 
     fn increment(&self, service: &str) {
-        let mut counts = self.counts.lock().unwrap();
+        let mut counts = self.counts.lock();
         match counts.entry(service.to_owned()) {
             Entry::Occupied(mut e) => {
                 *e.get_mut() += 1;
@@ -1267,7 +1267,7 @@ impl CountingServiceRegistry {
     }
 
     fn totals(&self) -> HashMap<String, usize> {
-        self.counts.lock().unwrap().clone()
+        self.counts.lock().clone()
     }
 }
 

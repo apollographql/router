@@ -14,7 +14,9 @@ pub(crate) use field_type::*;
 pub(crate) use fragments::*;
 pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
+pub(crate) use schema::QueryHash;
 pub(crate) use schema::Schema;
+pub(crate) use schema::SchemaHash;
 pub(crate) use selection::*;
 use serde::Deserialize;
 use serde::Serialize;
@@ -158,5 +160,11 @@ impl IntoGraphQLErrors for SpecError {
                 Ok(vec![gql_err])
             }
         }
+    }
+}
+
+impl From<std::convert::Infallible> for SpecError {
+    fn from(value: std::convert::Infallible) -> Self {
+        match value {}
     }
 }

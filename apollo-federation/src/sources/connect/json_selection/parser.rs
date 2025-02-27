@@ -1,6 +1,9 @@
 use std::fmt::Display;
+use std::str::FromStr;
 
 use apollo_compiler::collections::IndexSet;
+use nom::IResult;
+use nom::Slice;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
@@ -14,21 +17,18 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
 use nom::sequence::tuple;
-use nom::IResult;
-use nom::Slice;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
-use super::location::merge_ranges;
-use super::location::new_span;
-use super::location::ranged_span;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
-use crate::sources::connect::variable::Namespace;
+use super::location::merge_ranges;
+use super::location::new_span;
+use super::location::ranged_span;
 use crate::sources::connect::variable::VariableNamespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
@@ -231,7 +231,7 @@ impl JSONSelection {
         }
     }
 
-    pub fn external_variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+    pub fn external_variables<N: FromStr + ToString>(&self) -> impl Iterator<Item = N> {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
@@ -363,9 +363,9 @@ impl NamedSelection {
                         ))
                     } else {
                         Err(nom_fail_message(
-                        input,
-                        "Named path selection must either begin with alias or ..., or end with subselection",
-                    ))
+                            input,
+                            "Named path selection must either begin with alias or ..., or end with subselection",
+                        ))
                     }
                 }
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
@@ -479,7 +479,7 @@ impl PathSelection {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
     }
 
-    pub(crate) fn variable_reference(&self) -> Option<VariableReference<Namespace>> {
+    pub(crate) fn variable_reference<N: FromStr + ToString>(&self) -> Option<VariableReference<N>> {
         match self.path.as_ref() {
             PathList::Var(var, tail) => match var.as_ref() {
                 KnownVariable::External(namespace) => {
@@ -493,7 +493,7 @@ impl PathSelection {
                         .unwrap_or_default();
                     Some(VariableReference {
                         namespace: VariableNamespace {
-                            namespace: *namespace,
+                            namespace: N::from_str(namespace).ok()?,
                             location: var.range().unwrap_or_default(),
                         },
                         path: parts,
@@ -662,29 +662,13 @@ impl PathList {
                 let full_range = merge_ranges(dollar_range.clone(), rest.range());
                 return if let Some(var) = opt_var {
                     let full_name = format!("{}{}", dollar.as_ref(), var.as_str());
-                    if let Some(known_var) = KnownVariable::from_str(full_name.as_str()) {
-                        let var_range = merge_ranges(dollar_range.clone(), var.range());
-                        let ranged_known_var = WithRange::new(known_var, var_range);
-                        Ok((
-                            remainder,
-                            WithRange::new(Self::Var(ranged_known_var, rest), full_range),
-                        ))
-                    } else {
-                        Err(nom_fail_message(
-                            input,
-                            // Here's an error where we might like to use
-                            // format! to include the full_name of the unknown
-                            // variable in the error message, but that means
-                            // we'd have to store the message as an owned
-                            // String, which would make Span no longer Copy,
-                            // which leads to more cloning of Spans in the
-                            // parser code. For now, the input Span reported
-                            // with the error will begin with the unknown
-                            // variable name, which should be enough to
-                            // interpret this static message.
-                            "Unknown variable",
-                        ))
-                    }
+                    let known_var = KnownVariable::from_str(full_name.as_str());
+                    let var_range = merge_ranges(dollar_range.clone(), var.range());
+                    let ranged_known_var = WithRange::new(known_var, var_range);
+                    Ok((
+                        remainder,
+                        WithRange::new(Self::Var(ranged_known_var, rest), full_range),
+                    ))
                 } else {
                     let ranged_dollar_var =
                         WithRange::new(KnownVariable::Dollar, dollar_range.clone());
@@ -1232,38 +1216,31 @@ impl Ranged for MethodArgs {
 // using a Vec<LitExpr> in all cases (possibly empty but never missing).
 impl MethodArgs {
     fn parse(input: Span) -> ParseResult<Self> {
-        tuple((
-            spaces_or_comments,
-            ranged_span("("),
-            spaces_or_comments,
-            opt(map(
-                tuple((
-                    LitExpr::parse,
-                    many0(preceded(
-                        tuple((spaces_or_comments, char(','))),
-                        LitExpr::parse,
-                    )),
-                    opt(tuple((spaces_or_comments, char(',')))),
-                )),
-                |(first, rest, _trailing_comma)| {
-                    let mut output = vec![first];
-                    output.extend(rest);
-                    output
-                },
-            )),
-            spaces_or_comments,
-            ranged_span(")"),
-        ))(input)
-        .map(|(remainder, (_, open_paren, _, args, _, close_paren))| {
-            let range = merge_ranges(open_paren.range(), close_paren.range());
-            (
-                remainder,
-                Self {
-                    args: args.unwrap_or_default(),
-                    range,
-                },
-            )
-        })
+        let input = spaces_or_comments(input)?.0;
+        let (mut input, open_paren) = ranged_span("(")(input)?;
+        input = spaces_or_comments(input)?.0;
+
+        let mut args = Vec::new();
+        if let Ok((remainder, first)) = LitExpr::parse(input) {
+            args.push(first);
+            input = remainder;
+
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+                input = spaces_or_comments(remainder)?.0;
+                if let Ok((remainder, arg)) = LitExpr::parse(input) {
+                    args.push(arg);
+                    input = remainder;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        input = spaces_or_comments(input)?.0;
+        let (input, close_paren) = ranged_span(")")(input)?;
+
+        let range = merge_ranges(open_paren.range(), close_paren.range());
+        Ok((input, Self { args, range }))
     }
 }
 
@@ -1275,6 +1252,7 @@ mod tests {
     use super::super::location::strip_ranges::StripRanges;
     use super::*;
     use crate::selection;
+    use crate::sources::connect::json_selection::fixtures::Namespace;
     use crate::sources::connect::json_selection::helpers::span_is_all_spaces_or_comments;
     use crate::sources::connect::json_selection::location::new_span;
 
@@ -1948,7 +1926,7 @@ mod tests {
             "$this",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::from(Namespace::This).into_with_range(),
+                    KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                     PathList::Empty.into_with_range(),
                 )
                 .into_with_range(),
@@ -1970,7 +1948,7 @@ mod tests {
             "$this { hello }",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::from(Namespace::This).into_with_range(),
+                    KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                     PathList::Selection(SubSelection {
                         selections: vec![NamedSelection::Field(
                             None,
@@ -2007,7 +1985,7 @@ mod tests {
         check_path_selection(
             "$this { before alias: $args.arg after }",
             PathList::Var(
-                KnownVariable::from(Namespace::This).into_with_range(),
+                KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                 PathList::Selection(SubSelection {
                     selections: vec![
                         NamedSelection::Field(None, Key::field("before").into_with_range(), None),
@@ -2016,7 +1994,8 @@ mod tests {
                             inline: false,
                             path: PathSelection {
                                 path: PathList::Var(
-                                    KnownVariable::from(Namespace::Args).into_with_range(),
+                                    KnownVariable::External(Namespace::Args.to_string())
+                                        .into_with_range(),
                                     PathList::Key(
                                         Key::field("arg").into_with_range(),
                                         PathList::Empty.into_with_range(),
@@ -2054,7 +2033,8 @@ mod tests {
                                     inline: false,
                                     path: PathSelection {
                                         path: PathList::Var(
-                                            KnownVariable::from(Namespace::Args).into_with_range(),
+                                            KnownVariable::External(Namespace::Args.to_string())
+                                                .into_with_range(),
                                             PathList::Key(
                                                 Key::field("arg").into_with_range(),
                                                 PathList::Empty.into_with_range(),
@@ -2079,7 +2059,7 @@ mod tests {
             "$args.a.b.c",
             PathSelection {
                 path: PathList::Var(
-                    KnownVariable::from(Namespace::Args).into_with_range(),
+                    KnownVariable::External(Namespace::Args.to_string()).into_with_range(),
                     PathList::from_slice(
                         &[
                             Key::Field("a".to_string()),
@@ -2151,10 +2131,7 @@ mod tests {
                 Ok((remainder, path)) => {
                     panic!(
                         "Expected error at offset {} with message '{}', but got path {:?} and remainder {:?}",
-                        expected_offset,
-                        expected_message,
-                        path,
-                        remainder,
+                        expected_offset, expected_message, path, remainder,
                     );
                 }
                 Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
@@ -2221,7 +2198,7 @@ mod tests {
             selection!("$this").strip_ranges(),
             JSONSelection::Path(PathSelection {
                 path: PathList::Var(
-                    KnownVariable::from(Namespace::This).into_with_range(),
+                    KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                     PathList::Empty.into_with_range()
                 )
                 .into_with_range(),
@@ -2274,7 +2251,7 @@ mod tests {
                     inline: false,
                     path: PathSelection {
                         path: PathList::Var(
-                            KnownVariable::from(Namespace::This).into_with_range(),
+                            KnownVariable::External(Namespace::This.to_string()).into_with_range(),
                             PathList::Selection(SubSelection {
                                 selections: vec![
                                     NamedSelection::Field(
@@ -2306,10 +2283,6 @@ mod tests {
         // parsed as a continuation of a previous selection. Instead, use $.data
         // to achieve the same effect without ambiguity.
         assert_debug_snapshot!(JSONSelection::parse(".data"));
-
-        // We statically verify that all variables are KnownVariables, and
-        // $bogus is not one of them.
-        assert_debug_snapshot!(JSONSelection::parse("$bogus"));
 
         // If you want to mix a path selection with other named selections, the
         // path selection must have a trailing subselection, to enforce that it
@@ -2460,11 +2433,13 @@ mod tests {
                         PathList::Method(
                             WithRange::new("or".to_string(), None),
                             Some(MethodArgs {
-                                args: vec![LitExpr::Path(PathSelection::from_slice(
-                                    &[Key::field("data"), Key::field("y")],
-                                    None,
-                                ))
-                                .into_with_range()],
+                                args: vec![
+                                    LitExpr::Path(PathSelection::from_slice(
+                                        &[Key::field("data"), Key::field("y")],
+                                        None,
+                                    ))
+                                    .into_with_range(),
+                                ],
                                 ..Default::default()
                             }),
                             PathList::Empty.into_with_range(),
@@ -2530,19 +2505,21 @@ mod tests {
                         PathList::Method(
                             WithRange::new("concat".to_string(), None),
                             Some(MethodArgs {
-                                args: vec![LitExpr::Array(vec![
-                                    LitExpr::Path(PathSelection::from_slice(
-                                        &[Key::field("data"), Key::field("y")],
-                                        None,
-                                    ))
+                                args: vec![
+                                    LitExpr::Array(vec![
+                                        LitExpr::Path(PathSelection::from_slice(
+                                            &[Key::field("data"), Key::field("y")],
+                                            None,
+                                        ))
+                                        .into_with_range(),
+                                        LitExpr::Path(PathSelection::from_slice(
+                                            &[Key::field("data"), Key::field("z")],
+                                            None,
+                                        ))
+                                        .into_with_range(),
+                                    ])
                                     .into_with_range(),
-                                    LitExpr::Path(PathSelection::from_slice(
-                                        &[Key::field("data"), Key::field("z")],
-                                        None,
-                                    ))
-                                    .into_with_range(),
-                                ])
-                                .into_with_range()],
+                                ],
                                 ..Default::default()
                             }),
                             PathList::Empty.into_with_range(),
@@ -2950,7 +2927,10 @@ mod tests {
             JSONSelection::Path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
-                        WithRange::new(KnownVariable::from(Namespace::Args), Some(0..5)),
+                        WithRange::new(
+                            KnownVariable::External(Namespace::Args.to_string()),
+                            Some(0..5),
+                        ),
                         WithRange::new(
                             PathList::Key(
                                 WithRange::new(Key::field("product"), Some(6..13)),
@@ -2975,7 +2955,10 @@ mod tests {
             JSONSelection::Path(PathSelection {
                 path: WithRange::new(
                     PathList::Var(
-                        WithRange::new(KnownVariable::from(Namespace::Args), Some(1..6)),
+                        WithRange::new(
+                            KnownVariable::External(Namespace::Args.to_string()),
+                            Some(1..6),
+                        ),
                         WithRange::new(
                             PathList::Key(
                                 WithRange::new(Key::field("product"), Some(9..16)),
@@ -3014,7 +2997,7 @@ mod tests {
                             path: WithRange::new(
                                 PathList::Var(
                                     WithRange::new(
-                                        KnownVariable::from(Namespace::Args),
+                                        KnownVariable::External(Namespace::Args.to_string()),
                                         Some(15..20),
                                     ),
                                     WithRange::new(
@@ -3148,17 +3131,5 @@ mod tests {
         let selection = JSONSelection::parse("a.b.c").unwrap();
         let var_paths = selection.external_var_paths();
         assert_eq!(var_paths.len(), 0);
-    }
-
-    #[test]
-    fn test_parse_unknown_variable() {
-        assert_eq!(
-            JSONSelection::parse("a b { c: $foobar.x.y.z { d } }"),
-            Err(JSONSelectionParseError {
-                message: "Unknown variable".to_string(),
-                fragment: "$foobar.x.y.z { d } }".to_string(),
-                offset: 9,
-            })
-        );
     }
 }

@@ -42,10 +42,12 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
-use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+#[cfg(test)]
+use crate::plugins::healthcheck::test_listen;
+use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::limits;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -106,6 +108,22 @@ pub enum ConfigurationError {
 
     /// could not load certificate authorities: {error}
     CertificateAuthorities { error: String },
+}
+
+impl From<proteus::Error> for ConfigurationError {
+    fn from(error: proteus::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
+}
+
+impl From<proteus::parser::Error> for ConfigurationError {
+    fn from(error: proteus::parser::Error) -> Self {
+        Self::MigrationFailure {
+            error: error.to_string(),
+        }
+    }
 }
 
 /// The configuration for the router.
@@ -228,6 +246,10 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             "limits".to_string(),
             serde_json::to_value(&ad_hoc.limits).unwrap(),
         );
+        ad_hoc.apollo_plugins.plugins.insert(
+            "health_check".to_string(),
+            serde_json::to_value(&ad_hoc.health_check).unwrap(),
+        );
 
         // Use a struct literal instead of a builder to ensure this is exhaustive
         Configuration {
@@ -263,15 +285,9 @@ fn default_graphql_listen() -> ListenAddr {
 }
 
 #[cfg(test)]
-fn test_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:0").unwrap().into()
-}
-
-#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -394,7 +410,6 @@ impl Default for Configuration {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -416,7 +431,7 @@ impl Configuration {
         let configuration = Self {
             validated_yaml: Default::default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
-            health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
+            health_check: health_check.unwrap_or_else(|| HealthCheck::builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
@@ -531,7 +546,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
     }
 }
 
@@ -665,7 +680,6 @@ fn default_defer_support() -> bool {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
@@ -694,7 +708,6 @@ impl Supergraph {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
@@ -1267,84 +1280,6 @@ impl Default for Homepage {
     }
 }
 
-/// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct HealthCheck {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:8088
-    pub(crate) listen: ListenAddr,
-
-    /// Set to false to disable the health check
-    pub(crate) enabled: bool,
-
-    /// Optionally set a custom healthcheck path
-    /// Defaults to /health
-    pub(crate) path: String,
-}
-
-fn default_health_check_listen() -> ListenAddr {
-    SocketAddr::from_str("127.0.0.1:8088").unwrap().into()
-}
-
-fn default_health_check_enabled() -> bool {
-    true
-}
-
-fn default_health_check_path() -> String {
-    "/health".to_string()
-}
-
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}").to_string();
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(default_health_check_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-        }
-    }
-}
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl HealthCheck {
-    #[builder]
-    pub(crate) fn fake_new(
-        listen: Option<ListenAddr>,
-        enabled: Option<bool>,
-        path: Option<String>,
-    ) -> Self {
-        let mut path = path.unwrap_or_else(default_health_check_path);
-        if !path.starts_with('/') {
-            path = format!("/{path}");
-        }
-
-        Self {
-            listen: listen.unwrap_or_else(test_listen),
-            enabled: enabled.unwrap_or_else(default_health_check_enabled),
-            path,
-        }
-    }
-}
-
-impl Default for HealthCheck {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
 /// You probably don’t want this in production!
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -1483,7 +1418,7 @@ impl Batching {
                     subgraph_batching_config
                         .subgraphs
                         .get(service_name)
-                        .map_or(true, |x| x.enabled)
+                        .is_none_or(|x| x.enabled)
                 } else {
                     // If it isn't, require:
                     // - an enabled subgraph entry
