@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::link::context_spec_definition::parse_context;
@@ -13,14 +13,13 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
-use crate::schema::field_set::collect_target_fields_from_field_set;
-use crate::schema::position::FieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
-
-use super::position::CompositeTypeDefinitionPosition;
-use super::position::FieldArgumentDefinitionPosition;
-use super::position::ObjectFieldDefinitionPosition;
+use crate::schema::field_set::collect_target_fields_from_field_set;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldArgumentDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
@@ -595,10 +594,11 @@ impl ExternalMetadata {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Name;
+
+    use crate::schema::FederationSchema;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
-    use crate::schema::FederationSchema;
-    use apollo_compiler::Name;
 
     #[test]
     fn subgraph_metadata_is_field_shareable() {
