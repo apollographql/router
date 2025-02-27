@@ -24,7 +24,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:current
-      - image: cimg/redis:7.4.1
+      - image: cimg/redis:7.4.2
       - image: openzipkin/zipkin:3.4.3
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
     resource_class: 2xlarge
