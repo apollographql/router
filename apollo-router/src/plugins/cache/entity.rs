@@ -45,14 +45,15 @@ use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
+use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
 use crate::Context;
 use crate::Endpoint;
@@ -98,14 +99,14 @@ impl Storage {
 pub(crate) struct Config {
     /// Enable or disable the entity caching feature
     #[serde(default)]
-    enabled: bool,
+    pub(crate) enabled: bool,
 
     #[serde(default)]
     /// Expose cache keys in context
     expose_keys_in_context: bool,
 
     /// Configure invalidation per subgraph
-    subgraph: SubgraphConfiguration<Subgraph>,
+    pub(crate) subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Global invalidation configuration
     invalidation: Option<InvalidationEndpointConfig>,
@@ -390,8 +391,11 @@ impl Plugin for EntityCache {
 
                     response
                 })
-                .service(CacheService(Some(InnerCacheService {
-                    service,
+                .service(CacheService {
+                    service: ServiceBuilder::new()
+                        .buffered()
+                        .service(service)
+                        .boxed_clone(),
                     entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
@@ -400,7 +404,7 @@ impl Plugin for EntityCache {
                     private_id,
                     invalidation: self.invalidation.clone(),
                     expose_keys_in_context: self.expose_keys_in_context,
-                })));
+                });
             tower::util::BoxService::new(inner)
         } else {
             ServiceBuilder::new()
@@ -498,9 +502,9 @@ impl EntityCache {
     }
 }
 
-struct CacheService(Option<InnerCacheService>);
-struct InnerCacheService {
-    service: subgraph::BoxService,
+#[derive(Clone)]
+struct CacheService {
+    service: subgraph::BoxCloneService,
     name: String,
     entity_type: Option<String>,
     storage: RedisCacheStorage,
@@ -520,21 +524,18 @@ impl Service<subgraph::Request> for CacheService {
         &mut self,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), Self::Error>> {
-        match &mut self.0 {
-            Some(s) => s.service.poll_ready(cx),
-            None => panic!("service should have been called only once"),
-        }
+        self.service.poll_ready(cx)
     }
 
     fn call(&mut self, request: subgraph::Request) -> Self::Future {
-        match self.0.take() {
-            None => panic!("service should have been called only once"),
-            Some(s) => Box::pin(s.call_inner(request)),
-        }
+        let clone = self.clone();
+        let inner = std::mem::replace(self, clone);
+
+        Box::pin(inner.call_inner(request))
     }
 }
 
-impl InnerCacheService {
+impl CacheService {
     async fn call_inner(
         mut self,
         request: subgraph::Request,
@@ -588,9 +589,7 @@ impl InnerCacheService {
                     ControlFlow::Break(response) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
                         let _ = response.context.insert(
-                            CacheMetricContextKey::new(
-                                response.subgraph_name.clone().unwrap_or_default(),
-                            ),
+                            CacheMetricContextKey::new(response.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
                         );
                         Ok(response)
@@ -598,9 +597,7 @@ impl InnerCacheService {
                     ControlFlow::Continue((request, mut root_cache_key)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
-                            CacheMetricContextKey::new(
-                                request.subgraph_name.clone().unwrap_or_default(),
-                            ),
+                            CacheMetricContextKey::new(request.subgraph_name.clone()),
                             CacheSubgraph(cache_hit),
                         );
 
@@ -740,6 +737,7 @@ impl InnerCacheService {
                                 .context(context)
                                 .data(Value::Object(data))
                                 .errors(new_errors)
+                                .subgraph_name(self.name)
                                 .extensions(Object::new())
                                 .build();
                             CacheControl::no_store().to_headers(response.response.headers_mut())?;
@@ -872,7 +870,7 @@ async fn cache_lookup_root(
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(control));
+                    .with_lock(|lock| lock.insert(control));
                 if expose_keys_in_context {
                     let request_id = request.id.clone();
                     let cache_control_header = value.0.control.to_cache_control_header()?;
@@ -908,7 +906,7 @@ async fn cache_lookup_root(
                     .data(value.0.data)
                     .extensions(Object::new())
                     .context(request.context)
-                    .and_subgraph_name(request.subgraph_name.clone())
+                    .subgraph_name(request.subgraph_name.clone())
                     .build();
 
                 value
@@ -1035,7 +1033,7 @@ async fn cache_lookup_entities(
         let mut response = subgraph::Response::builder()
             .data(data)
             .extensions(Object::new())
-            .and_subgraph_name(request.subgraph_name)
+            .subgraph_name(request.subgraph_name)
             .context(request.context)
             .build();
 
@@ -1048,7 +1046,7 @@ async fn cache_lookup_entities(
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         if let Some(c) = lock.get_mut::<CacheControl>() {
             *c = c.merge(cache_control);
         } else {
@@ -1220,9 +1218,11 @@ pub(crate) fn hash_vary_headers(headers: &http::HeaderMap) -> String {
     hex::encode(digest.finalize().as_slice())
 }
 
+// XXX(@goto-bus-stop): this doesn't make much sense: QueryHash already includes the operation name.
+// This function can be removed outright later at the cost of invalidating all entity caches.
 pub(crate) fn hash_query(query_hash: &QueryHash, body: &graphql::Request) -> String {
     let mut digest = Sha256::new();
-    digest.update(&query_hash.0);
+    digest.update(query_hash.as_bytes());
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);

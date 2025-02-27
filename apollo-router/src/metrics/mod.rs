@@ -1,3 +1,9 @@
+//! APIs for integrating with the router's metrics.
+//!
+//! ## Compatibility
+//! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
+//! API-stable, we may update it in a minor version, which may require code changes to plugins.
+
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
@@ -11,9 +17,6 @@ use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
-pub(crate) mod layer;
-
-// During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 
 #[cfg(test)]
 pub(crate) mod test_utils {
@@ -28,28 +31,26 @@ pub(crate) mod test_utils {
     use itertools::Itertools;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
-    use opentelemetry::sdk::metrics::data::DataPoint;
-    use opentelemetry::sdk::metrics::data::Gauge;
-    use opentelemetry::sdk::metrics::data::Histogram;
-    use opentelemetry::sdk::metrics::data::HistogramDataPoint;
-    use opentelemetry::sdk::metrics::data::Metric;
-    use opentelemetry::sdk::metrics::data::ResourceMetrics;
-    use opentelemetry::sdk::metrics::data::Sum;
-    use opentelemetry::sdk::metrics::data::Temporality;
-    use opentelemetry::sdk::metrics::reader::AggregationSelector;
-    use opentelemetry::sdk::metrics::reader::MetricProducer;
-    use opentelemetry::sdk::metrics::reader::MetricReader;
-    use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
-    use opentelemetry::sdk::AttributeSet;
     use opentelemetry::Array;
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
-    use opentelemetry_api::Context;
+    use opentelemetry_sdk::metrics::data::DataPoint;
+    use opentelemetry_sdk::metrics::data::Gauge;
+    use opentelemetry_sdk::metrics::data::Histogram;
+    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry_sdk::metrics::data::Metric;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::data::Sum;
+    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::AttributeSet;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::Pipeline;
     use serde::Serialize;
     use tokio::task_local;
 
@@ -84,19 +85,15 @@ pub(crate) mod test_utils {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.reader.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> opentelemetry_api::metrics::Result<()> {
-            self.reader.force_flush(cx)
+        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+            self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry_api::metrics::Result<()> {
+        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
             self.reader.shutdown()
         }
     }
@@ -156,10 +153,7 @@ pub(crate) mod test_utils {
     }
 
     impl Metrics {
-        pub(crate) fn find(
-            &self,
-            name: &str,
-        ) -> Option<&opentelemetry::sdk::metrics::data::Metric> {
+        pub(crate) fn find(&self, name: &str) -> Option<&opentelemetry_sdk::metrics::data::Metric> {
             self.resource_metrics
                 .scope_metrics
                 .iter()
@@ -217,14 +211,16 @@ pub(crate) mod test_utils {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
                         return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            datapoint.value == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
                         return sum.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            datapoint.value == value
+                                && Self::equal_attributes(attributes, &datapoint.attributes)
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
@@ -232,12 +228,13 @@ pub(crate) mod test_utils {
                     if matches!(ty, MetricType::Histogram) {
                         if count {
                             return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.attributes == *attributes
-                                    && datapoint.count == value.to_u64().unwrap()
+                                datapoint.count == value.to_u64().unwrap()
+                                    && Self::equal_attributes(attributes, &datapoint.attributes)
                             });
                         } else {
                             return histogram.data_points.iter().any(|datapoint| {
-                                datapoint.attributes == *attributes && datapoint.sum == value
+                                datapoint.sum == value
+                                    && Self::equal_attributes(attributes, &datapoint.attributes)
                             });
                         }
                     }
@@ -258,26 +255,23 @@ pub(crate) mod test_utils {
                 if let Some(gauge) = metric.data.as_any().downcast_ref::<Gauge<T>>() {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
-                        return gauge
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return gauge.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
-                        return sum
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return sum.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
                     if matches!(ty, MetricType::Histogram) {
-                        return histogram
-                            .data_points
-                            .iter()
-                            .any(|datapoint| datapoint.attributes == attributes);
+                        return histogram.data_points.iter().any(|datapoint| {
+                            Self::equal_attributes(&attributes, &datapoint.attributes)
+                        });
                     }
                 }
             }
@@ -316,6 +310,13 @@ pub(crate) mod test_utils {
                     })
                 })
                 .collect()
+        }
+
+        fn equal_attributes(attrs1: &AttributeSet, attrs2: &[KeyValue]) -> bool {
+            attrs1
+                .iter()
+                .zip(attrs2.iter())
+                .all(|((k, v), kv)| kv.key == *k && kv.value == *v)
         }
     }
 
@@ -375,7 +376,7 @@ pub(crate) mod test_utils {
     impl SerdeMetricData {
         fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
             metric_data: &mut SerdeMetricData,
-            value: &dyn opentelemetry::sdk::metrics::data::Aggregation,
+            value: &dyn opentelemetry_sdk::metrics::data::Aggregation,
         ) {
             if let Some(gauge) = value.as_any().downcast_ref::<Gauge<T>>() {
                 gauge.data_points.iter().for_each(|datapoint| {
@@ -400,7 +401,7 @@ pub(crate) mod test_utils {
             let mut serde_metric = SerdeMetric {
                 name: value.name.into_owned(),
                 description: value.description.into_owned(),
-                unit: value.unit.as_str().to_string(),
+                unit: value.unit.to_string(),
                 data: value.data.into(),
             };
             // Sort the datapoints so that we can compare them
@@ -436,7 +437,7 @@ pub(crate) mod test_utils {
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
         }
@@ -471,14 +472,14 @@ pub(crate) mod test_utils {
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
+                    .map(|kv| (kv.key.to_string(), Self::convert(&kv.value)))
                     .collect(),
             }
         }
     }
 
-    impl From<Box<dyn opentelemetry::sdk::metrics::data::Aggregation>> for SerdeMetricData {
-        fn from(value: Box<dyn opentelemetry::sdk::metrics::data::Aggregation>) -> Self {
+    impl From<Box<dyn opentelemetry_sdk::metrics::data::Aggregation>> for SerdeMetricData {
+        fn from(value: Box<dyn opentelemetry_sdk::metrics::data::Aggregation>) -> Self {
             let mut metric_data = SerdeMetricData::default();
             Self::extract_datapoints::<u64>(&mut metric_data, value.as_ref());
             Self::extract_datapoints::<f64>(&mut metric_data, value.as_ref());
@@ -494,8 +495,12 @@ pub(crate) mod test_utils {
         Gauge,
     }
 }
+
+/// Returns a MeterProvider, as a concrete type so we can use our own extensions.
+///
+/// During tests this is a task local so that we can test metrics without having to worry about other tests interfering.
 #[cfg(test)]
-pub(crate) fn meter_provider() -> AggregateMeterProvider {
+pub(crate) fn meter_provider_internal() -> AggregateMeterProvider {
     test_utils::meter_provider_and_readers().0
 }
 
@@ -504,14 +509,26 @@ pub(crate) use test_utils::collect_metrics;
 
 #[cfg(not(test))]
 static AGGREGATE_METER_PROVIDER: OnceLock<AggregateMeterProvider> = OnceLock::new();
+
+/// Returns the currently configured global MeterProvider, as a concrete type
+/// so we can use our own extensions.
 #[cfg(not(test))]
-pub(crate) fn meter_provider() -> AggregateMeterProvider {
+pub(crate) fn meter_provider_internal() -> AggregateMeterProvider {
     AGGREGATE_METER_PROVIDER
         .get_or_init(Default::default)
         .clone()
 }
 
-#[macro_export]
+/// Returns the currently configured global [`MeterProvider`].
+///
+/// See the [module-level documentation] for important details on the semver-compatibility guarantees of this API.
+///
+/// [`MeterProvider`]: opentelemetry::metrics::MeterProvider
+/// [module-level documentation]: crate::metrics
+pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
+    meter_provider_internal()
+}
+
 /// Get or create a `u64` monotonic counter metric and add a value to it.
 ///
 /// Each metric needs a description.
@@ -787,47 +804,6 @@ macro_rules! u64_histogram {
     };
 }
 
-/// Get or create an i64 histogram metric and add a value to it
-///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
-#[allow(unused_macros)]
-macro_rules! i64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, $attrs);
-    };
-
-    ($name:literal, $description:literal, $value: expr) => {
-        metric!(i64, histogram, record, $name, $description, $value, []);
-    };
-}
-
 thread_local! {
     // This is used exactly once in testing callsite caching.
     #[cfg(test)]
@@ -855,23 +831,22 @@ macro_rules! metric {
                 let cache_callsite = true;
 
                 if cache_callsite {
-                    static INSTRUMENT_CACHE: std::sync::OnceLock<std::sync::Mutex<std::sync::Weak<opentelemetry_api::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
+                    static INSTRUMENT_CACHE: std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
 
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
-                            let meter_provider = crate::metrics::meter_provider();
+                            let meter_provider = crate::metrics::meter_provider_internal();
                             let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
-                            std::sync::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
+                            parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
-                        .lock()
-                        .expect("lock poisoned");
+                        .lock();
                     let instrument = if let Some(instrument) = instrument_guard.upgrade() {
                         // Fast path, we got the instrument, drop the mutex guard immediately.
                         drop(instrument_guard);
                         instrument
                     } else {
                         // Slow path, we need to obtain the instrument again.
-                        let meter_provider = crate::metrics::meter_provider();
+                        let meter_provider = crate::metrics::meter_provider_internal();
                         let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
                         *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
@@ -1189,6 +1164,27 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
+/// Shared counter for `apollo.router.graphql_error` for consistency
+pub(crate) fn count_graphql_error(count: u64, code: Option<&str>) {
+    match code {
+        None => {
+            u64_counter!(
+                "apollo.router.graphql_error",
+                "Number of GraphQL error responses returned by the router",
+                count
+            );
+        }
+        Some(code) => {
+            u64_counter!(
+                "apollo.router.graphql_error",
+                "Number of GraphQL error responses returned by the router",
+                count,
+                code = code.to_string()
+            );
+        }
+    }
+}
+
 /// Assert that all metrics match an [insta] snapshot.
 ///
 /// Consider using [assert_non_zero_metrics_snapshot] to produce more grokkable snapshots if
@@ -1236,7 +1232,7 @@ macro_rules! assert_non_zero_metrics_snapshot {
 }
 
 #[cfg(test)]
-pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output> + Send>>;
+pub(crate) type MetricFuture<T> = Pin<Box<dyn Future<Output = <T as Future>::Output>>>;
 
 #[cfg(test)]
 pub(crate) trait FutureMetricsExt<T> {
@@ -1247,20 +1243,20 @@ pub(crate) trait FutureMetricsExt<T> {
         MetricFuture<Self>,
     >
     where
-        Self: Sized + Future + Send + 'static,
-        <Self as Future>::Output: Send + 'static,
+        Self: Sized + Future + 'static,
+        <Self as Future>::Output: 'static,
     {
         test_utils::AGGREGATE_METER_PROVIDER_ASYNC.scope(
             Default::default(),
             async move {
                 let result = self.await;
                 let _ = tokio::task::spawn_blocking(|| {
-                    meter_provider().shutdown();
+                    meter_provider_internal().shutdown();
                 })
                 .await;
                 result
             }
-            .boxed(),
+            .boxed_local(),
         )
     }
 }
@@ -1270,11 +1266,12 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 
 #[cfg(test)]
 mod test {
-    use opentelemetry_api::metrics::MeterProvider;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::KeyValue;
 
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
+    use crate::metrics::meter_provider_internal;
     use crate::metrics::FutureMetricsExt;
 
     #[test]
@@ -1413,16 +1410,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_i64_histogram() {
-        async {
-            i64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram_sum!("test", 1, "attr" = "val");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
     async fn test_f64_histogram() {
         async {
             f64_histogram!("test", "test description", 1.0, "attr" = "val");
@@ -1492,28 +1479,28 @@ mod test {
         }
 
         // Callsite hasn't been used yet, so there should be no metrics
-        assert_eq!(meter_provider().registered_instruments(), 0);
+        assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Call the metrics, it will be registered
         test();
         assert_counter!("test", 1, "attr" = "val");
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Call the metrics again, but the second call will not register a new metric because it will have be retrieved from the static
         test();
         assert_counter!("test", 2, "attr" = "val");
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Force invalidation of instruments
-        meter_provider().set(MeterProviderType::PublicPrometheus, None);
-        assert_eq!(meter_provider().registered_instruments(), 0);
+        meter_provider_internal().set(MeterProviderType::PublicPrometheus, None);
+        assert_eq!(meter_provider_internal().registered_instruments(), 0);
 
         // Slow path
         test();
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
 
         // Fast path
         test();
-        assert_eq!(meter_provider().registered_instruments(), 1);
+        assert_eq!(meter_provider_internal().registered_instruments(), 1);
     }
 }

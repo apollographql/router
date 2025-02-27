@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -59,7 +58,6 @@ use tower::ServiceExt;
 pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
 use crate::configuration::cors::Cors;
-use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
@@ -67,34 +65,23 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
-use crate::plugin::test::MockSubgraph;
-use crate::query_planner::QueryPlannerService;
-use crate::router_factory::create_plugins;
+use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::services::execution;
-use crate::services::layers::persisted_queries::PersistedQueryLayer;
-use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::service::RouterCreator;
-use crate::services::supergraph;
-use crate::services::HasSchema;
-use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::ApolloRouterError;
 use crate::Configuration;
-use crate::Context;
 use crate::ListenAddr;
 use crate::TestHarness;
 
@@ -2276,65 +2263,10 @@ async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> S
 }
 
 #[tokio::test]
-async fn test_health_check() {
-    let router_service = router::service::from_supergraph_mock_callback(|_| {
-        Ok(supergraph::Response::builder()
-            .data(json!({ "__typename": "Query"}))
-            .context(Context::new())
-            .build()
-            .unwrap())
-    })
-    .await;
-
-    let (server, client) = init(router_service).await;
-    let url = format!(
-        "{}/health",
-        server.graphql_listen_address().as_ref().unwrap()
-    );
-
-    let response = client.get(url).send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json!({"status": "UP" }),
-        response.json::<serde_json::Value>().await.unwrap()
-    )
-}
-
-#[tokio::test]
-async fn test_health_check_custom_listener() {
-    let conf = Configuration::fake_builder()
-        .health_check(
-            HealthCheck::fake_builder()
-                .listen(ListenAddr::SocketAddr("127.0.0.1:4012".parse().unwrap()))
-                .enabled(true)
-                .build(),
-        )
-        .build()
-        .unwrap();
-
-    // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(
-        router::service::empty().await,
-        Arc::new(conf),
-        MultiMap::new(),
-    )
-    .await
-    .unwrap();
-    let url = "http://localhost:4012/health";
-
-    let response = client.get(url).send().await.unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        json!({"status": "UP" }),
-        response.json::<serde_json::Value>().await.unwrap()
-    )
-}
-
-#[tokio::test]
 async fn test_sneaky_supergraph_and_health_check_configuration() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
                 .enabled(true)
                 .build(),
@@ -2342,10 +2274,33 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
         .build()
         .unwrap();
+
+    // Manually add the endpoints, since they are only created if the health-check plugin is
+    // enabled and that won't happen in init_with_config()
+    let endpoint = service_fn(|req: router::Request| async move {
+        Ok::<_, BoxError>(
+            http::Response::builder()
+                .status(StatusCode::OK)
+                .body(format!(
+                    "{} + {}",
+                    req.router_request.method(),
+                    req.router_request.uri().path()
+                ))
+                .unwrap()
+                .into(),
+        )
+    })
+    .boxed_clone();
+    let mut web_endpoints = MultiMap::new();
+    web_endpoints.insert(
+        ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()),
+        Endpoint::from_router_service("/health".to_string(), endpoint.boxed()),
+    );
+
     let error = init_with_config(
         router::service::empty().await,
         Arc::new(conf),
-        MultiMap::new(),
+        web_endpoints,
     )
     .await
     .unwrap_err();
@@ -2360,7 +2315,7 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
 async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:0".parse().unwrap()))
                 .enabled(false)
                 .build(),
@@ -2381,7 +2336,7 @@ async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
 async fn test_supergraph_and_health_check_same_port_different_listener() {
     let conf = Configuration::fake_builder()
         .health_check(
-            HealthCheck::fake_builder()
+            HealthCheck::builder()
                 .listen(ListenAddr::SocketAddr("127.0.0.1:4013".parse().unwrap()))
                 .enabled(true)
                 .build(),
@@ -2404,116 +2359,5 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
     assert_eq!(
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
         error.to_string()
-    );
-}
-
-#[tokio::test]
-async fn test_supergraph_timeout() {
-    let config = serde_json::json!({
-        "supergraph": {
-            "listen": "127.0.0.1:0",
-            "defer_support": false,
-        },
-        "traffic_shaping": {
-            "router": {
-                "timeout": "1ns"
-            }
-        },
-    });
-
-    let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
-
-    let schema = include_str!("..//testdata/minimal_supergraph.graphql");
-    let schema = Arc::new(Schema::parse(schema, &conf).unwrap());
-    let planner = QueryPlannerService::new(schema.clone(), conf.clone())
-        .await
-        .unwrap();
-
-    // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
-    // because we need the plugins to apply on the supergraph
-    let subgraph_schemas = Arc::new(
-        planner
-            .subgraph_schemas()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.schema.clone()))
-            .collect(),
-    );
-    let mut plugins = create_plugins(&conf, &schema, subgraph_schemas, None, None)
-        .await
-        .unwrap();
-
-    plugins.insert("delay".into(), Box::new(Delay));
-
-    struct Delay;
-
-    #[async_trait::async_trait]
-    impl crate::plugin::Plugin for Delay {
-        type Config = ();
-
-        async fn new(_: crate::plugin::PluginInit<()>) -> Result<Self, BoxError> {
-            Ok(Self)
-        }
-
-        fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
-            service
-                .map_future(|fut| async {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                    fut.await
-                })
-                .boxed()
-        }
-    }
-
-    let builder = PluggableSupergraphServiceBuilder::new(planner)
-        .with_configuration(conf.clone())
-        .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
-
-    let supergraph_creator = builder
-        .with_plugins(Arc::new(plugins))
-        .build()
-        .await
-        .unwrap();
-
-    let service = RouterCreator::new(
-        QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&conf)).await,
-        Arc::new(PersistedQueryLayer::new(&conf).await.unwrap()),
-        Arc::new(supergraph_creator),
-        conf.clone(),
-    )
-    .await
-    .unwrap()
-    .make();
-
-    // keep the server handle around otherwise it will immediately shutdown
-    let (server, client) = init_with_config(service, conf.clone(), MultiMap::new())
-        .await
-        .unwrap();
-    let url = server
-        .graphql_listen_address()
-        .as_ref()
-        .unwrap()
-        .to_string();
-
-    let response = client
-        .post(url)
-        .body(r#"{ "query": "{ me }" }"#)
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
-
-    let body = response.bytes().await.unwrap();
-    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        body,
-        json!({
-             "errors": [{
-                 "message": "Request timed out",
-                 "extensions": {
-                     "code": "REQUEST_TIMEOUT"
-                 }
-             }]
-        })
     );
 }

@@ -1,6 +1,0 @@
-description: supergraph.experimental_reuse_query_fragments is deprecated
-actions:
-  - type: log
-    level: warn
-    path: supergraph.experimental_reuse_query_fragments
-    log: "'supergraph.experimental_reuse_query_fragments' is not supported by the native query planner and this configuration option will be removed in the next release. Use 'supergraph.generate_query_fragments' instead."

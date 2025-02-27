@@ -1,6 +1,7 @@
 //! Externalization plugin
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -32,9 +33,11 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::configuration::shared::Client;
+use crate::context::context_key_from_deprecated;
+use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -55,6 +58,7 @@ use crate::services::hickory_dns_connector::AsyncHyperResolver;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
+use crate::Context;
 
 #[cfg(test)]
 mod test;
@@ -251,7 +255,7 @@ pub(super) struct RouterRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -272,7 +276,7 @@ pub(super) struct RouterResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the SDL
@@ -290,7 +294,7 @@ pub(super) struct SubgraphRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the subgraph URI
@@ -313,7 +317,7 @@ pub(super) struct SubgraphResponseConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
-    pub(super) context: bool,
+    pub(super) context: ContextConf,
     /// Send the body
     pub(super) body: bool,
     /// Send the service name
@@ -348,6 +352,65 @@ struct Conf {
     /// The subgraph stage request/response configuration
     #[serde(default)]
     subgraph: SubgraphStages,
+}
+
+/// Configures the context
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields, untagged)]
+pub(super) enum ContextConf {
+    /// Deprecated configuration using a boolean
+    Deprecated(bool),
+    NewContextConf(NewContextConf),
+}
+
+impl Default for ContextConf {
+    fn default() -> Self {
+        Self::Deprecated(false)
+    }
+}
+
+/// Configures the context
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(super) enum NewContextConf {
+    /// Send all context keys to coprocessor
+    All,
+    /// Send all context keys using deprecated names (from router 1.x) to coprocessor
+    Deprecated,
+    /// Only send the list of context keys to coprocessor
+    Selective(Arc<HashSet<String>>),
+}
+
+impl ContextConf {
+    pub(crate) fn get_context(&self, ctx: &Context) -> Option<Context> {
+        match self {
+            Self::NewContextConf(NewContextConf::All) => Some(ctx.clone()),
+            Self::NewContextConf(NewContextConf::Deprecated) | Self::Deprecated(true) => {
+                let mut new_ctx = Context::from_iter(ctx.iter().map(|elt| {
+                    (
+                        context_key_to_deprecated(elt.key().clone()),
+                        elt.value().clone(),
+                    )
+                }));
+                new_ctx.id = ctx.id.clone();
+
+                Some(new_ctx)
+            }
+            Self::NewContextConf(NewContextConf::Selective(context_keys)) => {
+                let mut new_ctx = Context::from_iter(ctx.iter().filter_map(|elt| {
+                    if context_keys.contains(elt.key()) {
+                        Some((elt.key().clone(), elt.value().clone()))
+                    } else {
+                        None
+                    }
+                }));
+                new_ctx.id = ctx.id.clone();
+
+                Some(new_ctx)
+            }
+            Self::Deprecated(false) => None,
+        }
+    }
 }
 
 fn default_timeout() -> Duration {
@@ -397,7 +460,7 @@ impl RouterStage {
             let http_client = http_client.clone();
             let sdl = sdl.clone();
 
-            OneShotAsyncCheckpointLayer::new(move |request: router::Request| {
+            AsyncCheckpointLayer::new(move |request: router::Request| {
                 let request_config = request_config.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let http_client = http_client.clone();
@@ -485,6 +548,7 @@ impl RouterStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -534,7 +598,7 @@ impl SubgraphStage {
             let http_client = http_client.clone();
             let coprocessor_url = coprocessor_url.clone();
             let service_name = service_name.clone();
-            OneShotAsyncCheckpointLayer::new(move |request: subgraph::Request| {
+            AsyncCheckpointLayer::new(move |request: subgraph::Request| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let service_name = service_name.clone();
@@ -623,6 +687,7 @@ impl SubgraphStage {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
+            .buffered() // XXX: Added during backpressure fixing
             .service(service)
             .boxed()
     }
@@ -672,7 +737,7 @@ where
 
     let path_to_send = request_config.path.then(|| parts.uri.to_string());
 
-    let context_to_send = request_config.context.then(|| request.context.clone());
+    let context_to_send = request_config.context.get_context(&request.context);
     let sdl_to_send = request_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -688,11 +753,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
     let duration = start.elapsed();
-    drop(guard);
     record_coprocessor_duration(PipelineStep::RouterRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
@@ -753,7 +816,12 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            for (key, value) in context.try_into_iter()? {
+            for (mut key, value) in context.try_into_iter()? {
+                if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                    &request_config.context
+                {
+                    key = context_key_from_deprecated(key);
+                }
                 res.context.upsert_json_value(key, move |_current| value);
             }
         }
@@ -773,7 +841,11 @@ where
     request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -843,7 +915,7 @@ where
         .then(|| std::str::from_utf8(&bytes).map(|s| s.to_string()))
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-    let context_to_send = response_config.context.then(|| response.context.clone());
+    let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
 
     let payload = Externalizable::router_builder()
@@ -858,11 +930,9 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
     let duration = start.elapsed();
-    drop(guard);
     record_coprocessor_duration(PipelineStep::RouterResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
@@ -887,7 +957,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             response
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -914,6 +989,7 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
+            let context_conf = response_config.context.clone();
 
             async move {
                 let bytes = deferred_response.to_vec();
@@ -921,9 +997,8 @@ where
                     .body
                     .then(|| String::from_utf8(bytes.clone()))
                     .transpose()?;
-                let context_to_send = response_config
-                    .context
-                    .then(|| generator_map_context.clone());
+                let generator_map_context = generator_map_context.clone();
+                let context_to_send = context_conf.get_context(&generator_map_context);
 
                 // Note: We deliberately DO NOT send headers or status_code even if the user has
                 // requested them. That's because they are meaningless on a deferred response and
@@ -938,11 +1013,9 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                drop(guard);
                 tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
@@ -958,7 +1031,12 @@ where
                 };
 
                 if let Some(context) = co_processor_output.context {
-                    for (key, value) in context.try_into_iter()? {
+                    for (mut key, value) in context.try_into_iter()? {
+                        if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                            &context_conf
+                        {
+                            key = context_key_from_deprecated(key);
+                        }
                         generator_map_context.upsert_json_value(key, move |_current| value);
                     }
                 }
@@ -1022,7 +1100,7 @@ where
         .body
         .then(|| serde_json::to_value(&body))
         .transpose()?;
-    let context_to_send = request_config.context.then(|| request.context.clone());
+    let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());
     let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
@@ -1044,11 +1122,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let guard = request.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
     let duration = start.elapsed();
-    drop(guard);
     record_coprocessor_duration(PipelineStep::SubgraphRequest, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
@@ -1095,12 +1171,17 @@ where
             let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
-                subgraph_name: Some(subgraph_name),
+                subgraph_name,
                 id: request.id,
             };
 
             if let Some(context) = co_processor_output.context {
-                for (key, value) in context.try_into_iter()? {
+                for (mut key, value) in context.try_into_iter()? {
+                    if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                        &request_config.context
+                    {
+                        key = context_key_from_deprecated(key);
+                    }
                     subgraph_response
                         .context
                         .upsert_json_value(key, move |_current| value);
@@ -1124,7 +1205,11 @@ where
     request.subgraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) = &request_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             request
                 .context
                 .upsert_json_value(key, move |_current| value);
@@ -1182,7 +1267,7 @@ where
         .body
         .then(|| serde_json::to_value(&body))
         .transpose()?;
-    let context_to_send = response_config.context.then(|| response.context.clone());
+    let context_to_send = response_config.context.get_context(&response.context);
     let service_name = response_config.service_name.then_some(service_name);
     let subgraph_request_id = response_config
         .subgraph_request_id
@@ -1200,11 +1285,9 @@ where
         .build();
 
     tracing::debug!(?payload, "externalized output");
-    let guard = response.context.enter_active_request();
     let start = Instant::now();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
     let duration = start.elapsed();
-    drop(guard);
     record_coprocessor_duration(PipelineStep::SubgraphResponse, duration);
 
     tracing::debug!(?co_processor_result, "co-processor returned");
@@ -1227,7 +1310,12 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        for (key, value) in context.try_into_iter()? {
+        for (mut key, value) in context.try_into_iter()? {
+            if let ContextConf::NewContextConf(NewContextConf::Deprecated) =
+                &response_config.context
+            {
+                key = context_key_from_deprecated(key);
+            }
             response
                 .context
                 .upsert_json_value(key, move |_current| value);

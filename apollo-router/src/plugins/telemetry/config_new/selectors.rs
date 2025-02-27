@@ -1,6 +1,5 @@
-use access_json::JSONQuery;
 use derivative::Derivative;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::path::JsonPathInst;
@@ -11,7 +10,6 @@ use super::attributes::SubgraphRequestResendCountKey;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
@@ -457,19 +455,6 @@ pub(crate) enum SubgraphSelector {
     SubgraphQueryVariable {
         /// The name of a subgraph query variable.
         subgraph_query_variable: String,
-        #[serde(skip)]
-        #[allow(dead_code)]
-        /// Optional redaction pattern.
-        redact: Option<String>,
-        /// Optional default value.
-        default: Option<AttributeValue>,
-    },
-    /// Deprecated, use SubgraphResponseData and SubgraphResponseError instead
-    SubgraphResponseBody {
-        /// The subgraph response body json path.
-        #[schemars(with = "String")]
-        #[serde(deserialize_with = "deserialize_json_query")]
-        subgraph_response_body: JSONQuery,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -1348,10 +1333,11 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => request
-                .subgraph_name
-                .clone()
-                .map(opentelemetry::Value::from),
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => {
+                Some(request.subgraph_name.clone().into())
+            }
+            // .clone()
+            // .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphOperationKind { .. } => request
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -1531,21 +1517,9 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
-            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => response
-                .subgraph_name
-                .clone()
-                .map(opentelemetry::Value::from),
-            SubgraphSelector::SubgraphResponseBody {
-                subgraph_response_body,
-                default,
-                ..
-            } => subgraph_response_body
-                .execute(response.response.body())
-                .ok()
-                .flatten()
-                .as_ref()
-                .and_then(|v| v.maybe_to_otel_value())
-                .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => {
+                Some(response.subgraph_name.clone().into())
+            }
             SubgraphSelector::SubgraphResponseData {
                 subgraph_response_data,
                 default,
@@ -1601,7 +1575,7 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::Cache { cache, entity_type } => {
                 let cache_info: CacheSubgraph = response
                     .context
-                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()?))
+                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()))
                     .ok()
                     .flatten()?;
 
@@ -1722,7 +1696,6 @@ impl Selector for SubgraphSelector {
                     | SubgraphSelector::SupergraphOperationKind { .. }
                     | SubgraphSelector::SupergraphOperationName { .. }
                     | SubgraphSelector::SubgraphName { .. }
-                    | SubgraphSelector::SubgraphResponseBody { .. }
                     | SubgraphSelector::SubgraphResponseData { .. }
                     | SubgraphSelector::SubgraphResponseErrors { .. }
                     | SubgraphSelector::ResponseContext { .. }
@@ -1766,7 +1739,7 @@ mod test {
     use opentelemetry::trace::TraceState;
     use opentelemetry::Context;
     use opentelemetry::KeyValue;
-    use opentelemetry_api::StringValue;
+    use opentelemetry::StringValue;
     use serde_json::json;
     use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
@@ -3260,7 +3233,7 @@ mod test {
         let context = crate::Context::new();
         context
             .extensions()
-            .with_lock(|mut lock| lock.insert::<OperationLimits<u32>>(limits));
+            .with_lock(|lock| lock.insert::<OperationLimits<u32>>(limits));
         (selector, context)
     }
 

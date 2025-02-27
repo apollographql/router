@@ -98,7 +98,6 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         context: Context,
@@ -121,7 +120,6 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a fake Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         context: Option<Context>,
@@ -144,6 +142,8 @@ impl Request {
 
 use displaydoc::Display;
 use thiserror::Error;
+
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 
 #[derive(Error, Display, Debug)]
 pub enum ParseError {
@@ -214,21 +214,9 @@ impl Response {
         self.response.body_mut().into_data_stream().next().await
     }
 
-    #[deprecated]
-    pub fn map<F>(self, f: F) -> Response
-    where
-        F: FnOnce(Body) -> Body,
-    {
-        Response {
-            context: self.context,
-            response: self.response.map(f),
-        }
-    }
-
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -241,6 +229,9 @@ impl Response {
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         context: Context,
     ) -> Result<Self, BoxError> {
+        if !errors.is_empty() {
+            context.insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
+        }
         // Build a response
         let b = graphql::Response::builder()
             .and_label(label)
@@ -292,7 +283,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,
@@ -379,7 +369,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a fake Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,

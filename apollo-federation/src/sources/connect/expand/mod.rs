@@ -1,12 +1,15 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use apollo_compiler::validation::Valid;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
+use crate::ApiSchemaOptions;
+use crate::Supergraph;
+use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
 use crate::link::Link;
 use crate::merge::merge_subgraphs;
@@ -15,9 +18,6 @@ use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::Connector;
 use crate::subgraph::Subgraph;
 use crate::subgraph::ValidSubgraph;
-use crate::ApiSchemaOptions;
-use crate::Supergraph;
-use crate::ValidFederationSubgraph;
 
 mod carryover;
 pub(crate) mod visitors;
@@ -174,6 +174,8 @@ fn split_subgraph(
 }
 
 mod helpers {
+    use apollo_compiler::Name;
+    use apollo_compiler::Node;
     use apollo_compiler::ast;
     use apollo_compiler::ast::Argument;
     use apollo_compiler::ast::Directive;
@@ -188,28 +190,27 @@ mod helpers {
     use apollo_compiler::schema::EnumType;
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::ScalarType;
-    use apollo_compiler::Name;
-    use apollo_compiler::Node;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
 
     use super::filter_directives;
-    use super::visitors::try_insert;
-    use super::visitors::try_pre_insert;
     use super::visitors::GroupVisitor;
     use super::visitors::SchemaVisitor;
+    use super::visitors::try_insert;
+    use super::visitors::try_pre_insert;
+    use crate::ValidFederationSubgraph;
     use crate::error::FederationError;
     use crate::internal_error;
-    use crate::link::spec::Identity;
     use crate::link::Link;
+    use crate::link::spec::Identity;
+    use crate::schema::FederationSchema;
+    use crate::schema::ValidFederationSchema;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::position::SchemaRootDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
-    use crate::schema::FederationSchema;
-    use crate::schema::ValidFederationSchema;
     use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
@@ -219,7 +220,6 @@ mod helpers {
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
     use crate::supergraph::new_empty_fed_2_subgraph_schema;
-    use crate::ValidFederationSubgraph;
 
     /// A helper struct for expanding a subgraph into one per connect directive.
     pub(super) struct Expander<'a> {
@@ -355,19 +355,19 @@ mod helpers {
                     return Err(FederationError::internal(format!(
                         "connect directives not yet supported on interfaces: found on {}",
                         interface.type_name
-                    )))
+                    )));
                 }
                 TypeDefinitionPosition::Union(union) => {
                     return Err(FederationError::internal(format!(
                         "connect directives not yet supported on union: found on {}",
                         union.type_name
-                    )))
+                    )));
                 }
                 TypeDefinitionPosition::InputObject(input) => {
                     return Err(FederationError::internal(format!(
                         "connect directives not yet supported on inputs: found on {}",
                         input.type_name
-                    )))
+                    )));
                 }
             };
 
@@ -496,7 +496,7 @@ mod helpers {
                     return Err(FederationError::internal(format!(
                         "connector output types currently only support object types: found {}",
                         other.type_name()
-                    )))
+                    )));
                 }
             };
 
@@ -575,7 +575,7 @@ mod helpers {
                 _ => {
                     return Err(FederationError::internal(
                         "keys cannot be added to scalars, unions, enums, or input objects",
-                    ))
+                    ));
                 }
             }?;
 

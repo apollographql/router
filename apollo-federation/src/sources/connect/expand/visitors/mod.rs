@@ -8,8 +8,8 @@ mod selection;
 
 use std::collections::VecDeque;
 
-use apollo_compiler::ast::Directive;
 use apollo_compiler::Name;
+use apollo_compiler::ast::Directive;
 use indexmap::IndexSet;
 
 use crate::schema::FederationSchema;
@@ -194,11 +194,11 @@ mod tests {
     use itertools::Itertools;
 
     use crate::error::FederationError;
+    use crate::sources::connect::JSONSelection;
+    use crate::sources::connect::SubSelection;
     use crate::sources::connect::expand::visitors::FieldVisitor;
     use crate::sources::connect::expand::visitors::GroupVisitor;
     use crate::sources::connect::json_selection::NamedSelection;
-    use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::SubSelection;
 
     /// Visitor for tests.
     ///

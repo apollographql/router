@@ -37,7 +37,15 @@ The table below shows which version of federation each router release is compile
     <tbody>
     <tr>
         <td>
-            v1.57.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+            v2.0.0 and later (<a href="https://github.com/apollographql/router/releases">see latest releases</a>)
+        </td>
+        <td>
+            2.9.3
+        </td>
+    </tr>
+    <tr>
+        <td>
+            v1.57.0 - v1.60.0
         </td>
         <td>
             2.9.3
@@ -415,6 +423,9 @@ The table below shows which version of federation each router release is compile
 
 ## Federation 1 support
 
-Federation 2.x composition is backward compatible with Federation 1.x subgraph schemas, so you can use the router with any valid Federation 1.x supergraph.
+Only Apollo Router Core and GraphOS Router v1.59 and earlier support Federation v1.x supergraphs. The following _don't_ support Federation v1.x:
 
-If your Federation 1.x supergraph _doesn't_ work with the router, see possible causes in [Backward compatibility in Federation 2](/federation/federation-2/backward-compatibility/).
+- Router v1.60 and later
+- Router v2.0 and later
+
+[Learn how to upgrade from Federation version 1 to 2.](/graphos/reference/migration/to-federation-version-2)

@@ -84,10 +84,9 @@ impl From<[u8; 16]> for TraceId {
 // live with...
 #[cfg(test)]
 mod test {
-    use std::sync::Mutex;
-
     use once_cell::sync::Lazy;
     use opentelemetry::trace::TracerProvider;
+    use parking_lot::Mutex;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::Registry;
 
@@ -99,9 +98,6 @@ mod test {
     // If we set test-threads=1, then this avoids the problem but means all our tests will run slowly.
     // So: to avoid this problem, we have a mutex lock which just exists to serialize access to the
     // global resources.
-    // Note: If a test fails, then it will poison the lock, so when locking we attempt to recover
-    // from poisoned mutex and continue anyway. This is safe to do, since the lock is effectively
-    // "read-only" and not protecting shared state but synchronising code access to global state.
     static TRACING_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
@@ -121,9 +117,7 @@ mod test {
 
     #[tokio::test]
     async fn it_returns_valid_trace_id() {
-        let _guard = TRACING_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
 
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
@@ -133,7 +127,7 @@ mod test {
                     .build(),
             )
             .build();
-        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+        let tracer = provider.tracer_builder("noop").build();
 
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
@@ -149,16 +143,14 @@ mod test {
 
     #[test]
     fn it_correctly_compares_valid_and_invalid_trace_id() {
-        let _guard = TRACING_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TRACING_LOCK.lock();
         let my_id = TraceId::maybe_new();
         assert!(my_id.is_none());
         // Create a tracing layer with the configured tracer
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+        let tracer = provider.tracer_builder("noop").build();
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`
@@ -176,14 +168,12 @@ mod test {
 
     #[test]
     fn it_correctly_compares_valid_and_valid_trace_id() {
-        let _guard = TRACING_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guard = TRACING_LOCK.lock();
         // Create a tracing layer with the configured tracer
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
             .build();
-        let tracer = provider.versioned_tracer("noop", None::<String>, None::<String>, None);
+        let tracer = provider.tracer_builder("noop").build();
         let telemetry = otel::layer().force_sampling().with_tracer(tracer);
         // Use the tracing subscriber `Registry`, or any other subscriber
         // that impls `LookupSpan`

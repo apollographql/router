@@ -1,10 +1,9 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::schema::Schema;
-use apollo_compiler::ExecutableDocument;
 
-use super::normalize_operation;
 use super::Field;
 use super::Name;
 use super::NamedFragments;
@@ -12,11 +11,12 @@ use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
+use super::normalize_operation;
 use crate::error::FederationError;
 use crate::query_graph::graph_path::OpPathElement;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 
 macro_rules! assert_normalized {
     ($schema_doc: expr, $query: expr, @$expected: literal) => {{

@@ -276,7 +276,7 @@ impl Plugin for Subscription {
         ServiceBuilder::new()
             .checkpoint(move |req: subgraph::Request| {
                 if req.operation_kind == OperationKind::Subscription && !enabled {
-                    Ok(ControlFlow::Break(subgraph::Response::builder().context(req.context).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build()))
+                    Ok(ControlFlow::Break(subgraph::Response::builder().context(req.context).subgraph_name(req.subgraph_name).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build()))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }
@@ -732,6 +732,7 @@ mod tests {
     use crate::services::router::body;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::uplink::license_enforcement::LicenseState;
     use crate::Notify;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -900,6 +901,7 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
+                    .license(LicenseState::default())
                     .build(),
             )
             .await
@@ -989,6 +991,7 @@ mod tests {
                         .unwrap(),
                     )
                     .notify(notify.clone())
+                    .license(LicenseState::default())
                     .build(),
             )
             .await

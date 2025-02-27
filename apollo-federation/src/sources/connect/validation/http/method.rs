@@ -1,27 +1,27 @@
-use apollo_compiler::ast::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
 
 use super::url::validate_template;
+use crate::sources::connect::URLTemplate;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
-use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
-use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
-use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::URLTemplate;
+use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
+use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
+use crate::sources::connect::validation::graphql::SchemaInfo;
 
 pub(crate) fn validate<'schema>(
     http_arg: &'schema [(Name, Node<Value>)],
     coordinate: ConnectHTTPCoordinate<'schema>,
     http_arg_node: &Node<Value>,
-    expression_context: &expression::Context,
+    schema: &SchemaInfo<'schema>,
 ) -> Result<(URLTemplate, HttpMethodCoordinate<'schema>), Vec<Message>> {
-    let source_map = &expression_context.schema.sources;
+    let source_map = &schema.sources;
     let mut methods = http_arg
         .iter()
         .filter(|(method, _)| {
@@ -66,5 +66,5 @@ pub(crate) fn validate<'schema>(
         node: method_value,
     };
 
-    validate_template(coordinate, expression_context).map(|template| (template, coordinate))
+    validate_template(coordinate, schema).map(|template| (template, coordinate))
 }

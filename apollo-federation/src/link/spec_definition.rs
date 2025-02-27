@@ -1,18 +1,18 @@
-use std::collections::btree_map::Keys;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Keys;
 use std::sync::Arc;
 
-use apollo_compiler::schema::DirectiveDefinition;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::ExtendedType;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::link::Link;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
-use crate::link::Link;
 use crate::schema::FederationSchema;
 
 pub(crate) trait SpecDefinition {

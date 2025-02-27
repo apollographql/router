@@ -1,6 +1,8 @@
 use nom::bytes::complete::tag;
 use nom::combinator::map;
 use nom_locate::LocatedSpan;
+use shape::location::Location;
+use shape::location::SourceId;
 
 use super::ParseResult;
 
@@ -30,6 +32,10 @@ pub(super) fn new_span(input: &str) -> Span {
 // field, so they can implement Ranged without the WithRange<T> wrapper.
 pub(crate) trait Ranged {
     fn range(&self) -> OffsetRange;
+
+    fn shape_location(&self, source_id: &SourceId) -> Option<Location> {
+        self.range().map(|range| source_id.location(range.clone()))
+    }
 }
 
 // The ranges produced by the JSONSelection parser are pairs of character
@@ -131,12 +137,9 @@ pub(super) fn merge_ranges(left: OffsetRange, right: OffsetRange) -> OffsetRange
 
 // Parser combinator that matches a &str and returns a WithRange<&str> with the
 // matched string and the range of the match.
-pub(super) fn ranged_span<'a, 'b>(
+pub(super) fn ranged_span<'a, 'b: 'a>(
     s: &'a str,
-) -> impl FnMut(Span<'b>) -> ParseResult<'b, WithRange<&'b str>> + 'a
-where
-    'b: 'a,
-{
+) -> impl FnMut(Span<'b>) -> ParseResult<'b, WithRange<&'b str>> {
     map(tag(s), |t: Span<'b>| {
         let start = t.location_offset();
         let range = Some(start..start + s.len());

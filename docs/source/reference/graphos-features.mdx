@@ -1,6 +1,6 @@
 ---
 title: GraphOS Router Features
-subtitle: Use router features enabled by GraphOS and the Enterprise plan
+subtitle: Use router features enabled by GraphOS plans
 description: Unlock Enterprise features for the GraphOS Router by connecting it to Apollo GraphOS.
 redirectFrom: 
   - /router/enterprise-features
@@ -10,32 +10,36 @@ A router connected to GraphOS, whether cloud-hosted or self-hosted, is called a 
 
 ## GraphOS Router features
 
-<GraphOSRouterFeatures />
+The GraphOS Router supports a collection of premium features specific to GraphOS. These features include:
+
+- Real-time updates via [GraphQL subscriptions](/graphos/routing/operations/subscriptions)
+- Improved performance with [query batching](/graphos/routing/performance/query-batching)
+- Authentication of inbound requests via [JSON Web Token (JWT)](/graphos/routing/security/jwt)
+- [Authorization of specific fields and types](/graphos/routing/security/authorization) through the [`@requiresScopes`](/graphos/routing/security/authorization#requiresscopes), [`@authenticated`](/graphos/routing/security/authorization#authenticated), and [`@policy`](/graphos/routing/security/authorization#policy) directives
+- Incremental migration between subgraphs through [the progressive `@override` directive](/graphos/schema-design/federated-schemas/entities/migrate-fields#incremental-migration-with-progressive-override).
+- Redis-backed [distributed caching of query plans and persisted queries](/graphos/routing/performance/caching/distributed)
+- Redis-backed [entity caching of subgraph responses](/graphos/routing/performance/caching/entity)
+- Custom request handling in any language via [external coprocessing](/graphos/routing/customization/coprocessor)
+- Mitigation of potentially malicious requests via [request limits](/graphos/routing/security/request-limits),[demand control](/graphos/routing/security/request-limits), and [safelisting](/graphos/routing/security/persisted-queries)
+- Custom instrumentation and telemetry, including [custom attributes for spans](/graphos/reference/router/telemetry/instrumentation/spans#attributes).
+- An [offline license](/graphos/reference/router/graphos-features#the-enterprise-license) that enables running the router with GraphOS features when disconnected from the internet.
+- [Using contexts to share data](/graphos/schema-design/federated-schemas/entities/use-contexts) with the `@context` and `@fromContext` directives
 
 For details on these features, see [this blog post](https://blog.apollographql.com/apollo-router-v1-12-improved-router-security-performance-and-extensibility) in addition to the documentation links above.
 
-## Enterprise plan features
+### Enabling plan-specific features
 
-<Tip>
+To enable support for plan-specific features in GraphOS Router:
 
-Try the Enterprise features of GraphOS Router with a free [GraphOS trial](https://www.apollographql.com/pricing).
-
-</Tip>
-
-To enable support for Enterprise features in GraphOS Router:
-
-- Your organization must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 - You must run GraphOS Router v1.12 or later. [Download the latest version.](/graphos/reference/router/self-hosted-install#1-download-and-extract-the-router-binary)
-    - Certain Enterprise features might require a later router version. See a particular feature's documentation for details.
+    - Certain features might require a later router version. See a particular feature's documentation for details.
 - Your router instances must connect to GraphOS with a **graph API key** and **graph ref** associated with your organization.
     - You connect your router to GraphOS by setting [these environment variables](/graphos/reference/router/configuration#environment-variables) when starting the router.
-    - If your router _already_ connects to your GraphOS Enterprise organization, no further action is required.
+    - If your router _already_ connects to your GraphOS organization, no further action is required.
 
-After enabling support, you can begin using all [Enterprise features](#graphos-router-features).
+### The GraphOS license
 
-### The Enterprise license
-
-Whenever your router instance starts up and connects to GraphOS, it fetches a **license**, which is the credential that authorizes its use of Enterprise features:
+Whenever your router instance starts up and connects to GraphOS, it fetches a **license**, which is the credential that authorizes its use of GraphOS features:
 
 ```mermaid
 flowchart LR;
@@ -56,19 +60,25 @@ A router instance's license is valid for the duration of your organization's cur
 
 <MinVersion version="1.37.0">
 
-### Offline Enterprise license
+### Offline license
 
 </MinVersion>
 
 <Tip>
 
-Offline Enterprise license support is available on an as-needed basis. Send a request to your Apollo contact to enable it for your GraphOS Studio organization.
+Offline license support is available on an as-needed basis to Enterprise organizations. Send a request to your Apollo contact to enable it for your GraphOS Studio organization.
 
 </Tip>
 
 Running your GraphOS Router fleet while fully connected to GraphOS is the best choice for  most Apollo users. However, some scenarios can prevent your routers from connecting to GraphOS for an extended period, ranging from disasters that break connectivity to isolated sites operating with air-gapped networks. If you need to restart or rapidly scale your entire router fleet, but you're unable to communicate with Apollo Uplink, new router instances won't be able to serve traffic.
 
-To support long-term disconnection scenarios, GraphOS supports **offline Enterprise licenses** for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. The functionality available with an offline license is much like being fully connected to GraphOS, including the GraphOS [schema delivery pipeline](/graphos/platform/schema-management#schema-delivery) for supergraph CI (schema checks, linting, contracts, etc.).
+To support long-term disconnection scenarios, GraphOS supports **offline licenses** for the GraphOS Router. An offline license enables routers to start and serve traffic without a persistent connection to GraphOS. Instead of fetching its supergraph schema from Apollo Uplink, an offline router gets its supergraph schema from a local supergraph schema file.
+
+<Note>
+
+You can use the GraphOS [schema delivery pipeline](/graphos/platform/schema-management#schema-delivery) for supergraph CI (schema checks, linting, contracts, etc.) in an online environment to manage the local supergraph schema file provided to your offline router.
+
+</Note>
 
 An offline license can be retrieved from GraphOS with the [`rover license fetch`](/rover/commands/license) command.
 
@@ -76,7 +86,7 @@ With an offline license, a router can either be fully disconnected from GraphOS 
 
 <Note>
 
-A router using an offline license requires [the use of local manifests](/graphos/routing/security/persisted-queries#experimental_local_manifests) when using [safelisting with persisted queries](/graphos/routing/security/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
+A router using an offline license requires [the use of local manifests](/graphos/routing/security/persisted-queries#local_manifests) when using [safelisting with persisted queries](/graphos/routing/security/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
 
 </Note>
 
@@ -84,7 +94,7 @@ An offline license is valid for the lesser of the duration of your contract with
 
 #### Set up offline license for the GraphOS Router
 
-Follow these steps to configure an GraphOS Router to use an offline Enterprise license:
+Follow these steps to configure an GraphOS Router to use an offline license:
 
 1. Fetch an offline license by running [`rover license fetch`](/rover/commands/license/#license-fetch) with the ID of the graph from which you want to fetch a license:
 
@@ -119,13 +129,13 @@ Follow these steps to configure an GraphOS Router to use an offline Enterprise l
 
 You might also need to run an GraphOS Router instance on your local machine, such as with the [`rover dev`](/graphos/graphs/local-development) command. It's likely that your local router instance doesn't connect to GraphOS to get its supergraph schema from Uplink. For example, you can run `rover dev` to perform composition locally.
 
-**You _can_ use Enterprise router features with a locally composed supergraph schema!** To do so, your router must still connect to GraphOS to obtain its [license](#the-enterprise-license).
+**You _can_ use GraphOS Router features with a locally composed supergraph schema!** To do so, your router must still connect to GraphOS to obtain its [license](#the-graphos-license).
 
 #### Set up local development
 
 These steps work both for running the router executable directly (`./router`) and for running it via `rover dev`:
 
-1. [Create a new variant](/graphos/graphs/federated-graphs/#adding-a-variant-via-the-rover-cli) for your supergraph that you'll use _only_ to fetch Enterprise licenses.
+1. [Create a new variant](/graphos/graphs/federated-graphs/#adding-a-variant-via-the-rover-cli) for your supergraph that you'll use _only_ to fetch GraphOS licenses.
     - Give the variant a name that clearly distinguishes it from variants that track schemas and metrics.
     - Every team member that runs a router locally can use this same variant.
     - When you create this variant, publish a dummy subgraph schema like the following (your router won't use it):
@@ -148,30 +158,30 @@ These steps work both for running the router executable directly (`./router`) an
     - The value of `APOLLO_GRAPH_REF` is the graph ref for the new, license-specific variant you created (for example, `docs-example-graph@local-licenses`).
     - The value of `APOLLO_KEY` is the graph API key you created.
 
-4. Your router will fetch an Enterprise license while using its locally composed supergraph schema.
+4. Your router will fetch an GraphOS license while using its locally composed supergraph schema.
 
 ### Common errors
 
-**If your router doesn't successfully connect to GraphOS,** it logs an error that begins with one of the following strings if any Enterprise features are enabled:
+**If your router doesn't successfully connect to GraphOS,** it logs an error that begins with one of the following strings if any GraphOS features are enabled:
 
 | Error Message               | Description |
 |-----------------------------|-------------|
 | `Not connected to GraphOS.` | At least one of the `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables wasn't set on router startup. |
-| `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS Enterprise plan. |
-| `License has expired.`      | Your organization's GraphOS Enterprise subscription has ended. **Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans).** |
+| `License not found.`        | The router connected to GraphOS with credentials that are not associated with a GraphOS plan. |
+| `License has expired.`      | Your organization's GraphOS subscription has ended. **Your router will stop processing incoming requests at the end of the standard [grace period](#grace-period-for-expired-plans).** |
 
-## Turning off Enterprise features
+## Turning off GraphOS features
 
-To turn off an Enterprise feature, remove all of its associated configuration keys from your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file).
+To turn off an GraphOS feature, remove all of its associated configuration keys from your router's [YAML config file](/graphos/reference/router/configuration#yaml-config-file).
 
 ## Grace period for expired plans
 
-If your organization terminates its GraphOS Enterprise subscription, your router's Enterprise license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can turn off Enterprise features before they produce breaking errors in your router.
+If your organization terminates its GraphOS subscription, your router's license is considered expired at the end of your final paid subscription period. GraphOS provides a grace period for expired licenses so that you can turn off GraphOS features before they produce breaking errors in your router.
 
-If your router has an expired Enterprise license, its behavior degrades according to the following schedule, _if_ any Enterprise features are still enabled:
+If your router has an expired GraphOS license, its behavior degrades according to the following schedule, _if_ any GraphOS features are still enabled:
 
 - **For the first 14 days after your license expires,** your router continues to behave as though it has a valid license.
 - **After 14 days,** your router begins a **soft outage**: it continues processing client requests, but it emits logs and metrics that indicate it's experiencing an outage.
 - **After 28 days,** your router begins a **hard outage**. It no longer processes incoming client requests and continues emitting logs and metrics from the soft outage.
 
-Your router resumes normal functioning whenever you renew your GraphOS Enterprise subscription or turn off all [Enterprise features](#list-of-features).
+Your router resumes normal functioning whenever you renew your GraphOS subscription or turn off all [GraphOS features](#list-of-features).

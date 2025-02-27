@@ -9,14 +9,16 @@ use tracing::trace;
 use super::fetch_dependency_graph::FetchIdGenerator;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
-use crate::query_graph::graph_path::create_initial_options;
 use crate::query_graph::graph_path::ClosedBranch;
 use crate::query_graph::graph_path::ClosedPath;
 use crate::query_graph::graph_path::ExcludedConditions;
@@ -27,26 +29,25 @@ use crate::query_graph::graph_path::OpPathElement;
 use crate::query_graph::graph_path::OpenBranch;
 use crate::query_graph::graph_path::SimultaneousPaths;
 use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
+use crate::query_graph::graph_path::create_initial_options;
 use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::QueryGraph;
-use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
+use crate::query_plan::QueryPlanCost;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
-use crate::query_plan::QueryPlanCost;
+use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::ValidFederationSchema;
 use crate::utils::logging::format_open_branch;
 use crate::utils::logging::snapshot;
 
@@ -417,14 +418,23 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 no_followups = true;
                 break;
             }
+
+            let evaluated_paths_count = &self.parameters.statistics.evaluated_plan_paths;
+            let simultaneous_indirect_path_count: usize =
+                followups_for_option.iter().map(|p| p.paths.0.len()).sum();
+            evaluated_paths_count
+                .set(evaluated_paths_count.get() + simultaneous_indirect_path_count);
+
             new_options.extend(followups_for_option);
             if let Some(options_limit) = self.parameters.config.debug.paths_limit {
                 if new_options.len() > options_limit as usize {
-                    // TODO: Create a new error code for this error kind.
-                    return Err(FederationError::internal(format!(
-                        "Too many options generated for {}, reached the limit of {}.",
-                        selection, options_limit,
-                    )));
+                    return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                        message: format!(
+                            "Too many options generated for {}, reached the limit of {}.",
+                            selection, options_limit,
+                        ),
+                    }
+                    .into());
                 }
             }
         }
