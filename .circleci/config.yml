@@ -26,7 +26,7 @@ executors:
       - image: cimg/base:current
       - image: cimg/redis:7.4.2
       - image: openzipkin/zipkin:3.4.3
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.20.0
     resource_class: 2xlarge
     environment:
       CARGO_BUILD_JOBS: 4
