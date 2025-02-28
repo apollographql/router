@@ -25,6 +25,44 @@ include_subgraph_errors:
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, subgraph errors are included from all subgraphs _except_ the `products` subgraph.
 
+```yaml title="router.yaml"
+include_subgraph_errors:
+  all:
+    redact_message: true
+    allow_extensions_keys:
+      - code
+  subgraphs:
+    product:
+      redact_message: false  # Propagate original error messages
+      allow_extensions_keys: # Extend global allow list - `code` and `reason` will be propagated
+        - reason
+      exclude_global_keys:   # Exclude `code` from global allow list - only `reason` will be propagated.
+        - code
+    account:
+      deny_extensions_keys:  # Overrides global allow list
+        - stack
+    review: false            # Redact everything.
+```
+
+#### All
+| Attributes                | Type | Description                                                                 | Required |
+|-----------------------|------------|-----------------------------------------------------------------------------|----------|
+| redact_message    | boolean    | Redact the error message from all subgraphs                                 | Required |
+| allow_extensions_keys | array      | Propagate specific keys in the error extensions from all subgraphs. Mutual exclusive with `all.deny_extensions_keys`         | Required |
+| deny_extensions_keys  | array      | Redact specific keys in the error extensions from all subgraphs. Mutual exclusive with `all.allow_extensions_keys`            | Required |
+
+#### Subgraphs
+| Attributes                | Type | Description                                                                 | Required |
+|-----------------------|------------|-----------------------------------------------------------------------------|----------|
+| redact_message  | boolean    | Redact the error message from specific subgraphs. Can override global `redact_message` or `boolean` config                         | Optional |
+| exclude_global_keys | array      | Exclude keys from the global allow or deny list for this specific subgraph. | Optional |
+| allow_extensions_keys | array      | Propagate specific keys in the error extensions from specific subgraphs. Mutual exclusive with `deny_extensions_keys` in a same subgraph. It'll extend global allow list or override global deny list in a subgraph. | Optional |
+| deny_extensions_keys  | array      | Redact specific keys in the error extensions from specific subgraphs. Mutual exclusive with `allow_extensions_keys` in a same subgraph. It'll extend global deny list or override global allow list in a subgraph. | Optional |
+
+#### Other key behaviors
+- When global config is a boolean, subgraph must use boolean config type.
+- A subgraph boolean config can override global config completely.
+
 ## Sending errors to GraphOS
 To report the subgraph errors to GraphOS that is a separate configuration that is not affected by client subgraph error inclusion, see the [GraphOS reporting docs](/router/configuration/telemetry/apollo-telemetry).
 
@@ -32,7 +70,7 @@ To report the subgraph errors to GraphOS that is a separate configuration that i
 To log the GraphQL error responses (i.e. messages returned in the GraphQL `errors` array) from the router, see the [logging configuration documentation](/router/configuration/telemetry/exporters/logging/overview).
 
 ## Exposing subgraph name through error extensions
-If `include_subgraph_errors` is `true` for a particular subgraph, all errors originating in this subgraph will have the subgraph's name exposed as a `service` extension.
+If `include_subgraph_errors` is `true` for a particular subgraph, all errors originating in this subgraph will have the subgraph's name exposed as a `service` extension. However, `service` will not be included in the error response if subgraph explicitly denied it via allow or deny extensions list.
 
 For example, if subgraph errors are enabled for the `products` subgraph and this subgraph returns an error, it will have a `service` extension:
 ```json
