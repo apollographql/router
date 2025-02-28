@@ -93,7 +93,13 @@ pub(crate) struct QueryPlanningParameters<'a> {
 
 impl QueryPlanningParameters<'_> {
     pub(crate) fn check_cancellation(&self) -> Result<(), SingleFederationError> {
-        if let Some(check) = self.check_for_cooperative_cancellation {
+        Self::check_cancellation_with(&self.check_for_cooperative_cancellation)
+    }
+
+    pub(crate) fn check_cancellation_with(
+        check: &Option<&dyn Fn() -> ControlFlow<()>>,
+    ) -> Result<(), SingleFederationError> {
+        if let Some(check) = check {
             match check() {
                 ControlFlow::Continue(()) => Ok(()),
                 ControlFlow::Break(()) => Err(SingleFederationError::PlanningCancelled),
@@ -417,11 +423,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         );
 
         for option in options.iter_mut() {
+            self.parameters.check_cancellation()?;
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
                 &operation_element,
                 /*resolver*/ self,
                 &self.parameters.override_conditions,
+                &|| self.parameters.check_cancellation(),
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -1058,6 +1066,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 dependency_graph,
                 path_tree,
                 type_conditioned_fetching_enabled,
+                &|| self.parameters.check_cancellation(),
             )?;
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
@@ -1095,6 +1104,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 )?,
                 Default::default(),
                 &Default::default(),
+                &|| self.parameters.check_cancellation(),
             )?;
         }
 

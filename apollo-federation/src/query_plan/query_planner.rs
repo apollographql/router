@@ -367,6 +367,11 @@ impl QueryPlanner {
             NamedFragments::new(&document.fragments, &self.api_schema),
             &self.api_schema,
             &self.interface_types_with_interface_objects,
+            &|| {
+                QueryPlanningParameters::check_cancellation_with(
+                    &options.check_for_cooperative_cancellation,
+                )
+            },
         )?;
 
         let NormalizedDefer {
@@ -573,6 +578,7 @@ fn compute_root_serial_dependency_graph(
                 &mut fetch_dependency_graph,
                 &prev_path,
                 parameters.config.type_conditioned_fetching,
+                &|| parameters.check_cancellation(),
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
@@ -611,6 +617,7 @@ pub(crate) fn compute_root_fetch_groups(
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
     type_conditioned_fetching_enabled: bool,
+    check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -660,6 +667,7 @@ pub(crate) fn compute_root_fetch_groups(
             )?,
             Default::default(),
             &Default::default(),
+            check_cancellation,
         )?;
     }
     Ok(())

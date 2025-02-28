@@ -715,9 +715,14 @@ mod tests {
             "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
-        let normalized_operation =
-            normalize_operation(operation, Default::default(), &schema, &Default::default())
-                .unwrap();
+        let normalized_operation = normalize_operation(
+            operation,
+            Default::default(),
+            &schema,
+            &Default::default(),
+            &|| Ok(()),
+        )
+        .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
         let paths = vec![
