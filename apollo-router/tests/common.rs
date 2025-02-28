@@ -399,7 +399,7 @@ impl IntegrationTest {
         let tracer_provider_subgraph = telemetry.tracer_provider("subgraph");
 
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
-        let address: SocketAddr = listener.local_addr().unwrap();
+        let address = listener.local_addr().unwrap();
         let url = format!("http://{address}/");
 
         // Add a default override for products, if not specified
