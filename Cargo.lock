@@ -194,6 +194,7 @@ name = "apollo-federation"
 version = "2.0.0"
 dependencies = [
  "apollo-compiler",
+ "apollo-federation",
  "derive_more",
  "dhat",
  "either",

@@ -55,6 +55,8 @@ tempfile.workspace = true
 pretty_assertions = "1.4.0"
 rstest = "0.22.0"
 dhat = "0.3.3"
+# workaround for https://github.com/rust-lang/cargo/issues/2911
+apollo-federation = { path = ".", features = ["correctness"] }
 
 [[test]]
 name = "main"
