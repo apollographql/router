@@ -239,6 +239,18 @@ impl Operation {
             named_fragments,
         })
     }
+
+    pub fn is_query(&self) -> bool {
+        self.root_kind == SchemaRootDefinitionKind::Query
+    }
+
+    pub fn is_mutation(&self) -> bool {
+        self.root_kind == SchemaRootDefinitionKind::Mutation
+    }
+
+    pub fn is_subscription(&self) -> bool {
+        self.root_kind == SchemaRootDefinitionKind::Subscription
+    }
 }
 
 /// An analogue of the apollo-compiler type `SelectionSet` with these changes:

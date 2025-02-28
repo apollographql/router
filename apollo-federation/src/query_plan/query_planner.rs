@@ -313,17 +313,11 @@ impl QueryPlanner {
         self.federated_query_graph.subgraph_schemas()
     }
 
-    // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
-    #[cfg_attr(
-        feature = "snapshot_tracing",
-        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")
-    )]
-    pub fn build_query_plan(
+    pub fn normalized_operation(
         &self,
         document: &Valid<ExecutableDocument>,
-        operation_name: Option<Name>,
-        options: QueryPlanOptions,
-    ) -> Result<QueryPlan, FederationError> {
+        operation_name: Option<&Name>,
+    ) -> Result<Operation, FederationError> {
         let operation = document
             .operations
             .get(operation_name.as_ref().map(|name| name.as_str()))
@@ -339,16 +333,28 @@ impl QueryPlanner {
             crate::bail!("Invalid operation: empty selection set")
         }
 
-        let is_subscription = operation.is_subscription();
-
-        let statistics = QueryPlanningStatistics::default();
-
-        let normalized_operation = normalize_operation(
+        normalize_operation(
             operation,
             NamedFragments::new(&document.fragments, &self.api_schema),
             &self.api_schema,
             &self.interface_types_with_interface_objects,
-        )?;
+        )
+    }
+
+    // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")
+    )]
+    pub fn build_query_plan(
+        &self,
+        document: &Valid<ExecutableDocument>,
+        operation_name: Option<Name>,
+        options: QueryPlanOptions,
+    ) -> Result<QueryPlan, FederationError> {
+        let normalized_operation = self.normalized_operation(document, operation_name.as_ref())?;
+        let is_subscription = normalized_operation.is_subscription();
+        let statistics = QueryPlanningStatistics::default();
 
         let NormalizedDefer {
             operation: normalized_operation,
@@ -394,7 +400,7 @@ impl QueryPlanner {
             normalized_operation.variables.clone(),
             normalized_operation.directives.clone(),
             operation_compression,
-            operation.name.clone(),
+            normalized_operation.name.clone(),
             assigned_defer_labels,
         );
         let mut parameters = QueryPlanningParameters {

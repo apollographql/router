@@ -82,6 +82,12 @@ enum Command {
         #[command(flatten)]
         planner: QueryPlannerArgs,
     },
+    /// Outputs the normalized version of the given query
+    Normalize {
+        query: PathBuf,
+        /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
+        schemas: Vec<PathBuf>,
+    },
     /// Validate one supergraph schema file or multiple subgraph schemas
     Validate {
         /// Path(s) to one supergraph schema file, `-` for stdin or multiple subgraph schemas.
@@ -170,6 +176,7 @@ fn main() -> ExitCode {
             schemas,
             planner,
         } => cmd_plan(&query, &schemas, planner),
+        Command::Normalize { query, schemas } => cmd_normalize(&query, &schemas),
         Command::Validate { schemas } => cmd_validate(&schemas),
         Command::Compose { schemas } => cmd_compose(&schemas),
         Command::Extract {
@@ -315,6 +322,18 @@ fn cmd_plan(
             e.description()
         )),
     }
+}
+
+// Use the query planner to normalize the input query
+fn cmd_normalize(query_path: &Path, schema_paths: &[PathBuf]) -> Result<(), FederationError> {
+    let query = read_input(query_path);
+    let supergraph = load_supergraph(schema_paths)?;
+    let planner = QueryPlanner::new(&supergraph, Default::default())?;
+    let query_doc =
+        ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
+    let operation = planner.normalized_operation(&query_doc, None)?;
+    println!("{}", operation);
+    Ok(())
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {
