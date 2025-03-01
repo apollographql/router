@@ -16,12 +16,12 @@
     )
 )]
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
 use multimap::MultiMap;
 
 use super::known_var::KnownVariable;
@@ -30,11 +30,11 @@ use super::location::Ranged;
 use super::location::WithRange;
 use super::parser::MethodArgs;
 use super::parser::PathList;
-use crate::sources::connect::json_selection::Alias;
-use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::Alias;
+use crate::sources::connect::json_selection::NamedSelection;
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
@@ -272,10 +272,10 @@ fn map_fields_by_name_impl<'a>(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::validation::Valid;
     use pretty_assertions::assert_eq;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> (ExecutableDocument, SelectionSet) {

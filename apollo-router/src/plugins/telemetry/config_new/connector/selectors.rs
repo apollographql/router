@@ -324,7 +324,6 @@ mod tests {
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
     use crate::services::router::body;
-    use crate::services::router::body::RouterBody;
     use crate::Context;
 
     const TEST_SUBGRAPH_NAME: &str = "test_subgraph_name";
@@ -373,12 +372,12 @@ mod tests {
         }
     }
 
-    fn http_request() -> http::Request<RouterBody> {
-        http::Request::builder().body(body::empty()).unwrap()
+    fn http_request() -> http::Request<String> {
+        http::Request::builder().body("".into()).unwrap()
     }
 
-    fn http_request_with_header() -> http::Request<RouterBody> {
-        let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+    fn http_request_with_header() -> http::Request<String> {
+        let mut http_request = http::Request::builder().body("".into()).unwrap();
         http_request.headers_mut().insert(
             TEST_HEADER_NAME,
             HeaderValue::from_static(TEST_HEADER_VALUE),
@@ -386,12 +385,12 @@ mod tests {
         http_request
     }
 
-    fn connector_request(http_request: http::Request<RouterBody>) -> Request {
+    fn connector_request(http_request: http::Request<String>) -> Request {
         connector_request_with_mapping_problems(http_request, vec![])
     }
 
     fn connector_request_with_mapping_problems(
-        http_request: http::Request<RouterBody>,
+        http_request: http::Request<String>,
         mapping_problems: Vec<Problem>,
     ) -> Request {
         Request {

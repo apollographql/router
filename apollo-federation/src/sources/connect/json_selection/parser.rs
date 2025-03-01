@@ -2,6 +2,8 @@ use std::fmt::Display;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexSet;
+use nom::IResult;
+use nom::Slice;
 use nom::branch::alt;
 use nom::character::complete::char;
 use nom::character::complete::one_of;
@@ -15,20 +17,18 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
 use nom::sequence::tuple;
-use nom::IResult;
-use nom::Slice;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
-use super::location::merge_ranges;
-use super::location::new_span;
-use super::location::ranged_span;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
 use super::location::WithRange;
+use super::location::merge_ranges;
+use super::location::new_span;
+use super::location::ranged_span;
 use crate::sources::connect::variable::VariableNamespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
@@ -231,9 +231,7 @@ impl JSONSelection {
         }
     }
 
-    pub fn external_variables<'a, N: FromStr + ToString + 'a>(
-        &'a self,
-    ) -> impl Iterator<Item = N> + 'a {
+    pub fn external_variables<N: FromStr + ToString>(&self) -> impl Iterator<Item = N> {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
@@ -365,9 +363,9 @@ impl NamedSelection {
                         ))
                     } else {
                         Err(nom_fail_message(
-                        input,
-                        "Named path selection must either begin with alias or ..., or end with subselection",
-                    ))
+                            input,
+                            "Named path selection must either begin with alias or ..., or end with subselection",
+                        ))
                     }
                 }
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
@@ -2133,10 +2131,7 @@ mod tests {
                 Ok((remainder, path)) => {
                     panic!(
                         "Expected error at offset {} with message '{}', but got path {:?} and remainder {:?}",
-                        expected_offset,
-                        expected_message,
-                        path,
-                        remainder,
+                        expected_offset, expected_message, path, remainder,
                     );
                 }
                 Err(nom::Err::Error(e) | nom::Err::Failure(e)) => {
@@ -2438,11 +2433,13 @@ mod tests {
                         PathList::Method(
                             WithRange::new("or".to_string(), None),
                             Some(MethodArgs {
-                                args: vec![LitExpr::Path(PathSelection::from_slice(
-                                    &[Key::field("data"), Key::field("y")],
-                                    None,
-                                ))
-                                .into_with_range()],
+                                args: vec![
+                                    LitExpr::Path(PathSelection::from_slice(
+                                        &[Key::field("data"), Key::field("y")],
+                                        None,
+                                    ))
+                                    .into_with_range(),
+                                ],
                                 ..Default::default()
                             }),
                             PathList::Empty.into_with_range(),
@@ -2508,19 +2505,21 @@ mod tests {
                         PathList::Method(
                             WithRange::new("concat".to_string(), None),
                             Some(MethodArgs {
-                                args: vec![LitExpr::Array(vec![
-                                    LitExpr::Path(PathSelection::from_slice(
-                                        &[Key::field("data"), Key::field("y")],
-                                        None,
-                                    ))
+                                args: vec![
+                                    LitExpr::Array(vec![
+                                        LitExpr::Path(PathSelection::from_slice(
+                                            &[Key::field("data"), Key::field("y")],
+                                            None,
+                                        ))
+                                        .into_with_range(),
+                                        LitExpr::Path(PathSelection::from_slice(
+                                            &[Key::field("data"), Key::field("z")],
+                                            None,
+                                        ))
+                                        .into_with_range(),
+                                    ])
                                     .into_with_range(),
-                                    LitExpr::Path(PathSelection::from_slice(
-                                        &[Key::field("data"), Key::field("z")],
-                                        None,
-                                    ))
-                                    .into_with_range(),
-                                ])
-                                .into_with_range()],
+                                ],
                                 ..Default::default()
                             }),
                             PathList::Empty.into_with_range(),

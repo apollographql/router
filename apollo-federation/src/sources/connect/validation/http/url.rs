@@ -1,19 +1,19 @@
 use std::fmt::Display;
 use std::str::FromStr;
 
-use apollo_compiler::ast::Value;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Value;
 use url::Url;
 
+use crate::sources::connect::URLTemplate;
 use crate::sources::connect::string_template;
+use crate::sources::connect::validation::Code;
+use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::Code;
-use crate::sources::connect::validation::Message;
-use crate::sources::connect::URLTemplate;
 
 pub(crate) fn validate_template(
     coordinate: HttpMethodCoordinate,

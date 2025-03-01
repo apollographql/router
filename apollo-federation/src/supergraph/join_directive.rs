@@ -1,21 +1,21 @@
 //! @join__directive extraction
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::schema::Component;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
 use super::get_subgraph;
 use super::subgraph::FederationSubgraphs;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
+use crate::schema::FederationSchema;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::FederationSchema;
 use crate::sources::connect::ConnectSpec;
 
 static JOIN_DIRECTIVE: &str = "join__directive";

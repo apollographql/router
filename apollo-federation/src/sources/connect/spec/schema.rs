@@ -1,12 +1,12 @@
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
-use apollo_compiler::Name;
 use http::HeaderName;
 use url::Url;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::HeaderSource;
+use crate::sources::connect::json_selection::JSONSelection;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");

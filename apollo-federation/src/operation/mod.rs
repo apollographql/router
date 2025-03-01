@@ -19,17 +19,17 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
-use std::sync::atomic;
 use std::sync::Arc;
+use std::sync::atomic;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
 use crate::compat::coerce_executable_values;
@@ -38,17 +38,17 @@ use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::conditions::Conditions;
+use crate::schema::ValidFederationSchema;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
 
 mod contains;
@@ -673,10 +673,10 @@ mod field_selection {
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
+    use crate::schema::ValidFederationSchema;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
-    use crate::schema::ValidFederationSchema;
 
     /// An analogue of the apollo-compiler type `Field` with these changes:
     /// - Makes the selection set optional. This is because `SelectionSet` requires a type of
@@ -866,9 +866,9 @@ mod field_selection {
                             CompositeTypeDefinitionPosition::try_from(field_type)
                         {
                             debug_assert_eq!(
-                                field_type_position,
-                                selection_set.type_position,
-                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]", field_type_position, selection_set.type_position,
+                                field_type_position, selection_set.type_position,
+                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]",
+                                field_type_position, selection_set.type_position,
                             );
                             debug_assert_eq!(
                                 self.schema, selection_set.schema,
@@ -917,14 +917,14 @@ mod fragment_spread_selection {
     use apollo_compiler::Name;
     use serde::Serialize;
 
-    use crate::operation::is_deferred_selection;
     use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
+    use crate::operation::is_deferred_selection;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
     pub(crate) struct FragmentSpreadSelection {
@@ -1067,17 +1067,17 @@ mod inline_fragment_selection {
     use serde::Serialize;
 
     use crate::error::FederationError;
-    use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
-    use crate::operation::is_deferred_selection;
+    use crate::link::graphql_definition::defer_directive_arguments;
     use crate::operation::DirectiveList;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
+    use crate::operation::is_deferred_selection;
     use crate::query_plan::FetchDataPathElement;
-    use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
 
     /// An analogue of the apollo-compiler type `InlineFragment` with these changes:
     /// - Stores the inline fragment data (other than the selection set) in `InlineFragment`,
@@ -1671,12 +1671,10 @@ impl SelectionSet {
                 }
                 SelectionValue::FragmentSpread(fragment_spread) => {
                     // at this point in time all fragment spreads should have been converted into inline fragments
-                    return Err(FederationError::internal(
-                        format!(
-                            "Error while optimizing sibling typename information, selection set contains {} named fragment",
-                            fragment_spread.get().spread.fragment_name
-                        )
-                    ));
+                    return Err(FederationError::internal(format!(
+                        "Error while optimizing sibling typename information, selection set contains {} named fragment",
+                        fragment_spread.get().spread.fragment_name
+                    )));
                 }
             }
         }
@@ -2235,7 +2233,7 @@ impl SelectionSet {
                     }
                 }
                 Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal("unexpected fragment spread"))
+                    return Err(FederationError::internal("unexpected fragment spread"));
                 }
             }
         }
@@ -2424,7 +2422,7 @@ fn compute_aliases_for_non_merging_fields(
     let mut seen_response_names: IndexMap<Name, SeenResponseName> = IndexMap::default();
 
     // - `s.selections` must be fragment-spread-free.
-    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
+    fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> {
         s.selections.iter().flat_map(|s2| {
             s2.fields_in_set()
                 .into_iter()

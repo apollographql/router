@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
-use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 
 fn second_operation(plan: &QueryPlan) -> String {
     let Some(TopLevelPlanNode::Sequence(node)) = &plan.node else {
