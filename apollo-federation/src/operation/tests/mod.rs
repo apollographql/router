@@ -54,6 +54,7 @@ macro_rules! assert_equal_ops {
     };
 }
 pub(super) use assert_equal_ops;
+
 use crate::correctness::compare_operations;
 
 pub(super) fn parse_schema_and_operation(
@@ -129,7 +130,10 @@ fn expands_named_fragments() {
         baz
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       {
         foo {
           id
@@ -137,7 +141,8 @@ fn expands_named_fragments() {
           baz
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -172,7 +177,10 @@ fn expands_and_deduplicates_fragments() {
         bar
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       {
         foo {
           id
@@ -180,7 +188,8 @@ fn expands_and_deduplicates_fragments() {
           baz
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -240,14 +249,18 @@ fn merge_same_fields_without_directives() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       {
         t {
           v1
           v2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -272,14 +285,18 @@ fn merge_same_fields_with_same_directive() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       query Test($skipIf: Boolean!) {
         t @skip(if: $skipIf) {
           v1
           v2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -306,14 +323,18 @@ fn merge_same_fields_with_same_directive_but_different_arg_order() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       query Test($skipIf: Boolean!) {
         t @customSkip(if: $skipIf, label: "foo") {
           v1
           v2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -338,7 +359,10 @@ fn do_not_merge_when_only_one_field_specifies_directive() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       query Test($skipIf: Boolean!) {
         t {
           v1
@@ -347,7 +371,8 @@ fn do_not_merge_when_only_one_field_specifies_directive() {
           v2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -372,7 +397,10 @@ fn do_not_merge_when_fields_have_different_directives() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       query Test($skip1: Boolean!, $skip2: Boolean!) {
         t @skip(if: $skip1) {
           v1
@@ -381,7 +409,8 @@ fn do_not_merge_when_fields_have_different_directives() {
           v2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -412,7 +441,10 @@ fn do_not_merge_fields_with_defer_directive() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation, r###"
+    assert_normalized_equal!(
+        schema,
+        operation,
+        r###"
       query Test {
         t {
           ... @defer {
@@ -423,7 +455,8 @@ fn do_not_merge_fields_with_defer_directive() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -467,7 +500,10 @@ fn merge_nested_field_selections() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, nested_operation, r###"
+    assert_normalized_equal!(
+        schema,
+        nested_operation,
+        r###"
       query Test {
         t {
           t1
@@ -484,7 +520,8 @@ fn merge_nested_field_selections() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 //
@@ -514,14 +551,18 @@ fn merge_same_fragment_without_directives() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_with_fragments, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_with_fragments,
+        r###"
       query Test {
         t {
           v1
           v2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -548,7 +589,10 @@ fn merge_same_fragments_with_same_directives() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_fragments_with_directives, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_directives,
+        r###"
       query Test($skipIf: Boolean!) {
         t {
           ... on T @skip(if: $skipIf) {
@@ -557,7 +601,8 @@ fn merge_same_fragments_with_same_directives() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -586,7 +631,10 @@ fn merge_same_fragments_with_same_directive_but_different_arg_order() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_fragments_with_directives_args_order, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_directives_args_order,
+        r###"
       query Test($skipIf: Boolean!) {
         t {
           ... on T @customSkip(if: $skipIf, label: "foo") {
@@ -595,7 +643,8 @@ fn merge_same_fragments_with_same_directive_but_different_arg_order() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -622,7 +671,10 @@ fn do_not_merge_when_only_one_fragment_specifies_directive() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_one_fragment_with_directive, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_one_fragment_with_directive,
+        r###"
       query Test($skipIf: Boolean!) {
         t {
           v1
@@ -631,7 +683,8 @@ fn do_not_merge_when_only_one_fragment_specifies_directive() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -658,7 +711,10 @@ fn do_not_merge_when_fragments_have_different_directives() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_fragments_with_different_directive, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_different_directive,
+        r###"
       query Test($skip1: Boolean!, $skip2: Boolean!) {
         t {
           ... on T @skip(if: $skip1) {
@@ -669,7 +725,8 @@ fn do_not_merge_when_fragments_have_different_directives() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -698,7 +755,10 @@ fn do_not_merge_fragments_with_defer_directive() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_fragments_with_defer, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_fragments_with_defer,
+        r###"
       query Test {
         t {
           ... on T @defer {
@@ -709,7 +769,8 @@ fn do_not_merge_fragments_with_defer_directive() {
           }
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -755,7 +816,10 @@ fn merge_nested_fragments() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_nested_fragments, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_nested_fragments,
+        r###"
       query Test {
         t {
           t1
@@ -766,7 +830,8 @@ fn merge_nested_fragments() {
           t2
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -820,13 +885,17 @@ fn keeps_typename_if_no_other_selection() {
         }
       }
     "#;
-    assert_normalized_equal!(schema, operation_with_single_typename, r###"
+    assert_normalized_equal!(
+        schema,
+        operation_with_single_typename,
+        r###"
       query TestQuery {
         foo {
           __typename
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -1563,7 +1632,10 @@ fn handles_fragment_matching_at_the_top_level_of_another_fragment() {
         }
     "#;
 
-    assert_normalized_equal!(schema_doc, query, r###"
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
         {
           t {
             u {
@@ -1573,7 +1645,8 @@ fn handles_fragment_matching_at_the_top_level_of_another_fragment() {
             a
           }
         }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -1615,13 +1688,17 @@ fn handles_fragments_used_in_context_where_they_get_trimmed() {
         }
     "#;
 
-    assert_normalized_equal!(schema_doc, query, r###"
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
         {
           t1 {
             y
           }
         }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -1659,13 +1736,17 @@ fn handles_fragments_on_union_in_context_with_limited_intersection() {
         }
     "#;
 
-    assert_normalized_equal!(schema_doc, query, r###"
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
         {
           t1 {
             x
           }
         }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -1767,7 +1848,10 @@ fn fragments_with_same_directive_in_the_fragment_selection() {
       }
     "#;
 
-    assert_normalized_equal!(schema_doc, query, r###"
+    assert_normalized_equal!(
+        schema_doc,
+        query,
+        r###"
       query($cond1: Boolean!, $cond2: Boolean!) {
         t1 {
           a
@@ -1779,7 +1863,8 @@ fn fragments_with_same_directive_in_the_fragment_selection() {
           a @include(if: $cond2)
         }
       }
-    "###);
+    "###
+    );
 }
 
 #[test]
@@ -1810,7 +1895,10 @@ fn fragments_with_directive_on_typename() {
         }
     "#;
 
-    assert_normalized_equal!(schema, query, r###"
+    assert_normalized_equal!(
+        schema,
+        query,
+        r###"
         query($if: Boolean!) {
           t1 {
             b
@@ -1824,7 +1912,8 @@ fn fragments_with_directive_on_typename() {
             c
           }
         }
-        "###);
+        "###
+    );
 }
 
 #[test]

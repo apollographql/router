@@ -661,7 +661,8 @@ mod tests {
         use apollo_compiler::validation::Valid;
 
         use crate::correctness::compare_operations;
-        use crate::operation::tests::{assert_equal_ops, parse_and_expand};
+        use crate::operation::tests::assert_equal_ops;
+        use crate::operation::tests::parse_and_expand;
         use crate::operation::tests::parse_operation;
         use crate::operation::tests::parse_schema;
 
