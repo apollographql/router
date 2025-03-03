@@ -9,7 +9,7 @@ license = "Elastic-2.0"
 
 # renovate-automation: rustc version
 rust-version = "1.85.0"
-edition = "2021"
+edition = "2024"
 build = "build/main.rs"
 default-run = "router"
 
