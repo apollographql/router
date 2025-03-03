@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::time::Duration;
 
+use apollo_router::Context;
+use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
-use apollo_router::Context;
-use apollo_router::TestHarness;
 use async_trait::async_trait;
 use axum::handler::HandlerWithoutStateExt;
 use futures::FutureExt;

@@ -1,20 +1,21 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::StreamExt;
 use futures::future::join_all;
 use futures::prelude::*;
-use futures::StreamExt;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tower::ServiceExt;
 use tracing::Instrument;
 
-use super::log;
-use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
+use super::log;
+use super::subscription::SubscriptionHandle;
+use crate::Context;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
@@ -24,11 +25,6 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::fetch::Variables;
-use crate::query_planner::FlattenNode;
-use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -36,17 +32,21 @@ use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
 use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
+use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
+use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::SubgraphSchemas;
+use crate::query_planner::fetch::Variables;
+use crate::services::FetchRequest;
 use crate::services::fetch;
 use crate::services::fetch::ErrorMapping;
 use crate::services::fetch::SubscriptionRequest;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
-use crate::services::FetchRequest;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::Context;
 
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
@@ -215,10 +215,12 @@ impl PlanNode {
                     if parameters.subscription_handle.is_none() {
                         tracing::error!("No subscription handle provided for a subscription");
                         value = Value::default();
-                        errors = vec![Error::builder()
-                            .message("no subscription handle provided for a subscription")
-                            .extension_code("NO_SUBSCRIPTION_HANDLE")
-                            .build()];
+                        errors = vec![
+                            Error::builder()
+                                .message("no subscription handle provided for a subscription")
+                                .extension_code("NO_SUBSCRIPTION_HANDLE")
+                                .build(),
+                        ];
                     } else {
                         match Variables::new(
                             &[],

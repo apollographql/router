@@ -5,25 +5,25 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::KeyValue;
+use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::Schema;
-use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Deserializer;
 use serde::de::Error;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Deserializer;
 use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 
 use super::Stage;
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+use crate::Context;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::Context;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -262,7 +262,9 @@ where
         if let Some(Stage::Request) = &restricted_stage {
             for (name, custom) in &self.custom {
                 if !custom.is_active(Stage::Request) {
-                    return Err(format!("cannot set the attribute {name:?} because it is using a selector computed in another stage than 'request' so it will not be computed"));
+                    return Err(format!(
+                        "cannot set the attribute {name:?} because it is using a selector computed in another stage than 'request' so it will not be computed"
+                    ));
                 }
             }
         }

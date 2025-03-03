@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
-use http::header::CONTENT_TYPE;
-use http::header::VARY;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::Uri;
+use http::header::CONTENT_TYPE;
+use http::header::VARY;
 use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
@@ -14,6 +14,8 @@ use serde_json_bytes::json;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::Configuration;
+use crate::Context;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
@@ -22,18 +24,16 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::query_planner::APOLLO_OPERATION_ID;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::services::router;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::make_fake_batch;
-use crate::Configuration;
-use crate::Context;
 
 // Test Vary processing
 

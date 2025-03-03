@@ -99,7 +99,9 @@ impl Expansion {
 
         let dev_mode_defaults = if crate::executable::APOLLO_ROUTER_DEV_MODE.load(Ordering::Relaxed)
         {
-            tracing::info!("Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)");
+            tracing::info!(
+                "Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)"
+            );
             dev_mode_defaults()
         } else {
             Vec::new()
@@ -325,13 +327,13 @@ pub(crate) fn coerce(expanded: &str) -> Value {
 #[cfg(test)]
 mod test {
     use insta::assert_yaml_snapshot;
-    use serde_json::json;
     use serde_json::Value;
+    use serde_json::json;
 
-    use crate::configuration::expansion::dev_mode_defaults;
+    use crate::configuration::Expansion;
     use crate::configuration::expansion::Override;
     use crate::configuration::expansion::ValueType;
-    use crate::configuration::Expansion;
+    use crate::configuration::expansion::dev_mode_defaults;
 
     #[test]
     fn test_override_precedence() {

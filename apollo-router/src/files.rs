@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::prelude::*;
-use notify::event::DataChange;
-use notify::event::MetadataKind;
-use notify::event::ModifyKind;
 use notify::Config;
 use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
+use notify::event::ModifyKind;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 

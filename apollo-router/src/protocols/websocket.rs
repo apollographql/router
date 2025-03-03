@@ -2,13 +2,13 @@ use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 
-use futures::future;
-use futures::stream::SplitStream;
 use futures::Future;
 use futures::Sink;
 use futures::SinkExt;
 use futures::Stream;
 use futures::StreamExt;
+use futures::future;
+use futures::stream::SplitStream;
 use http::HeaderValue;
 use pin_project_lite::pin_project;
 use schemars::JsonSchema;
@@ -18,10 +18,10 @@ use serde_json_bytes::Value;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio_stream::wrappers::IntervalStream;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 
 use crate::graphql;
 
@@ -531,7 +531,9 @@ where
                     Ok(server_message) => {
                         if let Some(id) = &server_message.id() {
                             if this.id != id {
-                                tracing::error!("we should not receive data from other subscriptions, closing the stream");
+                                tracing::error!(
+                                    "we should not receive data from other subscriptions, closing the stream"
+                                );
                                 return Poll::Ready(None);
                             }
                         }
@@ -684,10 +686,10 @@ mod tests {
     use std::convert::Infallible;
     use std::net::SocketAddr;
 
-    use axum::extract::ws::Message as AxumWsMessage;
-    use axum::extract::WebSocketUpgrade;
-    use axum::routing::get;
     use axum::Router;
+    use axum::extract::WebSocketUpgrade;
+    use axum::extract::ws::Message as AxumWsMessage;
+    use axum::routing::get;
     use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;

@@ -1,13 +1,13 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Instant;
 
+use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use opentelemetry::Key;
@@ -15,16 +15,19 @@ use opentelemetry::KeyValue;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
-use tower::buffer::Buffer;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::buffer::Buffer;
 use tower_service::Service;
-use tracing::field;
 use tracing::Span;
+use tracing::field;
 use tracing_futures::Instrument;
 
+use crate::Configuration;
+use crate::Context;
+use crate::Notify;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
@@ -34,27 +37,35 @@ use crate::error::CacheResolverError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
-use crate::layers::ServiceBuilderExt;
 use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
+use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
-use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
+use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
-use crate::query_planner::subscription::SubscriptionHandle;
-use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlannerService;
+use crate::query_planner::subscription::OPENED_SUBSCRIPTIONS;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
+use crate::query_planner::subscription::SubscriptionHandle;
 use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::ExecutionServiceFactory;
+use crate::services::QueryPlannerContent;
+use crate::services::QueryPlannerResponse;
+use crate::services::SubgraphServiceFactory;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution;
@@ -71,20 +82,9 @@ use crate::services::router::ClientRequestAccepts;
 use crate::services::subgraph::BoxGqlStream;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
-use crate::services::ExecutionRequest;
-use crate::services::ExecutionResponse;
-use crate::services::ExecutionServiceFactory;
-use crate::services::QueryPlannerContent;
-use crate::services::QueryPlannerResponse;
-use crate::services::SubgraphServiceFactory;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
-use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Schema;
+use crate::spec::operation_limits::OperationLimits;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
-use crate::Context;
-use crate::Notify;
 
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo::supergraph::first_event";
 pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
@@ -254,10 +254,12 @@ async fn service_call(
         Some(QueryPlannerContent::IntrospectionDisabled) => {
             let mut response = SupergraphResponse::new_from_graphql_response(
                 graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("introspection has been disabled"))
-                        .extension_code("INTROSPECTION_DISABLED")
-                        .build()])
+                    .errors(vec![
+                        crate::error::Error::builder()
+                            .message(String::from("introspection has been disabled"))
+                            .extension_code("INTROSPECTION_DISABLED")
+                            .build(),
+                    ])
                     .build(),
                 context,
             );
@@ -325,16 +327,28 @@ async fn service_call(
                 || (is_subscription && !accepts_multipart_subscription)
             {
                 let (error_message, error_code) = if is_deferred {
-                    (String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'"), "DEFER_BAD_HEADER")
+                    (
+                        String::from(
+                            "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed;deferSpec=20220824'",
+                        ),
+                        "DEFER_BAD_HEADER",
+                    )
                 } else {
-                    (String::from("the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'"), "SUBSCRIPTION_BAD_HEADER")
+                    (
+                        String::from(
+                            "the router received a query with a subscription but the client does not accept multipart/mixed HTTP responses. To enable subscription support, add the HTTP header 'Accept: multipart/mixed;subscriptionSpec=1.0'",
+                        ),
+                        "SUBSCRIPTION_BAD_HEADER",
+                    )
                 };
                 let mut response = SupergraphResponse::new_from_graphql_response(
                     graphql::Response::builder()
-                        .errors(vec![crate::error::Error::builder()
-                            .message(error_message)
-                            .extension_code(error_code)
-                            .build()])
+                        .errors(vec![
+                            crate::error::Error::builder()
+                                .message(error_message)
+                                .extension_code(error_code)
+                                .build(),
+                        ])
                         .build(),
                     context,
                 );
@@ -1051,7 +1065,7 @@ impl SupergraphCreator {
         Error = BoxError,
         Future = BoxFuture<'static, supergraph::ServiceResult>,
     > + Send
-           + use<> {
+    + use<> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }
