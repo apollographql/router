@@ -143,7 +143,7 @@ impl TracingConfigurator for Config {
         let fixed_span_names = self.fixed_span_names;
         let endpoint = &self
             .endpoint
-            .extend_to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
+            .to_full_uri(&Uri::from_static(DEFAULT_ENDPOINT));
 
         let exporter = datadog_exporter::new_pipeline()
             .with_agent_endpoint(endpoint.to_string().trim_end_matches('/'))

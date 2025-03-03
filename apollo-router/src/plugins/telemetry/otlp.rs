@@ -76,7 +76,7 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.extend_to_full_uri(&DEFAULT_GRPC_ENDPOINT);
+                let endpoint = self.endpoint.to_full_uri(&DEFAULT_GRPC_ENDPOINT);
                 let tls_config = self.grpc.clone().tls_config(&endpoint)?;
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
@@ -88,7 +88,7 @@ impl Config {
                 Ok(exporter)
             }
             Protocol::Http => {
-                let mut endpoint = self.endpoint.extend_to_full_uri(&DEFAULT_HTTP_ENDPOINT);
+                let mut endpoint = self.endpoint.to_full_uri(&DEFAULT_HTTP_ENDPOINT);
                 if let TelemetryDataKind::Traces = kind {
                     endpoint = add_missing_traces_path(endpoint)?;
                 }

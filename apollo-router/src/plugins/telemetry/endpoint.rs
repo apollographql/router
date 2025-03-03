@@ -20,7 +20,7 @@ pub(crate) struct UriEndpoint {
 
 impl UriEndpoint {
     /// Converts an endpoint to a URI using the default endpoint as reference for any URI parts that are missing.
-    pub(crate) fn extend_to_full_uri(&self, default_endpoint: &Uri) -> Uri {
+    pub(crate) fn to_full_uri(&self, default_endpoint: &Uri) -> Uri {
         if let Some(uri) = &self.uri {
             let mut parts = uri.clone().into_parts();
             if parts.scheme.is_none() {
@@ -218,50 +218,49 @@ mod test {
     }
 
     #[test]
-    fn test_extend_to_full_uri() {
+    fn test_to_full_uri() {
         assert_eq!(
-            UriEndpoint::default()
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+            UriEndpoint::default().to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://localhost:9411/path2")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("example.com"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://example.com:9411/path2")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("example.com:2000"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://example.com:2000/path2")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("http://example.com:2000/"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://example.com:2000/")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("http://example.com:2000/path1"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://example.com:2000/path1")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("http://example.com:2000"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://example.com:2000")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("http://example.com/path1"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://example.com:9411/path1")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("http://:2000/path1"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://localhost:2000/path1")
         );
         assert_eq!(
             UriEndpoint::from(Uri::from_static("/path1"))
-                .extend_to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
+                .to_full_uri(&Uri::from_static("http://localhost:9411/path2")),
             Uri::from_static("http://localhost:9411/path1")
         );
     }
