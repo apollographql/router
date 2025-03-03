@@ -848,10 +848,10 @@ mod helper {
     use apollo_router::graphql::Request;
     use apollo_router::graphql::Response;
     use tower::BoxError;
-    use wiremock::matchers;
     use wiremock::MockServer;
     use wiremock::Respond;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers;
 
     use super::test_is_enabled;
     use crate::integration::common::IntegrationTest;

@@ -1,10 +1,10 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
 use apollo_federation::query_plan::requires_selection;
 use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
@@ -14,8 +14,8 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
-use tracing::instrument;
 use tracing::Instrument;
+use tracing::instrument;
 
 use super::rewrites;
 use super::selection::execute_selection_set;
@@ -33,9 +33,9 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxService;
-use crate::services::SubgraphRequest;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
@@ -292,10 +292,12 @@ impl FetchNode {
         if !response.is_primary() {
             return (
                 Value::default(),
-                vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: self.service_name.to_string(),
-                }
-                .to_graphql_error(Some(current_dir.to_owned()))],
+                vec![
+                    FetchError::SubrequestUnexpectedPatchResponse {
+                        service: self.service_name.to_string(),
+                    }
+                    .to_graphql_error(Some(current_dir.to_owned())),
+                ],
             );
         }
 
@@ -319,7 +321,12 @@ impl FetchNode {
                     1
                 );
                 if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
-                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, id, e);
+                    tracing::error!(
+                        "error sending fetch result at path {} and id {:?} for deferred response building: {}",
+                        current_dir,
+                        id,
+                        e
+                    );
                 }
             }
         }

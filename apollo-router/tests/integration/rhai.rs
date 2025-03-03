@@ -1,5 +1,5 @@
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_rhai_callbacks_are_invoked() {

@@ -1,28 +1,28 @@
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::Name;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 
-use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use super::http_json_transport::make_request;
+use crate::Context;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
-use crate::Context;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -461,7 +461,7 @@ fn entities_with_fields_from_request(
                                 return Some(Err(InvalidOperation(
                                     "handling fragments inside entity selections not implemented"
                                         .into(),
-                                )))
+                                )));
                             }
                         };
                         field.map(|f| Ok((typename, f)))
@@ -567,9 +567,9 @@ fn entities_with_fields_from_request(
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::name;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -579,10 +579,10 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
+    use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
     use crate::services::connector::request_service::TransportRequest;
-    use crate::Context;
 
     #[test]
     fn test_root_fields_simple() {

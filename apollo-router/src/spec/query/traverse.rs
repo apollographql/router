@@ -1,7 +1,7 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema::FieldLookupError;
-use apollo_compiler::ExecutableDocument;
 use tower::BoxError;
 
 /// Traverse a document with the given visitor.

@@ -5,7 +5,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.6.2
+  gh: circleci/github-cli@2.6.3
   slack: circleci/slack@5.1.1
   secops: apollo/circleci-secops-orb@2.0.7
 
@@ -24,9 +24,9 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:current
-      - image: cimg/redis:7.4.1
+      - image: cimg/redis:7.4.2
       - image: openzipkin/zipkin:3.4.3
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.20.0
     resource_class: 2xlarge
     environment:
       CARGO_BUILD_JOBS: 4

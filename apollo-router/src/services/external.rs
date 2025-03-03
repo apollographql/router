@@ -6,28 +6,28 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
 
 use super::subgraph::SubgraphRequestId;
+use crate::Context;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 

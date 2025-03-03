@@ -1,13 +1,17 @@
 //! Generation of usage reporting fields
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::AddAssign;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::OperationType;
@@ -22,10 +26,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -1122,11 +1122,7 @@ fn get_arg_separator(
         + arg_strings.iter().map(|s| s.len()).sum::<usize>()
         + arg_strings.len()
         + ((arg_strings.len() - 1) * 2);
-    if original_line_length > 80 {
-        ' '
-    } else {
-        ','
-    }
+    if original_line_length > 80 { ' ' } else { ',' }
 }
 
 fn format_fragment_spread(

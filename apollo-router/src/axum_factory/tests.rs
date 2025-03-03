@@ -2,25 +2,25 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
+use futures::Future;
+use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
-use futures::Future;
-use futures::StreamExt;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
-use http::HeaderMap;
-use http::HeaderValue;
 #[cfg(unix)]
 use http_body_util::BodyExt;
 use hyper::rt::ReadBufCursor;
@@ -29,6 +29,9 @@ use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
 use pin_project_lite::pin_project;
+use reqwest::Client;
+use reqwest::Method;
+use reqwest::StatusCode;
 use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
@@ -38,9 +41,6 @@ use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
 use reqwest::redirect::Policy;
-use reqwest::Client;
-use reqwest::Method;
-use reqwest::StatusCode;
 use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
@@ -50,17 +50,21 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::ReadBuf;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
-use tower::service_fn;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::service_fn;
 
 pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
-use crate::configuration::cors::Cors;
+use crate::ApolloRouterError;
+use crate::Configuration;
+use crate::ListenAddr;
+use crate::TestHarness;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
+use crate::configuration::cors::Cors;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
@@ -68,22 +72,18 @@ use crate::json_ext::Path;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::MULTIPART_DEFER_ACCEPT;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphResponse;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
-use crate::services::SupergraphResponse;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::ApolloRouterError;
-use crate::Configuration;
-use crate::ListenAddr;
-use crate::TestHarness;
 
 macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -160,12 +160,12 @@ impl RouterFactory for TestRouterFactory {
 
 async fn init(
     mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
 ) -> (HttpServerHandle, Client) {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
@@ -236,12 +236,12 @@ async fn init(
 
 pub(super) async fn init_with_config(
     mut router_service: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
     conf: Arc<Configuration>,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
@@ -294,12 +294,12 @@ pub(super) async fn init_with_config(
 #[cfg(unix)]
 async fn init_unix(
     mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
     temp_dir: &tempfile::TempDir,
 ) -> HttpServerHandle {
     let server_factory = AxumHttpServerFactory::new();
@@ -1386,9 +1386,9 @@ async fn it_refuses_to_start_if_homepage_and_sandbox_are_enabled() {
         .unwrap_err();
 
     assert_eq!(
-            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
-            error.to_string()
-        )
+        "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+        error.to_string()
+    )
 }
 
 #[test(tokio::test)]
@@ -1409,9 +1409,9 @@ async fn it_refuses_to_start_if_sandbox_is_enabled_and_introspection_is_not() {
         .unwrap_err();
 
     assert_eq!(
-            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
-            error.to_string()
-        )
+        "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+        error.to_string()
+    )
 }
 
 #[test(tokio::test)]
@@ -1685,12 +1685,14 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
-                .incremental(vec![graphql::IncrementalResponse::builder()
-                    .data(json!({
-                        "name": "Ada"
-                    }))
-                    .path(Path::from("me"))
-                    .build()])
+                .incremental(vec![
+                    graphql::IncrementalResponse::builder()
+                        .data(json!({
+                            "name": "Ada"
+                        }))
+                        .path(Path::from("me"))
+                        .build(),
+                ])
                 .has_next(true)
                 .build(),
             graphql::Response::builder().has_next(false).build(),
@@ -1724,15 +1726,15 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
-        );
+        std::str::from_utf8(&first).unwrap(),
+        "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
+    );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&second).unwrap(),
+        std::str::from_utf8(&second).unwrap(),
         "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"name\":\"Ada\"},\"path\":[\"me\"]}]}\r\n--graphql"
-        );
+    );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
@@ -1746,12 +1748,14 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 #[test(tokio::test)]
 async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterError> {
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let body = stream::iter(vec![graphql::Response::builder()
-            .data(json!({
-                "me": "name",
-            }))
-            .has_next(false)
-            .build()])
+        let body = stream::iter(vec![
+            graphql::Response::builder()
+                .data(json!({
+                    "me": "name",
+                }))
+                .has_next(false)
+                .build(),
+        ])
         .boxed();
 
         Ok(SupergraphResponse::new_from_response(
@@ -1782,9 +1786,9 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
-        );
+        std::str::from_utf8(&first).unwrap(),
+        "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
+    );
 
     server.shutdown().await
 }

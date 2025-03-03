@@ -2,22 +2,22 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::Stream;
 use futures::stream::StreamExt;
 use futures::stream::TryStreamExt;
-use futures::Stream;
 use http::HeaderMap;
 use http::HeaderValue;
 use http_body_util::BodyExt;
+use mediatype::MediaType;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
 use rand::RngCore;
 
-use super::error::FileUploadError;
-use super::map_field::MapFieldRaw;
 use super::MultipartRequest;
 use super::Result as UploadResult;
+use super::error::FileUploadError;
+use super::map_field::MapFieldRaw;
 use crate::services::router::body::RouterBody;
 
 #[derive(Clone, Debug)]

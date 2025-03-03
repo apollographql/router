@@ -9,11 +9,11 @@ use serde::Serialize;
 use static_assertions::assert_impl_all;
 
 use super::layers::query_analysis::ParsedDocument;
+use crate::Context;
 use crate::compute_job::MaybeBackPressureError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
-use crate::Context;
 
 /// Options for planning a query
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]

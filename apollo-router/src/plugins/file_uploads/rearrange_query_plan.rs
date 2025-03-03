@@ -7,9 +7,9 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 
-use super::error::FileUploadError;
 use super::MapField;
 use super::Result as UploadResult;
+use super::error::FileUploadError;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::PlanNode;
@@ -280,8 +280,8 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::query_planner::subscription::SubscriptionNode;
     use crate::query_planner::Primary;
+    use crate::query_planner::subscription::SubscriptionNode;
     use crate::services::execution::QueryPlan;
 
     // Custom `assert_matches` due to its current nightly-only status, see

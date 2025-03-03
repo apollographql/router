@@ -138,7 +138,7 @@ fn normalize(request: &mut Request) {
     if let Some(q) = &request.query {
         let mut doc = Document::parse(q.clone(), "request").unwrap();
 
-        if let Some(Definition::OperationDefinition(ref mut op)) = doc.definitions.first_mut() {
+        if let Some(Definition::OperationDefinition(op)) = doc.definitions.first_mut() {
             let o = op.make_mut();
             o.name.take();
         };

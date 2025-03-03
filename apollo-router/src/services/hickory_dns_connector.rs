@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
+use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::config::LookupIpStrategy;
 use hickory_resolver::system_conf::read_system_conf;
-use hickory_resolver::TokioAsyncResolver;
-use hyper_util::client::legacy::connect::dns::Name;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::connect::dns::Name;
 use tower::Service;
 
 use crate::configuration::shared::DnsResolutionStrategy;
