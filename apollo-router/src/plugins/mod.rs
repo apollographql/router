@@ -39,6 +39,7 @@ pub(crate) mod limits;
 pub(crate) mod override_url;
 pub(crate) mod progressive_override;
 mod record_replay;
+pub(crate) mod request_decompression;
 pub(crate) mod rhai;
 pub(crate) mod subscription;
 pub(crate) mod telemetry;
