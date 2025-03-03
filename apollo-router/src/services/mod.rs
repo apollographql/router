@@ -25,9 +25,9 @@ pub(crate) use crate::services::router::Request as RouterRequest;
 pub(crate) use crate::services::router::Response as RouterResponse;
 pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
-pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
+pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 
 pub(crate) mod connect;
 pub(crate) mod connector;

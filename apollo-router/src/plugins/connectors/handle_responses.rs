@@ -9,11 +9,12 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tracing::Span;
 
+use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::plugins::connectors::make_requests::ResponseKey;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::mapping::Problem;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
@@ -29,12 +30,11 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
-use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::connector::request_service::Error;
 use crate::services::connector::request_service::TransportResponse;
+use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
-use crate::Context;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -573,11 +573,11 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
+    use crate::Context;
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
-    use crate::Context;
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {

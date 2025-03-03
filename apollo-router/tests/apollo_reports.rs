@@ -23,15 +23,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
-use axum::body::Bytes;
-use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use axum::body::Bytes;
+use axum::routing::post;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use http_body_util::BodyExt as _;

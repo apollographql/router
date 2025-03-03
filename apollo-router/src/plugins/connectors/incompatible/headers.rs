@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
-use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::Configuration;
+use crate::configuration::subgraph::SubgraphConfiguration;
 
 pub(super) struct HeadersIncompatPlugin {
     /// Configured subgraphs for header propagation

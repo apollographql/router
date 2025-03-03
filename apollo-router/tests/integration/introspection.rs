@@ -3,8 +3,8 @@ use apollo_router::services::supergraph::Request;
 use serde_json::json;
 use tower::ServiceExt;
 
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[tokio::test]
 async fn simple() {

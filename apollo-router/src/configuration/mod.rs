@@ -20,14 +20,14 @@ pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
+use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
-use rustls::ServerConfig;
+use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -41,19 +41,19 @@ pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
+use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
-use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::limits;
-use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::uplink::UplinkConfig;
-use crate::ApolloRouterError;
 
 pub(crate) mod connector;
 pub(crate) mod cors;
@@ -475,13 +475,12 @@ impl Configuration {
         }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                self.supergraph.path,
-                self.supergraph.path
-            ),
-        });
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                    self.supergraph.path, self.supergraph.path
+                ),
+            });
         }
         if self.supergraph.path.ends_with('*')
             && !self.supergraph.path.ends_with("/*")
@@ -496,15 +495,13 @@ impl Configuration {
             });
         }
         if self.supergraph.path.contains("/*/") {
-            return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.graphql_path' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        self.supergraph.path
-                    ),
-                },
-            );
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                    self.supergraph.path
+                ),
+            });
         }
 
         // PQs.
@@ -1125,19 +1122,19 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("could not parse the key: {e}"),
-            ))
+            ));
         }
         Some(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "expected a private key",
-            ))
+            ));
         }
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "could not find a private key",
-            ))
+            ));
         }
     };
 

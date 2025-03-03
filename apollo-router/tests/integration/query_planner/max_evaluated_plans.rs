@@ -1,7 +1,7 @@
 use serde_json::json;
 
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 fn assert_evaluated_plans(prom: &str, expected: u64) {
     let line = prom

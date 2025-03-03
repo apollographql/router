@@ -4,16 +4,16 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use paste::paste;
 use serde_json::Value;
 
+use crate::Configuration;
 use crate::metrics::meter_provider;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;
 

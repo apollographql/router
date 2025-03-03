@@ -5,8 +5,8 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::router::body::RouterBody;
 use super::Plugins;
+use super::router::body::RouterBody;
 use crate::Context;
 
 pub(crate) mod service;

@@ -7,11 +7,11 @@ use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
 
+use crate::Configuration;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::UpdateConfiguration;
 use crate::uplink::UplinkConfig;
-use crate::Configuration;
 
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 
