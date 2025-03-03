@@ -13,6 +13,7 @@ use super::SelectionKey;
 use super::SelectionSet;
 use super::normalize_operation;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -65,8 +66,14 @@ pub(super) fn parse_and_expand(
         fragments,
         schema,
         &Default::default(),
-        &|| Ok(()),
+        &never_cancel,
     )
+}
+
+/// The `normalize_operation()` function has a `check_cancellation` parameter that we'll want to
+/// configure to never cancel during tests. We create a convenience function here for that purpose.
+pub(crate) fn never_cancel() -> Result<(), SingleFederationError> {
+    Ok(())
 }
 
 #[test]
@@ -106,7 +113,7 @@ type Foo {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         normalized_operation.named_fragments = Default::default();
@@ -161,7 +168,7 @@ type Foo {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         normalized_operation.named_fragments = Default::default();
@@ -204,7 +211,7 @@ type Query {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
 
@@ -240,7 +247,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test {
@@ -284,7 +291,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -331,7 +338,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -376,7 +383,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -423,7 +430,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
@@ -475,7 +482,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test {
@@ -542,7 +549,7 @@ type V {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test {
@@ -602,7 +609,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test {
@@ -649,7 +656,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -700,7 +707,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -749,7 +756,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skipIf: Boolean!) {
@@ -798,7 +805,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
@@ -851,7 +858,7 @@ type T {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test {
@@ -920,7 +927,7 @@ type V {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query Test {
@@ -967,7 +974,7 @@ type Foo {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1007,7 +1014,7 @@ type Foo {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1058,7 +1065,7 @@ scalar FieldSet
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &interface_objects,
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1198,7 +1205,7 @@ mod make_selection_tests {
             Default::default(),
             &schema,
             &Default::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1298,7 +1305,7 @@ mod lazy_map_tests {
             Default::default(),
             &schema,
             &Default::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1357,7 +1364,7 @@ mod lazy_map_tests {
             Default::default(),
             &schema,
             &Default::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1563,7 +1570,7 @@ fn test_expand_all_fragments1() {
             NamedFragments::new(&executable_document.fragments, &schema),
             &schema,
             &IndexSet::default(),
-            &|| Ok(()),
+            &never_cancel,
         )
         .unwrap();
         normalized_operation.named_fragments = Default::default();

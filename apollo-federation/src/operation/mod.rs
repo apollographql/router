@@ -64,6 +64,8 @@ pub(crate) use contains::*;
 pub(crate) use directive_list::DirectiveList;
 pub(crate) use merging::*;
 pub(crate) use rebase::*;
+#[cfg(test)]
+pub(crate) use tests::never_cancel;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
@@ -1543,7 +1545,7 @@ impl SelectionSet {
 
     pub(crate) fn expand_all_fragments(
         &self,
-        check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<SelectionSet, FederationError> {
         let mut expanded_selections = vec![];
         SelectionSet::expand_selection_set(&mut expanded_selections, self, check_cancellation)?;
@@ -1560,7 +1562,7 @@ impl SelectionSet {
     fn expand_selection_set(
         destination: &mut Vec<Selection>,
         selection_set: &SelectionSet,
-        check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<(), FederationError> {
         for value in selection_set.selections.values() {
             check_cancellation()?;
@@ -2725,7 +2727,7 @@ impl InlineFragmentSelection {
     pub(crate) fn from_fragment_spread_selection(
         parent_type_position: CompositeTypeDefinitionPosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
-        check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let schema = fragment_spread_selection.spread.schema.schema();
         for directive in fragment_spread_selection.spread.directives.iter() {
@@ -3759,7 +3761,7 @@ pub(crate) fn normalize_operation(
     named_fragments: NamedFragments,
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
-    check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<Operation, FederationError> {
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;

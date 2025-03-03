@@ -3488,7 +3488,7 @@ pub(crate) fn compute_nodes_for_tree(
     initial_node_path: FetchDependencyGraphNodePath,
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
-    check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
     snapshot!("OpPathTree", initial_tree.to_string(), "path_tree");
     let mut stack = vec![ComputeNodesStackItem {
@@ -3600,7 +3600,7 @@ fn compute_nodes_for_key_resolution<'a>(
     edge_id: EdgeIndex,
     new_context: &'a OpGraphPathContext,
     created_nodes: &mut IndexSet<NodeIndex>,
-    check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let edge = stack_item.tree.graph.edge_weight(edge_id)?;
     let Some(conditions) = &child.conditions else {
@@ -3855,7 +3855,7 @@ fn compute_nodes_for_op_path_element<'a>(
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     operation_element: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
-    check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let Some(edge_id) = child.edge else {
         // A null edge means that the operation does nothing
@@ -4442,7 +4442,7 @@ fn handle_conditions_tree(
     query_graph_edge_id_if_typename_needed: Option<EdgeIndex>,
     defer_context: &DeferContext,
     created_nodes: &mut IndexSet<NodeIndex>,
-    check_cancellation: &impl Fn() -> Result<(), SingleFederationError>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ConditionsNodeData, FederationError> {
     // In many cases, we can optimize conditions by merging the fields into previously existing
     // nodes. However, we only do this when the current node has only a single parent (it's hard to
