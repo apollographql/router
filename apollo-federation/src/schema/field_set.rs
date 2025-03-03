@@ -119,7 +119,6 @@ pub(crate) fn collect_target_fields_from_field_set(
         // This case exists for when a directive's field set uses an interface I with implementer O, and conditions
         // I on O, but the actual phrase "type O implements I" only exists in another subgraph. Ideally, this wouldn't
         // be allowed, but it would be a breaking change to remove it, thus it's supported for legacy reasons.
-        // TODO: Check if we need to take this path for other directives as well
         Valid::assume_valid(FieldSet::parse(
             schema,
             parent_type_name,
