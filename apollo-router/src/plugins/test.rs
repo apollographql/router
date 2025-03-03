@@ -13,6 +13,8 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::Configuration;
+use crate::Notify;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -25,8 +27,6 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
-use crate::Notify;
 
 /// Test harness for plugins
 /// The difference between this and the regular TestHarness is that this is more suited for unit testing.
@@ -233,11 +233,13 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     pub(crate) async fn call_connector_request_service(
         &self,
         request: connector::request_service::Request,
-        response_fn: impl Fn(connector::request_service::Request) -> connector::request_service::Response
-            + Send
-            + Sync
-            + Clone
-            + 'static,
+        response_fn: impl Fn(
+            connector::request_service::Request,
+        ) -> connector::request_service::Response
+        + Send
+        + Sync
+        + Clone
+        + 'static,
     ) -> Result<connector::request_service::Response, BoxError> {
         let service: connector::request_service::BoxService =
             connector::request_service::BoxService::new(ServiceBuilder::new().service_fn(
@@ -403,8 +405,8 @@ mod test_for_harness {
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
-    use crate::services::router::body;
     use crate::services::router::BoxService;
+    use crate::services::router::body;
 
     /// Config for the test plugin
     #[derive(JsonSchema, Deserialize)]

@@ -18,11 +18,11 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
-use super::get_trace_and_span_id;
-use super::EventFormatter;
 use super::APOLLO_CONNECTOR_PREFIX;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use super::EventFormatter;
+use super::get_trace_and_span_id;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
@@ -483,11 +483,11 @@ mod test {
     use tracing::subscriber;
     use tracing_core::Event;
     use tracing_core::Subscriber;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::Registry;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::registry::LookupSpan;
-    use tracing_subscriber::Layer;
-    use tracing_subscriber::Registry;
 
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;

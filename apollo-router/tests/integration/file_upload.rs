@@ -1,10 +1,10 @@
 use std::collections::BTreeMap;
 
 use bytes::Bytes;
+use http::HeaderValue;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::HeaderValue;
 use tower::BoxError;
 
 const FILE_CONFIG: &str = include_str!("../fixtures/file_upload/default.router.yaml");
@@ -1019,26 +1019,26 @@ mod helper {
     use std::net::SocketAddr;
     use std::path::PathBuf;
 
-    use axum::body::Body;
-    use axum::extract::State;
-    use axum::response::IntoResponse;
     use axum::BoxError;
     use axum::Json;
     use axum::Router;
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::response::IntoResponse;
     use buildstructor::buildstructor;
     use futures::StreamExt;
-    use http::header::CONTENT_TYPE;
     use http::Request;
     use http::StatusCode;
+    use http::header::CONTENT_TYPE;
     use itertools::Itertools;
     use multer::Multipart;
     use reqwest::multipart::Form;
     use reqwest::multipart::Part;
-    use serde::de::DeserializeOwned;
     use serde::Deserialize;
     use serde::Serialize;
-    use serde_json::json;
+    use serde::de::DeserializeOwned;
     use serde_json::Value;
+    use serde_json::json;
     use thiserror::Error;
     use tokio::net::TcpListener;
     use tokio_stream::Stream;
@@ -1249,11 +1249,13 @@ mod helper {
 
         // The mappings match the field names of the multipart stream to the graphql variables of the query
         let mappings = Part::text(
-            serde_json::json!(names
-                .iter()
-                .enumerate()
-                .map(|(index, _)| (index.to_string(), vec![format!("variables.file{index}")]))
-                .collect::<BTreeMap<String, Vec<String>>>())
+            serde_json::json!(
+                names
+                    .iter()
+                    .enumerate()
+                    .map(|(index, _)| (index.to_string(), vec![format!("variables.file{index}")]))
+                    .collect::<BTreeMap<String, Vec<String>>>()
+            )
             .to_string(),
         )
         .file_name("mappings.json");

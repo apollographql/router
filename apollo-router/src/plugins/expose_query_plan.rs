@@ -1,8 +1,8 @@
 use std::ops::ControlFlow;
 
+use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
-use futures::StreamExt;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -131,7 +131,7 @@ impl Plugin for ExposeQueryPlan {
                     Ok(mut res) => {
                         if !matches!(setting, Setting::Disabled) {
                             let (parts, stream) = res.response.into_parts();
-                            let (mut first, rest) = stream.into_future().await;
+                            let (mut first, rest) = StreamExt::into_future(stream).await;
 
                             if let Some(first) = &mut first {
                                 if let Some(plan) =
@@ -168,10 +168,10 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::MockedSubgraphs;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
-    use crate::MockedSubgraphs;
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
@@ -292,10 +292,12 @@ mod tests {
         // populated (like in the following tests when we're testing that the query plan is
         // output), it's populated with _only_ the query plan (meaning we won't be experiencing
         // false positives)
-        assert!(execute_supergraph_test(VALID_QUERY, supergraph)
-            .await
-            .extensions
-            .is_empty())
+        assert!(
+            execute_supergraph_test(VALID_QUERY, supergraph)
+                .await
+                .extensions
+                .is_empty()
+        )
     }
 
     #[tokio::test]

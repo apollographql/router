@@ -6,24 +6,24 @@ use std::time::Instant;
 use std::time::SystemTime;
 
 use once_cell::unsync;
-use opentelemetry::trace as otel;
-use opentelemetry::trace::noop;
-use opentelemetry::trace::TraceContextExt;
 use opentelemetry::Context as OtelContext;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::StringValue;
 use opentelemetry::Value;
+use opentelemetry::trace as otel;
+use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::noop;
+use tracing_core::Event;
+use tracing_core::Subscriber;
 use tracing_core::field;
 use tracing_core::span;
 use tracing_core::span::Attributes;
 use tracing_core::span::Id;
 use tracing_core::span::Record;
-use tracing_core::Event;
-use tracing_core::Subscriber;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 use super::OtelData;
 use super::PreSampledTracer;
@@ -1120,15 +1120,15 @@ mod tests {
     use std::thread;
     use std::time::SystemTime;
 
-    use opentelemetry::trace::noop;
-    use opentelemetry::trace::TraceFlags;
     use opentelemetry::StringValue;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::noop;
     use parking_lot::Mutex;
     use tracing_subscriber::prelude::*;
 
     use super::*;
-    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::OTEL_NAME;
+    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);
