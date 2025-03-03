@@ -152,6 +152,9 @@ impl Mocks for MockStore {
 
 #[tokio::test]
 async fn insert() {
+    let mut parser = apollo_compiler::parser::Parser::new();
+    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(schema.validate().unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -211,7 +214,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -242,9 +245,10 @@ async fn insert() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -275,6 +279,9 @@ async fn insert() {
 
 #[tokio::test]
 async fn no_cache_control() {
+    let mut parser = apollo_compiler::parser::Parser::new();
+    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(schema.validate().unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -310,9 +317,10 @@ async fn no_cache_control() {
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -337,9 +345,10 @@ async fn no_cache_control() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -366,6 +375,9 @@ async fn no_cache_control() {
 #[tokio::test]
 async fn private() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    let mut parser = apollo_compiler::parser::Parser::new();
+    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(schema.validate().unwrap());
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -425,7 +437,7 @@ async fn private() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -510,6 +522,9 @@ async fn private() {
 #[tokio::test]
 async fn no_data() {
     let query = "query { currentUser { allOrganizations { id name } } }";
+    let mut parser = apollo_compiler::parser::Parser::new();
+    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(schema.validate().unwrap());
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -580,7 +595,7 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -616,9 +631,10 @@ async fn no_data() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let subgraphs = MockedSubgraphs(
         [(
@@ -696,7 +712,9 @@ async fn no_data() {
 #[tokio::test]
 async fn missing_entities() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-
+    let mut parser = apollo_compiler::parser::Parser::new();
+    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(schema.validate().unwrap());
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
@@ -768,7 +786,7 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -791,9 +809,10 @@ async fn missing_entities() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let subgraphs = MockedSubgraphs([
             ("user", MockSubgraph::builder().with_json(
