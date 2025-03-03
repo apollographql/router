@@ -150,7 +150,7 @@ pub(crate) fn collect_subselections(
 
 /// Returns an iterator of functions, one per combination of boolean values of the given variables.
 /// The function return whether a given variable (by its name) is true in that combination.
-fn variable_combinations(defer_stats: &DeferStats) -> impl Iterator<Item = BooleanValues> {
+fn variable_combinations(defer_stats: &DeferStats) -> impl Iterator<Item = BooleanValues> + use<> {
     // `N = variables.len()` boolean values have a total of 2^N combinations.
     // If we enumerate them by counting from 0 to 2^N - 1,
     // interpreting the N bits of the binary representation of the counter

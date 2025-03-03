@@ -35,7 +35,7 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use schemars::gen::SchemaGenerator;
+use schemars::r#gen::SchemaGenerator;
 use schemars::JsonSchema;
 use tower::buffer::future::ResponseFuture;
 use tower::buffer::Buffer;
@@ -256,7 +256,7 @@ impl PluginFactory {
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
             },
-            schema_factory: |gen| gen.subschema_for::<<P as PluginUnstable>::Config>(),
+            schema_factory: |generator| generator.subschema_for::<<P as PluginUnstable>::Config>(),
             type_id: TypeId::of::<P>(),
         }
     }
@@ -279,7 +279,7 @@ impl PluginFactory {
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
             },
-            schema_factory: |gen| gen.subschema_for::<<P as PluginPrivate>::Config>(),
+            schema_factory: |generator| generator.subschema_for::<<P as PluginPrivate>::Config>(),
             type_id: TypeId::of::<P>(),
         }
     }
@@ -304,8 +304,11 @@ impl PluginFactory {
         .await
     }
 
-    pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {
-        (self.schema_factory)(gen)
+    pub(crate) fn create_schema(
+        &self,
+        generator: &mut SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        (self.schema_factory)(generator)
     }
 }
 

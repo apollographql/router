@@ -626,7 +626,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn execute_default_query(
         &self,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> + use<> {
         self.execute_query(Query::builder().build())
     }
 
@@ -634,7 +634,7 @@ impl IntegrationTest {
     pub fn execute_query(
         &self,
         query: Query,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -698,7 +698,7 @@ impl IntegrationTest {
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"

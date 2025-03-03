@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use http::uri::Authority;
 use http::Uri;
-use schemars::gen::SchemaGenerator;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::de::Error;
@@ -107,8 +107,8 @@ impl JsonSchema for UriEndpoint {
         "UriEndpoint".to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<String>()
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<String>()
     }
 }
 
@@ -165,8 +165,8 @@ impl JsonSchema for SocketEndpoint {
         "SocketEndpoint".to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<String>()
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<String>()
     }
 }
 

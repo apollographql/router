@@ -163,7 +163,7 @@ pub(crate) mod metrics;
 pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
-mod resource;
+pub(crate) mod resource;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
@@ -1157,7 +1157,7 @@ impl Telemetry {
                     custom_events.on_response_event(resp, &ctx);
                     custom_graphql_instruments.on_response_event(resp, &ctx);
                 });
-                let (first_response, rest) = stream.into_future().await;
+                let (first_response, rest) = StreamExt::into_future(stream).await;
 
                 let response = http::Response::from_parts(
                     parts,

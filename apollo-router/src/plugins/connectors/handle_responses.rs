@@ -98,7 +98,7 @@ impl RawResponse {
 
                 let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
 
-                if let Some(ref debug) = debug_context {
+                if let Some(debug) = debug_context {
                     debug.lock().push_response(
                         debug_request.clone(),
                         &parts,
@@ -173,7 +173,7 @@ impl RawResponse {
                     .build()
                     .add_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
 
-                if let Some(ref debug) = debug_context {
+                if let Some(debug) = debug_context {
                     debug
                         .lock()
                         .push_response(debug_request.clone(), &parts, &data, None);
@@ -547,7 +547,7 @@ async fn deserialize_response<T: HttpBody>(
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
-            if let Some(ref debug_context) = debug_context {
+            if let Some(debug_context) = debug_context {
                 debug_context
                     .lock()
                     .push_invalid_response(debug_request.clone(), parts, body);

@@ -225,7 +225,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         t.directives().has(&self.authenticated_directive_name)
     }
 
-    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())

@@ -120,8 +120,14 @@ pub mod _private {
     pub use crate::plugin::PLUGINS;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+    pub use crate::services::APOLLO_GRAPH_REF;
+    pub use crate::services::APOLLO_KEY;
 
     pub fn compute_job_queued_count() -> &'static std::sync::atomic::AtomicUsize {
         &crate::compute_job::queue().queued_count
+    }
+    pub mod telemetry {
+        pub use crate::plugins::telemetry::config::AttributeValue;
+        pub use crate::plugins::telemetry::resource::ConfigResource;
     }
 }

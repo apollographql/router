@@ -498,7 +498,7 @@ impl Query {
                 }
 
                 match input {
-                    Value::Object(ref mut input_object) => {
+                    Value::Object(input_object) => {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {

@@ -5,7 +5,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use opentelemetry::KeyValue;
-use schemars::gen::SchemaGenerator;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::JsonSchema;
 use serde::de::Error;
@@ -134,17 +134,17 @@ where
         )
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Extendable json schema is composed of and anyOf of A and additional properties of E
         // To allow this to happen we need to generate a schema that contains all the properties of A
         // and a schema ref to A.
         // We can then add additional properties to the schema of type E.
 
-        let attributes = gen.subschema_for::<A>();
-        let custom = gen.subschema_for::<HashMap<String, E>>();
+        let attributes = generator.subschema_for::<A>();
+        let custom = generator.subschema_for::<HashMap<String, E>>();
 
         // Get a list of properties from the attributes schema
-        let attribute_schema = gen
+        let attribute_schema = generator
             .dereference(&attributes)
             .expect("failed to dereference attributes");
         let mut properties = BTreeMap::new();

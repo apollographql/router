@@ -203,6 +203,10 @@ pub(crate) enum RouterSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+        /// Avoid unsafe std::env::set_var in tests
+        #[cfg(test)]
+        #[serde(skip)]
+        mocked_env_var: Option<String>,
     },
     /// Deprecated, should not be used anymore, use static field instead
     Static(String),
@@ -374,6 +378,10 @@ pub(crate) enum SupergraphSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+        /// Avoid unsafe std::env::set_var in tests
+        #[cfg(test)]
+        #[serde(skip)]
+        mocked_env_var: Option<String>,
     },
     /// Deprecated, should not be used anymore, use static field instead
     Static(String),
@@ -607,6 +615,10 @@ pub(crate) enum SubgraphSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<String>,
+        /// Avoid unsafe std::env::set_var in tests
+        #[cfg(test)]
+        #[serde(skip)]
+        mocked_env_var: Option<String>,
     },
     /// Deprecated, should not be used anymore, use static field instead
     Static(String),
@@ -683,10 +695,22 @@ impl Selector for RouterSelector {
                 .get(request_header)
                 .and_then(|h| Some(h.to_str().ok()?.to_string().into()))
                 .or_else(|| default.maybe_to_otel_value()),
-            RouterSelector::Env { env, default, .. } => std::env::var(env)
-                .ok()
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            RouterSelector::Env {
+                env,
+                default,
+                #[cfg(test)]
+                mocked_env_var,
+                ..
+            } => {
+                #[cfg(test)]
+                let value = mocked_env_var.clone();
+                #[cfg(not(test))]
+                let value = None;
+                value
+                    .or_else(|| std::env::var(env).ok())
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
             } => trace_id().map(|id| trace_id_format.format(id).into()),
@@ -949,10 +973,22 @@ impl Selector for SupergraphSelector {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
 
-            SupergraphSelector::Env { env, default, .. } => std::env::var(env)
-                .ok()
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            SupergraphSelector::Env {
+                env,
+                default,
+                #[cfg(test)]
+                mocked_env_var,
+                ..
+            } => {
+                #[cfg(test)]
+                let value = mocked_env_var.clone();
+                #[cfg(not(test))]
+                let value = None;
+                value
+                    .or_else(|| std::env::var(env).ok())
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For response
@@ -1451,10 +1487,22 @@ impl Selector for SubgraphSelector {
                 ..
             } => get_baggage(baggage_name).or_else(|| default.maybe_to_otel_value()),
 
-            SubgraphSelector::Env { env, default, .. } => std::env::var(env)
-                .ok()
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            SubgraphSelector::Env {
+                env,
+                default,
+                #[cfg(test)]
+                mocked_env_var,
+                ..
+            } => {
+                #[cfg(test)]
+                let value = mocked_env_var.clone();
+                #[cfg(not(test))]
+                let value = None;
+                value
+                    .or_else(|| std::env::var(env).ok())
+                    .or_else(|| default.clone())
+                    .map(opentelemetry::Value::from)
+            }
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
 
@@ -2750,10 +2798,11 @@ mod test {
 
     #[test]
     fn router_env() {
-        let selector = RouterSelector::Env {
+        let mut selector = RouterSelector::Env {
             env: "SELECTOR_ENV_VARIABLE".to_string(),
             redact: None,
             default: Some("defaulted".to_string()),
+            mocked_env_var: None,
         };
         assert_eq!(
             selector.on_request(
@@ -2763,9 +2812,10 @@ mod test {
             ),
             Some("defaulted".into())
         );
-        // Env set
-        std::env::set_var("SELECTOR_ENV_VARIABLE", "env_value");
 
+        if let RouterSelector::Env { mocked_env_var, .. } = &mut selector {
+            *mocked_env_var = Some("env_value".to_string())
+        }
         assert_eq!(
             selector.on_request(
                 &crate::services::RouterRequest::fake_builder()
@@ -2811,10 +2861,11 @@ mod test {
 
     #[test]
     fn supergraph_env() {
-        let selector = SupergraphSelector::Env {
+        let mut selector = SupergraphSelector::Env {
             env: "SELECTOR_SUPERGRAPH_ENV_VARIABLE".to_string(),
             redact: None,
             default: Some("defaulted".to_string()),
+            mocked_env_var: None,
         };
         assert_eq!(
             selector.on_request(
@@ -2824,9 +2875,10 @@ mod test {
             ),
             Some("defaulted".into())
         );
-        // Env set
-        std::env::set_var("SELECTOR_SUPERGRAPH_ENV_VARIABLE", "env_value");
 
+        if let SupergraphSelector::Env { mocked_env_var, .. } = &mut selector {
+            *mocked_env_var = Some("env_value".to_string())
+        }
         assert_eq!(
             selector.on_request(
                 &crate::services::SupergraphRequest::fake_builder()
@@ -2835,28 +2887,28 @@ mod test {
             ),
             Some("env_value".into())
         );
-        std::env::remove_var("SELECTOR_SUPERGRAPH_ENV_VARIABLE");
     }
 
     #[test]
     fn subgraph_env() {
-        let selector = SubgraphSelector::Env {
+        let mut selector = SubgraphSelector::Env {
             env: "SELECTOR_SUBGRAPH_ENV_VARIABLE".to_string(),
             redact: None,
             default: Some("defaulted".to_string()),
+            mocked_env_var: None,
         };
         assert_eq!(
             selector.on_request(&crate::services::SubgraphRequest::fake_builder().build()),
             Some("defaulted".into())
         );
-        // Env set
-        std::env::set_var("SELECTOR_SUBGRAPH_ENV_VARIABLE", "env_value");
 
+        if let SubgraphSelector::Env { mocked_env_var, .. } = &mut selector {
+            *mocked_env_var = Some("env_value".to_string())
+        }
         assert_eq!(
             selector.on_request(&crate::services::SubgraphRequest::fake_builder().build()),
             Some("env_value".into())
         );
-        std::env::remove_var("SELECTOR_SUBGRAPH_ENV_VARIABLE");
     }
 
     #[test]

@@ -1050,7 +1050,8 @@ impl SupergraphCreator {
         Response = supergraph::Response,
         Error = BoxError,
         Future = BoxFuture<'static, supergraph::ServiceResult>,
-    > + Send {
+    > + Send
+           + use<> {
         // Note: We have to box our cloned service to erase the type of the Buffer.
         self.sb.clone().boxed()
     }

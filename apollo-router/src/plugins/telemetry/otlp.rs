@@ -184,8 +184,8 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    HashMap::<String, Value>::json_schema(gen)
+fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    HashMap::<String, Value>::json_schema(generator)
 }
 
 impl GrpcExporter {
