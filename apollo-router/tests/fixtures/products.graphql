@@ -3,6 +3,7 @@ extend schema
 
 type Query {
   topProducts(first: Int = 5): [Product]
+  orderAndGroup(color: Color): [Product]
 }
 
 type Mutation {
@@ -14,4 +15,20 @@ type Product @key(fields: "upc") {
   name: String
   price: Int
   weight: Int
+  location(groupBy: GroupBy): String
+}
+
+enum OrderBy {
+  DESC,
+  ASC,
+}
+
+enum Color {
+  RED,
+  BLUE,
+}
+
+enum GroupBy {
+  DESC,
+  ASC,
 }
