@@ -41,16 +41,16 @@ impl PluginPrivate for RequestDecompressionPlugin {
         // RequestDecompressionLayer works on `http` types so we have to perform the conversions to
         // make it compatible with `BoxService`.
         ServiceBuilder::new()
-            .map_request(|req: router::Request| http::Request::from(req))
-            .map_response(|res: http::Response<_>| router::Response::from(res))
+            .map_request(http::Request::from)
+            .map_response(router::Response::from)
             .layer(
                 tower_http::decompression::RequestDecompressionLayer::new()
                     .br(self.br)
                     .gzip(self.gzip)
                     .deflate(self.deflate),
             )
-            .map_request(|req: http::Request<_>| router::Request::from(req))
-            .map_response(|res: router::Response| http::Response::from(res))
+            .map_request(router::Request::from)
+            .map_response(http::Response::from)
             .service(service)
             .boxed()
     }
