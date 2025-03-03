@@ -131,11 +131,17 @@ impl QueryPlannerService {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
+<<<<<<< HEAD
         let (plan, mut root_node) = compute_job::execute(priority, move || {
+=======
+        let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
+>>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
             let start = Instant::now();
 
+            let check = move || status.check_for_cooperative_cancellation();
             let query_plan_options = QueryPlanOptions {
                 override_conditions: plan_options.override_conditions,
+                check_for_cooperative_cancellation: Some(&check),
             };
 
             let result = operation

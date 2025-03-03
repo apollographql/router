@@ -85,12 +85,15 @@ impl QueryAnalysisLayer {
         let schema = self.schema.clone();
         let conf = self.configuration.clone();
 
-        // Must be created *outside* of the spawn_blocking or the span is not connected to the
-        // parent
+        // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
+        // TODO: is this correct?
+        let span = std::panic::AssertUnwindSafe(span);
+        let conf = std::panic::AssertUnwindSafe(conf);
+
         let priority = compute_job::Priority::P4; // Medium priority
-        let job = move || {
+        compute_job::execute(priority, move |_| {
             span.in_scope(|| {
                 Query::parse_document(
                     &query,
@@ -99,12 +102,25 @@ impl QueryAnalysisLayer {
                     conf.as_ref(),
                 )
             })
+<<<<<<< HEAD
         };
         // TODO: is this correct?
         let job = std::panic::AssertUnwindSafe(job);
         compute_job::execute(priority, job)
             .await
             .expect("Query::parse_document panicked")
+=======
+        })
+        .map_err(MaybeBackPressureError::TemporaryError)?
+        .await
+        // `expect()` propagates any panic that potentially happens in the closure, but:
+        //
+        // * We try to avoid such panics in the first place and consider them bugs
+        // * The panic handler in `apollo-router/src/executable.rs` exits the process
+        //   so this error case should never be reached.
+        .expect("Query::parse_document panicked")
+        .map_err(MaybeBackPressureError::PermanentError)
+>>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
     }
 
     pub(crate) async fn supergraph_request(

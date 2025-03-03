@@ -298,6 +298,8 @@ pub enum SingleFederationError {
     DeferredSubscriptionUnsupported,
     #[error("{message}")]
     QueryPlanComplexityExceeded { message: String },
+    #[error("the caller requested cancellation")]
+    PlanningCancelled,
 }
 
 impl SingleFederationError {
@@ -492,6 +494,7 @@ impl SingleFederationError {
             SingleFederationError::QueryPlanComplexityExceeded { .. } => {
                 ErrorCode::QueryPlanComplexityExceededError
             }
+            SingleFederationError::PlanningCancelled => ErrorCode::Internal,
         }
     }
 }

@@ -580,6 +580,11 @@ mod tests {
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
+<<<<<<< HEAD
+=======
+    use crate::operation::Field;
+    use crate::operation::never_cancel;
+>>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
     use crate::operation::normalize_operation;
     use crate::operation::Field;
     use crate::query_graph::build_query_graph::build_query_graph;
@@ -715,9 +720,14 @@ mod tests {
             "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
-        let normalized_operation =
-            normalize_operation(operation, Default::default(), &schema, &Default::default())
-                .unwrap();
+        let normalized_operation = normalize_operation(
+            operation,
+            Default::default(),
+            &schema,
+            &Default::default(),
+            &never_cancel,
+        )
+        .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
         let paths = vec![
