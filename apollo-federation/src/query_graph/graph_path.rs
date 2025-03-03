@@ -2992,6 +2992,7 @@ impl OpGraphPath {
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
         let span = debug_span!("Trying to advance {self} directly with {operation_element}");
         let _guard = span.enter();
@@ -3262,6 +3263,7 @@ impl OpGraphPath {
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
                                     override_conditions,
+                                    check_cancellation,
                                 )?;
                             // If we find no options for that implementation, we bail (as we need to
                             // simultaneously advance all implementations).
@@ -3296,6 +3298,7 @@ impl OpGraphPath {
                                         operation_element,
                                         condition_resolver,
                                         override_conditions,
+                                        check_cancellation,
                                     )?;
                                 let Some(field_options_for_implementation) =
                                     field_options_for_implementation
@@ -3335,6 +3338,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
+                            check_cancellation,
                         )?;
                         if let Some(interface_path) = interface_path {
                             let (interface_path, all_options) =
@@ -3479,6 +3483,7 @@ impl OpGraphPath {
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
                                     override_conditions,
+                                    check_cancellation,
                                 )?;
                             let Some(implementation_options) = implementation_options else {
                                 drop(guard);
@@ -3505,6 +3510,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
+                            check_cancellation,
                         )?;
                         debug!("Type-exploded options: {}", DisplaySlice(&all_options));
                         Ok((Some(all_options), None))
@@ -3771,6 +3777,7 @@ impl SimultaneousPaths {
     /// the options for the `SimultaneousPaths` as a whole.
     fn flat_cartesian_product(
         options_for_each_path: Vec<Vec<SimultaneousPaths>>,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<Vec<SimultaneousPaths>, FederationError> {
         // This can be written more tersely with a bunch of `reduce()`/`flat_map()`s and friends,
         // but when interfaces type-explode into many implementations, this can end up with fairly
@@ -3801,6 +3808,7 @@ impl SimultaneousPaths {
 
         // Compute the cartesian product.
         for _ in 0..num_options {
+            check_cancellation()?;
             let num_simultaneous_paths = options_for_each_path
                 .iter()
                 .zip(&option_indexes)
@@ -3966,6 +3974,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
         debug!(
             "Trying to advance paths for operation: path = {}, operation = {operation_element}",
@@ -3980,6 +3989,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         // references to `self`, which means cloning these paths when iterating.
         let paths = self.paths.0.clone();
         for (path_index, path) in paths.iter().enumerate() {
+            check_cancellation()?;
             debug!("Computing options for {path}");
             let span = debug_span!(" |");
             let gaurd = span.enter();
@@ -3997,6 +4007,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         &updated_context,
                         condition_resolver,
                         override_conditions,
+                        check_cancellation,
                     )?;
                 debug!("{advance_options:?}");
                 drop(gaurd);
@@ -4069,6 +4080,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                                 &updated_context,
                                 condition_resolver,
                                 override_conditions,
+                                check_cancellation,
                             )?;
                         // If we can't advance the operation element after that path, ignore it,
                         // it's just not an option.
@@ -4157,6 +4169,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                     &updated_context,
                     condition_resolver,
                     override_conditions,
+                    check_cancellation,
                 )?;
                 options = advance_options.unwrap_or_else(Vec::new);
                 debug!("{options:?}");
@@ -4173,7 +4186,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             }
         }
 
-        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path)?;
+        let all_options =
+            SimultaneousPaths::flat_cartesian_product(options_for_each_path, check_cancellation)?;
         debug!("{all_options:?}");
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }

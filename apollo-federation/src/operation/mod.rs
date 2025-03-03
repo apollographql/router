@@ -64,6 +64,8 @@ pub(crate) use contains::*;
 pub(crate) use directive_list::DirectiveList;
 pub(crate) use merging::*;
 pub(crate) use rebase::*;
+#[cfg(test)]
+pub(crate) use tests::never_cancel;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
@@ -1541,9 +1543,12 @@ impl SelectionSet {
         Ok(())
     }
 
-    pub(crate) fn expand_all_fragments(&self) -> Result<SelectionSet, FederationError> {
+    pub(crate) fn expand_all_fragments(
+        &self,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    ) -> Result<SelectionSet, FederationError> {
         let mut expanded_selections = vec![];
-        SelectionSet::expand_selection_set(&mut expanded_selections, self)?;
+        SelectionSet::expand_selection_set(&mut expanded_selections, self, check_cancellation)?;
 
         let mut expanded = SelectionSet {
             schema: self.schema.clone(),
@@ -1557,12 +1562,14 @@ impl SelectionSet {
     fn expand_selection_set(
         destination: &mut Vec<Selection>,
         selection_set: &SelectionSet,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<(), FederationError> {
         for value in selection_set.selections.values() {
+            check_cancellation()?;
             match value {
                 Selection::Field(field_selection) => {
                     let selections = match &field_selection.selection_set {
-                        Some(s) => Some(s.expand_all_fragments()?),
+                        Some(s) => Some(s.expand_all_fragments(check_cancellation)?),
                         None => None,
                     };
                     destination.push(Selection::from_field(
@@ -1580,12 +1587,14 @@ impl SelectionSet {
                         SelectionSet::expand_selection_set(
                             destination,
                             &spread_selection.selection_set,
+                            check_cancellation,
                         )?;
                     } else {
                         // convert to inline fragment
                         let expanded = InlineFragmentSelection::from_fragment_spread_selection(
                             selection_set.type_position.clone(), // the parent type of this inline selection
                             spread_selection,
+                            check_cancellation,
                         )?;
                         destination.push(Selection::InlineFragment(Arc::new(expanded)));
                     }
@@ -1594,7 +1603,9 @@ impl SelectionSet {
                     destination.push(
                         InlineFragmentSelection::new(
                             inline_selection.inline_fragment.clone(),
-                            inline_selection.selection_set.expand_all_fragments()?,
+                            inline_selection
+                                .selection_set
+                                .expand_all_fragments(check_cancellation)?,
                         )
                         .into(),
                     );
@@ -2716,6 +2727,7 @@ impl InlineFragmentSelection {
     pub(crate) fn from_fragment_spread_selection(
         parent_type_position: CompositeTypeDefinitionPosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let schema = fragment_spread_selection.spread.schema.schema();
         for directive in fragment_spread_selection.spread.directives.iter() {
@@ -2753,7 +2765,7 @@ impl InlineFragmentSelection {
             },
             fragment_spread_selection
                 .selection_set
-                .expand_all_fragments()?,
+                .expand_all_fragments(check_cancellation)?,
         ))
     }
 
@@ -3749,10 +3761,11 @@ pub(crate) fn normalize_operation(
     named_fragments: NamedFragments,
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<Operation, FederationError> {
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;
-    normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
+    normalized_selection_set = normalized_selection_set.expand_all_fragments(check_cancellation)?;
     // We clear up the fragments since we've expanded all.
     // Also note that expanding fragment usually generate unnecessary fragments/inefficient
     // selections, so it basically always make sense to flatten afterwards. Besides, fragment
