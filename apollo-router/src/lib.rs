@@ -86,11 +86,11 @@ pub mod otel_compat;
 
 pub use crate::configuration::Configuration;
 pub use crate::configuration::ListenAddr;
-pub use crate::context::extensions::sync::ExtensionsMutex;
-pub use crate::context::extensions::Extensions;
 pub use crate::context::Context;
-pub use crate::executable::main;
+pub use crate::context::extensions::Extensions;
+pub use crate::context::extensions::sync::ExtensionsMutex;
 pub use crate::executable::Executable;
+pub use crate::executable::main;
 pub use crate::notification::Notify;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
@@ -99,13 +99,13 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
-#[cfg(any(test, feature = "snapshot"))]
-pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
-#[cfg(any(test, feature = "snapshot"))]
-pub use crate::test_harness::http_snapshot::SnapshotServer;
-pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::SnapshotServer;
+#[cfg(any(test, feature = "snapshot"))]
+pub use crate::test_harness::http_snapshot::standalone::main as snapshot_server;
+pub use crate::test_harness::make_fake_batch;
 pub use crate::uplink::UplinkConfig;
 
 /// Not part of the public API
@@ -116,8 +116,8 @@ pub mod _private {
     pub use once_cell;
     pub use serde_json;
 
-    pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
+    pub use crate::plugin::PluginFactory;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
     pub use crate::services::APOLLO_GRAPH_REF;

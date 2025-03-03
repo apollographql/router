@@ -11,17 +11,15 @@ use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-use tracing::info_span;
 use tracing::Span;
+use tracing::info_span;
 
-use super::instruments::Instrumented;
 use super::Selector;
 use super::Selectors;
 use super::Stage;
+use super::instruments::Instrumented;
+use crate::Context;
 use crate::graphql;
-use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -30,6 +28,9 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
+use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
+use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
@@ -43,7 +44,6 @@ use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::Context;
 
 #[derive(Default, Clone)]
 pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
@@ -848,8 +848,8 @@ mod tests {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::URLTemplate;
-    use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use http::header::CONTENT_LENGTH;
     use router::body;
     use tracing::instrument::WithSubscriber;
 
@@ -862,11 +862,11 @@ mod tests {
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
-    use crate::services::connector::request_service::transport;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
+    use crate::services::connector::request_service::transport;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_router_events() {

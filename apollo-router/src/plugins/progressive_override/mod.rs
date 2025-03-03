@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 use dashmap::DashMap;
 use schemars::JsonSchema;
 use serde::Deserialize;

@@ -11,18 +11,18 @@ use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use buildstructor::Builder;
 use displaydoc::Display;
 use itertools::Itertools;
-use jsonwebtoken::decode;
-use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
+use jsonwebtoken::decode;
+use jsonwebtoken::jwk::JwkSet;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use serde::Deserialize;
@@ -32,12 +32,12 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
+use crate::Configuration;
 use crate::plugins::authentication::convert_key_algorithm;
-use crate::spec::Schema;
 use crate::spec::LINK_AS_ARGUMENT;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::LINK_URL_ARGUMENT;
-use crate::Configuration;
+use crate::spec::Schema;
 
 pub(crate) const LICENSE_EXPIRED_URL: &str = "https://go.apollo.dev/o/elp";
 pub(crate) const LICENSE_EXPIRED_SHORT_MESSAGE: &str =
@@ -822,6 +822,7 @@ mod test {
     use insta::assert_snapshot;
     use serde_json::json;
 
+    use crate::Configuration;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
@@ -829,7 +830,6 @@ mod test {
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
     use crate::uplink::license_enforcement::SchemaViolation;
-    use crate::Configuration;
 
     #[track_caller]
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {

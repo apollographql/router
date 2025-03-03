@@ -61,19 +61,23 @@ fn test_empty() -> Result<(), Failed> {
             .starts_with("unknown_service:telemetry_resources-"),
         "{service_name:?}"
     );
-    assert!(resource
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into())
-        .is_none());
+    assert!(
+        resource
+            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE.into())
+            .is_none()
+    );
     assert_eq!(
         resource.get(opentelemetry_semantic_conventions::resource::SERVICE_VERSION.into()),
         Some(std::env!("CARGO_PKG_VERSION").into())
     );
 
-    assert!(resource
-        .get(opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME.into())
-        .expect("expected excutable name")
-        .as_str()
-        .contains("telemetry_resources"));
+    assert!(
+        resource
+            .get(opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME.into())
+            .expect("expected excutable name")
+            .as_str()
+            .contains("telemetry_resources")
+    );
     Ok(())
 }
 
@@ -139,16 +143,18 @@ fn test_service_name_override() -> Result<(), Failed> {
     // unknown_service:executable_name
     // unknown_service (Untested as it can't happen)
 
-    assert!(TestConfig {
-        service_name: None,
-        service_namespace: None,
-        resources: Default::default(),
-    }
-    .to_resource()
-    .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
-    .unwrap()
-    .as_str()
-    .starts_with("unknown_service:telemetry_resources-"));
+    assert!(
+        TestConfig {
+            service_name: None,
+            service_namespace: None,
+            resources: Default::default(),
+        }
+        .to_resource()
+        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME.into())
+        .unwrap()
+        .as_str()
+        .starts_with("unknown_service:telemetry_resources-")
+    );
 
     assert_eq!(
         TestConfig {

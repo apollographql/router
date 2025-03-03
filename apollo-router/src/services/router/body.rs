@@ -3,11 +3,11 @@ use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
 use http_body::Frame;
-use http_body_util::combinators::UnsyncBoxBody;
 use http_body_util::BodyExt;
 use http_body_util::Empty;
 use http_body_util::Full;
 use http_body_util::StreamBody;
+use http_body_util::combinators::UnsyncBoxBody;
 use hyper::body::Body as HttpBody;
 
 pub type RouterBody = UnsyncBoxBody<Bytes, AxumError>;
