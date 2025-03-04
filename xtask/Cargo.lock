@@ -97,9 +97,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.96"
+version = "1.0.97"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b964d184e89d9b6b67dd2715bc8e74cf3107fb2b529990c90cf517326150bf4"
+checksum = "dcfed56ad506cb2c684a14971b8861fdc3baaaae314b9e5f9bb532cbe3ba7a4f"
 
 [[package]]
 name = "ascii"
@@ -786,9 +786,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.42.1"
+version = "1.42.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71c1b125e30d93896b365e156c33dadfffab45ee8400afcbba4752f59de08a86"
+checksum = "50259abbaa67d11d2bcafc7ba1d094ed7a0c70e3ce893f0d0997f73558cb3084"
 dependencies = [
  "console",
  "linked-hash-map",
