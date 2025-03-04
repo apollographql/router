@@ -12,6 +12,8 @@ Learn how query batching can help preserve data consistency of responses, and le
 
 Modern applications often require several requests to render a single page. This is usually the result of a component-based architecture where individual micro-frontends (MFE) make requests separately to fetch data relevant to them. 
 
+Query batching makes response data consistent for MFEs making multiple requests per page. It primarily preserves data consistency rather than improve performance.
+
 ### Preserving data consistency
 
 When the underlying data is changing rapidly, the separate requests of an application may result in responses with inconsistent data. Given two requests for a single page, the values returned in their responses may be different because the data's been updated or subgraph servers briefly had different values.
