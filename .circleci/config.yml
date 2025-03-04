@@ -329,9 +329,9 @@ commands:
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
               ./rustup.sh -y --profile minimal --component clippy --component rustfmt --default-toolchain none
+              echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+              export PATH="$HOME/.cargo/bin:$PATH"
             fi
-            echo '. "$HOME/.cargo/env"' >> "$BASH_ENV"
-            . "$HOME/.cargo/env"
             rustup toolchain install
             rustc -V
 
