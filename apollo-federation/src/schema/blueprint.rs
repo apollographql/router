@@ -10,6 +10,8 @@ use crate::link::Purpose;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
+use crate::schema::FederationSchema;
+use crate::schema::compute_subgraph_metadata;
 
 #[allow(dead_code)]
 struct CoreFeature {
@@ -31,7 +33,7 @@ trait SchemaBlueprint {
 
     fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool;
 
-    fn on_constructed(_: &mut Schema);
+    fn on_constructed(_schema: &mut FederationSchema) -> Result<(), FederationError>;
 
     fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature);
 
@@ -71,7 +73,10 @@ impl SchemaBlueprint for DefaultBlueprint {
         false
     }
 
-    fn on_constructed(_: &mut Schema) {}
+    fn on_constructed(_schema: &mut FederationSchema) -> Result<(), FederationError> {
+        // No-op by default, but used for federation.
+        Ok(())
+    }
 
     fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
         // No-op by default, but used for federation.
@@ -134,8 +139,11 @@ impl SchemaBlueprint for FederationBlueprint {
         todo!()
     }
 
-    fn on_constructed(_: &mut Schema) {
-        todo!()
+    fn on_constructed(schema: &mut FederationSchema) -> Result<(), FederationError> {
+        if schema.subgraph_metadata.is_none() {
+            schema.subgraph_metadata = compute_subgraph_metadata(schema)?.map(Box::new);
+        }
+        Ok(())
     }
 
     fn on_added_core_feature(schema: &mut Schema, feature: &CoreFeature) {
