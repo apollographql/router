@@ -369,15 +369,19 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
+            if [[ ! -f "$HOME/.cargo/bin/cargo-binstall$EXECUTABLE_SUFFIX" ]]; then
+              curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+            fi
+
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --version 0.14.21 cargo-deny
-              cargo install --locked --version 0.12.2 cargo-edit
-              cargo install --locked --version 0.12.0 cargo-fuzz
-              cargo install --locked --version 0.6.6 cargo-about
+              cargo binstall -y --version 0.14.21 cargo-deny
+              cargo binstall -y --version 0.12.2 cargo-edit
+              cargo binstall -y --version 0.12.0 cargo-fuzz
+              cargo binstall -y --version 0.6.6 cargo-about
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --version 0.9.70 cargo-nextest
+              cargo binstall -y --version 0.9.70 cargo-nextest
             fi
 
   fetch_dependencies:
