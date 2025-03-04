@@ -1,10 +1,10 @@
 /docs/ @apollographql/docs
 /.changesets/ @apollographql/docs
-/apollo-federation/ @dariuszkuc @sachindshinde @goto-bus-stop @SimonSapin @lrlna @TylerBloom @duckki
+/apollo-federation/ @apollographql/fed-core
 /apollo-federation/src/sources/connect @apollographql/connectors
-/apollo-router/ @apollographql/polaris @apollographql/atlas
+/apollo-router/ @apollographql/polaris @apollographql/fed-core
 /apollo-router/src/plugins/connectors @apollographql/connectors
-/apollo-router-benchmarks/ @apollographql/polaris @apollographql/atlas
-/apollo-router-scaffold/ @apollographql/polaris @apollographql/atlas
-/examples/ @apollographql/polaris @apollographql/atlas
-/.github/CODEOWNERS @apollographql/polaris @apollographql/atlas
+/apollo-router-benchmarks/ @apollographql/polaris @apollographql/fed-core
+/apollo-router-scaffold/ @apollographql/polaris @apollographql/fed-core
+/examples/ @apollographql/polaris @apollographql/fed-core
+/.github/CODEOWNERS @apollographql/polaris @apollographql/fed-core
