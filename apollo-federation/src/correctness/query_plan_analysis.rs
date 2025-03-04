@@ -362,7 +362,7 @@ fn interpret_fetch_node(
             fetch
                 .operation_document
                 .as_parsed()
-                .map_err(|e| e.to_string()),
+                .map_err(|e| e.to_string())?,
             schema,
         )
         .map(|rs| rs.add_boolean_conditions(conditions))
@@ -371,7 +371,7 @@ fn interpret_fetch_node(
             fetch
                 .operation_document
                 .as_parsed()
-                .map_err(|e| e.to_string()),
+                .map_err(|e| e.to_string())?,
             schema,
         )
         .map(|rs| rs.add_boolean_conditions(conditions))
