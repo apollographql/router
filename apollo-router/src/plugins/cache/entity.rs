@@ -1370,30 +1370,27 @@ fn extract_cache_keys(
                 reason: format!("unknown typename {typename:?} in representations"),
             })?
             .directives()
-            .iter()
+            .get_all("key")
             .filter_map(|directive| {
-                if directive.name == "key" {
-                    let mut parser = Parser::new();
-                    directive
-                        .specified_argument_by_name("fields")
-                        .and_then(|arg| arg.as_str())
-                        .and_then(|arg| {
-                            parser
-                                .parse_field_set(
-                                    &supergraph_schema,
-                                    NamedType::new(typename).ok()?,
-                                    arg,
-                                    "entity_caching.graphql",
-                                )
-                                .ok()
-                        })
-                } else {
-                    None
-                }
+                let mut parser = Parser::new();
+                directive
+                    .specified_argument_by_name("fields")
+                    .and_then(|arg| arg.as_str())
+                    .and_then(|arg| {
+                        parser
+                            .parse_field_set(
+                                &supergraph_schema,
+                                NamedType::new(typename).ok()?,
+                                arg,
+                                "entity_caching.graphql",
+                            )
+                            .ok()
+                    })
             })
             .flat_map(|field_set| get_root_field_names(&field_set.selection_set));
         let mut representation_entity_keys = IndexMap::new();
         for entity_key in entity_keys {
+            // We remove it from original representation to not hash it both in entity_hash_key and representation_hash_key
             let (key, value) = representation
                 .remove_entry(entity_key.as_str())
                 .ok_or_else(|| FetchError::MalformedRequest {
