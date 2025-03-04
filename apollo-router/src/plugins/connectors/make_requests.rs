@@ -1,28 +1,28 @@
 use std::sync::Arc;
 
-use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::Name;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
 use parking_lot::Mutex;
+use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
-use serde_json_bytes::json;
 
-use super::http_json_transport::HttpJsonTransportError;
 use super::http_json_transport::make_request;
-use crate::Context;
+use super::http_json_transport::HttpJsonTransportError;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
+use crate::Context;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -118,6 +118,10 @@ pub(crate) enum ResponseKey {
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
+    BatchEntity {
+        selection: Arc<JSONSelection>,
+        inputs: RequestInputs,
+    },
 }
 
 impl ResponseKey {
@@ -126,6 +130,7 @@ impl ResponseKey {
             ResponseKey::RootField { selection, .. } => selection,
             ResponseKey::Entity { selection, .. } => selection,
             ResponseKey::EntityField { selection, .. } => selection,
+            ResponseKey::BatchEntity { selection, .. } => selection,
         }
     }
 
@@ -134,6 +139,7 @@ impl ResponseKey {
             ResponseKey::RootField { inputs, .. } => inputs,
             ResponseKey::Entity { inputs, .. } => inputs,
             ResponseKey::EntityField { inputs, .. } => inputs,
+            ResponseKey::BatchEntity { inputs, .. } => inputs,
         }
     }
 }
@@ -163,6 +169,9 @@ impl From<&ResponseKey> for Path {
                 PathElement::Index(*index),
                 PathElement::Key(field_name.clone(), None),
             ]),
+            ResponseKey::BatchEntity { .. } => {
+                Path::from_iter(vec![PathElement::Key("_entities".to_string(), None)])
+            }
         }
     }
 }
@@ -178,6 +187,9 @@ pub(crate) fn make_requests(
         Some(EntityResolver::Explicit) => entities_from_request(connector.clone(), &request),
         Some(EntityResolver::Implicit) => {
             entities_with_fields_from_request(connector.clone(), &request)
+        }
+        Some(EntityResolver::ExplicitBatch(_)) => {
+            batch_entities_from_request(connector.clone(), &request)
         }
         None => root_fields(connector.clone(), &request),
     }?;
@@ -396,6 +408,74 @@ fn entities_from_request(
         .collect::<Result<Vec<_>, _>>()
 }
 
+// --- BATCH ENTITIES ----------------------------------------------------------------
+
+/// Connectors marked with `entity: true` can be used as entity resolvers,
+/// (resolving `_entities` queries) or regular root fields. For now we'll check
+/// the existence of the `representations` variable to determine which use case
+/// is relevant here.
+///
+/// If it's an entity resolver, we create separate requests for each item in the
+/// representations array.
+///
+/// ```json
+/// {
+///   "variables": {
+///      "representations": [{ "__typename": "User", "id": "1" }]
+///   }
+/// }
+/// ```
+///
+/// Returns a list of request inputs and the response key (index in the array).
+fn batch_entities_from_request(
+    connector: Arc<Connector>,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    use MakeRequestError::*;
+
+    let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
+        return root_fields(connector, request);
+    };
+
+    let op = request
+        .operation
+        .operations
+        .get(None)
+        .map_err(|_| InvalidOperation("no operation document".into()))?;
+
+    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
+
+    let selection = Arc::new(
+        connector
+            .selection
+            .apply_selection_set(&request.operation, &entities_field.selection_set),
+    );
+
+    let inputs = representations
+        .as_array()
+        .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
+        .iter()
+        .map(|rep| {
+            Ok(RequestInputs {
+                args: rep
+                    .as_object()
+                    .ok_or_else(|| {
+                        InvalidRepresentations("representation is not an object".into())
+                    })?
+                    .clone(),
+                // entity connectors are always on Query fields, so they cannot use
+                // sibling fields with $this
+                this: Default::default(),
+            })
+        })
+        .collect::<Result<Vec<RequestInputs>, MakeRequestError>>()?;
+
+    Ok(vec![ResponseKey::BatchEntity {
+        selection: selection.clone(),
+        inputs: todo!(),
+    }])
+}
+
 // --- ENTITY FIELDS -----------------------------------------------------------
 
 /// This is effectively the combination of the other two functions:
@@ -567,9 +647,9 @@ fn entities_with_fields_from_request(
 mod tests {
     use std::sync::Arc;
 
+    use apollo_compiler::name;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
-    use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -579,10 +659,10 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
-    use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
     use crate::services::connector::request_service::TransportRequest;
+    use crate::Context;
 
     #[test]
     fn test_root_fields_simple() {
