@@ -8,15 +8,23 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::Link;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+#[allow(dead_code)]
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
+
+    // TODO: Can we make this more generic than Vec?
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
 
     fn identity(&self) -> &Identity {
         &self.url().identity
@@ -24,6 +32,14 @@ pub(crate) trait SpecDefinition {
 
     fn version(&self) -> &Version {
         &self.url().version
+    }
+
+    fn feature_in_schema(&self, schema: &FederationSchema) -> Option<Arc<Link>> {
+        schema
+            .metadata()?
+            .by_identity
+            .get(&self.url().identity)
+            .cloned()
     }
 
     fn is_spec_type_name(
@@ -128,6 +144,29 @@ pub(crate) trait SpecDefinition {
 
     fn to_string(&self) -> String {
         self.url().to_string()
+    }
+
+    fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let mut errors = MultipleFederationErrors { errors: vec![] };
+        for type_spec in self.type_specs() {
+            // TODO: JS took 2 more arguments, but we didn't carry them over in the original port. Check if needed
+            if let Err(err) = type_spec.check_or_add(schema) {
+                errors.push(err);
+            }
+        }
+
+        for directive_spec in self.directive_specs() {
+            // TODO: JS took 2 more arguments, but we didn't carry them over in the original port. Check if needed
+            if let Err(err) = directive_spec.check_or_add(schema) {
+                errors.push(err);
+            }
+        }
+
+        if errors.errors.len() > 0 {
+            Err(FederationError::MultipleFederationErrors(errors))
+        } else {
+            Ok(())
+        }
     }
 }
 

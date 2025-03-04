@@ -10,6 +10,7 @@ use crate::link::Purpose;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
 
@@ -35,7 +36,7 @@ trait SchemaBlueprint {
 
     fn on_constructed(_schema: &mut FederationSchema) -> Result<(), FederationError>;
 
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature);
+    fn on_added_core_feature(_schema: &mut FederationSchema, _feature: &CoreFeature);
 
     fn on_invalidation(_: &Schema);
 
@@ -78,7 +79,7 @@ impl SchemaBlueprint for DefaultBlueprint {
         Ok(())
     }
 
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
+    fn on_added_core_feature(_schema: &mut FederationSchema, _feature: &CoreFeature) {
         // No-op by default, but used for federation.
     }
 
@@ -146,7 +147,7 @@ impl SchemaBlueprint for FederationBlueprint {
         Ok(())
     }
 
-    fn on_added_core_feature(schema: &mut Schema, feature: &CoreFeature) {
+    fn on_added_core_feature(schema: &mut FederationSchema, feature: &CoreFeature) {
         DefaultBlueprint::on_added_core_feature(schema, feature);
         if feature.url.identity == Identity::federation_identity() {
             if let Some(spec) = FEDERATION_VERSIONS.find(&feature.url.version) {

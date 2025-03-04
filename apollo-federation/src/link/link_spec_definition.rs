@@ -5,6 +5,7 @@ use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
@@ -21,6 +22,14 @@ impl LinkSpecDefinition {
 impl SpecDefinition for LinkSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
+    }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
     }
 }
 

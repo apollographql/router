@@ -1,9 +1,7 @@
-use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -13,9 +11,7 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
 
 use crate::error::FederationError;
-use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::link::Link;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
@@ -25,8 +21,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
-
-use super::database::links_metadata;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -544,83 +539,19 @@ impl FederationSpecDefinition {
             )?,
         })
     }
-
-    pub(crate) fn add_elements_to_schema(
-        &self,
-        schema: &mut Schema,
-    ) -> Result<(), FederationError> {
-        let feature = self.feature_in_schema(schema).expect(
-            format!(
-                "The {} specification should have been added to the schema before this is called",
-                self.url
-            )
-            .as_str(),
-        );
-
-        let mut errors = MultipleFederationErrors { errors: vec![] };
-        for type_spec in self.type_specs() {
-            if let Err(err) = type_spec.check_or_add(schema, feature.as_deref(), false) {
-                errors.push(err);
-            }
-        }
-
-        for directive_spec in self.directive_specs() {
-            if let Err(err) = directive_spec.check_or_add(schema, feature.as_deref(), false) {
-                errors.push(err);
-            }
-        }
-
-        if errors.errors.len() > 0 {
-            Err(FederationError::MultipleFederationErrors(errors))
-        } else {
-            Ok(())
-        }
-    }
-
-    // TODO: This should probably return Arc<FeatureDefinition>
-    fn feature_in_schema(&self, schema: &Schema) -> Result<Option<Arc<Link>>, FederationError> {
-        if let Some(links) = links_metadata(schema)?.as_ref() {
-            // TODO: Probably don't want to re-extract links every time we call this
-            Ok(links.by_identity.get(&self.url.identity).cloned())
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn type_specs(&self) -> Vec<Box<dyn TypeSpecification>> {
-        todo!()
-    }
-
-    fn directive_specs(&self) -> Vec<Box<dyn DirectiveSpecification>> {
-        todo!()
-    }
-}
-
-trait TypeSpecification {
-    fn name(&self) -> String;
-
-    fn check_or_add(
-        &self,
-        schema: &mut Schema,
-        feature: Option<&Link>,
-        as_built_in: bool,
-    ) -> Result<(), FederationError>;
-}
-
-trait DirectiveSpecification {
-    fn name(&self) -> String;
-
-    fn check_or_add(
-        &self,
-        schema: &mut Schema,
-        feature: Option<&Link>,
-        as_built_in: bool,
-    ) -> Result<(), FederationError>;
 }
 
 impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
+    }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
     }
 }
 
