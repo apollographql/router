@@ -7,6 +7,8 @@ use apollo_compiler::ast::NamedType;
 use crate::error::FederationError;
 use crate::link::Import;
 use crate::link::Purpose;
+use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::spec::Identity;
 use crate::link::spec::Url;
 
 #[allow(dead_code)]
@@ -71,7 +73,9 @@ impl SchemaBlueprint for DefaultBlueprint {
 
     fn on_constructed(_: &mut Schema) {}
 
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {}
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
+        // No-op by default, but used for federation.
+    }
 
     fn on_invalidation(_: &Schema) {
         todo!()
@@ -134,8 +138,13 @@ impl SchemaBlueprint for FederationBlueprint {
         todo!()
     }
 
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
-        todo!()
+    fn on_added_core_feature(schema: &mut Schema, feature: &CoreFeature) {
+        DefaultBlueprint::on_added_core_feature(schema, feature);
+        if feature.url.identity == Identity::federation_identity() {
+            if let Some(spec) = FEDERATION_VERSIONS.find(&feature.url.version) {
+                let _ = spec.add_elements_to_schema(schema);
+            }
+        }
     }
 
     fn on_invalidation(_: &Schema) {
