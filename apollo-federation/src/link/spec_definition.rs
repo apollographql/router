@@ -48,10 +48,8 @@ pub(crate) trait SpecDefinition {
         name_in_schema: &Name,
     ) -> Result<bool, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Err(SingleFederationError::Internal {
-                message: "Schema is not a core schema (add @link first)".to_owned(),
-            }
-            .into());
+            // TODO: Can probably just return bool from this fn
+            return Ok(false);
         };
         Ok(metadata
             .source_link_of_type(name_in_schema)
@@ -134,10 +132,7 @@ pub(crate) trait SpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Option<Arc<Link>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Err(SingleFederationError::Internal {
-                message: "Schema is not a core schema (add @link first)".to_owned(),
-            }
-            .into());
+            return Ok(None);
         };
         Ok(metadata.for_identity(self.identity()))
     }
