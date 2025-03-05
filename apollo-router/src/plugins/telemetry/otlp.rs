@@ -77,7 +77,6 @@ impl Config {
         match self.protocol {
             Protocol::Grpc => {
                 let endpoint = self.endpoint.to_full_uri(&DEFAULT_GRPC_ENDPOINT);
-                dbg!(&self.grpc);
                 let tls_config = self.grpc.clone().to_tls_config(&endpoint)?;
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
