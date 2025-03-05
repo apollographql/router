@@ -4,7 +4,6 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use http::Uri;
-use http::uri::Parts;
 use http::uri::PathAndQuery;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
