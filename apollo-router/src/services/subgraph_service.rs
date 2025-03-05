@@ -653,8 +653,8 @@ async fn call_websocket(
         }
 
         let error_details = match &err {
-            tokio_tungstenite::tungstenite::Error::Utf8 => {
-                "invalid UTF-8 in WebSocket handshake; no additional details available".to_string()
+            tokio_tungstenite::tungstenite::Error::Utf8(err) => {
+                format!("invalid UTF-8 in WebSocket handshake: {err}")
             }
 
             tokio_tungstenite::tungstenite::Error::Http(response) => {
