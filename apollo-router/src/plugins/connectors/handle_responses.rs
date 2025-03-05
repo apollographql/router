@@ -49,7 +49,7 @@ pub(crate) enum HandleResponseError {
 
 // --- RAW RESPONSE ------------------------------------------------------------
 
-pub(crate) enum RawResponse {
+enum RawResponse {
     /// This error type is used if:
     /// 1. We didn't even make the request (we hit the request limit)
     /// 2. We couldn't deserialize the response body
