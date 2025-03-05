@@ -1,5 +1,4 @@
 use apollo_compiler::Schema;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
@@ -9,7 +8,6 @@ use apollo_compiler::validation::Valid;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::schema::ValidFederationSchema;
@@ -29,11 +27,6 @@ fn check_absence_of_aliases(selection_set: &SelectionSet) -> Result<(), Federati
     ) -> Result<(), FederationError> {
         for selection in selection_set.iter() {
             match selection {
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal(
-                        "check_absence_of_aliases(): unexpected fragment spread",
-                    ));
-                }
                 Selection::InlineFragment(frag) => check_absence_of_aliases(&frag.selection_set)?,
                 Selection::Field(field) => {
                     if let Some(alias) = &field.field.alias {
@@ -75,9 +68,9 @@ pub(crate) fn parse_field_set(
     )?;
 
     // A field set should not contain any named fragments.
-    let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
+    let fragments = Default::default();
     let selection_set =
-        SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
+        SelectionSet::from_selection_set(&field_set.selection_set, &fragments, schema)?;
 
     // Validate that the field set has no aliases.
     check_absence_of_aliases(&selection_set)?;
@@ -202,9 +195,9 @@ pub(crate) fn validate_field_value(
     field_value.validate(schema.schema())?;
 
     // A field value should not contain any named fragments.
-    let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
+    let fragments = Default::default();
     let selection_set =
-        SelectionSet::from_selection_set(&field_value.selection_set, &named_fragments, schema)?;
+        SelectionSet::from_selection_set(&field_value.selection_set, &fragments, schema)?;
 
     // Validate that the field value has no aliases.
     check_absence_of_aliases(&selection_set)?;

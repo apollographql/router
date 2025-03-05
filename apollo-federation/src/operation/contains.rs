@@ -1,7 +1,6 @@
 use apollo_compiler::executable;
 
 use super::FieldSelection;
-use super::FragmentSpreadSelection;
 use super::HasSelectionKey;
 use super::InlineFragmentSelection;
 use super::Selection;
@@ -61,14 +60,9 @@ impl Selection {
             (Selection::Field(self_field), Selection::Field(other_field)) => {
                 self_field.containment(other_field, options)
             }
-            (
-                Selection::InlineFragment(self_fragment),
-                Selection::InlineFragment(_) | Selection::FragmentSpread(_),
-            ) => self_fragment.containment(other, options),
-            (
-                Selection::FragmentSpread(self_fragment),
-                Selection::InlineFragment(_) | Selection::FragmentSpread(_),
-            ) => self_fragment.containment(other, options),
+            (Selection::InlineFragment(self_fragment), Selection::InlineFragment(_)) => {
+                self_fragment.containment(other, options)
+            }
             _ => Containment::NotContained,
         }
     }
@@ -105,24 +99,6 @@ impl FieldSelection {
                 );
                 Containment::NotContained
             }
-        }
-    }
-}
-
-impl FragmentSpreadSelection {
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match other {
-            // Using keys here means that @defer fragments never compare equal.
-            // This is a bit odd but it is consistent: the selection set data structure would not
-            // even try to compare two @defer fragments, because their keys are different.
-            Selection::FragmentSpread(other) if self.spread.key() == other.spread.key() => self
-                .selection_set
-                .containment(&other.selection_set, options),
-            _ => Containment::NotContained,
         }
     }
 }
@@ -208,7 +184,7 @@ impl SelectionSet {
 mod tests {
     use super::Containment;
     use super::ContainmentOptions;
-    use crate::operation::Operation;
+    use crate::operation::NormalizedOperation;
     use crate::schema::ValidFederationSchema;
 
     fn containment_custom(left: &str, right: &str, ignore_missing_typename: bool) -> Containment {
@@ -247,8 +223,8 @@ mod tests {
         )
         .unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
-        let left = Operation::parse(schema.clone(), left, "left.graphql", None).unwrap();
-        let right = Operation::parse(schema.clone(), right, "right.graphql", None).unwrap();
+        let left = NormalizedOperation::parse(schema.clone(), left, "left.graphql").unwrap();
+        let right = NormalizedOperation::parse(schema.clone(), right, "right.graphql").unwrap();
 
         left.selection_set.containment(
             &right.selection_set,
@@ -337,28 +313,6 @@ mod tests {
                 "{ intf { ... on HasA { a } } }",
             ),
             Containment::Equal
-        );
-        // These select the same things, but containment also counts fragment namedness
-        assert_eq!(
-            containment(
-                "{ intf { ... on HasA { a } } }",
-                "{ intf { ...named } } fragment named on HasA { a }",
-            ),
-            Containment::NotContained
-        );
-        assert_eq!(
-            containment(
-                "{ intf { ...named } } fragment named on HasA { a intfField }",
-                "{ intf { ...named } } fragment named on HasA { a }",
-            ),
-            Containment::StrictlyContained
-        );
-        assert_eq!(
-            containment(
-                "{ intf { ...named } } fragment named on HasA { a }",
-                "{ intf { ...named } } fragment named on HasA { a intfField }",
-            ),
-            Containment::NotContained
         );
     }
 

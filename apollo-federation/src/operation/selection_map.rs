@@ -18,7 +18,6 @@ use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
 use crate::operation::field_selection::FieldSelection;
-use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
 use crate::operation::inline_fragment_selection::InlineFragmentSelection;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
@@ -446,9 +445,6 @@ impl SelectionMap {
                         ),
                     ))),
                 },
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal("unexpected fragment spread"));
-                }
             })
         }
         let mut iter = self.values();
@@ -504,7 +500,6 @@ where
 #[derive(Debug)]
 pub(crate) enum SelectionValue<'a> {
     Field(FieldSelectionValue<'a>),
-    FragmentSpread(FragmentSpreadSelectionValue<'a>),
     InlineFragment(InlineFragmentSelectionValue<'a>),
 }
 
@@ -514,9 +509,6 @@ impl<'a> SelectionValue<'a> {
             Selection::Field(field_selection) => {
                 SelectionValue::Field(FieldSelectionValue::new(field_selection))
             }
-            Selection::FragmentSpread(fragment_spread_selection) => SelectionValue::FragmentSpread(
-                FragmentSpreadSelectionValue::new(fragment_spread_selection),
-            ),
             Selection::InlineFragment(inline_fragment_selection) => SelectionValue::InlineFragment(
                 InlineFragmentSelectionValue::new(inline_fragment_selection),
             ),
@@ -526,7 +518,6 @@ impl<'a> SelectionValue<'a> {
     pub(super) fn key(&self) -> SelectionKey<'_> {
         match self {
             Self::Field(field) => field.get().key(),
-            Self::FragmentSpread(frag) => frag.get().key(),
             Self::InlineFragment(frag) => frag.get().key(),
         }
     }
@@ -536,7 +527,6 @@ impl<'a> SelectionValue<'a> {
     pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         match self {
             SelectionValue::Field(field) => field.get_selection_set_mut(),
-            SelectionValue::FragmentSpread(frag) => Some(frag.get_selection_set_mut()),
             SelectionValue::InlineFragment(frag) => Some(frag.get_selection_set_mut()),
         }
     }
@@ -560,24 +550,6 @@ impl<'a> FieldSelectionValue<'a> {
 
     pub(crate) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         Arc::make_mut(self.0).selection_set.as_mut()
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct FragmentSpreadSelectionValue<'a>(&'a mut Arc<FragmentSpreadSelection>);
-
-impl<'a> FragmentSpreadSelectionValue<'a> {
-    pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
-        Self(fragment_spread_selection)
-    }
-
-    pub(crate) fn get(&self) -> &Arc<FragmentSpreadSelection> {
-        self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
-        &mut Arc::make_mut(self.0).selection_set
     }
 }
 

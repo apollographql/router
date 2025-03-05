@@ -12,7 +12,6 @@ use serde::Serialize;
 use crate::bail;
 use crate::error::FederationError;
 use crate::operation::DirectiveList;
-use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionMapperReturn;
@@ -291,7 +290,7 @@ pub(crate) fn remove_conditions_from_selection_set(
             Ok(selection_set.clone())
         }
         Conditions::Variables(variable_conditions) => {
-            selection_set.lazy_map(&NamedFragments::default(), |selection| {
+            selection_set.lazy_map(|selection| {
                 let element = selection.element()?;
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
@@ -375,10 +374,6 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
                 }
-            }
-            _ => {
-                // TODO should we apply same logic as for inline_fragment "just in case"?
-                return Err(FederationError::internal("unexpected fragment spread"));
             }
         }
     }
