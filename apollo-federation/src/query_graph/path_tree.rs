@@ -580,11 +580,7 @@ mod tests {
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
-<<<<<<< HEAD
-=======
-    use crate::operation::Field;
     use crate::operation::never_cancel;
->>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
     use crate::operation::normalize_operation;
     use crate::operation::Field;
     use crate::query_graph::build_query_graph::build_query_graph;

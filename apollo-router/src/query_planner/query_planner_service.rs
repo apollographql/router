@@ -131,48 +131,49 @@ impl QueryPlannerService {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
-<<<<<<< HEAD
-        let (plan, mut root_node) = compute_job::execute(priority, move || {
-=======
-        let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
->>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
-            let start = Instant::now();
+        let (plan, mut root_node) =
+            compute_job::execute(priority, move |status: compute_job::JobStatus<'_, _>| {
+                let start = Instant::now();
 
-            let check = move || status.check_for_cooperative_cancellation();
-            let query_plan_options = QueryPlanOptions {
-                override_conditions: plan_options.override_conditions,
-                check_for_cooperative_cancellation: Some(&check),
-            };
+                let check = move || status.check_for_cooperative_cancellation();
+                let query_plan_options = QueryPlanOptions {
+                    override_conditions: plan_options.override_conditions,
+                    check_for_cooperative_cancellation: Some(&check),
+                };
 
-            let result = operation
-                .as_deref()
-                .map(|n| Name::new(n).map_err(FederationError::from))
-                .transpose()
-                .and_then(|operation| {
-                    rust_planner.build_query_plan(&doc.executable, operation, query_plan_options)
-                });
-            if let Err(FederationError::SingleFederationError(
-                SingleFederationError::InternalUnmergeableFields { .. },
-            )) = &result
-            {
-                u64_counter!(
-                    "apollo.router.operations.query_planner.unmergeable_fields",
-                    "Query planner caught attempting to merge unmergeable fields",
-                    1
-                );
-            }
-            let result = result.map_err(FederationErrorBridge::from);
+                let result = operation
+                    .as_deref()
+                    .map(|n| Name::new(n).map_err(FederationError::from))
+                    .transpose()
+                    .and_then(|operation| {
+                        rust_planner.build_query_plan(
+                            &doc.executable,
+                            operation,
+                            query_plan_options,
+                        )
+                    });
+                if let Err(FederationError::SingleFederationError(
+                    SingleFederationError::InternalUnmergeableFields { .. },
+                )) = &result
+                {
+                    u64_counter!(
+                        "apollo.router.operations.query_planner.unmergeable_fields",
+                        "Query planner caught attempting to merge unmergeable fields",
+                        1
+                    );
+                }
+                let result = result.map_err(FederationErrorBridge::from);
 
-            let elapsed = start.elapsed().as_secs_f64();
-            metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+                let elapsed = start.elapsed().as_secs_f64();
+                metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
-            result.map(|plan| {
-                let root_node = convert_root_query_plan_node(&plan);
-                (plan, root_node)
+                result.map(|plan| {
+                    let root_node = convert_root_query_plan_node(&plan);
+                    (plan, root_node)
+                })
             })
-        })
-        .await
-        .expect("query planner panicked")?;
+            .await
+            .expect("query planner panicked")?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node)?;
         }

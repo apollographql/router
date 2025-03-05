@@ -138,23 +138,11 @@ impl IntrospectionCache {
         let schema = schema.clone();
         let doc = doc.clone();
         let priority = compute_job::Priority::P1; // Low priority
-<<<<<<< HEAD
-        let response =
-            compute_job::execute(priority, move || Self::execute_introspection(&schema, &doc))
-                .await
-                .expect("Introspection panicked");
-=======
         let response = compute_job::execute(priority, move |_| {
-            Self::execute_introspection(max_depth, &schema, &doc)
-        })?
-        // `expect()` propagates any panic that potentially happens in the closure, but:
-        //
-        // * We try to avoid such panics in the first place and consider them bugs
-        // * The panic handler in `apollo-router/src/executable.rs` exits the process
-        //   so this error case should never be reached.
+            Self::execute_introspection(&schema, &doc)
+        })
         .await
         .expect("Introspection panicked");
->>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
         storage.insert(cache_key, response.clone()).await;
         response
     }

@@ -102,25 +102,9 @@ impl QueryAnalysisLayer {
                     conf.as_ref(),
                 )
             })
-<<<<<<< HEAD
-        };
-        // TODO: is this correct?
-        let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
-            .await
-            .expect("Query::parse_document panicked")
-=======
         })
-        .map_err(MaybeBackPressureError::TemporaryError)?
         .await
-        // `expect()` propagates any panic that potentially happens in the closure, but:
-        //
-        // * We try to avoid such panics in the first place and consider them bugs
-        // * The panic handler in `apollo-router/src/executable.rs` exits the process
-        //   so this error case should never be reached.
         .expect("Query::parse_document panicked")
-        .map_err(MaybeBackPressureError::PermanentError)
->>>>>>> 2c554fc4 (Ensure `build_query_plan()` cancels when the request cancels (#6840))
     }
 
     pub(crate) async fn supergraph_request(
