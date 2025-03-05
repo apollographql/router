@@ -20,9 +20,9 @@ use crate::Supergraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::NamedFragments;
+use crate::internal_error;
 use crate::operation::NormalizedDefer;
-use crate::operation::Operation;
+use crate::operation::NormalizedOperation;
 use crate::operation::SelectionSet;
 use crate::operation::normalize_operation;
 use crate::query_graph::QueryGraph;
@@ -364,14 +364,9 @@ impl QueryPlanner {
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&document.fragments, &self.api_schema),
+            &document.fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
-            &|| {
-                QueryPlanningParameters::check_cancellation_with(
-                    &options.check_for_cooperative_cancellation,
-                )
-            },
         )?;
 
         let NormalizedDefer {
@@ -780,9 +775,11 @@ fn compute_plan_for_defer_conditionals(
 }
 
 fn generate_condition_nodes<'a>(
-    op: Arc<Operation>,
+    op: Arc<NormalizedOperation>,
     mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
-    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
+    on_final_operation: &mut impl FnMut(
+        Arc<NormalizedOperation>,
+    ) -> Result<Option<PlanNode>, FederationError>,
 ) -> Result<Option<PlanNode>, FederationError> {
     match conditions.next() {
         None => on_final_operation(op),
@@ -812,14 +809,23 @@ pub(crate) enum SubgraphOperationCompression {
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(
+        &mut self,
+        operation: NormalizedOperation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
         match self {
-            Self::GenerateFragments => {
-                let mut operation = operation;
-                operation.generate_fragments()?;
-                Ok(operation)
+            Self::GenerateFragments => Ok(operation.generate_fragments()?),
+            Self::Disabled => {
+                let operation_document = operation.try_into().map_err(|err| match err {
+                    FederationError::SingleFederationError(
+                        SingleFederationError::InvalidGraphQL { diagnostics },
+                    ) => internal_error!(
+                        "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+                    ),
+                    _ => err,
+                })?;
+                Ok(operation_document)
             }
-            Self::Disabled => Ok(operation),
         }
     }
 }

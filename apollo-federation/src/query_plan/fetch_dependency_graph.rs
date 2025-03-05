@@ -31,7 +31,6 @@ use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -39,7 +38,7 @@ use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
-use crate::operation::Operation;
+use crate::operation::NormalizedOperation;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
@@ -1337,10 +1336,6 @@ impl FetchDependencyGraph {
         // Some helper functions
 
         let try_get_type_condition = |selection: &Selection| match selection {
-            Selection::FragmentSpread(fragment) => {
-                Some(fragment.spread.type_condition_position.clone())
-            }
-
             Selection::InlineFragment(inline) => {
                 inline.inline_fragment.type_condition_position.clone()
             }
@@ -2656,15 +2651,7 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation = operation_compression.compress(operation)?;
-        let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
-                diagnostics,
-            }) => internal_error!(
-                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            ),
-            _ => err,
-        })?;
+        let operation_document = operation_compression.compress(operation)?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
@@ -2989,9 +2976,6 @@ impl FetchDependencyGraphNode {
                         )?;
                     }
                 }
-                Selection::FragmentSpread(_) => {
-                    bail!("Contexts shouldn't contain named fragment spreads");
-                }
                 Selection::InlineFragment(inline_fragment_selection) => {
                     if let Some(type_condition) = &inline_fragment_selection
                         .inline_fragment
@@ -3020,7 +3004,7 @@ fn operation_for_entities_fetch(
     mut variable_definitions: Vec<Node<VariableDefinition>>,
     operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
-) -> Result<Operation, FederationError> {
+) -> Result<NormalizedOperation, FederationError> {
     variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
@@ -3079,14 +3063,13 @@ fn operation_for_entities_fetch(
         selections: Arc::new(map),
     };
 
-    Ok(Operation {
+    Ok(NormalizedOperation {
         schema: subgraph_schema.clone(),
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
         selection_set,
-        named_fragments: Default::default(),
     })
 }
 
@@ -3097,15 +3080,14 @@ fn operation_for_query_fetch(
     variable_definitions: Vec<Node<VariableDefinition>>,
     operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
-) -> Result<Operation, FederationError> {
-    Ok(Operation {
+) -> Result<NormalizedOperation, FederationError> {
+    Ok(NormalizedOperation {
         schema: subgraph_schema.clone(),
         root_kind,
         name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
         selection_set,
-        named_fragments: Default::default(),
     })
 }
 
@@ -3141,11 +3123,6 @@ impl SelectionSet {
             let subselections = match selection {
                 Selection::Field(field) => field.selection_set.as_ref(),
                 Selection::InlineFragment(inline) => Some(&inline.selection_set),
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal(
-                        "unexpected fragment spread in FetchDependencyGraphNode",
-                    ));
-                }
             };
             let subselections_cost = if let Some(selection_set) = subselections {
                 selection_set.cost(depth + 1.0)?
