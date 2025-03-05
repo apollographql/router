@@ -19,6 +19,7 @@ env_logger = "0.11.0"
 log = "0.4"
 rand = "0.8.0"
 reqwest = { workspace = true, features = ["json", "blocking"] }
+serde_json_bytes.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
@@ -61,6 +62,13 @@ doc = false
 [[bin]]
 name = "connector_selection_parse"
 path = "fuzz_targets/connector_selection_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "connector_selection_apply"
+path = "fuzz_targets/connector_selection_apply.rs"
 test = false
 doc = false
 bench = false
