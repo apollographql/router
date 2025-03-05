@@ -233,6 +233,8 @@ impl Connector {
     }
 
     /// Create an identifier for this connector that can be used for configuration and service identification
+    /// source_name will be "none" here when we are using a "sourceless" connector. In this situation, we'll use
+    /// the synthetic_name instead so that we have some kind of a unique identifier for this source.
     pub fn source_config_key(&self) -> String {
         let source_name = self
             .id
