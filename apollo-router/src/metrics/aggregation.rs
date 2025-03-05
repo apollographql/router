@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use derive_more::From;
 use itertools::Itertools;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::CallbackRegistration;
@@ -22,7 +23,6 @@ use opentelemetry::metrics::SyncCounter;
 use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 
 use crate::metrics::filter::FilterMeterProvider;
@@ -495,16 +495,22 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::AtomicI64;
     use std::sync::Arc;
     use std::sync::Weak;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
     use async_trait::async_trait;
     use opentelemetry::global::GlobalMeterProvider;
     use opentelemetry::metrics::MeterProvider;
     use opentelemetry::metrics::Result;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::ResourceMetrics;
     use opentelemetry_sdk::metrics::data::Temporality;
@@ -512,12 +518,6 @@ mod test {
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry_sdk::metrics::Aggregation;
-    use opentelemetry_sdk::metrics::InstrumentKind;
-    use opentelemetry_sdk::metrics::ManualReader;
-    use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::PeriodicReader;
-    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::runtime;
 
     use crate::metrics::aggregation::AggregateMeterProvider;

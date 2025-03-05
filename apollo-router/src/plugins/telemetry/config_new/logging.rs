@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::time::Duration;
 
-use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::InstanceType;
 use schemars::schema::Metadata;
 use schemars::schema::ObjectValidation;
@@ -11,11 +12,10 @@ use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::schema::SingleOrVec;
 use schemars::schema::SubschemaValidation;
-use schemars::JsonSchema;
-use serde::de::MapAccess;
-use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
@@ -153,11 +153,19 @@ impl JsonSchema for Format {
         "logging_format".to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // Does nothing, but will compile error if the
         let types = vec![
-            ("json", JsonFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html"),
-            ("text", TextFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html"),
+            (
+                "json",
+                JsonFormat::json_schema(generator),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+            ),
+            (
+                "text",
+                TextFormat::json_schema(generator),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+            ),
         ];
 
         Schema::Object(SchemaObject {

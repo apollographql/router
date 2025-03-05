@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::ast::VariableDefinition;
 use apollo_compiler::executable;
@@ -9,9 +12,6 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 

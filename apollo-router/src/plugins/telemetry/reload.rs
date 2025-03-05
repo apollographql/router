@@ -1,25 +1,25 @@
 use std::io::IsTerminal;
 
-use anyhow::anyhow;
 use anyhow::Result;
+use anyhow::anyhow;
 use once_cell::sync::OnceCell;
+use opentelemetry::Context;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::Context;
 use opentelemetry_sdk::trace::Tracer;
 use tower::BoxError;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Registry;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::SpanRef;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::Registry;
 
 use super::dynamic_attribute::DynAttributeLayer;
 use super::fmt_layer::FmtLayer;

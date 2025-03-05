@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::prelude::*;
-use notify::event::DataChange;
-use notify::event::MetadataKind;
-use notify::event::ModifyKind;
 use notify::Config;
 use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
+use notify::event::ModifyKind;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -29,11 +29,11 @@ const DEFAULT_WATCH_DURATION: Duration = Duration::from_millis(100);
 ///
 /// returns: impl Stream<Item=()>
 ///
-pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
+pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> + use<> {
     watch_with_duration(path, DEFAULT_WATCH_DURATION)
 }
 
-fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> {
+fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> + use<> {
     // Due to the vagaries of file watching across multiple platforms, instead of watching the
     // supplied path (file), we are going to watch the parent (directory) of the path.
     let config_file_path = PathBuf::from(path);

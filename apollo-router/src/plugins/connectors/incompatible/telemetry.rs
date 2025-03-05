@@ -2,8 +2,8 @@ use itertools::Either;
 use itertools::Itertools as _;
 
 use super::IncompatiblePlugin;
-use crate::plugins::telemetry::apollo;
 use crate::Configuration;
+use crate::plugins::telemetry::apollo;
 
 pub(super) struct TelemetryIncompatPlugin {
     config: apollo::SubgraphErrorConfig,

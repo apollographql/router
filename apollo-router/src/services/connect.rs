@@ -2,15 +2,15 @@
 
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::Context;
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::query_planner::fetch::Variables;
-use crate::Context;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 

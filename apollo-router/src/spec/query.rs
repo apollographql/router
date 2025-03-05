@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::executable;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::ExecutableDocument;
 use derivative::Derivative;
 use indexmap::IndexSet;
 use serde::Deserialize;
@@ -22,6 +22,7 @@ use self::subselections::SubSelectionKey;
 use self::subselections::SubSelectionValue;
 use super::Fragment;
 use super::QueryHash;
+use crate::Configuration;
 use crate::error::FetchError;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -32,17 +33,16 @@ use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::query_planner::fetch::OperationKind;
-use crate::services::layers::query_analysis::get_operation;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
-use crate::spec::schema::ApiSchema;
+use crate::services::layers::query_analysis::get_operation;
 use crate::spec::FieldType;
 use crate::spec::Fragments;
 use crate::spec::InvalidValue;
 use crate::spec::Schema;
 use crate::spec::Selection;
 use crate::spec::SpecError;
-use crate::Configuration;
+use crate::spec::schema::ApiSchema;
 
 pub(crate) mod subselections;
 pub(crate) mod transform;
@@ -498,7 +498,7 @@ impl Query {
                 }
 
                 match input {
-                    Value::Object(ref mut input_object) => {
+                    Value::Object(input_object) => {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
