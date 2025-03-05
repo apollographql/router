@@ -53,7 +53,7 @@ fuzz_target!(|input: GeneratedSelection| -> Corpus {
     };
 
     // Apply the fuzzed selection and ensure that it matches the output we expect
-    let (applied, errors) = selection.apply_to(&*INPUT);
+    let (applied, errors) = selection.apply_to(&INPUT);
     assert!(errors.is_empty());
     assert_eq!(applied, Some(OUTPUT.clone()));
 
