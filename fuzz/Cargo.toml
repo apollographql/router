@@ -59,8 +59,8 @@ test = false
 doc = false
 
 [[bin]]
-name = "selection_parsing"
-path = "fuzz_targets/selection_parsing.rs"
+name = "connector_selection_parse"
+path = "fuzz_targets/connector_selection_parse.rs"
 test = false
 doc = false
 bench = false
