@@ -13,13 +13,14 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use either::Either;
 use http::header;
 use http::HeaderName;
+use itertools::Itertools;
 use keys::make_key_field_set_from_variables;
+use keys::TrieNode;
 use serde_json::Value;
 use url::Url;
 
@@ -134,7 +135,7 @@ impl Connector {
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
-        let parent_type_name = connect.position.field.type_name().clone();
+        let parent_type_name = connect.position.parent_type_name();
         let schema_def = &schema.schema_definition;
         let on_query = schema_def
             .query
@@ -152,16 +153,42 @@ impl Connector {
             label: make_label(subgraph_name, &source_name, &transport),
             subgraph_name: subgraph_name.to_string(),
             source_name: source_name.clone(),
-            directive: connect.position,
+            directive: connect.position.clone(),
         };
 
-        let entity_resolver = match (connect.entity, on_root_type) {
-            (true, _) => Some(EntityResolver::Explicit),
-            (_, false) => Some(EntityResolver::Implicit),
-            _ => None,
+        let entity_resolver = match &connect.position {
+            super::spec::schema::DirectivePosition::Field(_) => {
+                match (connect.entity, on_root_type) {
+                    (true, _) => Some(EntityResolver::Explicit),
+                    (_, false) => Some(EntityResolver::Implicit),
+                    _ => None,
+                }
+            }
+            super::spec::schema::DirectivePosition::Object(pos) => {
+                let params = transport
+                    .variable_references()
+                    .filter(|var| var.namespace.namespace == Namespace::Batch)
+                    .unique()
+                    .collect_vec();
+
+                let mut merged = TrieNode::default();
+                for param in params {
+                    merged.insert(&param.path.iter().map(|p| p.as_str()).collect::<Vec<_>>());
+                }
+
+                Some(EntityResolver::ExplicitBatch(
+                    FieldSet::parse_and_validate(
+                        Valid::assume_valid_ref(schema),
+                        pos.ty.type_name().clone(),
+                        merged.to_string(),
+                        "",
+                    )
+                    .map_err(|_| FederationError::internal("Failed to create key for connector"))?,
+                ))
+            }
         };
 
-        let request_variables = transport.variables().collect();
+        let request_variables: HashSet<_> = transport.variables().collect();
         let response_variables = connect.selection.external_variables().collect();
 
         let connector = Connector {
@@ -179,9 +206,9 @@ impl Connector {
         Ok((id, connector))
     }
 
-    pub fn field_name(&self) -> &Name {
-        self.id.directive.field.field_name()
-    }
+    // pub fn field_name(&self) -> &Name {
+    //     self.id.directive.field.field_name()
+    // }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
         self.transport.variable_references().chain(
@@ -200,22 +227,13 @@ impl Connector {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {
-                let output_type = self
-                    .id
-                    .directive
-                    .field
-                    .get(schema)
-                    .map(|f| f.ty.inner_named_type())
-                    .map_err(|_| {
-                        internal_error!(
-                            "Missing field {}.{}",
-                            self.id.directive.field.type_name(),
-                            self.id.directive.field.field_name()
-                        )
+                let output_type =
+                    self.id.directive.output_type(schema).ok_or_else(|| {
+                        internal_error!("Missing {}", self.id.directive.coordinate())
                     })?;
                 make_key_field_set_from_variables(
                     schema,
-                    output_type,
+                    &output_type,
                     self.variable_references(),
                     EntityResolver::Explicit,
                 )
@@ -225,7 +243,7 @@ impl Connector {
             }
             Some(EntityResolver::Implicit) => make_key_field_set_from_variables(
                 schema,
-                self.id.directive.field.type_name(),
+                self.id.directive.parent_type().type_name(),
                 self.variable_references(),
                 EntityResolver::Implicit,
             )

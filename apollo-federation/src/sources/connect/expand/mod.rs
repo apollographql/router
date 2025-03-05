@@ -1,15 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use apollo_compiler::Schema;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Schema;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
-use crate::ApiSchemaOptions;
-use crate::Supergraph;
-use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
 use crate::link::Link;
 use crate::merge::merge_subgraphs;
@@ -18,6 +15,9 @@ use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::Connector;
 use crate::subgraph::Subgraph;
 use crate::subgraph::ValidSubgraph;
+use crate::ApiSchemaOptions;
+use crate::Supergraph;
+use crate::ValidFederationSubgraph;
 
 mod carryover;
 pub(crate) mod visitors;
@@ -65,6 +65,7 @@ pub fn expand_connectors(
     let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
         .extract_subgraphs()?
         .into_iter()
+        // .inspect(|sub| println!("{}", sub.1.schema.schema().serialize()))
         .partition_map(
             |(_, sub)| match ConnectSpec::get_from_schema(sub.schema.schema()) {
                 Some((spec, link)) if contains_connectors(&link, &sub) => {
@@ -87,6 +88,7 @@ pub fn expand_connectors(
     let all_subgraphs = graphql_subgraphs
         .iter()
         .chain(expanded_subgraphs.iter().map(|(_, sub)| sub))
+        // .inspect(|sub| println!("{}", sub.schema.serialize()))
         .collect();
     let new_supergraph = merge_subgraphs(all_subgraphs).map_err(|e| {
         FederationError::internal(format!("could not merge expanded subgraphs: {e:?}"))
@@ -174,8 +176,6 @@ fn split_subgraph(
 }
 
 mod helpers {
-    use apollo_compiler::Name;
-    use apollo_compiler::Node;
     use apollo_compiler::ast;
     use apollo_compiler::ast::Argument;
     use apollo_compiler::ast::Directive;
@@ -190,27 +190,29 @@ mod helpers {
     use apollo_compiler::schema::EnumType;
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::ScalarType;
+    use apollo_compiler::ty;
+    use apollo_compiler::Name;
+    use apollo_compiler::Node;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
 
     use super::filter_directives;
-    use super::visitors::GroupVisitor;
-    use super::visitors::SchemaVisitor;
     use super::visitors::try_insert;
     use super::visitors::try_pre_insert;
-    use crate::ValidFederationSubgraph;
+    use super::visitors::GroupVisitor;
+    use super::visitors::SchemaVisitor;
     use crate::error::FederationError;
     use crate::internal_error;
-    use crate::link::Link;
     use crate::link::spec::Identity;
-    use crate::schema::FederationSchema;
-    use crate::schema::ValidFederationSchema;
+    use crate::link::Link;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::position::SchemaRootDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
+    use crate::schema::FederationSchema;
+    use crate::schema::ValidFederationSchema;
     use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
@@ -220,6 +222,7 @@ mod helpers {
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
     use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
     use crate::supergraph::new_empty_fed_2_subgraph_schema;
+    use crate::ValidFederationSubgraph;
 
     /// A helper struct for expanding a subgraph into one per connect directive.
     pub(super) struct Expander<'a> {
@@ -321,103 +324,181 @@ mod helpers {
                 .as_ref()
                 .map(|m| m.name.clone());
 
-            let field = &connector.id.directive.field;
-            let field_def = field.get(self.original_schema.schema())?;
-            let field_type = self
-                .original_schema
-                .get_type(field_def.ty.inner_named_type().clone())?;
+            if let Some(field) = &connector.id.directive.field() {
+                let field_def = field.get(self.original_schema.schema())?;
+                let field_type = self
+                    .original_schema
+                    .get_type(field_def.ty.inner_named_type().clone())?;
 
-            // We'll need to make sure that we always process the inputs first, since they need to be present
-            // before any dependent types
-            self.process_inputs(&mut schema, &field_def.arguments)?;
+                // We'll need to make sure that we always process the inputs first, since they need to be present
+                // before any dependent types
+                self.process_inputs(&mut schema, &field_def.arguments)?;
 
-            // Actually process the type annotated with the connector, making sure to walk nested types
-            match field_type {
-                TypeDefinitionPosition::Object(object) => {
-                    SchemaVisitor::new(
-                        self.original_schema,
-                        &mut schema,
-                        &self.directive_deny_list,
-                    )
-                    .walk((
-                        object,
-                        connector.selection.next_subselection().cloned().ok_or(
-                            FederationError::internal("empty selections are not allowed"),
-                        )?,
-                    ))?;
+                // Actually process the type annotated with the connector, making sure to walk nested types
+                match field_type {
+                    TypeDefinitionPosition::Object(object) => {
+                        SchemaVisitor::new(
+                            self.original_schema,
+                            &mut schema,
+                            &self.directive_deny_list,
+                        )
+                        .walk((
+                            object,
+                            connector.selection.next_subselection().cloned().ok_or(
+                                FederationError::internal("empty selections are not allowed"),
+                            )?,
+                        ))?;
+                    }
+
+                    TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => {
+                        self.insert_custom_leaf(&mut schema, &field_type)?;
+                    }
+
+                    TypeDefinitionPosition::Interface(interface) => {
+                        return Err(FederationError::internal(format!(
+                            "connect directives not yet supported on interfaces: found on {}",
+                            interface.type_name
+                        )));
+                    }
+                    TypeDefinitionPosition::Union(union) => {
+                        return Err(FederationError::internal(format!(
+                            "connect directives not yet supported on union: found on {}",
+                            union.type_name
+                        )));
+                    }
+                    TypeDefinitionPosition::InputObject(input) => {
+                        return Err(FederationError::internal(format!(
+                            "connect directives not yet supported on inputs: found on {}",
+                            input.type_name
+                        )));
+                    }
+                };
+
+                // Add the root type for this connector, optionally inserting a dummy query root
+                // if the connector is not defined within a field on a Query (since a subgraph is invalid
+                // without at least a root-level Query)
+                let ObjectOrInterfaceTypeDefinitionPosition::Object(parent_object) = field.parent()
+                else {
+                    return Err(FederationError::internal(
+                        "connect directives on interfaces is not yet supported",
+                    ));
+                };
+
+                self.insert_query_for_field(&mut schema, &query_alias, &parent_object, field_def)?;
+
+                let query_root = SchemaRootDefinitionPosition {
+                    root_kind: SchemaRootDefinitionKind::Query,
+                };
+                query_root.insert(
+                    &mut schema,
+                    ComponentName {
+                        origin: ComponentOrigin::Definition,
+                        name: query_alias,
+                    },
+                )?;
+
+                if let Some(mutation_alias) = mutation_alias {
+                    // only add the mutation root definition if we've added the
+                    // type to this schema
+                    if schema.get_type(mutation_alias.clone()).is_ok() {
+                        let mutation_root = SchemaRootDefinitionPosition {
+                            root_kind: SchemaRootDefinitionKind::Mutation,
+                        };
+                        mutation_root.insert(
+                            &mut schema,
+                            ComponentName {
+                                origin: ComponentOrigin::Definition,
+                                name: mutation_alias,
+                            },
+                        )?;
+                    }
                 }
 
-                TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_) => {
-                    self.insert_custom_leaf(&mut schema, &field_type)?;
-                }
+                // Process any outputs needed by the connector
+                self.process_outputs(
+                    &mut schema,
+                    connector,
+                    parent_object.type_name.clone(),
+                    field_def.ty.inner_named_type().clone(),
+                )?;
+            } else {
+                let field_type = connector
+                    .id
+                    .directive
+                    .type_position(self.original_schema.schema());
 
-                TypeDefinitionPosition::Interface(interface) => {
-                    return Err(FederationError::internal(format!(
-                        "connect directives not yet supported on interfaces: found on {}",
-                        interface.type_name
-                    )));
-                }
-                TypeDefinitionPosition::Union(union) => {
-                    return Err(FederationError::internal(format!(
-                        "connect directives not yet supported on union: found on {}",
-                        union.type_name
-                    )));
-                }
-                TypeDefinitionPosition::InputObject(input) => {
-                    return Err(FederationError::internal(format!(
-                        "connect directives not yet supported on inputs: found on {}",
-                        input.type_name
-                    )));
-                }
-            };
+                // Actually process the type annotated with the connector, making sure to walk nested types
+                match &field_type {
+                    TypeDefinitionPosition::Object(object) => {
+                        SchemaVisitor::new(
+                            self.original_schema,
+                            &mut schema,
+                            &self.directive_deny_list,
+                        )
+                        .walk((
+                            object.clone(),
+                            connector.selection.next_subselection().cloned().ok_or(
+                                FederationError::internal("empty selections are not allowed"),
+                            )?,
+                        ))?;
+                    }
+                    _ => {}
+                };
 
-            // Add the root type for this connector, optionally inserting a dummy query root
-            // if the connector is not defined within a field on a Query (since a subgraph is invalid
-            // without at least a root-level Query)
-            let ObjectOrInterfaceTypeDefinitionPosition::Object(parent_object) = field.parent()
-            else {
-                return Err(FederationError::internal(
-                    "connect directives on interfaces is not yet supported",
-                ));
-            };
+                let query_object = ObjectTypeDefinitionPosition {
+                    type_name: query_alias.clone(),
+                };
+                query_object.pre_insert(&mut schema)?;
+                query_object.insert(
+                    &mut schema,
+                    ObjectType {
+                        description: None,
+                        name: query_alias.clone(),
+                        implements_interfaces: Default::default(),
+                        directives: DirectiveList::new(),
+                        fields: Default::default(),
+                    }
+                    .into(),
+                )?;
 
-            self.insert_query_for_field(&mut schema, &query_alias, &parent_object, field_def)?;
+                let query_root = SchemaRootDefinitionPosition {
+                    root_kind: SchemaRootDefinitionKind::Query,
+                };
+                query_root.insert(
+                    &mut schema,
+                    ComponentName {
+                        origin: ComponentOrigin::Definition,
+                        name: query_alias.clone(),
+                    },
+                )?;
 
-            let query_root = SchemaRootDefinitionPosition {
-                root_kind: SchemaRootDefinitionKind::Query,
-            };
-            query_root.insert(
-                &mut schema,
-                ComponentName {
-                    origin: ComponentOrigin::Definition,
-                    name: query_alias,
-                },
-            )?;
+                let dummy_field_def = ObjectFieldDefinitionPosition {
+                    type_name: query_alias,
+                    field_name: name!("_"),
+                };
+                dummy_field_def.insert(
+                    &mut schema,
+                    FieldDefinition {
+                        description: Default::default(),
+                        name: name!("_"),
+                        arguments: Default::default(),
+                        ty: ty!(ID),
+                        directives: ast::DirectiveList(vec![Node::new(Directive {
+                            name: name!("federation__inaccessible"),
+                            arguments: Vec::new(),
+                        })]),
+                    }
+                    .into(),
+                )?;
 
-            if let Some(mutation_alias) = mutation_alias {
-                // only add the mutation root definition if we've added the
-                // type to this schema
-                if schema.get_type(mutation_alias.clone()).is_ok() {
-                    let mutation_root = SchemaRootDefinitionPosition {
-                        root_kind: SchemaRootDefinitionKind::Mutation,
-                    };
-                    mutation_root.insert(
-                        &mut schema,
-                        ComponentName {
-                            origin: ComponentOrigin::Definition,
-                            name: mutation_alias,
-                        },
-                    )?;
-                }
+                // Process any outputs needed by the connector
+                self.process_outputs(
+                    &mut schema,
+                    connector,
+                    field_type.type_name().clone(),
+                    field_type.type_name().clone(),
+                )?;
             }
-
-            // Process any outputs needed by the connector
-            self.process_outputs(
-                &mut schema,
-                connector,
-                parent_object.type_name.clone(),
-                field_def.ty.inner_named_type().clone(),
-            )?;
 
             Ok(schema)
         }

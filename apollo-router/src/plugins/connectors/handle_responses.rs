@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
 use axum::body::HttpBody;
 use http::header::CONTENT_LENGTH;
+use itertools::Itertools;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
@@ -294,10 +296,30 @@ impl MappedResponse {
                     };
                 }
                 ResponseKey::BatchEntity {
-                    selection: _,
-                    inputs: _,
+                    key_selection,
+                    keys,
+                    ..
                 } => {
-                    todo!("MappedResponse::Data::add_to_data for ResponseKey::BatchEntity")
+                    if let serde_json_bytes::Value::Array(values) = value {
+                        let mut map = values
+                            .into_iter()
+                            .map(|v| {
+                                let key = key_selection.apply_to(&v).0.unwrap_or_default();
+                                (key, v)
+                            })
+                            .collect::<HashMap<_, _>>();
+
+                        let entities = keys
+                            .iter()
+                            .map(|key| map.remove(key).unwrap_or(Value::Null))
+                            .collect_vec();
+
+                        data.insert(ENTITIES, Value::Array(entities));
+                    } else {
+                        return Err(HandleResponseError::MergeError(
+                            "BatchEntity response is not an array".into(),
+                        ));
+                    }
                 }
             },
         }

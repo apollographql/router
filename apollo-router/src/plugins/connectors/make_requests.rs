@@ -2,13 +2,16 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
+use itertools::Itertools;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -32,6 +35,7 @@ const TYPENAME: &str = "__typename";
 pub(crate) struct RequestInputs {
     args: Map<ByteString, Value>,
     this: Map<ByteString, Value>,
+    pub(crate) batch: Vec<Map<ByteString, Value>>,
 }
 
 impl RequestInputs {
@@ -60,6 +64,20 @@ impl RequestInputs {
             map.insert(
                 Namespace::This.as_str().into(),
                 Value::Object(self.this.clone()),
+            );
+        }
+
+        // $batch only applies to entity resolvers on types
+        if variables_used.contains(&Namespace::Batch) {
+            map.insert(
+                Namespace::Batch.as_str().into(),
+                Value::Array(
+                    self.batch
+                        .clone()
+                        .into_iter()
+                        .map(|r| Value::Object(r))
+                        .collect(),
+                ),
             );
         }
 
@@ -120,6 +138,8 @@ pub(crate) enum ResponseKey {
     },
     BatchEntity {
         selection: Arc<JSONSelection>,
+        keys: Vec<Value>,
+        key_selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
 }
@@ -188,8 +208,8 @@ pub(crate) fn make_requests(
         Some(EntityResolver::Implicit) => {
             entities_with_fields_from_request(connector.clone(), &request)
         }
-        Some(EntityResolver::ExplicitBatch(_)) => {
-            batch_entities_from_request(connector.clone(), &request)
+        Some(EntityResolver::ExplicitBatch(ref key)) => {
+            batch_entities_from_request(connector.clone(), &request, key)
         }
         None => root_fields(connector.clone(), &request),
     }?;
@@ -311,7 +331,7 @@ fn root_fields(
 
                 let request_inputs = RequestInputs {
                     args,
-                    this: Default::default(),
+                    ..Default::default()
                 };
 
                 let response_key = ResponseKey::RootField {
@@ -396,7 +416,7 @@ fn entities_from_request(
                     .clone(),
                 // entity connectors are always on Query fields, so they cannot use
                 // sibling fields with $this
-                this: Default::default(),
+                ..Default::default()
             };
 
             Ok(ResponseKey::Entity {
@@ -410,69 +430,68 @@ fn entities_from_request(
 
 // --- BATCH ENTITIES ----------------------------------------------------------------
 
-/// Connectors marked with `entity: true` can be used as entity resolvers,
-/// (resolving `_entities` queries) or regular root fields. For now we'll check
-/// the existence of the `representations` variable to determine which use case
-/// is relevant here.
 ///
-/// If it's an entity resolver, we create separate requests for each item in the
-/// representations array.
-///
-/// ```json
-/// {
-///   "variables": {
-///      "representations": [{ "__typename": "User", "id": "1" }]
-///   }
-/// }
-/// ```
-///
-/// Returns a list of request inputs and the response key (index in the array).
 fn batch_entities_from_request(
     connector: Arc<Connector>,
     request: &connect::Request,
+    key: &Valid<FieldSet>,
 ) -> Result<Vec<ResponseKey>, MakeRequestError> {
     use MakeRequestError::*;
 
     let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
-        return root_fields(connector, request);
+        unreachable!("batch_entities_from_request called without representations");
     };
 
-    let op = request
-        .operation
-        .operations
-        .get(None)
-        .map_err(|_| InvalidOperation("no operation document".into()))?;
+    // let op = request
+    //     .operation
+    //     .operations
+    //     .get(None)
+    //     .map_err(|_| InvalidOperation("no operation document".into()))?;
 
-    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
+    // let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
 
     let selection = Arc::new(
-        connector
-            .selection
-            .apply_selection_set(&request.operation, &entities_field.selection_set),
+        connector.selection.clone(), // TODO
+                                     // .apply_selection_set(&request.operation, &entities_field.selection_set),
     );
 
-    let inputs = representations
-        .as_array()
-        .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
-        .iter()
-        .map(|rep| {
-            Ok(RequestInputs {
-                args: rep
+    let inputs = RequestInputs {
+        batch: representations
+            .as_array()
+            .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
+            .iter()
+            .map(|rep| {
+                let obj = rep
                     .as_object()
                     .ok_or_else(|| {
                         InvalidRepresentations("representation is not an object".into())
                     })?
-                    .clone(),
-                // entity connectors are always on Query fields, so they cannot use
-                // sibling fields with $this
-                this: Default::default(),
+                    .clone();
+                Ok::<_, MakeRequestError>(obj)
             })
+            .collect::<Result<Vec<_>, _>>()?,
+        ..Default::default()
+    };
+
+    let key_str = key.selection_set.to_string();
+    let key_selection = JSONSelection::parse(&key_str[1..key_str.len() - 1]).expect("valid key");
+
+    let keys = inputs
+        .batch
+        .iter()
+        .map(|r| {
+            key_selection
+                .apply_to(&serde_json_bytes::Value::Object(r.clone()))
+                .0
+                .unwrap_or_default()
         })
-        .collect::<Result<Vec<RequestInputs>, MakeRequestError>>()?;
+        .collect_vec();
 
     Ok(vec![ResponseKey::BatchEntity {
         selection: selection.clone(),
-        inputs: todo!(),
+        inputs,
+        key_selection: Arc::new(key_selection),
+        keys,
     }])
 }
 
@@ -624,6 +643,7 @@ fn entities_with_fields_from_request(
                             InvalidRepresentations("representation is not an object".into())
                         })?
                         .clone(),
+                    ..Default::default()
                 };
                 Ok::<_, MakeRequestError>(ResponseKey::EntityField {
                     index: *i,

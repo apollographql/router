@@ -8,8 +8,8 @@ use std::task::Poll;
 use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
-use opentelemetry::Key;
 use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::Key;
 use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,14 +22,14 @@ use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::aggregate_responses;
 use crate::plugins::connectors::make_requests::make_requests;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
-use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::connectors::tracing::connect_spec_version_instrument;
+use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::query_planner::fetch::SubgraphSchemas;
+use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
-use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
@@ -146,7 +146,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
                 "otel.kind" = "INTERNAL",
                 "apollo.connector.type" = CONNECTOR_TYPE_HTTP,
                 "apollo.connector.detail" = tracing::field::Empty,
-                "apollo.connector.field.name" = %connector.field_name(),
+                // "apollo.connector.field.name" = %connector.field_name(), // TODO
                 "apollo.connector.selection" = %connector.selection,
                 "apollo.connector.source.name" = tracing::field::Empty,
                 "apollo.connector.source.detail" = tracing::field::Empty,

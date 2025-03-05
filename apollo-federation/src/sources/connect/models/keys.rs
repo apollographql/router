@@ -51,10 +51,10 @@ pub(crate) fn make_key_field_set_from_variables<'a>(
 }
 
 #[derive(Default)]
-struct TrieNode(IndexMap<String, TrieNode>);
+pub(crate) struct TrieNode(IndexMap<String, TrieNode>);
 
 impl TrieNode {
-    fn insert(&mut self, path: &[&str]) {
+    pub(crate) fn insert(&mut self, path: &[&str]) {
         let mut node = self;
         for head in path {
             node = node.0.entry(head.to_string()).or_default();

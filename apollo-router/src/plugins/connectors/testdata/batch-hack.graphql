@@ -9,6 +9,11 @@ schema
       url: "https://specs.apollo.dev/connect/v0.1"
       import: ["@connect", "@source"]
     }
+  )
+  @join__directive(
+    graphs: [CONNECTORS]
+    name: "source"
+    args: { name: "json", http: { baseURL: "http://localhost:4001/api" } }
   ) {
   query: Query
 }
@@ -92,20 +97,26 @@ enum link__Purpose {
 }
 
 type Query @join__type(graph: CONNECTORS) {
-  users(ids: [ID!]!): [User]!
+  users: [User!]!
     @join__directive(
       graphs: [CONNECTORS]
       name: "connect"
-      args: {
-        http: { POST: "http://localhost/users", body: "$args { ids }" }
-        entity: true
-        batch: { key: "id" }
-        selection: "id name"
-      }
+      args: { source: "json", http: { GET: "/users" }, selection: "id" }
     )
 }
 
-type User @join__type(graph: CONNECTORS) {
+type User
+  @join__type(graph: CONNECTORS)
+  @join__directive(
+    graphs: [CONNECTORS]
+    name: "connect"
+    args: {
+      source: "json"
+      http: { POST: "/users-batch", body: "ids: $batch.id" }
+      selection: "id name username"
+    }
+  ) {
   id: ID!
   name: String
+  username: String
 }

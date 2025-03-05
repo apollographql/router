@@ -21,6 +21,7 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
+use spec::schema::DirectivePosition;
 pub use spec::ConnectSpec;
 pub use url_template::URLTemplate;
 pub use variable::Namespace;
@@ -39,7 +40,7 @@ pub struct ConnectId {
     pub label: String,
     pub subgraph_name: String,
     pub source_name: Option<String>,
-    pub(crate) directive: ObjectOrInterfaceFieldDirectivePosition,
+    pub(crate) directive: DirectivePosition,
 }
 
 impl ConnectId {
@@ -49,13 +50,21 @@ impl ConnectId {
     /// their own subgraphs when doing planning. Each subgraph will need a name, so we
     /// synthesize one using metadata present on the directive.
     pub(crate) fn synthetic_name(&self) -> String {
-        format!(
-            "{}_{}_{}_{}",
-            self.subgraph_name,
-            self.directive.field.type_name(),
-            self.directive.field.field_name(),
-            self.directive.directive_index
-        )
+        match self.directive {
+            DirectivePosition::Field(ref field) => format!(
+                "{}_{}_{}_{}",
+                self.subgraph_name,
+                field.field.type_name(),
+                field.field.field_name(),
+                field.directive_index
+            ),
+            DirectivePosition::Object(ref object) => format!(
+                "{}_{}_{}",
+                self.subgraph_name,
+                object.ty.type_name(),
+                object.directive_index
+            ),
+        }
     }
 
     pub fn subgraph_source(&self) -> String {
@@ -64,13 +73,21 @@ impl ConnectId {
     }
 
     pub fn coordinate(&self) -> String {
-        format!(
-            "{}:{}.{}@connect[{}]",
-            self.subgraph_name,
-            self.directive.field.type_name(),
-            self.directive.field.field_name(),
-            self.directive.directive_index
-        )
+        match self.directive {
+            DirectivePosition::Field(ref field) => format!(
+                "{}:{}.{}@connect[{}]",
+                self.subgraph_name,
+                field.field.type_name(),
+                field.field.field_name(),
+                field.directive_index
+            ),
+            DirectivePosition::Object(ref object) => format!(
+                "{}:{}@connect[{}]",
+                self.subgraph_name,
+                object.ty.type_name(),
+                object.directive_index
+            ),
+        }
     }
 }
 
@@ -109,7 +126,7 @@ impl ConnectId {
             label: label.to_string(),
             subgraph_name,
             source_name,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
+            directive: DirectivePosition::Field(ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                     ObjectFieldDefinitionPosition {
                         type_name,
@@ -118,7 +135,7 @@ impl ConnectId {
                 ),
                 directive_name: name!(connect),
                 directive_index: index,
-            },
+            }),
         }
     }
 }

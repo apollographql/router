@@ -1,30 +1,36 @@
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use itertools::Itertools;
 
+use super::schema::ConnectDirectiveArguments;
+use super::schema::ConnectHTTPArguments;
+use super::schema::DirectivePosition;
+use super::schema::ObjectOrInterfaceDirectivePosition;
+use super::schema::SourceDirectiveArguments;
+use super::schema::SourceHTTPArguments;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use super::schema::ConnectDirectiveArguments;
-use super::schema::ConnectHTTPArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
-use super::schema::SourceDirectiveArguments;
-use super::schema::SourceHTTPArguments;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::sources::connect::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::models::Header;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::ObjectFieldDefinitionPosition;
 
 macro_rules! internal {
     ($s:expr) => {
@@ -49,14 +55,14 @@ pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
-    schema
+    let mut on_fields: Vec<_> = schema
         .types
         .iter()
         .filter_map(|(name, ty)| match ty {
-            apollo_compiler::schema::ExtendedType::Object(node) => {
+            ExtendedType::Object(node) => {
                 Some((name, &node.fields, /* is_interface */ false))
             }
-            apollo_compiler::schema::ExtendedType::Interface(node) => {
+            ExtendedType::Interface(node) => {
                 Some((name, &node.fields, /* is_interface */ true))
             }
             _ => None,
@@ -85,16 +91,62 @@ pub(crate) fn extract_connect_directive_arguments(
                             )
                         };
 
-                        let position = ObjectOrInterfaceFieldDirectivePosition {
-                            field: field_pos,
-                            directive_name: directive.name.clone(),
-                            directive_index: i,
-                        };
+                        let position =
+                            DirectivePosition::Field(ObjectOrInterfaceFieldDirectivePosition {
+                                field: field_pos,
+                                directive_name: directive.name.clone(),
+                                directive_index: i,
+                            });
                         ConnectDirectiveArguments::from_position_and_directive(position, directive)
                     })
             })
         })
-        .collect()
+        .try_collect()?;
+
+    let on_types = schema
+        .types
+        .iter()
+        .filter_map(|(name, ty)| match ty {
+            ExtendedType::Object(node) => {
+                Some((name, node, /* is_interface */ false))
+            }
+            // ExtendedType::Interface(node) => {
+            //     Some((name, &node, /* is_interface */ true))
+            // }
+            _ => None,
+        })
+        .flat_map(|(type_name, ty, is_interface)| {
+            ty.directives
+                .iter()
+                .enumerate()
+                .filter(|(_, directive)| directive.name == *name)
+                .map(move |(i, directive)| {
+                    let ty_pos = if is_interface {
+                        ObjectOrInterfaceTypeDefinitionPosition::Interface(
+                            InterfaceTypeDefinitionPosition {
+                                type_name: type_name.clone(),
+                            },
+                        )
+                    } else {
+                        ObjectOrInterfaceTypeDefinitionPosition::Object(
+                            ObjectTypeDefinitionPosition {
+                                type_name: type_name.clone(),
+                            },
+                        )
+                    };
+
+                    let position = DirectivePosition::Object(ObjectOrInterfaceDirectivePosition {
+                        ty: ty_pos,
+                        directive_name: directive.name.clone(),
+                        directive_index: i,
+                    });
+                    ConnectDirectiveArguments::from_position_and_directive(position, directive)
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    on_fields.extend(on_types);
+    Ok(on_fields)
 }
 
 /// Internal representation of the object type pairs
@@ -184,7 +236,7 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 
 impl ConnectDirectiveArguments {
     fn from_position_and_directive(
-        position: ObjectOrInterfaceFieldDirectivePosition,
+        position: DirectivePosition,
         value: &Node<Directive>,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
@@ -302,15 +354,15 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::Schema;
     use apollo_compiler::name;
+    use apollo_compiler::Schema;
 
-    use crate::ValidFederationSubgraphs;
     use crate::schema::FederationSchema;
+    use crate::sources::connect::spec::schema::SourceDirectiveArguments;
     use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-    use crate::sources::connect::spec::schema::SourceDirectiveArguments;
     use crate::supergraph::extract_subgraphs_from_supergraph;
+    use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
 

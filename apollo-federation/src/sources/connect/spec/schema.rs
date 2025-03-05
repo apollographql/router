@@ -1,12 +1,17 @@
-use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use http::HeaderName;
 use url::Url;
 
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::sources::connect::HeaderSource;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
 use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::HeaderSource;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
@@ -60,12 +65,98 @@ pub(crate) struct SourceHTTPArguments {
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct ObjectOrInterfaceDirectivePosition {
+    pub(crate) ty: ObjectOrInterfaceTypeDefinitionPosition,
+    pub(crate) directive_name: Name,
+    pub(crate) directive_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum DirectivePosition {
+    Field(ObjectOrInterfaceFieldDirectivePosition),
+    Object(ObjectOrInterfaceDirectivePosition),
+}
+
+impl DirectivePosition {
+    pub(crate) fn field(&self) -> Option<&ObjectOrInterfaceFieldDefinitionPosition> {
+        match self {
+            DirectivePosition::Field(field) => Some(&field.field),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn parent_type(&self) -> ObjectOrInterfaceTypeDefinitionPosition {
+        match self {
+            DirectivePosition::Field(field) => field.field.parent(),
+            DirectivePosition::Object(object) => object.ty.clone(), // TODO
+        }
+    }
+
+    pub(crate) fn parent_type_name(&self) -> Name {
+        self.parent_type().type_name().clone()
+    }
+
+    pub(crate) fn output_type(&self, schema: &Schema) -> Option<Name> {
+        match self {
+            DirectivePosition::Field(f) => f
+                .field
+                .get(schema)
+                .ok()
+                .map(|f| f.ty.inner_named_type().clone()),
+            DirectivePosition::Object(o) => Some(o.ty.type_name().clone()),
+        }
+    }
+
+    pub(crate) fn coordinate(&self) -> String {
+        match self {
+            DirectivePosition::Field(f) => format!(
+                "{}:{}.{}@{}[{}]",
+                f.field.parent().type_name(),
+                f.field.type_name(),
+                f.field.field_name(),
+                f.directive_name,
+                f.directive_index
+            ),
+            DirectivePosition::Object(o) => format!(
+                "{}:{}@{}[{}]",
+                o.ty.type_name(),
+                o.ty.type_name(),
+                o.directive_name,
+                o.directive_index
+            ),
+        }
+    }
+
+    pub(crate) fn type_position(&self, schema: &Schema) -> TypeDefinitionPosition {
+        match self {
+            DirectivePosition::Field(f) => {
+                let inner_named_type = f
+                    .field
+                    .get(schema)
+                    .ok()
+                    .map(|f| f.ty.inner_named_type())
+                    .expect("TODO");
+                let ty = schema.types.get(inner_named_type).expect("TODO");
+                ObjectTypeDefinitionPosition {
+                    type_name: ty.name().clone(),
+                }
+                .into()
+            }
+            DirectivePosition::Object(o) => ObjectTypeDefinitionPosition {
+                type_name: o.ty.type_name().clone(),
+            }
+            .into(), // TODO interfaces
+        }
+    }
+}
+
 /// Arguments to the `@connect` directive
 ///
 /// Refer to [ConnectSpecDefinition] for more info.
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 pub(crate) struct ConnectDirectiveArguments {
-    pub(crate) position: ObjectOrInterfaceFieldDirectivePosition,
+    pub(crate) position: DirectivePosition,
 
     /// The upstream source for shared connector configuration.
     ///
@@ -93,7 +184,7 @@ pub(crate) struct ConnectDirectiveArguments {
 }
 
 /// The HTTP arguments needed for a connect request
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug)]
 pub(crate) struct ConnectHTTPArguments {
     pub(crate) get: Option<String>,
     pub(crate) post: Option<String>,
