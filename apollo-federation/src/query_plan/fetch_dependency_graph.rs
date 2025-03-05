@@ -3493,6 +3493,7 @@ pub(crate) fn compute_nodes_for_tree(
     initial_node_path: FetchDependencyGraphNodePath,
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
     snapshot!("OpPathTree", initial_tree.to_string(), "path_tree");
     let mut stack = vec![ComputeNodesStackItem {
@@ -3505,6 +3506,7 @@ pub(crate) fn compute_nodes_for_tree(
     }];
     let mut created_nodes = IndexSet::default();
     while let Some(stack_item) = stack.pop() {
+        check_cancellation()?;
         let node =
             FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
         for selection_set in &stack_item.tree.local_selection_sets {
@@ -3550,6 +3552,7 @@ pub(crate) fn compute_nodes_for_tree(
                                 edge_id,
                                 new_context,
                                 &mut created_nodes,
+                                check_cancellation,
                             )?);
                         }
                         QueryGraphEdgeTransition::RootTypeResolution { root_kind } => {
@@ -3577,6 +3580,7 @@ pub(crate) fn compute_nodes_for_tree(
                         child,
                         operation,
                         &mut created_nodes,
+                        check_cancellation,
                     )?);
                 }
             }
@@ -3601,6 +3605,7 @@ fn compute_nodes_for_key_resolution<'a>(
     edge_id: EdgeIndex,
     new_context: &'a OpGraphPathContext,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let edge = stack_item.tree.graph.edge_weight(edge_id)?;
     let Some(conditions) = &child.conditions else {
@@ -3616,6 +3621,7 @@ fn compute_nodes_for_key_resolution<'a>(
         stack_item.node_path.clone(),
         stack_item.defer_context.for_conditions(),
         &Default::default(),
+        check_cancellation,
     )?;
     created_nodes.extend(conditions_nodes.iter().copied());
     // Then we can "take the edge", creating a new node.
@@ -3854,6 +3860,7 @@ fn compute_nodes_for_op_path_element<'a>(
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     operation_element: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let Some(edge_id) = child.edge else {
         // A null edge means that the operation does nothing
@@ -3960,6 +3967,7 @@ fn compute_nodes_for_op_path_element<'a>(
             },
             &updated.defer_context,
             created_nodes,
+            check_cancellation,
         )?;
 
         if let Some(matching_context_ids) = &child.matching_context_ids {
@@ -4437,6 +4445,7 @@ fn handle_conditions_tree(
     query_graph_edge_id_if_typename_needed: Option<EdgeIndex>,
     defer_context: &DeferContext,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ConditionsNodeData, FederationError> {
     // In many cases, we can optimize conditions by merging the fields into previously existing
     // nodes. However, we only do this when the current node has only a single parent (it's hard to
@@ -4520,6 +4529,7 @@ fn handle_conditions_tree(
         fetch_node_path.clone(),
         defer_context.for_conditions(),
         &OpGraphPathContext::default(),
+        check_cancellation,
     )?;
 
     if newly_created_node_ids.is_empty() {

@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexSet;
@@ -87,6 +88,26 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
     pub(crate) override_conditions: EnabledOverrideConditions,
+    pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+}
+
+impl QueryPlanningParameters<'_> {
+    pub(crate) fn check_cancellation(&self) -> Result<(), SingleFederationError> {
+        Self::check_cancellation_with(&self.check_for_cooperative_cancellation)
+    }
+
+    pub(crate) fn check_cancellation_with(
+        check: &Option<&dyn Fn() -> ControlFlow<()>>,
+    ) -> Result<(), SingleFederationError> {
+        if let Some(check) = check {
+            match check() {
+                ControlFlow::Continue(()) => Ok(()),
+                ControlFlow::Break(()) => Err(SingleFederationError::PlanningCancelled),
+            }
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub(crate) struct QueryPlanningTraversal<'a, 'b> {
@@ -339,6 +360,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while !self.open_branches.is_empty() {
+            self.parameters.check_cancellation()?;
             snapshot!(
                 "OpenBranches",
                 snapshot_helper::open_branches_to_string(&self.open_branches),
@@ -401,11 +423,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         );
 
         for option in options.iter_mut() {
+            self.parameters.check_cancellation()?;
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
                 &operation_element,
                 /*resolver*/ self,
                 &self.parameters.override_conditions,
+                &|| self.parameters.check_cancellation(),
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -1042,6 +1066,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 dependency_graph,
                 path_tree,
                 type_conditioned_fetching_enabled,
+                &|| self.parameters.check_cancellation(),
             )?;
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
@@ -1079,6 +1104,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 )?,
                 Default::default(),
                 &Default::default(),
+                &|| self.parameters.check_cancellation(),
             )?;
         }
 
@@ -1130,6 +1156,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             statistics: self.parameters.statistics,
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
+            check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
