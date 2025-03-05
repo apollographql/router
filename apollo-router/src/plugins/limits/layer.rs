@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::task::Poll;
 
 use displaydoc::Display;
@@ -128,9 +128,9 @@ where
 impl<ReqBody, RespBody, S> Service<http::Request<ReqBody>> for RequestBodyLimit<ReqBody, S>
 where
     S: Service<
-        http::Request<super::limited::Limited<ReqBody>>,
-        Response = http::Response<RespBody>,
-    >,
+            http::Request<super::limited::Limited<ReqBody>>,
+            Response = http::Response<RespBody>,
+        >,
     ReqBody: http_body::Body,
     RespBody: http_body::Body,
     S::Error: From<BodyLimitError>,

@@ -17,11 +17,11 @@ use pin_project_lite::pin_project;
 use tokio::sync::Mutex;
 use tokio::sync::OwnedMutexGuard;
 
+use super::Result as UploadResult;
 use super::config::MultipartRequestLimits;
 use super::error::FileUploadError;
 use super::map_field::MapField;
 use super::map_field::MapFieldRaw;
-use super::Result as UploadResult;
 use crate::services::router::body::RouterBody;
 
 // The limit to set for the map field in the multipart request.

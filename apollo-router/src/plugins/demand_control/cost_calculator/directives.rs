@@ -1,13 +1,13 @@
 use ahash::HashMap;
 use ahash::HashMapExt;
 use ahash::HashSet;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 use apollo_federation::link::cost_spec_definition::ListSizeDirective as ParsedListSizeDirective;
 use tower::BoxError;
 

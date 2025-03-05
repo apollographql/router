@@ -1,11 +1,12 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::fmt::Display;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Instant;
 
+use axum::Router;
 use axum::extract::Extension;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -13,14 +14,13 @@ use axum::middleware;
 use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
-use axum::Router;
 use futures::channel::oneshot;
 use futures::future::join_all;
 use futures::prelude::*;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
 use itertools::Itertools;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
@@ -32,19 +32,20 @@ use serde_json::json;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio_rustls::TlsAcceptor;
-use tower::layer::layer_fn;
 use tower::ServiceExt;
+use tower::layer::layer_fn;
 use tower_http::trace::TraceLayer;
-use tracing::instrument::WithSubscriber;
 use tracing::Instrument;
+use tracing::instrument::WithSubscriber;
 
+use super::ENDPOINT_CALLBACK;
+use super::ListenAddrAndRouter;
+use super::listeners::ListenersAndRouters;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
-use super::listeners::ListenersAndRouters;
 use super::utils::PropagatingMakeSpan;
-use super::ListenAddrAndRouter;
-use super::ENDPOINT_CALLBACK;
+use crate::Context;
 use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
@@ -60,10 +61,9 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::APOLLO_ROUTER_LICENSE_EXPIRED;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
-use crate::Context;
+use crate::uplink::license_enforcement::LicenseState;
 
 static ACTIVE_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static BARE_WILDCARD_PATH_REGEX: Lazy<Regex> = Lazy::new(|| {

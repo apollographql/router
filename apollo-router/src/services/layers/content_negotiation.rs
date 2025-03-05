@@ -4,18 +4,18 @@
 
 use std::ops::ControlFlow;
 
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
+use mediatype::MediaTypeList;
+use mediatype::ReadParams;
+use mediatype::names::_STAR;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
-use mediatype::names::_STAR;
-use mediatype::MediaTypeList;
-use mediatype::ReadParams;
 use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
@@ -23,13 +23,8 @@ use tower::Service;
 use tower::ServiceExt;
 
 use crate::graphql;
-use crate::layers::sync_checkpoint::CheckpointService;
 use crate::layers::ServiceExt as _;
-use crate::services::router;
-use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
-use crate::services::router::ClientRequestAccepts;
-use crate::services::supergraph;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
@@ -37,6 +32,11 @@ use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_PARAMETER;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
+use crate::services::router;
+use crate::services::router::ClientRequestAccepts;
+use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
+use crate::services::supergraph;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
 

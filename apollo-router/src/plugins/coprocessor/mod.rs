@@ -9,14 +9,14 @@ use std::time::Duration;
 use std::time::Instant;
 
 use bytes::Bytes;
-use futures::future::ready;
-use futures::stream::once;
 use futures::StreamExt;
 use futures::TryStreamExt;
-use http::header;
+use futures::future::ready;
+use futures::stream::once;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::header;
 use http_body_util::BodyExt;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
@@ -25,20 +25,21 @@ use hyper_util::rt::TokioExecutor;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tower::timeout::TimeoutLayer;
-use tower::util::MapFutureLayer;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::timeout::TimeoutLayer;
+use tower::util::MapFutureLayer;
 
+use crate::Context;
 use crate::configuration::shared::Client;
 use crate::context::context_key_from_deprecated;
 use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
-use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -47,18 +48,17 @@ use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
-use crate::services::external::externalize_header_map;
 use crate::services::external::Control;
-use crate::services::external::Externalizable;
-use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
-use crate::services::hickory_dns_connector::new_async_http_connector;
+use crate::services::external::Externalizable;
+use crate::services::external::PipelineStep;
+use crate::services::external::externalize_header_map;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
+use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
-use crate::Context;
 
 #[cfg(test)]
 mod test;
@@ -782,19 +782,23 @@ where
         // If it isn't, we create a graphql error response
         let graphql_response: crate::graphql::Response = match body_as_value {
             serde_json::Value::Null => crate::graphql::Response::builder()
-                .errors(vec![Error::builder()
-                    .message(co_processor_output.body.take().unwrap_or_default())
-                    .extension_code(COPROCESSOR_ERROR_EXTENSION)
-                    .build()])
+                .errors(vec![
+                    Error::builder()
+                        .message(co_processor_output.body.take().unwrap_or_default())
+                        .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                        .build(),
+                ])
                 .build(),
             _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
                 crate::graphql::Response::builder()
-                    .errors(vec![Error::builder()
-                        .message(format!(
-                            "couldn't deserialize coprocessor output body: {error}"
-                        ))
-                        .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                        .build()])
+                    .errors(vec![
+                        Error::builder()
+                            .message(format!(
+                                "couldn't deserialize coprocessor output body: {error}"
+                            ))
+                            .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                            .build(),
+                    ])
                     .build()
             }),
         };
@@ -1144,19 +1148,23 @@ where
             let graphql_response: crate::graphql::Response =
                 match co_processor_output.body.unwrap_or(serde_json::Value::Null) {
                     serde_json::Value::String(s) => crate::graphql::Response::builder()
-                        .errors(vec![Error::builder()
-                            .message(s)
-                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
-                            .build()])
+                        .errors(vec![
+                            Error::builder()
+                                .message(s)
+                                .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                                .build(),
+                        ])
                         .build(),
                     value => serde_json::from_value(value).unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                .build()])
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
+                                    .build(),
+                            ])
                             .build()
                     }),
                 };

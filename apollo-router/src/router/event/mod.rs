@@ -21,9 +21,9 @@ use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateLicense;
 use self::Event::UpdateSchema;
+use crate::Configuration;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::schema::SchemaState;
-use crate::Configuration;
 
 /// Messages that are broadcast across the app.
 pub(crate) enum Event {

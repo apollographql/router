@@ -3,8 +3,8 @@ use itertools::Itertools;
 
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
-use crate::configuration::Batching;
 use crate::Configuration;
+use crate::configuration::Batching;
 
 pub(super) struct BatchingIncompatPlugin {
     config: Batching,

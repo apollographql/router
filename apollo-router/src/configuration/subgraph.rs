@@ -6,12 +6,12 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use serde::de;
 use serde::de::DeserializeOwned;
 use serde::de::MapAccess;
 use serde::de::Visitor;
-use serde::Deserialize;
-use serde::Serialize;
 
 // In various parts of the configuration, we need to provide a global configuration for subgraphs,
 // with a per subgraph override. This cannot be handled easily with `Default` implementations,

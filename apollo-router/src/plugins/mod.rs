@@ -8,8 +8,8 @@ macro_rules! schemar_fn {
     };
 
     ($name:ident, $ty:ty, $default:expr, $description:expr) => {
-        fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-            let schema = <$ty>::json_schema(gen);
+        fn $name(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+            let schema = <$ty>::json_schema(generator);
             let mut schema = schema.into_object();
             let mut metadata = schemars::schema::Metadata::default();
             metadata.description = Some($description.to_string());
