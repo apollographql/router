@@ -153,7 +153,7 @@ impl Mocks for MockStore {
 
 #[tokio::test]
 async fn insert() {
-    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -278,7 +278,7 @@ async fn insert() {
 
 #[tokio::test]
 async fn no_cache_control() {
-    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -372,7 +372,7 @@ async fn no_cache_control() {
 #[tokio::test]
 async fn private() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
-    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -519,7 +519,7 @@ async fn private() {
 #[tokio::test]
 async fn no_data() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -707,7 +707,7 @@ async fn no_data() {
 #[tokio::test]
 async fn missing_entities() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
