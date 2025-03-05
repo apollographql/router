@@ -355,7 +355,7 @@ impl RouterService {
                         response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
                     {
                         Self::count_value_completion_errors(
-                            &value_completion,
+                            value_completion,
                             &context,
                             &self.oltp_error_metrics_mode,
                         );
@@ -953,9 +953,8 @@ impl RouterService {
     ) {
         if let Some(vc_array) = value_completion.as_array() {
             let errors: Vec<graphql::Error> = vc_array
-                .into_iter()
-                .map(|ext_value| graphql::Error::from_value_completion_value(ext_value))
-                .flatten()
+                .iter()
+                .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
             Self::count_errors(&errors, context, oltp_error_metrics_mode);
         }
