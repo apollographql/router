@@ -78,7 +78,8 @@ impl Config {
         match self.protocol {
             Protocol::Grpc => {
                 let endpoint = self.endpoint.to_full_uri(&DEFAULT_GRPC_ENDPOINT);
-                let tls_config = self.grpc.clone().tls_config(&endpoint)?;
+                dbg!(&self.grpc);
+                let tls_config = self.grpc.clone().to_tls_config(&endpoint)?;
                 let exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_timeout(self.batch_processor.max_export_timeout)
@@ -160,7 +161,7 @@ fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::sch
 }
 
 impl GrpcExporter {
-    pub(crate) fn tls_config(&self, endpoint: &Uri) -> Result<ClientTlsConfig, BoxError> {
+    pub(crate) fn to_tls_config(&self, endpoint: &Uri) -> Result<ClientTlsConfig, BoxError> {
         let endpoint = endpoint
             .to_string()
             .parse::<Url>()
