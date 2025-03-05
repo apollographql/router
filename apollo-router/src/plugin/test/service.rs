@@ -8,7 +8,6 @@ use futures::Future;
 use http::Request as HyperRequest;
 use http::Response as HyperResponse;
 
-use crate::services::router::Body;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 #[cfg(test)]
@@ -19,6 +18,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::services::router::Body;
 #[cfg(test)]
 use crate::spec::Schema;
 

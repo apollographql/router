@@ -20,12 +20,12 @@ use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
-use wiremock::matchers::body_partial_json;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::body_partial_json;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
 
 #[path = "./common.rs"]
 pub(crate) mod common;
@@ -362,9 +362,9 @@ impl TestExecution {
                 {
                     use std::str::FromStr;
 
+                    use http::Uri;
                     use http::header::CONTENT_LENGTH;
                     use http::header::CONTENT_TYPE;
-                    use http::Uri;
 
                     let snapshot_server = apollo_router::SnapshotServer::spawn(
                         &path.join(&snapshot.path),

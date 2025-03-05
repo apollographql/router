@@ -1,6 +1,6 @@
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::validation::Valid;
@@ -21,9 +21,9 @@ use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::query_planner::PlanOptions;
-use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
 use crate::spec::QueryHash;
+use crate::spec::operation_limits::OperationLimits;
 
 /// A planner key.
 ///
@@ -259,13 +259,13 @@ impl PlanNode {
                         return Err(CacheResolverError::BatchingError(
                             "unexpected defer node encountered during query_hash processing"
                                 .to_string(),
-                        ))
+                        ));
                     }
                     PlanNode::Subscription { .. } => {
                         return Err(CacheResolverError::BatchingError(
                             "unexpected subscription node encountered during query_hash processing"
                                 .to_string(),
-                        ))
+                        ));
                     }
                     PlanNode::Condition {
                         if_clause,

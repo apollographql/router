@@ -1,17 +1,17 @@
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::schema::Value;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
 use serde_json::Number;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value as JSONValue;
 use tower::BoxError;
 
-use super::MakeRequestError;
 use super::ENTITIES;
+use super::MakeRequestError;
 
 pub(super) fn field_arguments_map(
     field: &Node<Field>,

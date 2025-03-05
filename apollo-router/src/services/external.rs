@@ -6,30 +6,30 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
 use tracing::Instrument;
 
 use super::subgraph::SubgraphRequestId;
+use crate::Context;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -321,11 +321,10 @@ where
             );
         });
 
-
-        let response = client
-            .call(request)
-            .instrument(http_req_span)
+        let response = client.call(request).instrument(http_req_span).await?;
+        router::body::into_bytes(response.into_body())
             .await
+            .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
     }
 }

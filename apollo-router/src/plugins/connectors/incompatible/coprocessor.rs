@@ -1,8 +1,8 @@
 use itertools::Itertools as _;
 
 use super::IncompatiblePlugin;
-use crate::plugins::coprocessor;
 use crate::Configuration;
+use crate::plugins::coprocessor;
 
 pub(super) struct CoprocessorIncompatPlugin;
 

@@ -1,13 +1,13 @@
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::sync::broadcast;
 
+use super::OperationKind;
 use super::fetch::SubgraphSchemas;
 use super::rewrites;
-use super::OperationKind;
 use crate::error::ValidationErrors;
 use crate::services::SubscriptionTaskParams;
 

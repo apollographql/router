@@ -5,10 +5,10 @@ use derivative::Derivative;
 use indexmap::IndexMap;
 use jsonschema::paths::JSONPointer;
 use jsonschema::paths::PathChunk;
+use yaml_rust::Event;
 use yaml_rust::parser::MarkedEventReceiver;
 use yaml_rust::parser::Parser;
 use yaml_rust::scanner::Marker;
-use yaml_rust::Event;
 
 use crate::configuration::ConfigurationError;
 

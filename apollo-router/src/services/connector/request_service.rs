@@ -15,13 +15,14 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing::info_span;
 
+use crate::Context;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::ErrorExtension;
 use crate::json_ext::Path;
 use crate::layers::ServiceBuilderExt;
-use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::handle_responses::MappedResponse;
+use crate::plugins::connectors::handle_responses::process_response;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::mapping::Problem;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
@@ -33,16 +34,15 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_VERSION;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEventRequest;
-use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::EventLevel;
+use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::CONNECT_REQUEST_SPAN_NAME;
+use crate::services::Plugins;
 use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::Plugins;
-use crate::Context;
 
 pub(crate) mod transport;
 

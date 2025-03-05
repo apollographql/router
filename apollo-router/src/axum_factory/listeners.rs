@@ -2,13 +2,13 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
-use axum::response::*;
 use axum::Router;
+use axum::response::*;
 use bytesize::ByteSize;
 use futures::channel::oneshot;
 use futures::prelude::*;
@@ -19,19 +19,19 @@ use hyper_util::server::conn::auto::Builder;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
-use tokio::sync::mpsc;
 use tokio::sync::Notify;
+use tokio::sync::mpsc;
 use tower_service::Service;
 
+use crate::ListenAddr;
+use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
-use crate::axum_factory::ENDPOINT_CALLBACK;
 use crate::configuration::Configuration;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
-use crate::ListenAddr;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
@@ -518,8 +518,8 @@ mod tests {
     use std::str::FromStr;
 
     use axum::BoxError;
-    use tower::service_fn;
     use tower::ServiceExt;
+    use tower::service_fn;
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;

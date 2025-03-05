@@ -11,9 +11,9 @@ use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json_bytes::from_value;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
+use serde_json_bytes::from_value;
 use sha2::Digest;
 use sha2::Sha256;
 use tokio::sync::RwLock;
@@ -32,13 +32,16 @@ use super::invalidation_endpoint::InvalidationService;
 use super::invalidation_endpoint::SubgraphInvalidationConfig;
 use super::metrics::CacheMetricContextKey;
 use super::metrics::CacheMetricsService;
+use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
 use crate::cache::storage::ValueType;
-use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Error;
@@ -55,9 +58,6 @@ use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
 use crate::spec::QueryHash;
 use crate::spec::TYPENAME;
-use crate::Context;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 /// Change this key if you introduce a breaking change in entity caching algorithm to make sure it won't take the previous entries
 pub(crate) const ENTITY_CACHE_VERSION: &str = "1.0";
@@ -449,7 +449,9 @@ impl Plugin for EntityCache {
                     map.insert(endpoint_config.listen.clone(), endpoint);
                 }
                 None => {
-                    tracing::warn!("Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured");
+                    tracing::warn!(
+                        "Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured"
+                    );
                 }
             }
         }
@@ -1344,7 +1346,10 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = String::new();
-        let _ = write!(&mut key, "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}");
+        let _ = write!(
+            &mut key,
+            "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}"
+        );
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");

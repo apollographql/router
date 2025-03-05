@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
+use http::Uri;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
-use http::Uri;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 use opentelemetry_sdk::metrics::InstrumentKind;
+use opentelemetry_sdk::metrics::reader::TemporalitySelector;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -184,8 +184,8 @@ pub(crate) struct GrpcExporter {
     pub(crate) metadata: http::HeaderMap,
 }
 
-fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    HashMap::<String, Value>::json_schema(gen)
+fn header_map(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    HashMap::<String, Value>::json_schema(generator)
 }
 
 impl GrpcExporter {
@@ -231,7 +231,9 @@ impl GrpcExporter {
             (Some(domain), _) => Some(domain.as_str()),
             (None, endpoint) if endpoint.scheme() == "https" => endpoint.host_str(),
             (None, endpoint) if endpoint.port() == Some(443) && endpoint.scheme() != "http" => {
-                tracing::warn!("telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error");
+                tracing::warn!(
+                    "telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error"
+                );
                 None
             }
             _ => None,

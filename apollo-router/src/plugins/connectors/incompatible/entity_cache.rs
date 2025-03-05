@@ -2,8 +2,8 @@ use itertools::Either;
 use itertools::Itertools as _;
 
 use super::IncompatiblePlugin;
-use crate::plugins::cache::entity;
 use crate::Configuration;
+use crate::plugins::cache::entity;
 
 pub(super) struct EntityCacheIncompatPlugin {
     config: entity::Config,
