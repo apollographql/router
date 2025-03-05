@@ -1,15 +1,15 @@
 use insta::assert_yaml_snapshot;
 use serde_json::json;
 use tower::BoxError;
+use wiremock::Mock;
+use wiremock::ResponseTemplate;
 use wiremock::matchers::body_partial_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
-use wiremock::Mock;
-use wiremock::ResponseTemplate;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_error_not_propagated_to_client() -> Result<(), BoxError> {

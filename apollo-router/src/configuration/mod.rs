@@ -20,14 +20,14 @@ pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
+use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
-use rustls::ServerConfig;
-use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -41,19 +41,19 @@ pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
+use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
-use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::limits;
-use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::uplink::UplinkConfig;
-use crate::ApolloRouterError;
 
 pub(crate) mod connector;
 pub(crate) mod cors;
@@ -288,7 +288,6 @@ fn default_graphql_listen() -> ListenAddr {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -411,7 +410,6 @@ impl Default for Configuration {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -477,13 +475,12 @@ impl Configuration {
         }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                self.supergraph.path,
-                self.supergraph.path
-            ),
-        });
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                    self.supergraph.path, self.supergraph.path
+                ),
+            });
         }
         if self.supergraph.path.ends_with('*')
             && !self.supergraph.path.ends_with("/*")
@@ -498,15 +495,13 @@ impl Configuration {
             });
         }
         if self.supergraph.path.contains("/*/") {
-            return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.graphql_path' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        self.supergraph.path
-                    ),
-                },
-            );
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                    self.supergraph.path
+                ),
+            });
         }
 
         // PQs.
@@ -581,7 +576,7 @@ impl JsonSchema for ApolloPlugins {
         stringify!(Plugins).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
@@ -591,7 +586,7 @@ impl JsonSchema for ApolloPlugins {
             .map(|factory| {
                 (
                     factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
-                    factory.create_schema(gen),
+                    factory.create_schema(generator),
                 )
             })
             .collect::<schemars::Map<String, Schema>>();
@@ -614,14 +609,14 @@ impl JsonSchema for UserPlugins {
         stringify!(Plugins).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|factory| (factory.name.to_string(), factory.create_schema(gen)))
+            .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
     }
@@ -682,7 +677,6 @@ fn default_defer_support() -> bool {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
@@ -711,7 +705,6 @@ impl Supergraph {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
@@ -1129,19 +1122,19 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("could not parse the key: {e}"),
-            ))
+            ));
         }
         Some(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "expected a private key",
-            ))
+            ));
         }
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "could not find a private key",
-            ))
+            ));
         }
     };
 
@@ -1422,7 +1415,7 @@ impl Batching {
                     subgraph_batching_config
                         .subgraphs
                         .get(service_name)
-                        .map_or(true, |x| x.enabled)
+                        .is_none_or(|x| x.enabled)
                 } else {
                     // If it isn't, require:
                     // - an enabled subgraph entry

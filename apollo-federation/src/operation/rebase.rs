@@ -6,7 +6,6 @@
 use apollo_compiler::Name;
 use itertools::Itertools;
 
-use super::runtime_types_intersect;
 use super::Field;
 use super::FieldSelection;
 use super::FragmentSpread;
@@ -19,11 +18,12 @@ use super::Selection;
 use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
+use super::runtime_types_intersect;
 use crate::ensure;
 use crate::error::FederationError;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
 
 fn print_possible_runtimes(
@@ -91,12 +91,16 @@ impl Selection {
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub(crate) enum RebaseError {
-    #[error("Cannot add selection of field `{field_position}` to selection set of parent type `{parent_type}`")]
+    #[error(
+        "Cannot add selection of field `{field_position}` to selection set of parent type `{parent_type}`"
+    )]
     CannotRebase {
         field_position: crate::schema::position::FieldDefinitionPosition,
         parent_type: CompositeTypeDefinitionPosition,
     },
-    #[error("Cannot add selection of field `{field_position}` to selection set of parent type `{parent_type}` that is potentially an interface object type at runtime")]
+    #[error(
+        "Cannot add selection of field `{field_position}` to selection set of parent type `{parent_type}` that is potentially an interface object type at runtime"
+    )]
     InterfaceObjectTypename {
         field_position: crate::schema::position::FieldDefinitionPosition,
         parent_type: CompositeTypeDefinitionPosition,

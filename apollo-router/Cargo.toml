@@ -8,8 +8,8 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.83.0"
-edition = "2021"
+rust-version = "1.85.0"
+edition = "2024"
 build = "build/main.rs"
 default-run = "router"
 
@@ -73,7 +73,7 @@ axum-extra = { version = "0.10.0", features = [ "typed-header" ] }
 axum-server = {  version = "0.7.1", optional = true }
 base64 = "0.22.0"
 bloomfilter = "1.0.13"
-buildstructor = "0.5.4"
+buildstructor = "0.6.0"
 bytes = "1.6.0"
 clap = { version = "4.5.8", default-features = false, features = [
     "env",
@@ -312,7 +312,6 @@ rhai = { version = "1.17.1", features = [
     "testing-environ",
 ] }
 serde_regex = { version = "1.1.0" }
-serial_test = { version = "3.1.1" }
 tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
@@ -371,6 +370,11 @@ harness = false
 name = "compute_backpressure"
 path = "tests/compute_backpressure.rs"
 
+[[test]]
+name = "telemetry_resources"
+path = "tests/telemetry_resource_tests.rs"
+harness = false
+
 [[bin]]
 name = "snapshot"
 path = "src/test_harness/http_snapshot_main.rs"
@@ -387,3 +391,20 @@ harness = false
 
 [[example]]
 name = "planner"
+
+[lints.rust]
+
+# Compatibility with the 2024 edition, remove after switching to it:
+boxed-slice-into-iter = "warn"
+dependency-on-unit-never-type-fallback = "warn"
+deprecated-safe-2024 = "warn"
+impl-trait-overcaptures = "warn"
+keyword-idents-2024 = "warn"
+missing-unsafe-on-extern = "warn"
+never-type-fallback-flowing-into-unsafe = "warn"
+rust-2024-guarded-string-incompatible-syntax = "warn"
+rust-2024-incompatible-pat = "warn"
+rust-2024-prelude-collisions = "warn"
+static-mut-refs = "warn"
+unsafe-attr-outside-unsafe = "warn"
+unsafe-op-in-unsafe-fn = "warn"

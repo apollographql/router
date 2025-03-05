@@ -326,57 +326,41 @@ plugins:
   experimental.expose_query_plan: true
 ```
 
-## `config` subcommands
+## Configuration awareness in your text editor
 
-GraphOS Router and Apollo Router Core provide a set of subcommands for interacting with its configuration. You run these subcommands with the following syntax:
+The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
 
+Generate the schema with the following command:
+
+```bash
+./router config schema > configuration_schema.json
 ```
-./router config schema
-./router config upgrade <path-to-config-file.yaml>
+
+After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
+
+- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
+- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
+- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
+- [Sublime](https://github.com/sublimelsp/LSP-yaml)
+- [Vim](https://github.com/Quramy/vison)
+
+## Upgrading your router configuration
+
+New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
+
+**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.** 
+
+If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
+
+```bash
+./router config upgrade <path_to_config.yaml>
 ```
 
-<table class="field-table api-ref">
-  <thead>
-    <tr>
-      <th>Subcommand</th>
-      <th>Description</th>
-    </tr>
-  </thead>
+You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
 
-<tbody>
-
-<tr>
-<td>
-
-##### `schema`
-
-</td>
-<td>
-
-Prints a JSON schema representation of the router's full supported configuration format.
-
-Use this schema to enable [configuration awareness in your text editor](#configuration-awareness-in-your-text-editor).
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `upgrade`
-
-</td>
-<td>
-
-Takes a config file created for a _previous_ version of the router and outputs the corresponding configuration for the _current_ version.
-
-For details, see [Upgrading your router configuration](#upgrading-your-router-configuration).
-
-</td>
-</tr>
-
-</tbody>
-</table>
+```bash
+./router config upgrade --diff <path_to_config.yaml>
+```
 
 ## YAML config file
 
@@ -1228,42 +1212,6 @@ headers:
 ```
 
 Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
-
-## Configuration awareness in your text editor
-
-The router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
-
-Generate the schema with the following command:
-
-```bash
-./router config schema > configuration_schema.json
-```
-
-After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
-
-- [Visual Studio Code](https://code.visualstudio.com/docs/languages/json#_json-schemas-and-settings)
-- [Emacs](https://emacs-lsp.github.io/lsp-mode/page/lsp-yaml)
-- [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
-- [Sublime](https://github.com/sublimelsp/LSP-yaml)
-- [Vim](https://github.com/Quramy/vison)
-
-## Upgrading your router configuration
-
-New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
-
-**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.** 
-
-If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
-
-```bash
-./router config upgrade <path_to_config.yaml>
-```
-
-You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
-
-```bash
-./router config upgrade --diff <path_to_config.yaml>
-```
 
 ## Related topics
 

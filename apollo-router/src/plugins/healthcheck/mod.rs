@@ -8,10 +8,10 @@
 
 use std::net::SocketAddr;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use http::StatusCode;
@@ -20,17 +20,17 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use tokio::time::Instant;
-use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::service_fn;
 
+use crate::Endpoint;
 use crate::configuration::ListenAddr;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::register_private_plugin;
 use crate::services::router;
-use crate::Endpoint;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]

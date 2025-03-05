@@ -2,15 +2,15 @@ use std::fmt::Formatter;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use http::uri::Authority;
 use http::Uri;
-use schemars::gen::SchemaGenerator;
-use schemars::schema::Schema;
+use http::uri::Authority;
 use schemars::JsonSchema;
-use serde::de::Error;
-use serde::de::Visitor;
+use schemars::r#gen::SchemaGenerator;
+use schemars::schema::Schema;
 use serde::Deserialize;
 use serde::Deserializer;
+use serde::de::Error;
+use serde::de::Visitor;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(crate) struct UriEndpoint {
@@ -109,8 +109,8 @@ impl JsonSchema for UriEndpoint {
         "UriEndpoint".to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<String>()
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<String>()
     }
 }
 
@@ -167,8 +167,8 @@ impl JsonSchema for SocketEndpoint {
         "SocketEndpoint".to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        gen.subschema_for::<String>()
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        generator.subschema_for::<String>()
     }
 }
 
@@ -214,7 +214,10 @@ mod test {
     fn test_parse_uri_error() {
         let error = serde_yaml::from_str::<UriEndpoint>("example.com:2000/path")
             .expect_err("expected error");
-        assert_eq!(error.to_string(), "invalid endpoint: example.com:2000/path. Expected a valid uri or 'default' at line 1 column 1");
+        assert_eq!(
+            error.to_string(),
+            "invalid endpoint: example.com:2000/path. Expected a valid uri or 'default' at line 1 column 1"
+        );
     }
 
     #[test]
@@ -283,7 +286,10 @@ mod test {
     fn test_parse_socket_error() {
         let error = serde_yaml::from_str::<SocketEndpoint>("example.com:2000/path")
             .expect_err("expected error");
-        assert_eq!(error.to_string(), "invalid endpoint: example.com:2000/path. Expected a valid socket or 'default' at line 1 column 1");
+        assert_eq!(
+            error.to_string(),
+            "invalid endpoint: example.com:2000/path. Expected a valid socket or 'default' at line 1 column 1"
+        );
     }
 
     #[test]

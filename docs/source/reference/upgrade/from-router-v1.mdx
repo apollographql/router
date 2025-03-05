@@ -304,7 +304,7 @@ Default values of some GraphOS reporting metrics have been changed from v1.x to 
 
 The router supports reporting operation usage metrics to GraphOS via OpenTelemetry Protocol (OTLP).
 
-Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `experimental_otlp_tracing_sampler` flag, and it's off by default.
+Prior to version 1.49.0 of the router, all GraphOS reporting was performed using a [private tracing format](/graphos/metrics/sending-operation-metrics#reporting-format). In v1.49.0, we introduced support for using OTel to perform this reporting. In v1.x, this is controlled using the `otlp_tracing_sampler` (or `experimental_otlp_tracing_sampler` prior to v1.61) flag, and it's off by default.
 
 Now in v2.x, this flag is renamed to `otlp_tracing_sampler`, and it's enabled by default.
 
@@ -427,7 +427,7 @@ No syntax changes are required when using the default endpoint path or a path wi
 
 <!-- PR: https://github.com/apollographql/router/pull/6621 -->
 
-In router v2.x, the path used for selecting data from a client request body for [header propagation](/docs/graphos/routing/header-propagation#insert) must comply with the [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) spec. This means a `$` is now required to select the root element.
+In router v2.x, the path used for selecting data from a client request body for [header propagation](/graphos/routing/header-propagation#insert) must comply with the [JSONPath](https://www.ietf.org/archive/id/draft-goessner-dispatch-jsonpath-00.html) spec. This means a `$` is now required to select the root element.
 
 **Upgrade step**: in your router config, prefix your paths with a `$` when selecting root elements. For example: 
 
@@ -531,7 +531,7 @@ Traffic shaping has been improved significantly in router v2.x. We've added a ne
 
 We recommend that users experiment with their configuration in order to arrive at the right combination of timeout, concurrency and rate limit controls for their particular use case.
 
-For more information about [configuring traffic shaping](../../routing/performance/traffic-shaping.mdx).
+To learn more about configuring the router for traffic shaping, go to [Traffic Shaping](/graphos/routing/performance/traffic-shaping).
 
 ### Enforce introspection depth limit
 

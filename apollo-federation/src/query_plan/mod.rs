@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable;
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
+use apollo_compiler::executable;
+use apollo_compiler::validation::Valid;
 use serde::Serialize;
 
 use crate::query_plan::query_planner::QueryPlanningStatistics;

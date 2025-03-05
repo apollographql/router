@@ -9,12 +9,12 @@ use futures::prelude::*;
 
 use crate::router::Event;
 use crate::router::Event::NoMoreLicense;
+use crate::uplink::UplinkConfig;
 use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::License;
 use crate::uplink::license_stream::LicenseQuery;
 use crate::uplink::license_stream::LicenseStreamExt;
 use crate::uplink::stream_from_uplink;
-use crate::uplink::UplinkConfig;
 
 const APOLLO_ROUTER_LICENSE_INVALID: &str = "APOLLO_ROUTER_LICENSE_INVALID";
 

@@ -13,10 +13,10 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::entity::REPRESENTATIONS;
+use super::entity::Ttl;
 use super::entity::hash_query;
 use super::entity::hash_vary_headers;
-use super::entity::Ttl;
-use super::entity::REPRESENTATIONS;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;

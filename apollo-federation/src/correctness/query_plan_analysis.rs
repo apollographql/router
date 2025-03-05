@@ -3,13 +3,15 @@
 use apollo_compiler::executable::Name;
 use itertools::Itertools;
 
-use super::response_shape::compute_response_shape_for_entity_fetch_operation;
-use super::response_shape::compute_response_shape_for_operation;
 use super::response_shape::Clause;
 use super::response_shape::Literal;
 use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape::ResponseShape;
+use super::response_shape::compute_response_shape_for_entity_fetch_operation;
+use super::response_shape::compute_response_shape_for_operation;
+use crate::FederationError;
+use crate::SingleFederationError;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::FetchDataPathElement;
@@ -21,10 +23,8 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-use crate::FederationError;
-use crate::SingleFederationError;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 
 //==================================================================================================
 // ResponseShape extra methods to support query plan analysis
@@ -307,7 +307,9 @@ fn rename_at_path(
                             let existed =
                                 merged_defs.insert(type_cond.clone(), defs_per_type_cond.clone());
                             if existed {
-                                return Err(format!("rename_at_path: new name/type already exists: {new_name} on {type_cond}"));
+                                return Err(format!(
+                                    "rename_at_path: new name/type already exists: {new_name} on {type_cond}"
+                                ));
                             }
                         }
                         result.insert(new_name, merged_defs);

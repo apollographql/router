@@ -4,10 +4,10 @@ use std::fmt::Formatter;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
-use apollo_compiler::validation::DiagnosticList;
-use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::WithErrors;
 
 use crate::subgraph::spec::FederationSpecError;
 
@@ -135,7 +135,9 @@ pub enum SingleFederationError {
     OperationNameNotProvided,
     #[error(r#"{message} in @fromContext substring "{context}""#)]
     FromContextParseError { context: String, message: String },
-    #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
+    #[error(
+        "Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations."
+    )]
     UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
@@ -298,6 +300,8 @@ pub enum SingleFederationError {
     DeferredSubscriptionUnsupported,
     #[error("{message}")]
     QueryPlanComplexityExceeded { message: String },
+    #[error("the caller requested cancellation")]
+    PlanningCancelled,
 }
 
 impl SingleFederationError {
@@ -492,6 +496,7 @@ impl SingleFederationError {
             SingleFederationError::QueryPlanComplexityExceeded { .. } => {
                 ErrorCode::QueryPlanComplexityExceededError
             }
+            SingleFederationError::PlanningCancelled => ErrorCode::Internal,
         }
     }
 }
@@ -806,7 +811,10 @@ static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
     ErrorCodeCategory::new_federation_directive(
         "FIELDS_HAS_ARGS".to_owned(),
         Box::new(|directive| {
-            format!("The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).", directive)
+            format!(
+                "The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).",
+                directive
+            )
         }),
         None,
     )
@@ -823,7 +831,10 @@ static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = 
         ErrorCodeCategory::new_federation_directive(
             "FIELDS_MISSING_EXTERNAL".to_owned(),
             Box::new(|directive| {
-                format!("The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.", directive)
+                format!(
+                    "The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.",
+                    directive
+                )
             }),
             Some(ErrorCodeMetadata {
                 added_in: FED1_CODE,
@@ -868,7 +879,10 @@ static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::
     ErrorCodeCategory::new_federation_directive(
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
         Box::new(|directive| {
-            format!("The `fields` argument of a `@{}` directive includes some directive applications. This is not supported", directive)
+            format!(
+                "The `fields` argument of a `@{}` directive includes some directive applications. This is not supported",
+                directive
+            )
         }),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
@@ -940,7 +954,10 @@ static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock:
     ErrorCodeCategory::new_federation_directive(
         "INVALID_FIELDS".to_owned(),
         Box::new(|directive| {
-            format!("The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).", directive)
+            format!(
+                "The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).",
+                directive
+            )
         }),
         None,
     )
@@ -972,7 +989,10 @@ static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::n
         }),
         Box::new(|element| {
             let kind: String = element.into();
-            format!("A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.", kind)
+            format!(
+                "A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.",
+                kind
+            )
         }),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,

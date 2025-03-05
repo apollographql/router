@@ -1,10 +1,10 @@
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -12,12 +12,12 @@ use crate::error::SingleFederationError;
 use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 
 // Federation spec does not allow the alias syntax in field set strings.
 // However, since `parse_field_set` uses the standard GraphQL parser, which allows aliases,
@@ -32,7 +32,7 @@ fn check_absence_of_aliases(selection_set: &SelectionSet) -> Result<(), Federati
                 Selection::FragmentSpread(_) => {
                     return Err(FederationError::internal(
                         "check_absence_of_aliases(): unexpected fragment spread",
-                    ))
+                    ));
                 }
                 Selection::InlineFragment(frag) => check_absence_of_aliases(&frag.selection_set)?,
                 Selection::Field(field) => {
@@ -205,10 +205,10 @@ pub(crate) fn validate_field_value(
 mod tests {
     use apollo_compiler::Name;
 
+    use crate::Supergraph;
     use crate::error::FederationError;
     use crate::query_graph::build_federated_query_graph;
     use crate::subgraph::Subgraph;
-    use crate::Supergraph;
 
     #[test]
     fn test_aliases_in_field_set() -> Result<(), FederationError> {

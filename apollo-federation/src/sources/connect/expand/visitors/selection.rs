@@ -1,26 +1,26 @@
 use std::ops::Deref;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
-use super::filter_directives;
-use super::try_insert;
-use super::try_pre_insert;
 use super::FieldVisitor;
 use super::GroupVisitor;
 use super::SchemaVisitor;
+use super::filter_directives;
+use super::try_insert;
+use super::try_pre_insert;
 use crate::error::FederationError;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::NamedSelection;
 
 /// Type alias for JSONSelection group info
 ///
@@ -88,7 +88,7 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                     TypeDefinitionPosition::Union(_) => {
                         return Err(FederationError::internal(
                             "unions are not yet handled for expansion",
-                        ))
+                        ));
                     }
 
                     // Anything else is not supported
@@ -96,13 +96,13 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
                         return Err(FederationError::internal(format!(
                             "expected field to be a leaf or object type, found: input {}",
                             input.type_name,
-                        )))
+                        )));
                     }
                     TypeDefinitionPosition::Interface(interface) => {
                         return Err(FederationError::internal(format!(
                             "expected field to be a leaf or object type, found: interface {}",
                             interface.type_name,
-                        )))
+                        )));
                     }
                 };
             }
@@ -118,9 +118,9 @@ impl FieldVisitor<NamedSelection> for SchemaVisitor<'_, ObjectTypeDefinitionPosi
             };
             if let Some(old_field) = r#type.fields.get(&field_name) {
                 if *old_field.deref().deref() != new_field {
-                    return Err(FederationError::internal(
-                    format!( "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"),
-                    ));
+                    return Err(FederationError::internal(format!(
+                        "tried to write field to existing type, but field type was different. expected {new_field:?} found {old_field:?}"
+                    )));
                 }
             } else {
                 r#type.fields.insert(field_name, Component::new(new_field));

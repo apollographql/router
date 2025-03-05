@@ -1,10 +1,10 @@
 use apollo_compiler::Schema;
 use insta::assert_snapshot;
 
-use crate::merge::merge_federation_subgraphs;
-use crate::schema::ValidFederationSchema;
 use crate::ValidFederationSubgraph;
 use crate::ValidFederationSubgraphs;
+use crate::merge::merge_federation_subgraphs;
+use crate::schema::ValidFederationSchema;
 
 macro_rules! subgraphs {
     ($($name:expr => $file:expr),* $(,)?) => {{

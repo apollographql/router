@@ -6,34 +6,36 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use ::tracing::info_span;
 use ::tracing::Span;
+use ::tracing::info_span;
 use axum_extra::headers::HeaderName;
+use config_new::Selectors;
 use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
-use config_new::Selectors;
 use dashmap::DashMap;
-use futures::future::ready;
-use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::StreamExt;
-use http::header;
+use futures::future::BoxFuture;
+use futures::future::ready;
+use futures::stream::once;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use opentelemetry::global::GlobalTracerProvider;
 use opentelemetry::metrics::MetricsError;
-use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
+use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
@@ -41,17 +43,15 @@ use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
 use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rand::Rng;
-use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -62,8 +62,8 @@ use self::apollo::ForwardValues;
 use self::apollo::LicensedOperationCountByType;
 use self::apollo::OperationSubType;
 use self::apollo::SingleReport;
-use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
+use self::apollo_exporter::proto;
 use self::config::Conf;
 use self::config::TraceIdFormat;
 use self::config_new::events::RouterEvents;
@@ -79,6 +79,8 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
+use crate::Context;
+use crate::ListenAddr;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
@@ -86,25 +88,25 @@ use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::ResponseVisitor;
-use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::connector::events::ConnectorEvents;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
-use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
@@ -114,6 +116,8 @@ use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
+use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -122,30 +126,26 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
 use crate::plugins::telemetry::metrics::prometheus::commit_prometheus;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
-use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::OPENTELEMETRY_TRACER_HANDLE;
-use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
-use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
+use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::query_planner::OperationKind;
 use crate::register_private_plugin;
 use crate::router_factory::Endpoint;
+use crate::services::ExecutionRequest;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::ExecutionRequest;
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
 use crate::spec::operation_limits::OperationLimits;
-use crate::Context;
-use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
@@ -163,7 +163,7 @@ pub(crate) mod metrics;
 pub(crate) mod otel;
 mod otlp;
 pub(crate) mod reload;
-mod resource;
+pub(crate) mod resource;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
@@ -292,7 +292,9 @@ impl PluginPrivate for Telemetry {
         config.instrumentation.spans.update_defaults();
         config.instrumentation.instruments.update_defaults();
         if let Err(err) = config.instrumentation.validate() {
-            ::tracing::warn!("Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events");
+            ::tracing::warn!(
+                "Potential configuration error for 'instrumentation': {err}, please check the documentation on https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events"
+            );
         }
 
         let field_level_instrumentation_ratio =
@@ -301,7 +303,9 @@ impl PluginPrivate for Telemetry {
         let tracer_provider = Self::create_tracer_provider(&config)?;
 
         if config.instrumentation.spans.mode == SpanMode::Deprecated {
-            ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
+            ::tracing::warn!(
+                "telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether"
+            );
         }
 
         let BuiltinInstruments {
@@ -1157,7 +1161,7 @@ impl Telemetry {
                     custom_events.on_response_event(resp, &ctx);
                     custom_graphql_instruments.on_response_event(resp, &ctx);
                 });
-                let (first_response, rest) = stream.into_future().await;
+                let (first_response, rest) = StreamExt::into_future(stream).await;
 
                 let response = http::Response::from_parts(
                     parts,
@@ -1353,7 +1357,7 @@ impl Telemetry {
 
             if context
                 .get(STUDIO_EXCLUDE)
-                .map_or(false, |x| x.unwrap_or_default())
+                .is_ok_and(|x| x.unwrap_or_default())
             {
                 // The request was excluded don't report the details, but do report the operation count
                 SingleStatsReport {
@@ -1981,17 +1985,17 @@ mod tests {
     use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
+    use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use std::sync::Arc;
     use std::time::Duration;
 
     use axum_extra::headers::HeaderName;
     use dashmap::DashMap;
-    use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
+    use http::header::CONTENT_TYPE;
     use insta::assert_snapshot;
     use itertools::Itertools;
     use opentelemetry::propagation::Injector;
@@ -2004,23 +2008,23 @@ mod tests {
     use opentelemetry::trace::TraceState;
     use parking_lot::Mutex;
     use serde_json::Value;
-    use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
-    use tower::util::BoxService;
+    use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
-    use tracing_core::field::Visit;
+    use tower::util::BoxService;
     use tracing_core::Event;
     use tracing_core::Field;
     use tracing_core::Subscriber;
+    use tracing_core::field::Visit;
     use tracing_futures::WithSubscriber;
+    use tracing_subscriber::Layer;
     use tracing_subscriber::layer::Context;
     use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::Layer;
 
-    use super::apollo::ForwardHeaders;
     use super::CustomTraceIdPropagator;
     use super::Telemetry;
+    use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
     use crate::graphql;
     use crate::graphql::Error;
@@ -2029,25 +2033,25 @@ mod tests {
     use crate::http_ext;
     use crate::json_ext::Object;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugin::DynPlugin;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
-    use crate::plugin::DynPlugin;
-    use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::demand_control::COST_ACTUAL_KEY;
     use crate::plugins::demand_control::COST_ESTIMATED_KEY;
     use crate::plugins::demand_control::COST_RESULT_KEY;
     use crate::plugins::demand_control::COST_STRATEGY_KEY;
+    use crate::plugins::demand_control::DemandControlError;
+    use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
     use crate::plugins::telemetry::handle_error_internal;
-    use crate::plugins::telemetry::EnableSubgraphFtv1;
-    use crate::services::router;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
+    use crate::services::router;
 
     async fn create_plugin_with_config(config: &str) -> Box<dyn DynPlugin> {
         let prometheus_support = config.contains("prometheus");
@@ -2181,10 +2185,12 @@ mod tests {
                     Ok(SupergraphResponse::fake_builder()
                         .context(req.context)
                         .status_code(StatusCode::BAD_REQUEST)
-                        .errors(vec![crate::graphql::Error::builder()
-                            .message("nope")
-                            .extension_code("NOPE")
-                            .build()])
+                        .errors(vec![
+                            crate::graphql::Error::builder()
+                                .message("nope")
+                                .extension_code("NOPE")
+                                .build(),
+                        ])
                         .build()
                         .unwrap())
                 },

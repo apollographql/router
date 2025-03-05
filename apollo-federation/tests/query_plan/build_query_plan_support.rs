@@ -3,12 +3,12 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 use apollo_compiler::collections::IndexSet;
-use apollo_federation::query_plan::query_planner::QueryPlanner;
-use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::query_plan::FetchNode;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::schema::ValidFederationSchema;
 use sha1::Digest;
 

@@ -1,29 +1,29 @@
 use std::convert::Infallible;
 use std::io;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use axum::body::Body;
-use http::header::CONTENT_ENCODING;
-use http::header::CONTENT_TYPE;
 use http::Request;
 use http::StatusCode;
 use http::Uri;
 use http::Version;
+use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_TYPE;
 use hyper::body::Incoming;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use mime::APPLICATION_JSON;
+use rustls::RootCertStore;
+use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
 use rustls::server::WebPkiClientVerifier;
-use rustls::RootCertStore;
-use rustls::ServerConfig;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tokio::io::AsyncWriteExt;
@@ -34,10 +34,13 @@ use tokio_rustls::TlsAcceptor;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::configuration::load_certs;
-use crate::configuration::load_key;
+use crate::Configuration;
+use crate::Context;
+use crate::TestHarness;
 use crate::configuration::TlsClient;
 use crate::configuration::TlsClientAuth;
+use crate::configuration::load_certs;
+use crate::configuration::load_key;
 use crate::graphql::Response;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -46,9 +49,6 @@ use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::supergraph;
-use crate::Configuration;
-use crate::Context;
-use crate::TestHarness;
 
 async fn tls_server(
     listener: TcpListener,

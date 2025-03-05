@@ -10,19 +10,19 @@ use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use tower::limit::RateLimitLayer;
-use tower::load_shed::error::Overloaded;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::limit::RateLimitLayer;
+use tower::load_shed::error::Overloaded;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::count_graphql_error;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::services::router;
 use crate::services::RouterResponse;
+use crate::services::router;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -159,9 +159,10 @@ mod test {
 
         assert!(r1.is_ok_and(|resp| resp.response.status().is_success()));
         assert!(r2.is_ok_and(|resp| resp.response.status() == StatusCode::SERVICE_UNAVAILABLE));
-        assert!(r3
-            .await
-            .is_ok_and(|resp| resp.response.status().is_success()));
+        assert!(
+            r3.await
+                .is_ok_and(|resp| resp.response.status().is_success())
+        );
     }
 
     #[tokio::test]

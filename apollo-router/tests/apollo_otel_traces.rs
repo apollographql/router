@@ -16,14 +16,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
-use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use axum::routing::post;
 use bytes::Bytes;
 use http::header::ACCEPT;
 use http_body_util::BodyExt as _;
@@ -48,8 +48,8 @@ async fn config(
     batch: bool,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
 ) -> (JoinHandle<()>, serde_json::Value) {
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

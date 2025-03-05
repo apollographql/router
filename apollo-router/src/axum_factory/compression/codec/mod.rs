@@ -26,7 +26,7 @@ pub(crate) trait Encode {
 
     /// Returns whether the internal buffers are flushed
     fn flush(&mut self, output: &mut PartialBuffer<impl AsRef<[u8]> + AsMut<[u8]>>)
-        -> Result<bool>;
+    -> Result<bool>;
 
     /// Returns whether the internal buffers are flushed and the end of the stream is written
     fn finish(

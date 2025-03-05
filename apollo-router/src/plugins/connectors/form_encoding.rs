@@ -74,7 +74,10 @@ mod tests {
         });
 
         let encoded = encode_json_as_form(&data).expect("test case is valid for transformation");
-        assert_eq!(encoded, "a=1&b=2&c%5Bd%5D=3&c%5Be%5D=4&c%5Bf%5D%5Bg%5D=5&c%5Bf%5D%5Bh%5D=6&c%5Bf%5D%5Bi%5D%5B0%5D=7&c%5Bf%5D%5Bi%5D%5B1%5D=8&c%5Bf%5D%5Bi%5D%5B2%5D=9&c%5Bf%5D%5Bj%5D%5B0%5D%5Bk%5D=10&c%5Bf%5D%5Bj%5D%5B1%5D%5Bl%5D=11&c%5Bf%5D%5Bj%5D%5B2%5D%5Bm%5D=12");
+        assert_eq!(
+            encoded,
+            "a=1&b=2&c%5Bd%5D=3&c%5Be%5D=4&c%5Bf%5D%5Bg%5D=5&c%5Bf%5D%5Bh%5D=6&c%5Bf%5D%5Bi%5D%5B0%5D=7&c%5Bf%5D%5Bi%5D%5B1%5D=8&c%5Bf%5D%5Bi%5D%5B2%5D=9&c%5Bf%5D%5Bj%5D%5B0%5D%5Bk%5D=10&c%5Bf%5D%5Bj%5D%5B1%5D%5Bl%5D=11&c%5Bf%5D%5Bj%5D%5B2%5D%5Bm%5D=12"
+        );
     }
 
     // https://github.com/ljharb/qs/blob/main/test/stringify.js used as reference for these tests

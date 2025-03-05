@@ -2,12 +2,12 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::VariableReference;
@@ -78,11 +78,11 @@ impl Display for TrieNode {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
 
-    use super::make_key_field_set_from_variables;
     use super::TrieNode;
+    use super::make_key_field_set_from_variables;
     use crate::sources::connect::PathSelection;
 
     #[test]

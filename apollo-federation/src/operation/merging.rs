@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 
-use super::selection_map;
 use super::FieldSelection;
 use super::FieldSelectionValue;
 use super::FragmentSpreadSelection;
@@ -15,6 +14,7 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionSet;
 use super::SelectionValue;
+use super::selection_map;
 use crate::bail;
 use crate::ensure;
 use crate::error::FederationError;
@@ -104,7 +104,8 @@ impl InlineFragmentSelectionValue<'_> {
                 "Cannot merge inline fragment from different schemas",
             );
             ensure!(
-                other_inline_fragment.parent_type_position == self_inline_fragment.parent_type_position,
+                other_inline_fragment.parent_type_position
+                    == self_inline_fragment.parent_type_position,
                 "Cannot merge inline fragment of parent type \"{}\" into an inline fragment of parent type \"{}\"",
                 other_inline_fragment.parent_type_position,
                 self_inline_fragment.parent_type_position,
@@ -229,12 +230,17 @@ impl SelectionSet {
                         else {
                             bail!(
                                 "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
-                                self_inline_fragment_selection.inline_fragment.parent_type_position,
-                                self_inline_fragment_selection.inline_fragment.type_condition_position.clone()
-                                    .map_or_else(
-                                        String::new,
-                                        |cond| format!("(type condition: {}) ", cond),
-                                    ),
+                                self_inline_fragment_selection
+                                    .inline_fragment
+                                    .parent_type_position,
+                                self_inline_fragment_selection
+                                    .inline_fragment
+                                    .type_condition_position
+                                    .clone()
+                                    .map_or_else(String::new, |cond| format!(
+                                        "(type condition: {}) ",
+                                        cond
+                                    ),),
                             );
                         };
                         inline_fragments

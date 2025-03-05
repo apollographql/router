@@ -6,27 +6,26 @@ use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::URLTemplate;
 use displaydoc::Display;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use thiserror::Error;
 use url::Url;
 
 use super::form_encoding::encode_json_as_form;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::plugin::debug::serialize_request;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::SelectionData;
+use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
-use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::TransportRequest;
-use crate::services::router;
+use crate::services::connector::request_service::transport::http::HttpRequest;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
@@ -64,19 +63,20 @@ pub(crate) fn make_request(
                         .map_err(HttpJsonTransportError::FormBodySerialization)?;
                     form_body = Some(encoded.clone());
                     let len = encoded.bytes().len();
-                    (router::body::from_bytes(encoded), len)
+                    (encoded, len)
                 } else {
                     request = request.header(CONTENT_TYPE, mime::APPLICATION_JSON.essence_str());
                     let bytes = serde_json::to_vec(json_body)?;
                     let len = bytes.len();
-                    (router::body::from_bytes(bytes), len)
+                    let body_string = serde_json::to_string(json_body)?;
+                    (body_string, len)
                 }
             } else {
-                (router::body::empty(), 0)
+                ("".into(), 0)
             };
             (json_body, form_body, body, content_length, apply_to_errors)
         } else {
-            (None, None, router::body::empty(), 0, vec![])
+            (None, None, "".into(), 0, vec![])
         };
 
     match transport.method {
@@ -617,14 +617,14 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
     use apollo_federation::sources::connect::JSONSelection;
-    use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::header::CONTENT_ENCODING;
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::services::router::body;
     use crate::Context;
+    use crate::services::router::body;
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -711,7 +711,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -723,14 +723,14 @@ mod tests {
                             "content-type": "application/json",
                             "content-length": "8",
                         },
-                        body: UnsyncBoxBody,
+                        body: "{\"a\":42}",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();
@@ -769,7 +769,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_debug_snapshot!(req, @r###"
+        assert_debug_snapshot!(req, @r#"
         (
             Http(
                 HttpRequest {
@@ -781,14 +781,14 @@ mod tests {
                             "content-type": "application/x-www-form-urlencoded",
                             "content-length": "4",
                         },
-                        body: UnsyncBoxBody,
+                        body: "a=42",
                     },
                     debug: None,
                 },
             ),
             [],
         )
-        "###);
+        "#);
 
         let TransportRequest::Http(HttpRequest { inner: req, .. }) = req.0;
         let body = body::into_string(req.into_body()).await.unwrap();
