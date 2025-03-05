@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use bytes::Bytes;
 use fred::error::RedisErrorKind;
 use fred::mocks::MockCommand;
@@ -152,9 +153,7 @@ impl Mocks for MockStore {
 
 #[tokio::test]
 async fn insert() {
-    let mut parser = apollo_compiler::parser::Parser::new();
-    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
-    let valid_schema = Arc::new(schema.validate().unwrap());
+    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -279,9 +278,7 @@ async fn insert() {
 
 #[tokio::test]
 async fn no_cache_control() {
-    let mut parser = apollo_compiler::parser::Parser::new();
-    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
-    let valid_schema = Arc::new(schema.validate().unwrap());
+    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -375,9 +372,7 @@ async fn no_cache_control() {
 #[tokio::test]
 async fn private() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
-    let mut parser = apollo_compiler::parser::Parser::new();
-    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
-    let valid_schema = Arc::new(schema.validate().unwrap());
+    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -522,9 +517,7 @@ async fn private() {
 #[tokio::test]
 async fn no_data() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-    let mut parser = apollo_compiler::parser::Parser::new();
-    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
-    let valid_schema = Arc::new(schema.validate().unwrap());
+    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -712,9 +705,7 @@ async fn no_data() {
 #[tokio::test]
 async fn missing_entities() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-    let mut parser = apollo_compiler::parser::Parser::new();
-    let schema = parser.parse_schema(SCHEMA, "test.graphql").unwrap();
-    let valid_schema = Arc::new(schema.validate().unwrap());
+    let valid_schema = Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap();
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},

@@ -1387,7 +1387,7 @@ fn extract_cache_keys(
                             .ok()
                     })
             })
-            .flat_map(|field_set| get_root_field_names(&field_set.selection_set));
+            .flat_map(|field_set| field_set.selection_set.root_fields(&Default::default()));
         let mut representation_entity_keys = IndexMap::new();
         for entity_key in entity_keys {
             // We remove it from original representation to not hash it both in entity_hash_key and representation_hash_key
@@ -1426,21 +1426,6 @@ fn extract_cache_keys(
         res.push(key);
     }
     Ok(res)
-}
-
-/// Use it specifically for keys field set because we don't check for fragment spread
-fn get_root_field_names(selection_set: &SelectionSet) -> Vec<Name> {
-    selection_set
-        .selections
-        .iter()
-        .flat_map(|sel| match sel {
-            apollo_compiler::executable::Selection::Field(node) => vec![node.name.clone()],
-            apollo_compiler::executable::Selection::FragmentSpread(_) => Vec::new(),
-            apollo_compiler::executable::Selection::InlineFragment(node) => {
-                get_root_field_names(&node.selection_set)
-            }
-        })
-        .collect()
 }
 
 // Only hash the list of entity keys
