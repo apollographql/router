@@ -18,4 +18,4 @@ fn subgraph_service(service, subgraph){
     });
 }
 ```
-By [@starJammer](https://github.com/starJammer) in https://github.com/apollographql/router/pull/5439
+By [@starJammer](https://github.com/starJammer) in https://github.com/apollographql/router/pull/6906
