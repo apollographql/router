@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use schemars::JsonSchema;
 use serde::de::Deserializer;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -57,8 +58,10 @@ impl<'de> Deserialize<'de> for ErrorMode {
     where
         D: Deserializer<'de>,
     {
-        use serde::de::{self, Visitor};
         use std::fmt;
+
+        use serde::de::Visitor;
+        use serde::de::{self};
 
         struct ErrorModeVisitor;
 
@@ -152,8 +155,10 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::{self, Visitor};
         use std::fmt;
+
+        use serde::de::Visitor;
+        use serde::de::{self};
 
         struct SubgraphConfigVisitor;
 
@@ -363,7 +368,7 @@ impl Plugin for IncludeSubgraphErrors {
                                 allow_extensions_keys,
                                 ..
                             } => (Some(allow_extensions_keys), None, redact),
-                            ErrorMode::Deny { 
+                            ErrorMode::Deny {
                                 deny_extensions_keys,
                                 ..
                             } => (None, Some(deny_extensions_keys), redact),
@@ -427,9 +432,9 @@ impl Plugin for IncludeSubgraphErrors {
                             .map_or(false, |deny| deny.contains(&"service".to_string()))
                         {
                             error
-                            .extensions
-                            .entry("service")
-                            .or_insert(sub_name_response.clone().into());
+                                .extensions
+                                .entry("service")
+                                .or_insert(sub_name_response.clone().into());
                         }
 
                         // Filter extensions based on effective_allow if specified
@@ -746,15 +751,20 @@ mod test {
     }
 
     // Below are test cases for allow and deny list
-    static PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"code":"FETCH_ERROR"}}]}"#.as_bytes())
-    });
+    static PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS: Lazy<Bytes> =
+        Lazy::new(|| {
+            Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"code":"FETCH_ERROR"}}]}"#.as_bytes())
+        });
 
-    static PRODUCT_RESPONSE_WITH_REDACTED_MESSAGE_AND_FILTERED_EXTENSIONS: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted","path":[],"extensions":{"code":"FETCH_ERROR"}}]}"#.as_bytes())
-    });
+    static PRODUCT_RESPONSE_WITH_REDACTED_MESSAGE_AND_FILTERED_EXTENSIONS: Lazy<Bytes> = Lazy::new(
+        || {
+            Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted","path":[],"extensions":{"code":"FETCH_ERROR"}}]}"#.as_bytes())
+        },
+    );
 
-    async fn create_plugin_with_object_config(config: &jValue) -> Result<Box<dyn DynPlugin>, BoxError> {
+    async fn create_plugin_with_object_config(
+        config: &jValue,
+    ) -> Result<Box<dyn DynPlugin>, BoxError> {
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.include_subgraph_errors")
             .expect("Plugin not found")
@@ -827,7 +837,8 @@ mod test {
                 },
                 "accounts": true  // Boolean is allowed
             }
-        })).await;
+        }))
+        .await;
         assert!(result.is_ok());
     }
 
@@ -837,11 +848,17 @@ mod test {
             "all": {
                 "redact_message": false,
                 "allow_extensions_keys": ["code"]
-            }    
-        })).await;    
+            }
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
-    }        
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS,
+            router,
+        )
+        .await;
+    }
 
     #[tokio::test]
     async fn it_allows_subgraph_bool_override_global_config_1() {
@@ -890,7 +907,12 @@ mod test {
         }))
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_REDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &PRODUCT_RESPONSE_WITH_REDACTED_MESSAGE_AND_FILTERED_EXTENSIONS,
+            router,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -906,11 +928,17 @@ mod test {
                     "exclude_global_keys": ["reason"],
                 },
             }
-        })).await;
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS,
+            router,
+        )
+        .await;
     }
- 
+
     #[tokio::test]
     async fn it_allows_subgraph_deny_list_to_override_global_allow_list() {
         let plugin = get_redacting_plugin(&serde_json::json!({
@@ -923,11 +951,17 @@ mod test {
                     "deny_extensions_keys": ["reason", "test", "service"]
                 },
             }
-        })).await;
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS,
+            router,
+        )
+        .await;
     }
- 
+
     #[tokio::test]
     async fn it_allows_subgraph_allow_list_to_override_global_deny_list() {
         let plugin = get_redacting_plugin(&serde_json::json!({
@@ -940,11 +974,17 @@ mod test {
                     "allow_extensions_keys": ["code"]
                 },
             }
-        })).await;
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS,
+            router,
+        )
+        .await;
     }
- 
+
     #[tokio::test]
     async fn it_allows_subgraph_deny_list_to_extend_global_deny_list() {
         let plugin = get_redacting_plugin(&serde_json::json!({
@@ -957,11 +997,12 @@ mod test {
                     "deny_extensions_keys": ["code"]
                 },
             }
-        })).await;
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
         execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
- 
+
     #[tokio::test]
     async fn it_allows_subgraph_allow_list_to_extend_global_allow_list() {
         let plugin = get_redacting_plugin(&serde_json::json!({
@@ -974,8 +1015,14 @@ mod test {
                     "allow_extensions_keys": ["code"]
                 },
             }
-        })).await;
+        }))
+        .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS, router).await;
+        execute_router_test(
+            ERROR_PRODUCT_QUERY,
+            &PRODUCT_RESPONSE_WITH_UNREDACTED_MESSAGE_AND_FILTERED_EXTENSIONS,
+            router,
+        )
+        .await;
     }
 }
