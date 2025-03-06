@@ -1596,6 +1596,10 @@ expression: "&schema"
           "description": "#/definitions/SubgraphShaping",
           "nullable": true
         },
+        "connector": {
+          "$ref": "#/definitions/ConnectorsShapingConfig",
+          "description": "#/definitions/ConnectorsShapingConfig"
+        },
         "deduplicate_variables": {
           "default": null,
           "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
@@ -1606,14 +1610,6 @@ expression: "&schema"
           "$ref": "#/definitions/RouterShaping",
           "description": "#/definitions/RouterShaping",
           "nullable": true
-        },
-        "sources": {
-          "additionalProperties": {
-            "$ref": "#/definitions/ConnectorShaping",
-            "description": "#/definitions/ConnectorShaping"
-          },
-          "description": "Applied on specific subgraphs",
-          "type": "object"
         },
         "subgraphs": {
           "additionalProperties": {
@@ -2169,6 +2165,25 @@ expression: "&schema"
           "default": {},
           "deprecated": true,
           "description": "A map of subgraph name to connectors config for that subgraph",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorsShapingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ConnectorShaping",
+          "description": "#/definitions/ConnectorShaping",
+          "nullable": true
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorShaping",
+            "description": "#/definitions/ConnectorShaping"
+          },
+          "description": "Applied on specific connector sources",
           "type": "object"
         }
       },
