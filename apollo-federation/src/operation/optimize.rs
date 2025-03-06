@@ -37,9 +37,9 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::Name;
 
 use super::FieldSelection;
 use super::Fragment;
@@ -657,7 +657,13 @@ mod tests {
     }
 
     mod fragment_generation {
+        use apollo_compiler::ExecutableDocument;
+        use apollo_compiler::validation::Valid;
+
+        use crate::correctness::compare_operations;
+        use crate::operation::tests::assert_equal_ops;
         use crate::operation::tests::parse_and_expand;
+        use crate::operation::tests::parse_operation;
         use crate::operation::tests::parse_schema;
 
         #[test]
@@ -675,7 +681,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -691,8 +697,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -713,6 +719,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -730,7 +737,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -746,8 +753,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -768,6 +775,8 @@ mod tests {
               }
             }
             "###);
+
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -785,7 +794,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -800,8 +809,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -819,6 +828,8 @@ mod tests {
               }
             }
             "###);
+
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -842,7 +853,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -858,8 +869,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -878,6 +889,8 @@ mod tests {
               }
             }
             "###);
+
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -899,7 +912,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -919,8 +932,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -945,6 +958,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -966,7 +980,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -984,8 +998,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -1006,6 +1020,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -1029,7 +1044,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let mut query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -1052,8 +1067,8 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
+            let original_query = query.clone();
 
             query
                 .generate_fragments()
@@ -1082,6 +1097,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, original_query, query);
         }
 
         #[test]
@@ -1135,6 +1151,7 @@ mod tests {
                 "#,
             )
             .expect("query is valid");
+            let normalized_query = query.clone();
 
             query
                 .generate_fragments()
@@ -1163,6 +1180,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, normalized_query, query);
         }
 
         #[test]
@@ -1216,6 +1234,7 @@ mod tests {
                 "#,
             )
             .expect("query is valid");
+            let normalized_query = query.clone();
 
             query
                 .generate_fragments()
@@ -1245,6 +1264,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, normalized_query, query);
         }
 
         #[test]
@@ -1288,6 +1308,7 @@ mod tests {
                 "#,
             )
             .expect("query is valid");
+            let normalized_query = query.clone();
 
             query
                 .generate_fragments()
@@ -1308,6 +1329,7 @@ mod tests {
               }
             }
             "###);
+            assert_equal_ops!(&schema, normalized_query, query);
         }
     }
 }

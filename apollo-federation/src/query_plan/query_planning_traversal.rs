@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexSet;
@@ -13,11 +14,12 @@ use crate::error::SingleFederationError;
 use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::ConditionResolverCache;
-use crate::query_graph::graph_path::create_initial_options;
 use crate::query_graph::graph_path::ClosedBranch;
 use crate::query_graph::graph_path::ClosedPath;
 use crate::query_graph::graph_path::ExcludedConditions;
@@ -28,26 +30,25 @@ use crate::query_graph::graph_path::OpPathElement;
 use crate::query_graph::graph_path::OpenBranch;
 use crate::query_graph::graph_path::SimultaneousPaths;
 use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
+use crate::query_graph::graph_path::create_initial_options;
 use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::QueryGraph;
-use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
+use crate::query_plan::QueryPlanCost;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNodePath;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
-use crate::query_plan::QueryPlanCost;
+use crate::query_plan::query_planner::compute_root_fetch_groups;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::schema::ValidFederationSchema;
 use crate::utils::logging::format_open_branch;
 use crate::utils::logging::snapshot;
 
@@ -87,6 +88,26 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
     pub(crate) override_conditions: EnabledOverrideConditions,
+    pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+}
+
+impl QueryPlanningParameters<'_> {
+    pub(crate) fn check_cancellation(&self) -> Result<(), SingleFederationError> {
+        Self::check_cancellation_with(&self.check_for_cooperative_cancellation)
+    }
+
+    pub(crate) fn check_cancellation_with(
+        check: &Option<&dyn Fn() -> ControlFlow<()>>,
+    ) -> Result<(), SingleFederationError> {
+        if let Some(check) = check {
+            match check() {
+                ControlFlow::Continue(()) => Ok(()),
+                ControlFlow::Break(()) => Err(SingleFederationError::PlanningCancelled),
+            }
+        } else {
+            Ok(())
+        }
+    }
 }
 
 pub(crate) struct QueryPlanningTraversal<'a, 'b> {
@@ -339,6 +360,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while !self.open_branches.is_empty() {
+            self.parameters.check_cancellation()?;
             snapshot!(
                 "OpenBranches",
                 snapshot_helper::open_branches_to_string(&self.open_branches),
@@ -401,11 +423,13 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         );
 
         for option in options.iter_mut() {
+            self.parameters.check_cancellation()?;
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
                 &operation_element,
                 /*resolver*/ self,
                 &self.parameters.override_conditions,
+                &|| self.parameters.check_cancellation(),
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -1042,6 +1066,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 dependency_graph,
                 path_tree,
                 type_conditioned_fetching_enabled,
+                &|| self.parameters.check_cancellation(),
             )?;
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
@@ -1079,6 +1104,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 )?,
                 Default::default(),
                 &Default::default(),
+                &|| self.parameters.check_cancellation(),
             )?;
         }
 
@@ -1130,6 +1156,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             statistics: self.parameters.statistics,
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
+            check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,

@@ -7,37 +7,38 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use either::Either;
-use http::header;
 use http::HeaderName;
+use http::header;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 use url::Url;
 
-use super::json_selection::ExternalVarPaths;
-use super::spec::schema::ConnectDirectiveArguments;
-use super::spec::schema::SourceDirectiveArguments;
-use super::spec::ConnectHTTPArguments;
-use super::spec::SourceHTTPArguments;
-use super::string_template;
-use super::variable::Namespace;
-use super::variable::VariableReference;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::URLTemplate;
+use super::json_selection::ExternalVarPaths;
+use super::spec::ConnectHTTPArguments;
+use super::spec::SourceHTTPArguments;
+use super::spec::schema::ConnectDirectiveArguments;
+use super::spec::schema::SourceDirectiveArguments;
+use super::string_template;
+use super::variable::Namespace;
+use super::variable::VariableReference;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::Link;
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
@@ -45,7 +46,6 @@ use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
-use crate::sources::connect::ConnectSpec;
 
 // --- Connector ---------------------------------------------------------------
 
@@ -180,9 +180,7 @@ impl Connector {
         self.id.directive.field.field_name()
     }
 
-    pub(crate) fn variable_references(
-        &self,
-    ) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
+    pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
         self.transport.variable_references().chain(
             self.selection
                 .external_var_paths()
@@ -312,12 +310,12 @@ impl HttpJsonTransport {
         format!("http: {} {}", self.method.as_str(), self.connect_template)
     }
 
-    fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+    fn variables(&self) -> impl Iterator<Item = Namespace> {
         self.variable_references()
             .map(|var_ref| var_ref.namespace.namespace)
     }
 
-    fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
+    fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
         let url_selections = self.connect_template.expressions().map(|e| &e.expression);
         let header_selections = self
             .headers
@@ -576,9 +574,9 @@ mod tests {
     use insta::assert_debug_snapshot;
 
     use super::*;
+    use crate::ValidFederationSubgraphs;
     use crate::schema::FederationSchema;
     use crate::supergraph::extract_subgraphs_from_supergraph;
-    use crate::ValidFederationSubgraphs;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
 

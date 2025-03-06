@@ -12,20 +12,20 @@ use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header::CONTENT_ENCODING;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::limit::ConcurrencyLimitLayer;
-use tower::limit::RateLimitLayer;
-use tower::load_shed::error::Overloaded;
-use tower::timeout::error::Elapsed;
-use tower::timeout::TimeoutLayer;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::limit::ConcurrencyLimitLayer;
+use tower::limit::RateLimitLayer;
+use tower::load_shed::error::Overloaded;
+use tower::timeout::TimeoutLayer;
+use tower::timeout::error::Elapsed;
 
 use self::connector::request_service::TransportRequest;
 use self::deduplication::QueryDeduplicationLayer;
@@ -34,6 +34,9 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::services::RouterResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 use crate::services::connector;
 use crate::services::connector::request_service::Error;
 use crate::services::connector::request_service::Request;
@@ -41,9 +44,6 @@ use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::services::RouterResponse;
-use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -586,35 +586,35 @@ mod test {
     use http::HeaderMap;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
-    use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use serde_json_bytes::json;
     use tower::Service;
     use url::Url;
 
     use super::*;
+    use crate::Configuration;
+    use crate::Context;
     use crate::json_ext::Object;
+    use crate::plugin::DynPlugin;
     use crate::plugin::test::MockConnector;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugin::DynPlugin;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
-    use crate::services::connector::request_service::transport::http::HttpRequest;
-    use crate::services::connector::request_service::Request as ConnectorRequest;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
-    use crate::services::router;
-    use crate::services::router::service::RouterCreator;
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SupergraphRequest;
+    use crate::services::connector::request_service::Request as ConnectorRequest;
+    use crate::services::connector::request_service::transport::http::HttpRequest;
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::router;
+    use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
-    use crate::Configuration;
-    use crate::Context;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
@@ -1049,17 +1049,18 @@ mod test {
 
         let mut svc = plugin.subgraph_service("test", test_service.boxed());
 
-        assert!(svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(SubgraphRequest::fake_builder().build())
-            .await
-            .unwrap()
-            .response
-            .body()
-            .errors
-            .is_empty());
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
         let response = svc
             .ready()
             .await
@@ -1072,17 +1073,18 @@ mod test {
 
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        assert!(svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(SubgraphRequest::fake_builder().build())
-            .await
-            .unwrap()
-            .response
-            .body()
-            .errors
-            .is_empty());
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1116,15 +1118,16 @@ mod test {
             "test_subgraph.test_sourcename".to_string(),
         );
 
-        assert!(svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(request)
-            .await
-            .unwrap()
-            .transport_result
-            .is_ok());
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(request)
+                .await
+                .unwrap()
+                .transport_result
+                .is_ok()
+        );
 
         let request = get_fake_connector_request(
             "test_subgraph.test_sourcename".into(),
@@ -1152,15 +1155,16 @@ mod test {
             None,
             "testing".to_string(),
         );
-        assert!(svc
-            .ready()
-            .await
-            .expect("it is ready")
-            .call(request)
-            .await
-            .unwrap()
-            .transport_result
-            .is_ok());
+        assert!(
+            svc.ready()
+                .await
+                .expect("it is ready")
+                .call(request)
+                .await
+                .unwrap()
+                .transport_result
+                .is_ok()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

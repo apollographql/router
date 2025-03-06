@@ -1,6 +1,9 @@
 use std::fmt;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -11,21 +14,18 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
+use crate::FederationError;
 use crate::bail;
 use crate::display_helpers;
 use crate::ensure;
 use crate::internal_error;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
-use crate::schema::ValidFederationSchema;
 use crate::utils::FallibleIterator;
-use crate::FederationError;
 
 //==================================================================================================
 // Vec utilities
@@ -956,7 +956,10 @@ impl ResponseShapeContext {
             // The field's declared type may not be the most specific type (in case of up-casting).
 
             // internal invariant check
-            ensure!(*field.ty().inner_named_type() == field.selection_set.ty, "internal invariant failure: field's type does not match with its selection set's type");
+            ensure!(
+                *field.ty().inner_named_type() == field.selection_set.ty,
+                "internal invariant failure: field's type does not match with its selection set's type"
+            );
 
             // A brand new context with the new type condition.
             // - Still inherits the boolean conditions for simplification purposes.
@@ -997,7 +1000,10 @@ impl ResponseShapeContext {
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
         // internal invariant check
-        ensure!(*fragment_type_condition == selection_set.ty, "internal invariant failure: fragment's type condition does not match with its selection set's type");
+        ensure!(
+            *fragment_type_condition == selection_set.ty,
+            "internal invariant failure: fragment's type condition does not match with its selection set's type"
+        );
 
         let Some(type_condition) = NormalizedTypeCondition::add_type_name(
             &self.type_condition,

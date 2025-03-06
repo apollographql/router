@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use super::ConfiguredSubgraphs;
 use super::IncompatiblePlugin;
-use crate::configuration::Tls;
 use crate::Configuration;
+use crate::configuration::Tls;
 
 pub(super) struct TlsIncompatPlugin {
     config: Tls,

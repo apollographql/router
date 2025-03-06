@@ -34,6 +34,12 @@ pub(crate) mod test_utils {
     use opentelemetry::Array;
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::AttributeSet;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::Pipeline;
     use opentelemetry_sdk::metrics::data::DataPoint;
     use opentelemetry_sdk::metrics::data::Gauge;
     use opentelemetry_sdk::metrics::data::Histogram;
@@ -45,12 +51,6 @@ pub(crate) mod test_utils {
     use opentelemetry_sdk::metrics::reader::AggregationSelector;
     use opentelemetry_sdk::metrics::reader::MetricReader;
     use opentelemetry_sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry_sdk::metrics::Aggregation;
-    use opentelemetry_sdk::metrics::AttributeSet;
-    use opentelemetry_sdk::metrics::InstrumentKind;
-    use opentelemetry_sdk::metrics::ManualReader;
-    use opentelemetry_sdk::metrics::MeterProviderBuilder;
-    use opentelemetry_sdk::metrics::Pipeline;
     use serde::Serialize;
     use tokio::task_local;
 
@@ -1266,13 +1266,13 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::metrics::MeterProvider;
     use opentelemetry::KeyValue;
+    use opentelemetry::metrics::MeterProvider;
 
+    use crate::metrics::FutureMetricsExt;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
-    use crate::metrics::FutureMetricsExt;
 
     #[test]
     fn test_gauge() {
@@ -1282,6 +1282,13 @@ mod test {
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
             .init();
+        assert_gauge!("test", 5);
+    }
+
+    #[test]
+    fn test_gauge_record() {
+        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        gauge.record(5, &[]);
         assert_gauge!("test", 5);
     }
 

@@ -7,11 +7,11 @@ use derive_more::Display;
 use derive_more::From;
 use futures::prelude::*;
 
+use crate::Configuration;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
 use crate::router::Event::UpdateConfiguration;
 use crate::uplink::UplinkConfig;
-use crate::Configuration;
 
 type ConfigurationStream = Pin<Box<dyn Stream<Item = Configuration> + Send>>;
 
@@ -139,6 +139,8 @@ enum ReadConfigError {
 mod tests {
     use std::env::temp_dir;
 
+    use futures::StreamExt;
+
     use super::*;
     use crate::files::tests::create_temp_file;
     use crate::files::tests::write_and_flush;
@@ -170,7 +172,7 @@ mod tests {
 
         // This time write garbage, there should not be an update.
         write_and_flush(&mut file, ":garbage").await;
-        let event = stream.into_future().now_or_never();
+        let event = StreamExt::into_future(stream).now_or_never();
         assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
     }
 

@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::panic::UnwindSafe;
 use std::sync::OnceLock;
 
@@ -31,6 +32,31 @@ fn thread_pool_size() -> usize {
             .get()
     }
 }
+
+pub(crate) struct JobStatus<'a, T> {
+    result_sender: &'a oneshot::Sender<std::thread::Result<T>>,
+}
+
+impl<T> JobStatus<'_, T> {
+    /// Checks whether the oneshot receiver for the result of the job was dropped,
+    /// which means nothing is expecting the result anymore.
+    ///
+    /// This can happen if the Tokio task owning it is cancelled,
+    /// such as if a supergraph client disconnects or if a request times out.
+    ///
+    /// In this case, a long-running job should try to cancel itself
+    /// to avoid needless resource consumption.
+    pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
+        if self.result_sender.is_closed() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
+    }
+}
+
+/// We expect calling `oneshot::Sender::is_closed` to never leave the sender in a broken state.
+impl<T> UnwindSafe for JobStatus<'_, T> {}
 
 /// Compute job queue is full
 #[derive(thiserror::Error, Debug, displaydoc::Display, Clone)]
@@ -101,13 +127,15 @@ pub(crate) fn execute<T, F>(
     job: F,
 ) -> Result<impl Future<Output = std::thread::Result<T>>, ComputeBackPressureError>
 where
-    F: FnOnce() -> T + Send + UnwindSafe + 'static,
+    F: FnOnce(JobStatus<'_, T>) -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
 {
     let (tx, rx) = oneshot::channel();
     let job = Box::new(move || {
+        let status = JobStatus { result_sender: &tx };
+        let result = std::panic::catch_unwind(move || job(status));
         // Ignore the error if the oneshot receiver was dropped
-        let _ = tx.send(std::panic::catch_unwind(job));
+        let _ = tx.send(result);
     });
     let queue = queue();
     queue.send(priority, job).map_err(|e| match e {
@@ -156,7 +184,7 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, || std::thread::current().id())
+        let job_thread = execute(Priority::P4, |_| std::thread::current().id())
             .unwrap()
             .await
             .unwrap();
@@ -169,12 +197,12 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, || {
+        let one = execute(Priority::P8, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         })
         .unwrap();
-        let two = execute(Priority::P8, || {
+        let two = execute(Priority::P8, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         })

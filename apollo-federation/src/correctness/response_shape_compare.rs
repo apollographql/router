@@ -1,8 +1,8 @@
 // Compare response shapes from a query plan and an input operation.
 
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Field;
-use apollo_compiler::Node;
 
 use super::response_shape::DefinitionVariant;
 use super::response_shape::FieldSelectionKey;
@@ -13,6 +13,7 @@ use super::response_shape::ResponseShape;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
+#[derive(Debug)]
 pub struct ComparisonError {
     description: String,
 }
@@ -346,7 +347,7 @@ fn compare_representative_field(this: &Field, other: &Field) -> Result<(), Compa
 fn same_ast_argument_value(x: &ast::Value, y: &ast::Value) -> bool {
     match (x, y) {
         // Object fields may be in different order.
-        (ast::Value::Object(ref x), ast::Value::Object(ref y)) => vec_matches_sorted_by(
+        (ast::Value::Object(x), ast::Value::Object(y)) => vec_matches_sorted_by(
             x,
             y,
             |(xx_name, _), (yy_name, _)| xx_name.cmp(yy_name),
@@ -354,7 +355,7 @@ fn same_ast_argument_value(x: &ast::Value, y: &ast::Value) -> bool {
         ),
 
         // Recurse into list items.
-        (ast::Value::List(ref x), ast::Value::List(ref y)) => {
+        (ast::Value::List(x), ast::Value::List(y)) => {
             vec_matches(x, y, |xx, yy| same_ast_argument_value(xx, yy))
         }
 

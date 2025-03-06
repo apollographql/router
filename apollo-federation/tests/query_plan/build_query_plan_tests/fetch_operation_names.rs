@@ -1,9 +1,9 @@
 use std::fmt::Write;
 
-use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlannerDebugConfig;
 
 fn second_operation(plan: &QueryPlan) -> String {
     let Some(TopLevelPlanNode::Sequence(node)) = &plan.node else {
@@ -243,10 +243,11 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
     schema.push_str("\n      }\n");
     operation.push_str("\n  }\n}\n");
 
-    let (api_schema, planner) = planner!(
+    let planner = planner!(
         S1: &schema,
         S2: &schema,
     );
+    let api_schema = planner.api_schema();
     let document = apollo_compiler::ExecutableDocument::parse_and_validate(
         api_schema.schema(),
         operation,

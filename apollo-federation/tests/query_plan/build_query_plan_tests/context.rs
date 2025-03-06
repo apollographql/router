@@ -35,6 +35,7 @@ use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 
 fn parse_fetch_data_path_element(value: &str) -> FetchDataPathElement {
     if value == ".." {
@@ -117,40 +118,42 @@ fn set_context_test_variable_is_from_same_subgraph() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
-               QueryPlan {
-                 Sequence {
-                   Fetch(service: "Subgraph1") {
-                     {
-                       t {
-                         __typename
-                         prop
-                         u {
-                           __typename
-                           id
-                           b
-                         }
-                       }
+           QueryPlan {
+             Sequence {
+               Fetch(service: "Subgraph1") {
+                 {
+                   t {
+                     __typename
+                     prop
+                     u {
+                       __typename
+                       id
+                       b
                      }
-                   },
-                   Flatten(path: "t.u") {
-                     Fetch(service: "Subgraph1") {
-                       {
-                         ... on U {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on U {
-                           field(a: $contextualArgument_1_0)
-                         }
-                       }
-                     },
-                   },
+                   }
+                 }
+               },
+               Flatten(path: "t.u") {
+                 Fetch(service: "Subgraph1") {
+                   {
+                     ... on U {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on U {
+                       field(a: $contextualArgument_1_0)
+                     }
+                   }
                  },
-               }
-               "###
+               },
+             },
+           }
+           "###
     );
     node_assert!(
         plan,
@@ -191,8 +194,8 @@ fn set_context_test_variable_is_from_different_subgraph() {
       "#,
       );
     let plan = assert_plan!(
-            planner,
-            r#"
+        planner,
+        r#"
         {
           t {
             u {
@@ -201,55 +204,57 @@ fn set_context_test_variable_is_from_different_subgraph() {
             }
           }
         }
-            "#,
-            @r###"
-               QueryPlan {
-                 Sequence {
-                   Fetch(service: "Subgraph1") {
-                     {
-                       t {
-                         __typename
-                         id
-                         u {
-                           __typename
-                           id
-                         }
-                       }
+        "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
+        @r###"
+           QueryPlan {
+             Sequence {
+               Fetch(service: "Subgraph1") {
+                 {
+                   t {
+                     __typename
+                     id
+                     u {
+                       __typename
+                       id
                      }
-                   },
-                   Flatten(path: "t") {
-                     Fetch(service: "Subgraph2") {
-                       {
-                         ... on T {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on T {
-                           prop
-                         }
-                       }
-                     },
-                   },
-                   Flatten(path: "t.u") {
-                     Fetch(service: "Subgraph1") {
-                       {
-                         ... on U {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on U {
-                           field(a: $contextualArgument_1_0)
-                         }
-                       }
-                     },
-                   },
+                   }
+                 }
+               },
+               Flatten(path: "t") {
+                 Fetch(service: "Subgraph2") {
+                   {
+                     ... on T {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on T {
+                       prop
+                     }
+                   }
                  },
-               }
-               "###);
+               },
+               Flatten(path: "t.u") {
+                 Fetch(service: "Subgraph1") {
+                   {
+                     ... on U {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on U {
+                       field(a: $contextualArgument_1_0)
+                     }
+                   }
+                 },
+               },
+             },
+           }
+           "###);
 
     node_assert!(
         plan,
@@ -303,6 +308,8 @@ fn set_context_test_variable_is_already_in_a_different_fetch_group() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -403,6 +410,8 @@ fn set_context_test_variable_is_a_list() {
           }
         }
       "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -505,6 +514,8 @@ fn set_context_test_fetched_as_a_list() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -602,6 +613,8 @@ fn set_context_test_impacts_on_query_planning() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -710,52 +723,54 @@ fn set_context_test_with_type_conditions_for_union() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
-               QueryPlan {
-                 Sequence {
-                   Fetch(service: "Subgraph1") {
-                     {
-                       t {
+           QueryPlan {
+             Sequence {
+               Fetch(service: "Subgraph1") {
+                 {
+                   t {
+                     __typename
+                     ... on A {
+                       __typename
+                       prop
+                       u {
                          __typename
-                         ... on A {
-                           __typename
-                           prop
-                           u {
-                             __typename
-                             id
-                             b
-                           }
-                         }
-                         ... on B {
-                           __typename
-                           prop
-                           u {
-                             __typename
-                             id
-                             b
-                           }
-                         }
+                         id
+                         b
                        }
                      }
-                   },
-                   Flatten(path: "t.u") {
-                     Fetch(service: "Subgraph1") {
-                       {
-                         ... on U {
-                           __typename
-                           id
-                         }
-                       } =>
-                       {
-                         ... on U {
-                           field(a: $contextualArgument_1_0)
-                         }
+                     ... on B {
+                       __typename
+                       prop
+                       u {
+                         __typename
+                         id
+                         b
                        }
-                     },
-                   },
+                     }
+                   }
+                 }
+               },
+               Flatten(path: "t.u") {
+                 Fetch(service: "Subgraph1") {
+                   {
+                     ... on U {
+                       __typename
+                       id
+                     }
+                   } =>
+                   {
+                     ... on U {
+                       field(a: $contextualArgument_1_0)
+                     }
+                   }
                  },
-               }
-               "###
+               },
+             },
+           }
+           "###
     );
 
     node_assert!(
@@ -809,6 +824,8 @@ fn set_context_test_accesses_a_different_top_level_query() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -882,6 +899,8 @@ fn set_context_one_subgraph() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -987,6 +1006,8 @@ fn set_context_required_field_is_several_levels_deep_going_back_and_forth_betwee
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
                QueryPlan {
                  Sequence {
@@ -1123,6 +1144,8 @@ fn set_context_test_before_key_resolution_transition() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
     QueryPlan {
       Sequence {
@@ -1256,6 +1279,8 @@ fn set_context_test_efficiently_merge_fetch_groups() {
           }
         }
         "#,
+        QueryPlanOptions::default(),
+        /* verify_correctness FED-508 */ false,
         @r###"
     QueryPlan {
       Sequence {

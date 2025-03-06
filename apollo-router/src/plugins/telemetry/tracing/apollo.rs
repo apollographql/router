@@ -10,8 +10,8 @@ use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::otel::named_runtime_channel::NamedTokioRuntime;
 use crate::plugins::telemetry::span_factory::SpanMode;
-use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::apollo_telemetry;
 
 impl TracingConfigurator for Config {
     fn enabled(&self) -> bool {

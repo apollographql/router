@@ -3,25 +3,26 @@
 use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use arc_swap::ArcSwap;
+use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
-use futures::StreamExt;
 use http::StatusCode;
-use notify::event::DataChange;
-use notify::event::MetadataKind;
-use notify::event::ModifyKind;
 use notify::Config;
 use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
+use notify::event::ModifyKind;
 use parking_lot::Mutex;
+use rhai::AST;
 use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
@@ -30,13 +31,12 @@ use rhai::FuncArgs;
 use rhai::Instant;
 use rhai::Scope;
 use rhai::Shared;
-use rhai::AST;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::BoxService;
 
 use self::engine::RhaiService;
 use self::engine::SharedMut;
@@ -603,7 +603,7 @@ macro_rules! gen_map_deferred_response {
                     // for which we will implement mapping later
                     let $base::Response { response, context } = mapped_response;
                     let (parts, stream) = response.into_parts();
-                    let (first, rest) = stream.into_future().await;
+                    let (first, rest) = StreamExt::into_future(stream).await;
 
                     if first.is_none() {
                         let error_details = ErrorDetails {

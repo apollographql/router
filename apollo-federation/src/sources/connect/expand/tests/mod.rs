@@ -4,9 +4,9 @@ use insta::assert_debug_snapshot;
 use insta::assert_snapshot;
 use insta::glob;
 
-use crate::sources::connect::expand::expand_connectors;
-use crate::sources::connect::expand::ExpansionResult;
 use crate::ApiSchemaOptions;
+use crate::sources::connect::expand::ExpansionResult;
+use crate::sources::connect::expand::expand_connectors;
 
 #[test]
 fn it_expand_supergraph() {

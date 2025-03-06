@@ -6,10 +6,10 @@ use serde_json::json;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::graph_os_enabled;
+use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
-use crate::integration::IntegrationTest;
+use crate::integration::common::graph_os_enabled;
 
 const PROMETHEUS_CONFIG: &str = r#"
             telemetry:

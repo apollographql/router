@@ -18,30 +18,30 @@ use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use mime::APPLICATION_JSON;
+use opentelemetry::Context;
+use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry::Context;
-use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::testing::trace::NoopSpanExporter;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::trace::Config;
 use opentelemetry_sdk::trace::TracerProvider;
-use opentelemetry_sdk::Resource;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use parking_lot::Mutex;
 use regex::Regex;
 use reqwest::Request;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
@@ -55,17 +55,17 @@ use tracing_core::LevelFilter;
 use tracing_futures::Instrument;
 use tracing_futures::WithSubscriber;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
+use tracing_subscriber::layer::SubscriberExt;
 use uuid::Uuid;
-use wiremock::http::Method;
-use wiremock::matchers::method;
-use wiremock::matchers::path_regex;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
+use wiremock::http::Method;
+use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 pub struct Query {
     traced: bool,
@@ -568,7 +568,9 @@ impl IntegrationTest {
                         message: String,
                     }
                     let Ok(log) = serde_json::from_str::<Log>(&line) else {
-                        panic!("line: '{line}' isn't JSON, might you have some debug output in the logging?");
+                        panic!(
+                            "line: '{line}' isn't JSON, might you have some debug output in the logging?"
+                        );
                     };
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
@@ -641,7 +643,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn execute_default_query(
         &self,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> + use<> {
         self.execute_query(Query::builder().build())
     }
 
@@ -649,7 +651,7 @@ impl IntegrationTest {
     pub fn execute_query(
         &self,
         query: Query,
-    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -713,7 +715,7 @@ impl IntegrationTest {
         &self,
         request: reqwest::multipart::Form,
         transform: Option<fn(reqwest::Request) -> reqwest::Request>,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (String, reqwest::Response)> + use<> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -1126,7 +1128,9 @@ impl IntegrationTest {
                         }
                     }
                 }
-                panic!("key {key} not found: {e}\n This may be caused by a number of things including federation version changes");
+                panic!(
+                    "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
+                );
             }
         };
 
