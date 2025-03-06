@@ -50,7 +50,7 @@ impl SubgraphMetadata {
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
         let key_fields = Self::collect_key_fields(schema)?;
         let provided_fields = Self::collect_provided_fields(schema)?;
-        let required_fields = Self::collect_required_fields(schema, federation_spec_definition)?;
+        let required_fields = Self::collect_required_fields(schema)?;
         let shareable_fields = Self::collect_shareable_fields(schema, federation_spec_definition)?;
 
         Ok(Self {
@@ -150,31 +150,17 @@ impl SubgraphMetadata {
 
     fn collect_required_fields(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let requires_directive_definition =
-            federation_spec_definition.requires_directive_definition(schema)?;
-        let requires_directive_referencers = schema
-            .referencers
-            .get_directive(&requires_directive_definition.name)?;
-
         let mut required_fields = IndexSet::default();
-        for field_definition_position in &requires_directive_referencers.object_fields {
-            let directives = &field_definition_position.get(schema.schema())?.directives;
-            for requires_directive_application in
-                directives.get_all(&requires_directive_definition.name)
-            {
-                let requires_directive_arguments = federation_spec_definition
-                    .requires_directive_arguments(requires_directive_application)?;
-                required_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    field_definition_position.parent().type_name,
-                    requires_directive_arguments.fields,
-                    false,
-                )?);
-            }
+        let applications = schema.requires_directive_applications()?;
+        for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
+            required_fields.extend(collect_target_fields_from_field_set(
+                unwrap_schema(schema),
+                requires_directive.target.type_name.clone(),
+                requires_directive.arguments.fields,
+                false,
+            )?);
         }
-
         Ok(required_fields)
     }
 

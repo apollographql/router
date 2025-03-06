@@ -21,6 +21,7 @@ use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
+use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -417,6 +418,39 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    pub(crate) fn requires_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<RequiresDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
+        let requires_directive_definition = federation_spec.requires_directive_definition(&self)?;
+        let requires_directive_referencers = self
+            .referencers()
+            .get_directive(&requires_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in &requires_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for provides_directive_application in
+                        directives.get_all(&requires_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .requires_directive_arguments(provides_directive_application);
+                        applications.push(arguments.map(|args| RequiresDirective {
+                            arguments: args,
+                            schema_directive: provides_directive_application,
+                            sibling_directives: directives,
+                            target: field_definition_position,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
@@ -465,6 +499,17 @@ pub(crate) struct ProvidesDirective<'schema> {
     target: &'schema ObjectFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
+}
+
+pub(crate) struct RequiresDirective<'schema> {
+    /// The parsed arguments of this `@requires` application
+    arguments: RequiresDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema apollo_compiler::Node<apollo_compiler::ast::Directive>,
+    /// The `DirectiveList` containing all directives applied to the target position, including this one
+    sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
+    /// The schema position to which this directive is applied
+    target: &'schema ObjectFieldDefinitionPosition,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
