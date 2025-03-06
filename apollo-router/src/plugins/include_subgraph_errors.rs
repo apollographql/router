@@ -37,12 +37,16 @@ enum ErrorMode {
     Included(bool),
     /// Allow specific extension keys with required redact_message
     Allow {
+        /// Allow specific extension keys
         allow_extensions_keys: Vec<String>,
+        /// redact errors messages for all subgraphs
         redact_message: bool,
     },
     /// Deny specific extension keys with required redact_message
     Deny {
+        /// Deny specific extension keys
         deny_extensions_keys: Vec<String>,
+        /// redact errors messages for all subgraphs
         redact_message: bool,
     },
 }
@@ -120,8 +124,10 @@ impl<'de> Deserialize<'de> for ErrorMode {
 #[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SubgraphConfigCommon {
+    /// Redact error messages for a subgraph
     #[serde(skip_serializing_if = "Option::is_none")]
     redact_message: Option<bool>,
+    /// Exclude specific extension keys from global allow/deny list
     #[serde(skip_serializing_if = "Option::is_none")]
     exclude_global_keys: Option<Vec<String>>,
 }
@@ -133,17 +139,22 @@ enum SubgraphConfig {
     Included(bool),
     /// Allow specific extension keys for a subgraph
     Allow {
+        /// Allow specific extension keys for a subgraph. Will extending global allow list or override a global deny list
         allow_extensions_keys: Vec<String>,
+        /// Common configuration for a subgraph
         #[serde(flatten)]
         common: SubgraphConfigCommon,
     },
     /// Deny specific extension keys for a subgraph
     Deny {
+        /// Allow specific extension keys for a subgraph. Will extending global deny list or override a global allow list
         deny_extensions_keys: Vec<String>,
+        /// Common configuration for a subgraph
         #[serde(flatten)]
         common: SubgraphConfigCommon,
     },
     CommonOnly {
+        /// Common configuration for a subgraph
         #[serde(flatten)]
         common: SubgraphConfigCommon,
     },
