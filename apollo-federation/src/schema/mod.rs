@@ -8,6 +8,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
 
@@ -16,6 +17,7 @@ use crate::error::SingleFederationError;
 use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
+use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -218,9 +220,7 @@ impl FederationSchema {
         }
     }
 
-    pub(crate) fn key_directive_applications(
-        &self,
-    ) -> Result<Vec<Result<KeyDirective, FederationError>>, FederationError> {
+    pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let key_directive_definition = federation_spec.key_directive_definition(&self)?;
         let key_directive_referencers = self
@@ -260,7 +260,38 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    pub(crate) fn provides_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ProvidesDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
+        let provides_directive_definition = federation_spec.provides_directive_definition(&self)?;
+        let provides_directive_referencers = self
+            .referencers()
+            .get_directive(&provides_directive_definition.name)?;
+
+        let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
+        for field_definition_position in &provides_directive_referencers.object_fields {
+            let field_definition = field_definition_position.get(self.schema())?;
+            let directives = &field_definition.directives;
+            for provides_directive_application in
+                directives.get_all(&provides_directive_definition.name)
+            {
+                let arguments =
+                    federation_spec.provides_directive_arguments(provides_directive_application);
+                applications.push(arguments.map(|args| ProvidesDirective {
+                    arguments: args,
+                    schema_directive: provides_directive_application,
+                    sibling_directives: directives,
+                    target: field_definition_position,
+                }));
+            }
+        }
+        Ok(applications)
+    }
 }
+
+type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
 
 pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
@@ -271,6 +302,17 @@ pub(crate) struct KeyDirective<'schema> {
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
     target: ObjectOrInterfaceTypeDefinitionPosition,
+}
+
+pub(crate) struct ProvidesDirective<'schema> {
+    /// The parsed arguments of this `@provides` application
+    arguments: ProvidesDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema apollo_compiler::Node<apollo_compiler::ast::Directive>,
+    /// The `DirectiveList` containing all directives applied to the target position, including this one
+    sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
+    /// The schema position to which this directive is applied
+    target: &'schema ObjectFieldDefinitionPosition,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.

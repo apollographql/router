@@ -51,7 +51,7 @@ impl SubgraphMetadata {
         let interface_constraint_fields =
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
         let key_fields = Self::collect_key_fields(schema)?;
-        let provided_fields = Self::collect_provided_fields(schema, federation_spec_definition)?;
+        let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema, federation_spec_definition)?;
         let shareable_fields = Self::collect_shareable_fields(schema, federation_spec_definition)?;
 
@@ -123,7 +123,7 @@ impl SubgraphMetadata {
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut key_fields = IndexSet::default();
         let applications = schema.key_directive_applications()?;
-        for key_directive in applications.into_iter().filter_map(|k| k.ok()) {
+        for key_directive in applications.into_iter().filter_map(|res| res.ok()) {
             key_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
                 key_directive.target.type_name().clone(),
@@ -136,32 +136,17 @@ impl SubgraphMetadata {
 
     fn collect_provided_fields(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let provides_directive_definition =
-            federation_spec_definition.provides_directive_definition(schema)?;
-        let provides_directive_referencers = schema
-            .referencers
-            .get_directive(&provides_directive_definition.name)?;
-
         let mut provided_fields = IndexSet::default();
-        for field_definition_position in &provides_directive_referencers.object_fields {
-            let field_definition = field_definition_position.get(schema.schema())?;
-            let directives = &field_definition.directives;
-            for provides_directive_application in
-                directives.get_all(&provides_directive_definition.name)
-            {
-                let provides_directive_arguments = federation_spec_definition
-                    .provides_directive_arguments(provides_directive_application)?;
-                provided_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    field_definition.ty.inner_named_type().clone(),
-                    provides_directive_arguments.fields,
-                    false,
-                )?);
-            }
+        let applications = schema.provides_directive_applications()?;
+        for provides_directive in applications.into_iter().filter_map(|res| res.ok()) {
+            provided_fields.extend(collect_target_fields_from_field_set(
+                unwrap_schema(schema),
+                provides_directive.target.type_name.clone(),
+                provides_directive.arguments.fields,
+                false,
+            )?);
         }
-
         Ok(provided_fields)
     }
 
