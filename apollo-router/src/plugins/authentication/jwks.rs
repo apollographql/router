@@ -4,16 +4,16 @@ use std::mem;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::future::Either;
 use futures::future::join_all;
 use futures::future::select;
-use futures::future::Either;
 use futures::pin_mut;
 use futures::stream::repeat;
 use futures::stream::select_all;
 use http::header::ACCEPT;
+use jsonwebtoken::Algorithm;
 use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::Algorithm;
 use mime::APPLICATION_JSON;
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -23,9 +23,9 @@ use tower::BoxError;
 use tracing_futures::Instrument;
 use url::Url;
 
-use super::Header;
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
+use super::Header;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {

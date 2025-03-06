@@ -1,8 +1,8 @@
 pub(crate) mod debug;
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use debug::ConnectorContext;
 use futures::StreamExt;

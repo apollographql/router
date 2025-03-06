@@ -7,25 +7,25 @@ use fred::mocks::MockCommand;
 use fred::mocks::Mocks;
 use fred::prelude::RedisError;
 use fred::prelude::RedisValue;
-use http::header::CACHE_CONTROL;
 use http::HeaderValue;
+use http::header::CACHE_CONTROL;
 use parking_lot::Mutex;
 use tower::Service;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
-use crate::cache::redis::RedisCacheStorage;
-use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphService;
-use crate::plugins::cache::entity::CacheKeyContext;
-use crate::plugins::cache::entity::CacheKeysContext;
-use crate::plugins::cache::entity::Subgraph;
-use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
-use crate::services::subgraph;
-use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;
 use crate::TestHarness;
+use crate::cache::redis::RedisCacheStorage;
+use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::MockSubgraphService;
+use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
+use crate::plugins::cache::entity::CacheKeyContext;
+use crate::plugins::cache::entity::CacheKeysContext;
+use crate::plugins::cache::entity::Subgraph;
+use crate::services::subgraph;
+use crate::services::supergraph;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 #[derive(Debug)]
@@ -495,12 +495,14 @@ async fn private() {
         .build()
         .unwrap();
     let mut response = service.ready().await.unwrap().call(request).await.unwrap();
-    assert!(response
-        .context
-        .get::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS)
-        .ok()
-        .flatten()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, CacheKeysContext>(CONTEXT_CACHE_KEYS)
+            .ok()
+            .flatten()
+            .is_none()
+    );
     insta::assert_json_snapshot!(cache_keys);
 
     let response = response.next_response().await.unwrap();

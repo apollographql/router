@@ -1,22 +1,22 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use axum::handler::HandlerWithoutStateExt;
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use http::header::CONTENT_TYPE;
 use insta::assert_yaml_snapshot;
+use jsonwebtoken::EncodingKey;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyType;
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::EncodingKey;
 use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;

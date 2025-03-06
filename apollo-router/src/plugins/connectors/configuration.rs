@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::CustomConfiguration;
+use apollo_federation::sources::connect::expand::Connectors;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
 use super::incompatible::warn_incompatible_plugins;
+use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::services::connector_service::ConnectorSourceRef;
-use crate::Configuration;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

@@ -21,14 +21,14 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
+use crate::Configuration;
 use crate::graphql;
 use crate::spec::Schema;
-use crate::Configuration;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
@@ -179,7 +179,9 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new configuration everytime we have a new router configuration
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<K, V> {
         self.router_broadcasts.subscribe_configuration()
     }
     /// Receive the new schema everytime we have a new schema
@@ -187,7 +189,7 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.schema.0.send(schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new schema everytime we have a new schema
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<K, V> {
         self.router_broadcasts.subscribe_schema()
     }
 }
@@ -968,12 +970,14 @@ impl RouterBroadcasts {
         }
     }
 
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<> {
         BroadcastStream::new(self.configuration.0.subscribe())
             .filter_map(|cfg| futures::future::ready(cfg.ok()))
     }
 
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<> {
         BroadcastStream::new(self.schema.0.subscribe())
             .filter_map(|schema| futures::future::ready(schema.ok()))
     }

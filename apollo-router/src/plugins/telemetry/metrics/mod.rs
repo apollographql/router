@@ -1,16 +1,16 @@
 use multimap::MultiMap;
-use opentelemetry_sdk::metrics::reader::AggregationSelector;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::Aggregation;
 use opentelemetry_sdk::metrics::InstrumentKind;
-use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::reader::AggregationSelector;
 use tower::BoxError;
 
+use crate::ListenAddr;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::router_factory::Endpoint;
-use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;

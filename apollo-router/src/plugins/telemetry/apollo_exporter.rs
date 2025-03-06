@@ -8,14 +8,14 @@ use std::time::Duration;
 use std::time::Instant;
 
 use bytes::BytesMut;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
+use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
-use http::StatusCode;
 use opentelemetry::ExportError;
 use parking_lot::Mutex;
 pub(crate) use prost::*;
@@ -321,7 +321,9 @@ impl ApolloExporter {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
                             if let Ok(response) = serde_json::Value::from_str(&data) {
                                 if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
-                                    tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
+                                    tracing::warn!(
+                                        "traces will not be sent to Apollo as this account is on a free plan"
+                                    );
                                     self.strip_traces.store(true, Ordering::SeqCst);
                                 }
                             }
