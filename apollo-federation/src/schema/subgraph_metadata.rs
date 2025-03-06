@@ -7,12 +7,12 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 
 use crate::error::FederationError;
-use crate::link::context_spec_definition::parse_context;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::query_graph::build_query_graph::parse_context;
 use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
@@ -12,12 +13,12 @@ use petgraph::Direction;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use regex::Regex;
 use strum::IntoEnumIterator;
 
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::context_spec_definition::parse_context;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -48,6 +49,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::supergraph::extract_subgraphs_from_supergraph;
 use crate::utils::FallibleIterator;
+use crate::utils::iter_into_single_item;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -2352,6 +2354,85 @@ fn resolvable_key_applications<'doc>(
         applications.push(key_directive_application);
     }
     Ok(applications)
+}
+
+static CONTEXT_PARSING_LEADING_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^(?:[\n\r\t ,]|#[^\n\r]*)*((?s:.)*)$"#).unwrap());
+
+static CONTEXT_PARSING_CONTEXT_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^([A-Za-z_](?-u:\w)*)((?s:.)*)$"#).unwrap());
+
+fn context_parse_error(context: &str, message: &str) -> FederationError {
+    SingleFederationError::FromContextParseError {
+        context: context.to_string(),
+        message: message.to_string(),
+    }
+    .into()
+}
+
+pub(crate) fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+    // PORT_NOTE: The original JS regex, as shown below
+    //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
+    // makes use of negative lookaheads, which aren't supported natively by Rust's regex crate.
+    // There's a fancy_regex crate which does support this, but in the specific case above, the
+    // negative lookaheads are just used to ensure strict *-greediness for the preceding expression
+    // (i.e., it guarantees those *-expressions match greedily and won't backtrack).
+    //
+    // We can emulate that in this case by matching a series of regexes instead of a single regex,
+    // where for each regex, the relevant *-expression doesn't backtrack by virtue of the rest of
+    // the haystack guaranteeing a match. Also note that Rust has (?s:.) to match all characters
+    // including newlines, which we use in place of JS's common regex workaround of [\s\S].
+    fn strip_leading_ignored_tokens(input: &str) -> Result<&str, FederationError> {
+        iter_into_single_item(CONTEXT_PARSING_LEADING_PATTERN.captures_iter(input))
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str())
+            .ok_or_else(|| context_parse_error(input, "Failed to skip any leading ignored tokens"))
+    }
+
+    let dollar_start = strip_leading_ignored_tokens(field)?;
+    let mut dollar_iter = dollar_start.chars();
+    if dollar_iter.next() != Some('$') {
+        return Err(context_parse_error(
+            dollar_start,
+            r#"Failed to find leading "$""#,
+        ));
+    }
+    let after_dollar = dollar_iter.as_str();
+
+    let context_start = strip_leading_ignored_tokens(after_dollar)?;
+    let Some(context_captures) =
+        iter_into_single_item(CONTEXT_PARSING_CONTEXT_PATTERN.captures_iter(context_start))
+    else {
+        return Err(context_parse_error(
+            dollar_start,
+            "Failed to find context name token and selection",
+        ));
+    };
+
+    let context = match context_captures.get(1).map(|m| m.as_str()) {
+        Some(context) if !context.is_empty() => context,
+        _ => {
+            return Err(context_parse_error(
+                context_start,
+                "Expected to find non-empty context name",
+            ));
+        }
+    };
+
+    let selection = match context_captures.get(2).map(|m| m.as_str()) {
+        Some(selection) if !selection.is_empty() => selection,
+        _ => {
+            return Err(context_parse_error(
+                context_start,
+                "Expected to find non-empty selection",
+            ));
+        }
+    };
+
+    // PORT_NOTE: apollo_compiler's parsing code for field sets requires ignored tokens to be
+    // pre-stripped if curly braces are missing, so we additionally do that here.
+    let selection = strip_leading_ignored_tokens(selection)?;
+    Ok((context.to_owned(), selection.to_owned()))
 }
 
 #[cfg(test)]
