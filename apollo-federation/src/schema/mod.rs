@@ -226,8 +226,8 @@ impl FederationSchema {
     pub(crate) fn context_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ContextDirective> {
-        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
-        let context_directive_definition = federation_spec.context_directive_definition(&self)?;
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let context_directive_definition = federation_spec.context_directive_definition(self)?;
         let context_directive_referencers = self
             .referencers()
             .get_directive(&context_directive_definition.name)?;
@@ -281,12 +281,13 @@ impl FederationSchema {
         Ok(applications)
     }
 
+    #[allow(clippy::wrong_self_convention)]
     pub(crate) fn from_context_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<FromContextDirective> {
-        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let from_context_directive_definition =
-            federation_spec.from_context_directive_definition(&self)?;
+            federation_spec.from_context_directive_definition(self)?;
         let from_context_directive_referencers = self
             .referencers()
             .get_directive(&from_context_directive_definition.name)?;
@@ -327,7 +328,7 @@ impl FederationSchema {
 
     pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
-        let key_directive_definition = federation_spec.key_directive_definition(&self)?;
+        let key_directive_definition = federation_spec.key_directive_definition(self)?;
         let key_directive_referencers = self
             .referencers()
             .get_directive(&key_directive_definition.name)?;
@@ -373,8 +374,8 @@ impl FederationSchema {
     pub(crate) fn provides_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<ProvidesDirective> {
-        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
-        let provides_directive_definition = federation_spec.provides_directive_definition(&self)?;
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let provides_directive_definition = federation_spec.provides_directive_definition(self)?;
         let provides_directive_referencers = self
             .referencers()
             .get_directive(&provides_directive_definition.name)?;
@@ -404,8 +405,8 @@ impl FederationSchema {
     pub(crate) fn requires_directive_applications(
         &self,
     ) -> FallibleDirectiveIterator<RequiresDirective> {
-        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
-        let requires_directive_definition = federation_spec.requires_directive_definition(&self)?;
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let requires_directive_definition = federation_spec.requires_directive_definition(self)?;
         let requires_directive_referencers = self
             .referencers()
             .get_directive(&requires_directive_definition.name)?;
