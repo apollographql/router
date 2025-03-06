@@ -131,6 +131,15 @@ impl Merge for SubgraphShaping {
     }
 }
 
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+struct ConnectorsShapingConfig {
+    /// Applied on all connectors
+    all: Option<ConnectorShaping>,
+    /// Applied on specific connector sources
+    sources: HashMap<String, ConnectorShaping>,
+}
+
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ConnectorShaping {
@@ -148,16 +157,28 @@ struct ConnectorShaping {
     dns_resolution_strategy: Option<DnsResolutionStrategy>,
 }
 
-impl From<ConnectorShaping> for SubgraphShaping {
-    fn from(value: ConnectorShaping) -> Self {
-        SubgraphShaping {
-            shaping: Shaping {
-                deduplicate_query: None,
-                compression: value.compression,
-                global_rate_limit: value.global_rate_limit,
-                timeout: value.timeout,
-                experimental_http2: value.experimental_http2,
-                dns_resolution_strategy: value.dns_resolution_strategy,
+impl Merge for ConnectorShaping {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => ConnectorShaping {
+                compression: self.compression.or(fallback.compression),
+                timeout: self.timeout.or(fallback.timeout),
+                global_rate_limit: self
+                    .global_rate_limit
+                    .as_ref()
+                    .or(fallback.global_rate_limit.as_ref())
+                    .cloned(),
+                experimental_http2: self
+                    .experimental_http2
+                    .as_ref()
+                    .or(fallback.experimental_http2.as_ref())
+                    .cloned(),
+                dns_resolution_strategy: self
+                    .dns_resolution_strategy
+                    .as_ref()
+                    .or(fallback.dns_resolution_strategy.as_ref())
+                    .cloned(),
             },
         }
     }
@@ -190,7 +211,8 @@ pub(crate) struct Config {
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Applied on specific subgraphs
-    sources: HashMap<String, ConnectorShaping>,
+    connector: ConnectorsShapingConfig,
+
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
@@ -436,31 +458,23 @@ impl PluginPrivate for TrafficShaping {
         service: crate::services::connector::request_service::BoxService,
         source_name: String,
     ) -> crate::services::connector::request_service::BoxService {
-        let all_config = self.config.all.as_ref();
-        let source_config = self
-            .config
-            .sources
-            .get(&source_name)
-            .map(|connector_config| connector_config.clone().into());
+        let all_config = self.config.connector.all.as_ref();
+        let source_config = self.config.connector.sources.get(&source_name).cloned();
         let final_config = Self::merge_config(all_config, source_config.as_ref());
 
         if let Some(config) = final_config {
-            let rate_limit = config
-                .shaping
-                .global_rate_limit
-                .as_ref()
-                .map(|rate_limit_conf| {
-                    self.rate_limit_sources
-                        .lock()
-                        .entry(source_name.clone())
-                        .or_insert_with(|| {
-                            RateLimitLayer::new(
-                                rate_limit_conf.capacity.into(),
-                                rate_limit_conf.interval,
-                            )
-                        })
-                        .clone()
-                });
+            let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
+                self.rate_limit_sources
+                    .lock()
+                    .entry(source_name.clone())
+                    .or_insert_with(|| {
+                        RateLimitLayer::new(
+                            rate_limit_conf.capacity.into(),
+                            rate_limit_conf.interval,
+                        )
+                    })
+                    .clone()
+            });
 
             ServiceBuilder::new()
                 .map_future_with_request_data(
@@ -497,11 +511,11 @@ impl PluginPrivate for TrafficShaping {
                 )
                 .load_shed()
                 .layer(TimeoutLayer::new(
-                    config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT),
+                    config.timeout.unwrap_or(DEFAULT_TIMEOUT),
                 ))
                 .option_layer(rate_limit)
                 .map_request(move |mut req: connector::request_service::Request| {
-                    if let Some(compression) = config.shaping.compression {
+                    if let Some(compression) = config.compression {
                         let TransportRequest::Http(ref mut http_request) = req.transport_request;
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         http_request.inner.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
@@ -545,15 +559,11 @@ impl TrafficShaping {
         &self,
         source_name: &str,
     ) -> crate::configuration::shared::Client {
-        let source_config = self
-            .config
-            .sources
-            .get(source_name)
-            .map(|connector_config| connector_config.clone().into());
-        Self::merge_config(self.config.all.as_ref(), source_config.as_ref())
+        let source_config = self.config.connector.sources.get(source_name).cloned();
+        Self::merge_config(self.config.connector.all.as_ref(), source_config.as_ref())
             .map(|config| crate::configuration::shared::Client {
-                experimental_http2: config.shaping.experimental_http2,
-                dns_resolution_strategy: config.shaping.dns_resolution_strategy,
+                experimental_http2: config.experimental_http2,
+                dns_resolution_strategy: config.dns_resolution_strategy,
             })
             .unwrap_or_default()
     }
@@ -860,9 +870,10 @@ mod test {
     async fn it_adds_correct_headers_for_compression_for_connector() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
-        sources:
-            test_subgraph.test_sourcename:
-                compression: gzip
+        connector:
+            sources:
+                test_subgraph.test_sourcename:
+                    compression: gzip
         "#,
         )
         .unwrap();
@@ -1078,12 +1089,13 @@ mod test {
     async fn it_rate_limit_connector_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
-        sources:
-            test_subgraph.test_sourcename:
-                global_rate_limit:
-                    capacity: 1
-                    interval: 100ms
-                timeout: 500ms
+        connector:
+            sources:
+                test_subgraph.test_sourcename:
+                    global_rate_limit:
+                        capacity: 1
+                        interval: 100ms
+                    timeout: 500ms
         "#,
         )
         .unwrap();

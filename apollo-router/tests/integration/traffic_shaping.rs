@@ -91,9 +91,10 @@ async fn test_connector_timeout() -> Result<(), BoxError> {
             r#"
             {PROMETHEUS_CONFIG}
             traffic_shaping:
-                sources:
-                    connectors.jsonPlaceholder:
-                        timeout: 1ns
+                connector:
+                    sources:
+                        connectors.jsonPlaceholder:
+                            timeout: 1ns
             "#
         ))
         .supergraph(PathBuf::from_iter([
@@ -293,11 +294,12 @@ async fn test_connector_rate_limit() -> Result<(), BoxError> {
             include_subgraph_errors:
                 all: true
             traffic_shaping:
-                sources:
-                    connectors.jsonPlaceholder:
-                        global_rate_limit:
-                            capacity: 1
-                            interval: 10min
+                connector:
+                    sources:
+                        connectors.jsonPlaceholder:
+                            global_rate_limit:
+                                capacity: 1
+                                interval: 10min
             connectors:
                 sources:
                     connectors.jsonPlaceholder:
