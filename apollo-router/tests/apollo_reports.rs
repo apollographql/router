@@ -394,6 +394,7 @@ where
         _ => Err(anyhow!("error retrieving response")),
     };
 
+
     // We must always try to find the report regardless of if the response had failures
     for _ in 0..10 {
         let my_reports = reports.lock().await;
@@ -737,4 +738,17 @@ async fn test_demand_control_trace_batched() {
             get_batch_trace_report(reports, req, use_legacy_request_span, true, false).await;
         assert_report!(report);
     }
+}
+
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_same_enum() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{orderAndGroup(color: RED){location(groupBy: DESC)}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report_mocked(reports, req).await;
+    assert_report!(report)
 }
