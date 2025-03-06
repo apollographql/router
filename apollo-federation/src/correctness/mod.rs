@@ -73,9 +73,6 @@ pub fn check_plan(
                 "Failed to compute the response shape from query plan:\n{e}"
             ))
         })?;
-    println!(
-        "check_plan:\nOperation response shape: {op_rs}\nQuery plan response shape: {plan_rs}"
-    );
     tracing::debug!(
         "check_plan:\nOperation response shape: {op_rs}\nQuery plan response shape: {plan_rs}"
     );

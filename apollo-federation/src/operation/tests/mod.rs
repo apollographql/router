@@ -35,8 +35,10 @@ macro_rules! assert_normalized_equal {
         let schema = parse_schema($schema_doc);
         let original_document = ExecutableDocument::parse_and_validate(schema.schema(), $query, "query.graphql").expect("valid document");
         let normalized_document = normalized.clone().try_into().expect("valid normalized document");
-        compare_operations(&schema, &original_document, &normalized_document).expect("documents A and B are the same");
-        compare_operations(&schema, &normalized_document, &original_document).expect("documents B and A are the same");
+        // since compare operations just check if a query is subset of another one
+        // we verify that both A ⊆ B and B ⊆ A are true which means that A = B
+        compare_operations(&schema, &original_document, &normalized_document).expect("original query is a subset of the normalized one");
+        compare_operations(&schema, &normalized_document, &original_document).expect("normalized query is a subset of original one");
         normalized
     }};
 }
@@ -47,10 +49,12 @@ macro_rules! assert_equal_ops {
             $first.try_into().expect("valid document");
         let minified_document: Valid<ExecutableDocument> =
             $second.try_into().expect("valid document");
+        // since compare operations just check if a query is subset of another one
+        // we verify that both A ⊆ B and B ⊆ A are true which means that A = B
         compare_operations($schema, &original_document, &minified_document)
-            .expect("documents are the same");
+            .expect("original document is a subset of minified one");
         compare_operations($schema, &minified_document, &original_document)
-            .expect("documents are the same");
+            .expect("minified document is a subset of original one");
     };
 }
 pub(super) use assert_equal_ops;
