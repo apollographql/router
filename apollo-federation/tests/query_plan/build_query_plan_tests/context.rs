@@ -34,8 +34,8 @@ use apollo_federation::query_plan::FetchDataKeyRenamer;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 use apollo_federation::query_plan::PlanNode;
-use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::TopLevelPlanNode;
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 
 fn parse_fetch_data_path_element(value: &str) -> FetchDataPathElement {
     if value == ".." {

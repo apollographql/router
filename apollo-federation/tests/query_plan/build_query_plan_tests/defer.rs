@@ -1,4 +1,5 @@
-use apollo_federation::query_plan::query_planner::{QueryPlanOptions, QueryPlannerConfig};
+use apollo_federation::query_plan::query_planner::QueryPlanOptions;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
     let mut config = QueryPlannerConfig::default();
