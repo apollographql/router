@@ -24,5 +24,8 @@ include_subgraph_errors:
     # Undefined subgraphs inherits default global settings from `all`
 ``` 
 
+**Note:** Using a `deny_extensions_keys` approach carries security risks because any sensitive information not explicitly included in the deny list will be exposed to clients. For better security, subgraphs should prefer to redact everything or `allow_extensions_keys` when possible.
+
+In future releases, Router may add its own extensions to subgraph errors in minor releases.
 
 By [@AUTHOR](https://github.com/Samjin) in https://github.com/apollographql/router/pull/6862

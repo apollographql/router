@@ -25,6 +25,8 @@ include_subgraph_errors:
 
 Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, subgraph errors are included from all subgraphs _except_ the `products` subgraph.
 
+Here's another example with finer control.
+
 ```yaml title="router.yaml"
 include_subgraph_errors:
   all:
@@ -43,6 +45,14 @@ include_subgraph_errors:
         - stack
     review: false            # Redact everything.
 ```
+
+<Note>
+
+Using a `deny_extensions_keys` approach carries security risks because it follows a blocklist pattern - any sensitive information not explicitly included in the deny list will be exposed to clients. 
+
+</Note>
+
+For better security, we recommend either fully redacting subgraph errors (by setting the subgraph to `false`) or using the `allow_extensions_keys` approach to explicitly specify which error extension fields can be exposed to clients.
 
 #### All
 | Attributes                | Type | Description                                                                 | Required |
