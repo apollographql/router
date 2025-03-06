@@ -4,6 +4,7 @@ use tracing::error_span;
 use tracing::info_span;
 
 use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::consts::CONNECT_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
@@ -203,6 +204,26 @@ impl SpanMode {
                     SUBGRAPH_SPAN_NAME,
                     "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = ::tracing::field::Empty,
+                    "otel.status_code" = ::tracing::field::Empty,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn create_connector(&self, source_name: &str) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                info_span!(
+                    CONNECT_REQUEST_SPAN_NAME,
+                    "apollo.source.name" = source_name,
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                )
+            }
+            SpanMode::SpecCompliant => {
+                info_span!(
+                    CONNECT_REQUEST_SPAN_NAME,
+                    "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                 )
             }
