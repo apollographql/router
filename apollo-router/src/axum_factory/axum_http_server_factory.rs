@@ -353,17 +353,7 @@ where
     })?;
     let span_mode = span_mode(configuration);
 
-    // XXX(@goto-bus-stop): in hyper 0.x, we required a HandleErrorLayer around this,
-    // to turn errors from decompression into an axum error response. Now,
-    // `RequestDecompressionLayer` appears to preserve(?) the error type from the inner service?
-    // So maybe we don't need this anymore? But I don't understand what happens to an error *caused
-    // by decompression* (such as an invalid compressed data stream).
-    let decompression = tower_http::decompression::RequestDecompressionLayer::new()
-        .br(true)
-        .gzip(true)
-        .deflate(true);
     let mut main_route = main_router::<RF>(configuration)
-        .layer(decompression)
         .layer(middleware::from_fn_with_state(
             (license, Instant::now(), Arc::new(AtomicU64::new(0))),
             license_handler,
