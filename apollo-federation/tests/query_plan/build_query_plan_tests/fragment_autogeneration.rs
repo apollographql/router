@@ -67,46 +67,47 @@ fn it_handles_nested_fragment_generation_from_operation_with_fragments() {
           }
         "#,
     );
+    let operation = r#"
+      query {
+        a {
+          ... on A1 {
+            ...FooSelect
+          }
+          ... on A2 {
+            ...FooSelect
+          }
+          ... on A3 {
+            ...FooSelect
+          }
+        }
+      }
+
+      fragment FooSelect on Foo {
+        __typename
+        foo
+        child {
+          ...FooChildSelect
+        }
+        child2 {
+          ...FooChildSelect
+        }
+      }
+
+      fragment FooChildSelect on Foo {
+        __typename
+        foo
+        child {
+          child {
+            child {
+              foo
+            }
+          }
+        }
+      }
+    "#;
     assert_plan!(
         &planner,
-        r#"
-          query {
-            a {
-              ... on A1 {
-                ...FooSelect
-              }
-              ... on A2 {
-                ...FooSelect
-              }
-              ... on A3 {
-                ...FooSelect
-              }
-            }
-          }
-
-          fragment FooSelect on Foo {
-            __typename
-            foo
-            child {
-              ...FooChildSelect
-            }
-            child2 {
-              ...FooChildSelect
-            }
-          }
-
-          fragment FooChildSelect on Foo {
-            __typename
-            foo
-            child {
-              child {
-                child {
-                  foo
-                }
-              }
-            }
-          }
-        "#,
+        operation,
 
         // This is a test case that shows worse result
         // QueryPlan {

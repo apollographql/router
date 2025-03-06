@@ -23,7 +23,7 @@ use crate::schema::ValidFederationSchema;
 //==================================================================================================
 // Public API
 
-#[derive(derive_more::From)]
+#[derive(derive_more::From, Debug)]
 pub enum CorrectnessError {
     /// Correctness checker's own error
     FederationError(FederationError),
