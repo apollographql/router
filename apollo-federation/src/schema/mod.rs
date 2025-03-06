@@ -396,6 +396,7 @@ impl FederationSchema {
                     schema_directive: provides_directive_application,
                     sibling_directives: directives,
                     target: field_definition_position,
+                    target_return_type: field_definition.ty.inner_named_type(),
                 }));
             }
         }
@@ -447,6 +448,8 @@ pub(crate) struct ProvidesDirective<'schema> {
     sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
     /// The schema position to which this directive is applied
     target: &'schema ObjectFieldDefinitionPosition,
+    /// The return type of the target field
+    target_return_type: &'schema Name,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
