@@ -5,6 +5,5 @@
 /apollo-router/ @apollographql/router-core @apollographql/fed-core
 /apollo-router/src/plugins/connectors @apollographql/connectors
 /apollo-router-benchmarks/ @apollographql/router-core @apollographql/fed-core
-/apollo-router-scaffold/ @apollographql/router-core @apollographql/fed-core
 /examples/ @apollographql/router-core @apollographql/fed-core
 /.github/CODEOWNERS @apollographql/router-core @apollographql/fed-core
