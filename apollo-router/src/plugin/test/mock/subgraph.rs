@@ -160,6 +160,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
+        dbg!("iciiii");
         if let Some(map_request_fn) = &self.map_request_fn {
             req = map_request_fn.clone()(req);
         }
@@ -198,8 +199,9 @@ impl Service<SubgraphRequest> for MockSubgraph {
             }
         }
 
+        println!("---> {:?}", &body);
         normalize(body);
-
+        println!("{:?}", &body);
         let response = if let Some(response) = self.mocks.get(body) {
             // Build an http Response
             let mut http_response_builder = http::Response::builder().status(StatusCode::OK);
