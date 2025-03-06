@@ -16,10 +16,8 @@ use crate::operation::SelectionSet;
 use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldArgumentDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
@@ -47,13 +45,12 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
-        let context_fields =
-            Self::collect_fields_used_by_context_directive(schema, federation_spec_definition)?;
+        let context_fields = Self::collect_fields_used_by_context_directive(schema)?;
         let interface_constraint_fields =
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
-        let key_fields = Self::collect_key_fields(schema, federation_spec_definition)?;
-        let provided_fields = Self::collect_provided_fields(schema, federation_spec_definition)?;
-        let required_fields = Self::collect_required_fields(schema, federation_spec_definition)?;
+        let key_fields = Self::collect_key_fields(schema)?;
+        let provided_fields = Self::collect_provided_fields(schema)?;
+        let required_fields = Self::collect_required_fields(schema)?;
         let shareable_fields = Self::collect_shareable_fields(schema, federation_spec_definition)?;
 
         Ok(Self {
@@ -121,103 +118,49 @@ impl SubgraphMetadata {
 
     fn collect_key_fields(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let key_directive_definition =
-            federation_spec_definition.key_directive_definition(schema)?;
-        let key_directive_referencers = schema
-            .referencers
-            .get_directive(&key_directive_definition.name)?;
-        let mut key_type_positions: Vec<ObjectOrInterfaceTypeDefinitionPosition> = vec![];
-        for object_type_position in &key_directive_referencers.object_types {
-            key_type_positions.push(object_type_position.clone().into());
-        }
-        for interface_type_position in &key_directive_referencers.interface_types {
-            key_type_positions.push(interface_type_position.clone().into());
-        }
-
         let mut key_fields = IndexSet::default();
-        for type_position in key_type_positions {
-            let directives = match &type_position {
-                ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-                ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-            };
-            for key_directive_application in directives.get_all(&key_directive_definition.name) {
-                let key_directive_arguments = federation_spec_definition
-                    .key_directive_arguments(key_directive_application)?;
-                key_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    type_position.type_name().clone(),
-                    key_directive_arguments.fields,
-                    false,
-                )?);
-            }
+        let applications = schema.key_directive_applications()?;
+        for key_directive in applications.into_iter().filter_map(|res| res.ok()) {
+            key_fields.extend(collect_target_fields_from_field_set(
+                unwrap_schema(schema),
+                key_directive.target.type_name().clone(),
+                key_directive.arguments.fields,
+                false,
+            )?);
         }
         Ok(key_fields)
     }
 
     fn collect_provided_fields(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let provides_directive_definition =
-            federation_spec_definition.provides_directive_definition(schema)?;
-        let provides_directive_referencers = schema
-            .referencers
-            .get_directive(&provides_directive_definition.name)?;
-
         let mut provided_fields = IndexSet::default();
-        for field_definition_position in &provides_directive_referencers.object_fields {
-            let field_definition = field_definition_position.get(schema.schema())?;
-            let directives = &field_definition.directives;
-            for provides_directive_application in
-                directives.get_all(&provides_directive_definition.name)
-            {
-                let provides_directive_arguments = federation_spec_definition
-                    .provides_directive_arguments(provides_directive_application)?;
-                provided_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    field_definition.ty.inner_named_type().clone(),
-                    provides_directive_arguments.fields,
-                    false,
-                )?);
-            }
+        let applications = schema.provides_directive_applications()?;
+        for provides_directive in applications.into_iter().filter_map(|res| res.ok()) {
+            provided_fields.extend(collect_target_fields_from_field_set(
+                unwrap_schema(schema),
+                provides_directive.target_return_type.clone(),
+                provides_directive.arguments.fields,
+                false,
+            )?);
         }
-
         Ok(provided_fields)
     }
 
     fn collect_required_fields(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let requires_directive_definition =
-            federation_spec_definition.requires_directive_definition(schema)?;
-        let requires_directive_referencers = schema
-            .referencers
-            .get_directive(&requires_directive_definition.name)?;
-
         let mut required_fields = IndexSet::default();
-        for field_definition_position in &requires_directive_referencers.object_fields {
-            let directives = &field_definition_position.get(schema.schema())?.directives;
-            for requires_directive_application in
-                directives.get_all(&requires_directive_definition.name)
-            {
-                let requires_directive_arguments = federation_spec_definition
-                    .requires_directive_arguments(requires_directive_application)?;
-                required_fields.extend(collect_target_fields_from_field_set(
-                    unwrap_schema(schema),
-                    field_definition_position.parent().type_name,
-                    requires_directive_arguments.fields,
-                    false,
-                )?);
-            }
+        let applications = schema.requires_directive_applications()?;
+        for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
+            required_fields.extend(collect_target_fields_from_field_set(
+                unwrap_schema(schema),
+                requires_directive.target.type_name.clone(),
+                requires_directive.arguments.fields,
+                false,
+            )?);
         }
-
         Ok(required_fields)
     }
 
@@ -261,15 +204,11 @@ impl SubgraphMetadata {
 
     fn collect_fields_used_by_context_directive(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let Ok(context_directive_definition) =
-            federation_spec_definition.context_directive_definition(schema)
-        else {
+        let Ok(context_directive_applications) = schema.context_directive_applications() else {
             return Ok(Default::default());
         };
-        let Ok(from_context_directive_definition) =
-            federation_spec_definition.from_context_directive_definition(schema)
+        let Ok(from_context_directive_applications) = schema.from_context_directive_applications()
         else {
             return Ok(Default::default());
         };
@@ -277,106 +216,35 @@ impl SubgraphMetadata {
         let mut used_context_fields = IndexSet::default();
         let mut entry_points: HashMap<String, HashSet<CompositeTypeDefinitionPosition>> =
             HashMap::new();
-        let context_directive_referencers = schema
-            .referencers
-            .get_directive(&context_directive_definition.name)?;
 
-        for interface_type_position in &context_directive_referencers.interface_types {
-            let directives = &interface_type_position.get(schema.schema())?.directives;
-            for context_directive_application in
-                directives.get_all(&context_directive_definition.name)
-            {
-                let context = federation_spec_definition
-                    .context_directive_arguments(context_directive_application)?
-                    .name;
-                if !entry_points.contains_key(context) {
-                    entry_points.insert(context.to_string(), HashSet::new());
-                }
-                entry_points
-                    .get_mut(context)
-                    .expect("was just inserted")
-                    .insert(interface_type_position.clone().into());
-            }
-        }
-        for object_type_position in &context_directive_referencers.object_types {
-            let directives = &object_type_position.get(schema.schema())?.directives;
-            for context_directive_application in
-                directives.get_all(&context_directive_definition.name)
-            {
-                let context = federation_spec_definition
-                    .context_directive_arguments(context_directive_application)?
-                    .name;
-                if !entry_points.contains_key(context) {
-                    entry_points.insert(context.to_string(), HashSet::new());
-                }
-                entry_points
-                    .get_mut(context)
-                    .expect("was just inserted")
-                    .insert(object_type_position.clone().into());
-            }
-        }
-        for union_type_position in &context_directive_referencers.union_types {
-            let directives = &union_type_position.get(schema.schema())?.directives;
-            for context_directive_application in
-                directives.get_all(&context_directive_definition.name)
-            {
-                let context = federation_spec_definition
-                    .context_directive_arguments(context_directive_application)?
-                    .name;
-                if !entry_points.contains_key(context) {
-                    entry_points.insert(context.to_string(), HashSet::new());
-                }
-                entry_points
-                    .get_mut(context)
-                    .expect("was just inserted")
-                    .insert(union_type_position.clone().into());
-            }
-        }
-
-        let from_context_directive_referencers = schema
-            .referencers
-            .get_directive(&from_context_directive_definition.name)?;
-        let mut from_context_positions: Vec<FieldArgumentDefinitionPosition> = Vec::new();
-        for object_field_argument_position in
-            &from_context_directive_referencers.object_field_arguments
+        for context_directive in context_directive_applications
+            .into_iter()
+            .filter_map(|d| d.ok())
         {
-            from_context_positions.push(object_field_argument_position.clone().into());
+            if !entry_points.contains_key(context_directive.arguments.name) {
+                entry_points.insert(context_directive.arguments.name.to_string(), HashSet::new());
+            }
+            entry_points
+                .get_mut(context_directive.arguments.name)
+                .expect("was just inserted")
+                .insert(context_directive.target);
         }
-        for interface_field_argument_position in
-            &from_context_directive_referencers.interface_field_arguments
+        for from_context_directive in from_context_directive_applications
+            .into_iter()
+            .filter_map(|d| d.ok())
         {
-            from_context_positions.push(interface_field_argument_position.clone().into());
-        }
-        for argument_definition_position in from_context_positions {
-            let directives = match &argument_definition_position {
-                FieldArgumentDefinitionPosition::Interface(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-                FieldArgumentDefinitionPosition::Object(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-            };
-
-            for from_context_directive_application in
-                directives.get_all(&from_context_directive_definition.name)
-            {
-                let field_value = federation_spec_definition
-                    .from_context_directive_arguments(from_context_directive_application)?
-                    .field;
-                let (context, selection) = parse_context(field_value)?;
-                if let Some(entry_point) = entry_points.get(context.as_str()) {
-                    for context_type in entry_point {
-                        used_context_fields.extend(collect_target_fields_from_field_set(
-                            unwrap_schema(schema),
-                            context_type.type_name().clone(),
-                            selection.as_str(),
-                            false,
-                        )?);
-                    }
+            let (context, selection) = parse_context(from_context_directive.arguments.field)?;
+            if let Some(entry_point) = entry_points.get(context.as_str()) {
+                for context_type in entry_point {
+                    used_context_fields.extend(collect_target_fields_from_field_set(
+                        unwrap_schema(schema),
+                        context_type.type_name().clone(),
+                        selection.as_str(),
+                        false,
+                    )?);
                 }
             }
         }
-
         Ok(used_context_fields)
     }
 
@@ -494,44 +362,27 @@ impl ExternalMetadata {
         let mut fake_external_fields = IndexSet::default();
         let extends_directive_definition =
             federation_spec_definition.extends_directive_definition(schema)?;
-        let key_directive_definition =
-            federation_spec_definition.key_directive_definition(schema)?;
-        let key_directive_referencers = schema
-            .referencers
-            .get_directive(&key_directive_definition.name)?;
-        let mut key_type_positions: Vec<ObjectOrInterfaceTypeDefinitionPosition> = vec![];
-        for object_type_position in &key_directive_referencers.object_types {
-            key_type_positions.push(object_type_position.clone().into());
-        }
-        for interface_type_position in &key_directive_referencers.interface_types {
-            key_type_positions.push(interface_type_position.clone().into());
-        }
-        for type_position in key_type_positions {
-            let directives = match &type_position {
-                ObjectOrInterfaceTypeDefinitionPosition::Object(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-                ObjectOrInterfaceTypeDefinitionPosition::Interface(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-            };
-            let has_extends_directive = directives.has(&extends_directive_definition.name);
-            for key_directive_application in directives.get_all(&key_directive_definition.name) {
-                // PORT_NOTE: The JS codebase treats the "extend" GraphQL keyword as applying to
-                // only the extension it's on, while it treats the "@extends" directive as applying
-                // to all definitions/extensions in the subgraph. We accordingly do the same.
-                if has_extends_directive
-                    || key_directive_application.origin.extension_id().is_some()
-                {
-                    let key_directive_arguments = federation_spec_definition
-                        .key_directive_arguments(key_directive_application)?;
-                    fake_external_fields.extend(collect_target_fields_from_field_set(
-                        unwrap_schema(schema),
-                        type_position.type_name().clone(),
-                        key_directive_arguments.fields,
-                        false,
-                    )?);
-                }
+        let applications = schema.key_directive_applications()?;
+        for key_directive in applications.into_iter().filter_map(|k| k.ok()) {
+            let has_extends_directive = key_directive
+                .sibling_directives
+                .has(&extends_directive_definition.name);
+            // PORT_NOTE: The JS codebase treats the "extend" GraphQL keyword as applying to
+            // only the extension it's on, while it treats the "@extends" directive as applying
+            // to all definitions/extensions in the subgraph. We accordingly do the same.
+            if has_extends_directive
+                || key_directive
+                    .schema_directive
+                    .origin
+                    .extension_id()
+                    .is_some()
+            {
+                fake_external_fields.extend(collect_target_fields_from_field_set(
+                    unwrap_schema(schema),
+                    key_directive.target.type_name().clone(),
+                    key_directive.arguments.fields,
+                    false,
+                )?);
             }
         }
         Ok(fake_external_fields)
