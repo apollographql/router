@@ -8,12 +8,14 @@ use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -215,6 +217,60 @@ impl FederationSchema {
             None => Ok(None),
         }
     }
+
+    pub(crate) fn key_directive_applications(
+        &self,
+    ) -> Result<Vec<Result<KeyDirective, FederationError>>, FederationError> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let key_directive_definition = federation_spec.key_directive_definition(&self)?;
+        let key_directive_referencers = self
+            .referencers()
+            .get_directive(&key_directive_definition.name)?;
+
+        let mut applications: Vec<Result<KeyDirective, FederationError>> = Vec::new();
+        for object_type_position in &key_directive_referencers.object_types {
+            let object_type = object_type_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &object_type.directives;
+            for directive in directives.get_all(&key_directive_definition.name) {
+                let arguments = federation_spec.key_directive_arguments(directive);
+                applications.push(arguments.map(|args| KeyDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: object_type_position.clone().into(),
+                }));
+            }
+        }
+        for interface_type_position in &key_directive_referencers.interface_types {
+            let interface_type = interface_type_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &interface_type.directives;
+            for directive in directives.get_all(&key_directive_definition.name) {
+                let arguments = federation_spec.key_directive_arguments(directive);
+                applications.push(arguments.map(|args| KeyDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: interface_type_position.clone().into(),
+                }));
+            }
+        }
+        Ok(applications)
+    }
+}
+
+pub(crate) struct KeyDirective<'schema> {
+    /// The parsed arguments of this `@key` application
+    arguments: KeyDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
+    /// The `DirectiveList` containing all directives applied to the target position, including this one
+    sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
+    /// The schema position to which this directive is applied
+    target: ObjectOrInterfaceTypeDefinitionPosition,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
