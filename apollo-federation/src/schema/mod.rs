@@ -234,51 +234,54 @@ impl FederationSchema {
 
         let mut applications = Vec::new();
         for interface_type_position in &context_directive_referencers.interface_types {
-            // TODO: Push these errors onto applications vec
-            let interface_type = interface_type_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &interface_type.directives;
-            for directive in directives.get_all(&context_directive_definition.name) {
-                let arguments = federation_spec.context_directive_arguments(directive);
-                applications.push(arguments.map(|args| ContextDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: interface_type_position.clone().into(),
-                }));
+            match interface_type_position.get(self.schema()) {
+                Ok(interface_type) => {
+                    let directives = &interface_type.directives;
+                    for directive in directives.get_all(&context_directive_definition.name) {
+                        let arguments = federation_spec.context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| ContextDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: interface_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         for object_type_position in &context_directive_referencers.object_types {
-            // TODO: Push these errors onto applications vec
-            let object_type = object_type_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &object_type.directives;
-            for directive in directives.get_all(&context_directive_definition.name) {
-                let arguments = federation_spec.context_directive_arguments(directive);
-                applications.push(arguments.map(|args| ContextDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: object_type_position.clone().into(),
-                }));
+            match object_type_position.get(self.schema()) {
+                Ok(object_type) => {
+                    let directives = &object_type.directives;
+                    for directive in directives.get_all(&context_directive_definition.name) {
+                        let arguments = federation_spec.context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| ContextDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: object_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         for union_type_position in &context_directive_referencers.union_types {
-            // TODO: Push these errors onto applications vec
-            let union_type = union_type_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &union_type.directives;
-            for directive in directives.get_all(&context_directive_definition.name) {
-                let arguments = federation_spec.context_directive_arguments(directive);
-                applications.push(arguments.map(|args| ContextDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: union_type_position.clone().into(),
-                }));
+            match union_type_position.get(self.schema()) {
+                Ok(union_type) => {
+                    let directives = &union_type.directives;
+                    for directive in directives.get_all(&context_directive_definition.name) {
+                        let arguments = federation_spec.context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| ContextDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: union_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         Ok(applications)
@@ -298,35 +301,39 @@ impl FederationSchema {
         for interface_field_argument_position in
             &from_context_directive_referencers.interface_field_arguments
         {
-            let interface_field_argument = interface_field_argument_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &interface_field_argument.directives;
-            for directive in directives.get_all(&from_context_directive_definition.name) {
-                let arguments = federation_spec.from_context_directive_arguments(directive);
-                applications.push(arguments.map(|args| FromContextDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: interface_field_argument_position.clone().into(),
-                }));
+            match interface_field_argument_position.get(self.schema()) {
+                Ok(interface_field_argument) => {
+                    let directives = &interface_field_argument.directives;
+                    for directive in directives.get_all(&from_context_directive_definition.name) {
+                        let arguments = federation_spec.from_context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: interface_field_argument_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         for object_field_argument_position in
             &from_context_directive_referencers.object_field_arguments
         {
-            let object_field_argument = object_field_argument_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &object_field_argument.directives;
-            for directive in directives.get_all(&from_context_directive_definition.name) {
-                let arguments = federation_spec.from_context_directive_arguments(directive);
-                applications.push(arguments.map(|args| FromContextDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: object_field_argument_position.clone().into(),
-                }));
+            match object_field_argument_position.get(self.schema()) {
+                Ok(object_field_argument) => {
+                    let directives = &object_field_argument.directives;
+                    for directive in directives.get_all(&from_context_directive_definition.name) {
+                        let arguments = federation_spec.from_context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| FromContextDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: object_field_argument_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         Ok(applications)
@@ -341,33 +348,37 @@ impl FederationSchema {
 
         let mut applications: Vec<Result<KeyDirective, FederationError>> = Vec::new();
         for object_type_position in &key_directive_referencers.object_types {
-            let object_type = object_type_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &object_type.directives;
-            for directive in directives.get_all(&key_directive_definition.name) {
-                let arguments = federation_spec.key_directive_arguments(directive);
-                applications.push(arguments.map(|args| KeyDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: object_type_position.clone().into(),
-                }));
+            match object_type_position.get(self.schema()) {
+                Ok(object_type) => {
+                    let directives = &object_type.directives;
+                    for directive in directives.get_all(&key_directive_definition.name) {
+                        let arguments = federation_spec.key_directive_arguments(directive);
+                        applications.push(arguments.map(|args| KeyDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: object_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         for interface_type_position in &key_directive_referencers.interface_types {
-            let interface_type = interface_type_position
-                .get(self.schema())
-                .expect("can get self");
-            let directives = &interface_type.directives;
-            for directive in directives.get_all(&key_directive_definition.name) {
-                let arguments = federation_spec.key_directive_arguments(directive);
-                applications.push(arguments.map(|args| KeyDirective {
-                    arguments: args,
-                    schema_directive: directive,
-                    sibling_directives: directives,
-                    target: interface_type_position.clone().into(),
-                }));
+            match interface_type_position.get(self.schema()) {
+                Ok(interface_type) => {
+                    let directives = &interface_type.directives;
+                    for directive in directives.get_all(&key_directive_definition.name) {
+                        let arguments = federation_spec.key_directive_arguments(directive);
+                        applications.push(arguments.map(|args| KeyDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: interface_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         Ok(applications)
@@ -384,20 +395,24 @@ impl FederationSchema {
 
         let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
         for field_definition_position in &provides_directive_referencers.object_fields {
-            let field_definition = field_definition_position.get(self.schema())?;
-            let directives = &field_definition.directives;
-            for provides_directive_application in
-                directives.get_all(&provides_directive_definition.name)
-            {
-                let arguments =
-                    federation_spec.provides_directive_arguments(provides_directive_application);
-                applications.push(arguments.map(|args| ProvidesDirective {
-                    arguments: args,
-                    schema_directive: provides_directive_application,
-                    sibling_directives: directives,
-                    target: field_definition_position,
-                    target_return_type: field_definition.ty.inner_named_type(),
-                }));
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for provides_directive_application in
+                        directives.get_all(&provides_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .provides_directive_arguments(provides_directive_application);
+                        applications.push(arguments.map(|args| ProvidesDirective {
+                            arguments: args,
+                            schema_directive: provides_directive_application,
+                            sibling_directives: directives,
+                            target: field_definition_position,
+                            target_return_type: field_definition.ty.inner_named_type(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
             }
         }
         Ok(applications)
