@@ -17,6 +17,7 @@ use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
+use http::uri::Scheme;
 use parking_lot::Mutex;
 use rhai::AST;
 use rhai::Array;
@@ -1185,6 +1186,21 @@ mod router_plugin {
             }
             None => Err("invalid URI; unable to set port".into()),
         }
+    }
+
+    // Uri.scheme
+    #[rhai_fn(get = "scheme", pure, return_raw)]
+    pub(crate) fn uri_scheme_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.scheme_str())
+    }
+
+    #[rhai_fn(set = "scheme", return_raw)]
+    pub(crate) fn uri_scheme_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        let mut parts: Parts = x.clone().into_parts();
+        let new_scheme = Scheme::from_str(value).map_err(|e| e.to_string())?;
+        parts.scheme = Some(new_scheme);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     // Response.label
