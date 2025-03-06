@@ -367,6 +367,9 @@ impl ExternalMetadata {
             let has_extends_directive = key_directive
                 .sibling_directives
                 .has(&extends_directive_definition.name);
+            // PORT_NOTE: The JS codebase treats the "extend" GraphQL keyword as applying to
+            // only the extension it's on, while it treats the "@extends" directive as applying
+            // to all definitions/extensions in the subgraph. We accordingly do the same.
             if has_extends_directive
                 || key_directive
                     .schema_directive
