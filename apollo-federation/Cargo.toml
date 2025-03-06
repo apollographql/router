@@ -27,7 +27,7 @@ derive_more = "0.99.17"
 http.workspace = true
 hashbrown = "0.15.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.13.0"
+itertools = "0.14.0"
 line-col = "0.2.1"
 multimap = "0.10.0"
 nom = "7.1.3"

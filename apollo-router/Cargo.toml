@@ -109,7 +109,7 @@ hyper = { version = "1.5.1", features = ["full"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 hyper-rustls = { version = "0.27.3", features = ["http1", "http2", "rustls-native-certs"] }
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.13.0"
+itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
 jsonschema = { version = "0.17.1", default-features = false }
