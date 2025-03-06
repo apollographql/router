@@ -412,8 +412,22 @@ pub(crate) async fn create_http_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
+    let connector_subgraphs: HashSet<String> = schema
+        .connectors
+        .as_ref()
+        .map(|c| {
+            c.by_service_name
+                .iter()
+                .map(|(_, connector)| connector.id.subgraph_name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
+        if connector_subgraphs.contains(name) {
+            continue; // Avoid adding services for subgraphs that are actually connectors since we'll separately add them below per source
+        }
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
             configuration,
