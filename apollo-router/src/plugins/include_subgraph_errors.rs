@@ -96,9 +96,9 @@ impl<'de> Deserialize<'de> for ErrorMode {
 
                 match (helper.allow_extensions_keys, helper.deny_extensions_keys) {
                     (Some(_), Some(_)) => {
-                        return Err(de::Error::custom(
+                        Err(de::Error::custom(
                             "Global config cannot have both allow_extensions_keys and deny_extensions_keys"
-                        ));
+                        ))
                     }
                     (Some(allow), None) => Ok(ErrorMode::Allow {
                         allow_extensions_keys: allow,
