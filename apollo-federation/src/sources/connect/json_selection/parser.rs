@@ -616,7 +616,7 @@ impl PathList {
         WithRange::new(self, None)
     }
 
-    fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
+    pub(super) fn parse_with_depth(input: Span, depth: usize) -> ParseResult<WithRange<Self>> {
         // If the input is empty (i.e. this method will end up returning
         // PathList::Empty), we want the OffsetRange to be an empty range at the
         // end of the previously parsed PathList elements, not separated from

@@ -295,6 +295,9 @@ pub(crate) mod strip_ranges {
                         LitExpr::Array(new_vec)
                     }
                     LitExpr::Path(path) => LitExpr::Path(path.strip_ranges()),
+                    LitExpr::LitPath(literal, subpath) => {
+                        LitExpr::LitPath(literal.strip_ranges(), subpath.strip_ranges())
+                    }
                 },
                 None,
             )

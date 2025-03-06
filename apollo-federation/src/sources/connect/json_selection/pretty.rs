@@ -264,6 +264,18 @@ impl PrettyPrintable for LitExpr {
                 let path = path.pretty_print_with_indentation(inline, indentation);
                 result.push_str(path.as_str());
             }
+            Self::LitPath(literal, subpath) => {
+                result.push_str(
+                    literal
+                        .pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
+                result.push_str(
+                    subpath
+                        .pretty_print_with_indentation(inline, indentation)
+                        .as_str(),
+                );
+            }
         }
 
         result
