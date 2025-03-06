@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::Uri;
 use opentelemetry::sdk::metrics::reader::TemporalitySelector;
@@ -22,7 +21,6 @@ use tonic::transport::Identity;
 use tower::BoxError;
 use url::Url;
 
-use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
@@ -78,84 +76,57 @@ impl Config {
     ) -> Result<T, BoxError> {
         match self.protocol {
             Protocol::Grpc => {
-                let endpoint = self.endpoint.to_uri(&DEFAULT_GRPC_ENDPOINT);
-                let grpc = self.grpc.clone();
-                let exporter = opentelemetry_otlp::new_exporter()
+                let endpoint = self.endpoint.to_full_uri(&DEFAULT_GRPC_ENDPOINT);
+                let mut exporter = opentelemetry_otlp::new_exporter()
                     .tonic()
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with(&endpoint, |b, endpoint| {
-                        b.with_endpoint(endpoint.to_string())
-                    })
-                    .with(&grpc.try_from(&endpoint)?, |b, t| {
-                        b.with_tls_config(t.clone())
-                    })
-                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()))
-                    .into();
-                Ok(exporter)
+                    .with_endpoint(endpoint.to_string())
+                    .with_metadata(MetadataMap::from_headers(self.grpc.metadata.clone()));
+
+                if let Some(tls_config) = self.grpc.clone().to_tls_config(&endpoint)? {
+                    exporter = exporter.with_tls_config(tls_config);
+                }
+
+                Ok(exporter.into())
             }
             Protocol::Http => {
-                let endpoint = add_missing_path(
-                    kind,
-                    self.endpoint
-                        .to_uri(&DEFAULT_HTTP_ENDPOINT)
-                        .map(|e| e.into_parts()),
-                )?;
+                let mut endpoint = self.endpoint.to_full_uri(&DEFAULT_HTTP_ENDPOINT);
+                if let TelemetryDataKind::Traces = kind {
+                    endpoint = add_missing_traces_path(endpoint)?;
+                }
                 let http = self.http.clone();
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
                     .with_timeout(self.batch_processor.max_export_timeout)
-                    .with(&endpoint, |b, endpoint| {
-                        b.with_endpoint(endpoint.to_string())
-                    })
-                    .with_headers(http.headers)
-                    .into();
-
-                Ok(exporter)
+                    .with_endpoint(endpoint.to_string())
+                    .with_headers(http.headers);
+                Ok(exporter.into())
             }
         }
     }
 }
 
 // Waiting for https://github.com/open-telemetry/opentelemetry-rust/issues/1618 to be fixed
-fn add_missing_path(
-    kind: TelemetryDataKind,
-    mut endpoint_parts: Option<Parts>,
-) -> Result<Option<Uri>, BoxError> {
-    if let Some(endpoint_parts) = &mut endpoint_parts {
-        if let TelemetryDataKind::Traces = kind {
-            match &mut endpoint_parts.path_and_query {
-                Some(path_and_query) => {
-                    if !path_and_query.path().ends_with(DEFAULT_HTTP_ENDPOINT_PATH) {
-                        match path_and_query.query() {
-                            Some(query) => {
-                                endpoint_parts.path_and_query =
-                                    Some(PathAndQuery::from_str(&format!(
-                                        "{}{DEFAULT_HTTP_ENDPOINT_PATH}?{query}",
-                                        path_and_query.path().trim_end_matches('/')
-                                    ))?);
-                            }
-                            None => {
-                                *path_and_query = PathAndQuery::from_str(&format!(
-                                    "{}{DEFAULT_HTTP_ENDPOINT_PATH}",
-                                    path_and_query.path().trim_end_matches('/')
-                                ))?;
-                            }
-                        }
-                    }
-                }
-                None => {
-                    endpoint_parts.path_and_query =
-                        Some(PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_PATH));
-                }
-            }
+fn add_missing_traces_path(uri: Uri) -> Result<Uri, BoxError> {
+    let mut parts = uri.into_parts();
+    parts.path_and_query = Some(match parts.path_and_query {
+        Some(path_and_query) if path_and_query.path().ends_with(DEFAULT_HTTP_ENDPOINT_PATH) => {
+            path_and_query
         }
-    }
-    let endpoint = match endpoint_parts {
-        Some(endpoint_parts) => Some(Uri::from_parts(endpoint_parts)?),
-        None => None,
-    };
+        Some(path_and_query) => match path_and_query.query() {
+            Some(query) => PathAndQuery::from_str(&format!(
+                "{}{DEFAULT_HTTP_ENDPOINT_PATH}?{query}",
+                path_and_query.path().trim_end_matches('/')
+            ))?,
+            None => PathAndQuery::from_str(&format!(
+                "{}{DEFAULT_HTTP_ENDPOINT_PATH}",
+                path_and_query.path().trim_end_matches('/')
+            ))?,
+        },
+        None => PathAndQuery::from_static(DEFAULT_HTTP_ENDPOINT_PATH),
+    });
 
-    Ok(endpoint)
+    Ok(Uri::from_parts(parts)?)
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
@@ -189,35 +160,25 @@ fn header_map(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Sch
 }
 
 impl GrpcExporter {
-    // Return a TlsConfig if it has something actually set.
-    pub(crate) fn try_from(
-        self,
-        endpoint: &Option<Uri>,
+    pub(crate) fn to_tls_config(
+        &self,
+        endpoint: &Uri,
     ) -> Result<Option<ClientTlsConfig>, BoxError> {
-        if let Some(endpoint) = endpoint {
-            let endpoint = endpoint.to_string().parse::<Url>().map_err(|e| {
-                BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e))
-            })?;
-            let domain_name = self.default_tls_domain(&endpoint);
+        let endpoint = endpoint
+            .to_string()
+            .parse::<Url>()
+            .map_err(|e| BoxError::from(format!("invalid GRPC endpoint {}, {}", endpoint, e)))?;
+        let domain_name = self.default_tls_domain(&endpoint);
 
-            if self.ca.is_some()
-                || self.key.is_some()
-                || self.cert.is_some()
-                || domain_name.is_some()
-            {
-                return Some(
-                    ClientTlsConfig::new()
-                        .with(&domain_name, |b, d| b.domain_name(*d))
-                        .try_with(&self.ca, |b, c| {
-                            Ok(b.ca_certificate(Certificate::from_pem(c)))
-                        })?
-                        .try_with(
-                            &self.cert.clone().zip(self.key.clone()),
-                            |b, (cert, key)| Ok(b.identity(Identity::from_pem(cert, key))),
-                        ),
-                )
-                .transpose();
-            }
+        if let (Some(ca), Some(key), Some(cert), Some(domain_name)) =
+            (&self.ca, &self.key, &self.cert, domain_name)
+        {
+            return Ok(Some(
+                ClientTlsConfig::new()
+                    .domain_name(domain_name)
+                    .ca_certificate(Certificate::from_pem(ca.clone()))
+                    .identity(Identity::from_pem(cert.clone(), key.clone())),
+            ));
         }
         Ok(None)
     }
@@ -311,38 +272,30 @@ mod tests {
     }
 
     #[test]
-    fn test_add_missing_path() {
+    fn test_add_missing_traces_path() {
         let url = Uri::from_str("https://api.apm.com:433/v1/traces").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let url = add_missing_traces_path(url).unwrap();
         assert_eq!(
             url.to_string(),
             String::from("https://api.apm.com:433/v1/traces")
         );
 
         let url = Uri::from_str("https://api.apm.com:433/").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let url = add_missing_traces_path(url).unwrap();
         assert_eq!(
             url.to_string(),
             String::from("https://api.apm.com:433/v1/traces")
         );
 
         let url = Uri::from_str("https://api.apm.com:433/?hi=hello").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let url = add_missing_traces_path(url).unwrap();
         assert_eq!(
             url.to_string(),
             String::from("https://api.apm.com:433/v1/traces?hi=hello")
         );
 
         let url = Uri::from_str("https://api.apm.com:433/v1?hi=hello").unwrap();
-        let url = add_missing_path(TelemetryDataKind::Traces, url.into_parts().into())
-            .unwrap()
-            .unwrap();
+        let url = add_missing_traces_path(url).unwrap();
         assert_eq!(
             url.to_string(),
             String::from("https://api.apm.com:433/v1/v1/traces?hi=hello")
