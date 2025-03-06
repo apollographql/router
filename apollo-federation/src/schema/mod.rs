@@ -8,7 +8,6 @@ use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use position::FieldArgumentDefinitionPosition;
 use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
@@ -242,8 +241,6 @@ impl FederationSchema {
                         let arguments = federation_spec.context_directive_arguments(directive);
                         applications.push(arguments.map(|args| ContextDirective {
                             arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
                             target: interface_type_position.clone().into(),
                         }));
                     }
@@ -259,8 +256,6 @@ impl FederationSchema {
                         let arguments = federation_spec.context_directive_arguments(directive);
                         applications.push(arguments.map(|args| ContextDirective {
                             arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
                             target: object_type_position.clone().into(),
                         }));
                     }
@@ -276,8 +271,6 @@ impl FederationSchema {
                         let arguments = federation_spec.context_directive_arguments(directive);
                         applications.push(arguments.map(|args| ContextDirective {
                             arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
                             target: union_type_position.clone().into(),
                         }));
                     }
@@ -307,12 +300,8 @@ impl FederationSchema {
                     let directives = &interface_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications.push(arguments.map(|args| FromContextDirective {
-                            arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
-                            target: interface_field_argument_position.clone().into(),
-                        }));
+                        applications
+                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -326,12 +315,8 @@ impl FederationSchema {
                     let directives = &object_field_argument.directives;
                     for directive in directives.get_all(&from_context_directive_definition.name) {
                         let arguments = federation_spec.from_context_directive_arguments(directive);
-                        applications.push(arguments.map(|args| FromContextDirective {
-                            arguments: args,
-                            schema_directive: directive,
-                            sibling_directives: directives,
-                            target: object_field_argument_position.clone().into(),
-                        }));
+                        applications
+                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
                     }
                 }
                 Err(error) => applications.push(Err(error.into())),
@@ -406,9 +391,6 @@ impl FederationSchema {
                             .provides_directive_arguments(provides_directive_application);
                         applications.push(arguments.map(|args| ProvidesDirective {
                             arguments: args,
-                            schema_directive: provides_directive_application,
-                            sibling_directives: directives,
-                            target: field_definition_position,
                             target_return_type: field_definition.ty.inner_named_type(),
                         }));
                     }
@@ -440,8 +422,6 @@ impl FederationSchema {
                             .requires_directive_arguments(provides_directive_application);
                         applications.push(arguments.map(|args| RequiresDirective {
                             arguments: args,
-                            schema_directive: provides_directive_application,
-                            sibling_directives: directives,
                             target: field_definition_position,
                         }));
                     }
@@ -458,10 +438,6 @@ type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, Fede
 pub(crate) struct ContextDirective<'schema> {
     /// The parsed arguments of this `@context` application
     arguments: ContextDirectiveArguments<'schema>,
-    /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
-    /// The `DirectiveList` containing all directives applied to the target position, including this one
-    sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
     target: CompositeTypeDefinitionPosition,
 }
@@ -469,12 +445,6 @@ pub(crate) struct ContextDirective<'schema> {
 pub(crate) struct FromContextDirective<'schema> {
     /// The parsed arguments of this `@fromContext` application
     arguments: FromContextDirectiveArguments<'schema>,
-    /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::Node<apollo_compiler::ast::Directive>,
-    /// The `DirectiveList` containing all directives applied to the target position, including this one
-    sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
-    /// The schema position to which this directive is applied
-    target: FieldArgumentDefinitionPosition,
 }
 
 pub(crate) struct KeyDirective<'schema> {
@@ -491,12 +461,6 @@ pub(crate) struct KeyDirective<'schema> {
 pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
-    /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::Node<apollo_compiler::ast::Directive>,
-    /// The `DirectiveList` containing all directives applied to the target position, including this one
-    sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
-    /// The schema position to which this directive is applied
-    target: &'schema ObjectFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
 }
@@ -504,10 +468,6 @@ pub(crate) struct ProvidesDirective<'schema> {
 pub(crate) struct RequiresDirective<'schema> {
     /// The parsed arguments of this `@requires` application
     arguments: RequiresDirectiveArguments<'schema>,
-    /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::Node<apollo_compiler::ast::Directive>,
-    /// The `DirectiveList` containing all directives applied to the target position, including this one
-    sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
     /// The schema position to which this directive is applied
     target: &'schema ObjectFieldDefinitionPosition,
 }
