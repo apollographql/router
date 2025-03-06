@@ -8,6 +8,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use position::FieldArgumentDefinitionPosition;
 use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
@@ -15,7 +16,9 @@ use referencer::Referencers;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
@@ -220,6 +223,115 @@ impl FederationSchema {
         }
     }
 
+    pub(crate) fn context_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ContextDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
+        let context_directive_definition = federation_spec.context_directive_definition(&self)?;
+        let context_directive_referencers = self
+            .referencers()
+            .get_directive(&context_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for interface_type_position in &context_directive_referencers.interface_types {
+            // TODO: Push these errors onto applications vec
+            let interface_type = interface_type_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &interface_type.directives;
+            for directive in directives.get_all(&context_directive_definition.name) {
+                let arguments = federation_spec.context_directive_arguments(directive);
+                applications.push(arguments.map(|args| ContextDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: interface_type_position.clone().into(),
+                }));
+            }
+        }
+        for object_type_position in &context_directive_referencers.object_types {
+            // TODO: Push these errors onto applications vec
+            let object_type = object_type_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &object_type.directives;
+            for directive in directives.get_all(&context_directive_definition.name) {
+                let arguments = federation_spec.context_directive_arguments(directive);
+                applications.push(arguments.map(|args| ContextDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: object_type_position.clone().into(),
+                }));
+            }
+        }
+        for union_type_position in &context_directive_referencers.union_types {
+            // TODO: Push these errors onto applications vec
+            let union_type = union_type_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &union_type.directives;
+            for directive in directives.get_all(&context_directive_definition.name) {
+                let arguments = federation_spec.context_directive_arguments(directive);
+                applications.push(arguments.map(|args| ContextDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: union_type_position.clone().into(),
+                }));
+            }
+        }
+        Ok(applications)
+    }
+
+    pub(crate) fn from_context_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<FromContextDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(&self)?;
+        let from_context_directive_definition =
+            federation_spec.from_context_directive_definition(&self)?;
+        let from_context_directive_referencers = self
+            .referencers()
+            .get_directive(&from_context_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for interface_field_argument_position in
+            &from_context_directive_referencers.interface_field_arguments
+        {
+            let interface_field_argument = interface_field_argument_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &interface_field_argument.directives;
+            for directive in directives.get_all(&from_context_directive_definition.name) {
+                let arguments = federation_spec.from_context_directive_arguments(directive);
+                applications.push(arguments.map(|args| FromContextDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: interface_field_argument_position.clone().into(),
+                }));
+            }
+        }
+        for object_field_argument_position in
+            &from_context_directive_referencers.object_field_arguments
+        {
+            let object_field_argument = object_field_argument_position
+                .get(self.schema())
+                .expect("can get self");
+            let directives = &object_field_argument.directives;
+            for directive in directives.get_all(&from_context_directive_definition.name) {
+                let arguments = federation_spec.from_context_directive_arguments(directive);
+                applications.push(arguments.map(|args| FromContextDirective {
+                    arguments: args,
+                    schema_directive: directive,
+                    sibling_directives: directives,
+                    target: object_field_argument_position.clone().into(),
+                }));
+            }
+        }
+        Ok(applications)
+    }
+
     pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let key_directive_definition = federation_spec.key_directive_definition(&self)?;
@@ -292,6 +404,28 @@ impl FederationSchema {
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
+
+pub(crate) struct ContextDirective<'schema> {
+    /// The parsed arguments of this `@context` application
+    arguments: ContextDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
+    /// The `DirectiveList` containing all directives applied to the target position, including this one
+    sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
+    /// The schema position to which this directive is applied
+    target: CompositeTypeDefinitionPosition,
+}
+
+pub(crate) struct FromContextDirective<'schema> {
+    /// The parsed arguments of this `@fromContext` application
+    arguments: FromContextDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema apollo_compiler::Node<apollo_compiler::ast::Directive>,
+    /// The `DirectiveList` containing all directives applied to the target position, including this one
+    sibling_directives: &'schema apollo_compiler::ast::DirectiveList,
+    /// The schema position to which this directive is applied
+    target: FieldArgumentDefinitionPosition,
+}
 
 pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application

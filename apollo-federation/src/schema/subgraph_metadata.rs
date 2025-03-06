@@ -16,7 +16,6 @@ use crate::operation::SelectionSet;
 use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::FieldArgumentDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 
@@ -46,8 +45,7 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
-        let context_fields =
-            Self::collect_fields_used_by_context_directive(schema, federation_spec_definition)?;
+        let context_fields = Self::collect_fields_used_by_context_directive(schema)?;
         let interface_constraint_fields =
             Self::collect_fields_used_to_satisfy_interface_constraints(schema)?;
         let key_fields = Self::collect_key_fields(schema)?;
@@ -220,15 +218,11 @@ impl SubgraphMetadata {
 
     fn collect_fields_used_by_context_directive(
         schema: &Valid<FederationSchema>,
-        federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let Ok(context_directive_definition) =
-            federation_spec_definition.context_directive_definition(schema)
-        else {
+        let Ok(context_directive_applications) = schema.context_directive_applications() else {
             return Ok(Default::default());
         };
-        let Ok(from_context_directive_definition) =
-            federation_spec_definition.from_context_directive_definition(schema)
+        let Ok(from_context_directive_applications) = schema.from_context_directive_applications()
         else {
             return Ok(Default::default());
         };
@@ -236,106 +230,35 @@ impl SubgraphMetadata {
         let mut used_context_fields = IndexSet::default();
         let mut entry_points: HashMap<String, HashSet<CompositeTypeDefinitionPosition>> =
             HashMap::new();
-        let context_directive_referencers = schema
-            .referencers
-            .get_directive(&context_directive_definition.name)?;
 
-        for interface_type_position in &context_directive_referencers.interface_types {
-            let directives = &interface_type_position.get(schema.schema())?.directives;
-            for context_directive_application in
-                directives.get_all(&context_directive_definition.name)
-            {
-                let context = federation_spec_definition
-                    .context_directive_arguments(context_directive_application)?
-                    .name;
-                if !entry_points.contains_key(context) {
-                    entry_points.insert(context.to_string(), HashSet::new());
-                }
-                entry_points
-                    .get_mut(context)
-                    .expect("was just inserted")
-                    .insert(interface_type_position.clone().into());
-            }
-        }
-        for object_type_position in &context_directive_referencers.object_types {
-            let directives = &object_type_position.get(schema.schema())?.directives;
-            for context_directive_application in
-                directives.get_all(&context_directive_definition.name)
-            {
-                let context = federation_spec_definition
-                    .context_directive_arguments(context_directive_application)?
-                    .name;
-                if !entry_points.contains_key(context) {
-                    entry_points.insert(context.to_string(), HashSet::new());
-                }
-                entry_points
-                    .get_mut(context)
-                    .expect("was just inserted")
-                    .insert(object_type_position.clone().into());
-            }
-        }
-        for union_type_position in &context_directive_referencers.union_types {
-            let directives = &union_type_position.get(schema.schema())?.directives;
-            for context_directive_application in
-                directives.get_all(&context_directive_definition.name)
-            {
-                let context = federation_spec_definition
-                    .context_directive_arguments(context_directive_application)?
-                    .name;
-                if !entry_points.contains_key(context) {
-                    entry_points.insert(context.to_string(), HashSet::new());
-                }
-                entry_points
-                    .get_mut(context)
-                    .expect("was just inserted")
-                    .insert(union_type_position.clone().into());
-            }
-        }
-
-        let from_context_directive_referencers = schema
-            .referencers
-            .get_directive(&from_context_directive_definition.name)?;
-        let mut from_context_positions: Vec<FieldArgumentDefinitionPosition> = Vec::new();
-        for object_field_argument_position in
-            &from_context_directive_referencers.object_field_arguments
+        for context_directive in context_directive_applications
+            .into_iter()
+            .filter_map(|d| d.ok())
         {
-            from_context_positions.push(object_field_argument_position.clone().into());
+            if !entry_points.contains_key(context_directive.arguments.name) {
+                entry_points.insert(context_directive.arguments.name.to_string(), HashSet::new());
+            }
+            entry_points
+                .get_mut(context_directive.arguments.name)
+                .expect("was just inserted")
+                .insert(context_directive.target);
         }
-        for interface_field_argument_position in
-            &from_context_directive_referencers.interface_field_arguments
+        for from_context_directive in from_context_directive_applications
+            .into_iter()
+            .filter_map(|d| d.ok())
         {
-            from_context_positions.push(interface_field_argument_position.clone().into());
-        }
-        for argument_definition_position in from_context_positions {
-            let directives = match &argument_definition_position {
-                FieldArgumentDefinitionPosition::Interface(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-                FieldArgumentDefinitionPosition::Object(pos) => {
-                    &pos.get(schema.schema())?.directives
-                }
-            };
-
-            for from_context_directive_application in
-                directives.get_all(&from_context_directive_definition.name)
-            {
-                let field_value = federation_spec_definition
-                    .from_context_directive_arguments(from_context_directive_application)?
-                    .field;
-                let (context, selection) = parse_context(field_value)?;
-                if let Some(entry_point) = entry_points.get(context.as_str()) {
-                    for context_type in entry_point {
-                        used_context_fields.extend(collect_target_fields_from_field_set(
-                            unwrap_schema(schema),
-                            context_type.type_name().clone(),
-                            selection.as_str(),
-                            false,
-                        )?);
-                    }
+            let (context, selection) = parse_context(from_context_directive.arguments.field)?;
+            if let Some(entry_point) = entry_points.get(context.as_str()) {
+                for context_type in entry_point {
+                    used_context_fields.extend(collect_target_fields_from_field_set(
+                        unwrap_schema(schema),
+                        context_type.type_name().clone(),
+                        selection.as_str(),
+                        false,
+                    )?);
                 }
             }
         }
-
         Ok(used_context_fields)
     }
 
