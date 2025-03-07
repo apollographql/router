@@ -1242,6 +1242,7 @@ pub(crate) fn hash_additional_data(
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
+    body.variables.sort_keys();
     digest.update(serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
@@ -1364,9 +1365,11 @@ fn extract_cache_keys(
     Ok(res)
 }
 
-pub(crate) fn hash_entity_key(representation: &Value) -> String {
+/// Returns a hash for the given representation, independent of field order. Destructively sorts any objects in the input.
+pub(crate) fn hash_entity_key(representation: &mut Value) -> String {
     // We have to hash the representation because it can contains PII
     let mut digest = Sha256::new();
+    representation.sort_all_objects();
     digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
     hex::encode(digest.finalize().as_slice())
 }
@@ -1615,5 +1618,29 @@ impl Ord for CacheKeyStatus {
             (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
             (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_entity_key_ordering() {
+        let mut representations = serde_json_bytes::json!([{
+            "id1": "test",
+            "id2": "test2"
+        }]);
+        let first_hash_key = hash_entity_key(&mut representations);
+        let mut representations = serde_json_bytes::json!([{
+            "id2": "test2",
+            "id1": "test"
+        }]);
+        let second_hash_key = hash_entity_key(&mut representations);
+
+        assert_eq!(
+            first_hash_key, second_hash_key,
+            "these 2 hashes should be equals because ordering doesn't matter"
+        );
     }
 }

@@ -108,7 +108,7 @@ hyper = { version = "1.5.1", features = ["full"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 hyper-rustls = { version = "0.27.3", features = ["http1", "http2", "rustls-native-certs"] }
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.13.0"
+itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
 jsonschema = { version = "0.17.1", default-features = false }
@@ -329,7 +329,7 @@ tracing-test = "0.2.5"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
 libtest-mimic = "0.7.3"
-rstest = "0.22.0"
+rstest = "0.25.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }

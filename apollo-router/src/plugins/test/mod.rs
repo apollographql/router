@@ -1,4 +1,9 @@
+mod router_ext;
+mod subgraph_ext;
+mod supergraph_ext;
+
 use std::any::TypeId;
+use std::fmt::Debug;
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -7,6 +12,8 @@ use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
 use pin_project_lite::pin_project;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -76,8 +83,8 @@ impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
     #[allow(clippy::needless_lifetimes)] // needless in `new` but not in generated builder methods
     pub(crate) async fn new<'a, 'b>(
-        config: Option<&'a str>,
-        schema: Option<&'b str>,
+        config: Option<&'b str>,
+        schema: Option<&'a str>,
         license: Option<LicenseState>,
     ) -> Self {
         let factory = crate::plugin::plugins()
@@ -361,7 +368,7 @@ pub(crate) trait FakeDefault {
 
 impl FakeDefault for router::Request {
     fn default() -> Self {
-        router::Request::fake_builder().build().unwrap()
+        router::Request::canned_request()
     }
 }
 
@@ -392,6 +399,40 @@ impl FakeDefault for http::HttpRequest {
     }
 }
 
+pub(crate) trait RequestTestExt<Request, Response>
+where
+    Request: Send + 'static,
+    Response: Send + 'static,
+{
+    fn canned_request() -> Request;
+    fn canned_result(self) -> Result<Response, BoxError>;
+    fn assert_context_eq<T>(&self, key: &str, value: T)
+    where
+        T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug;
+    fn assert_context_contains(&self, key: &str);
+    fn assert_context_not_contains(&self, key: &str);
+    fn assert_header_eq(&self, key: &str, value: &str);
+    async fn assert_body_eq<T>(&mut self, value: T)
+    where
+        T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug + Serialize;
+    async fn assert_canned_body(&mut self);
+}
+
+pub(crate) trait ResponseTestExt {
+    fn assert_context_eq<T>(&self, key: &str, value: T)
+    where
+        T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug;
+    fn assert_context_contains(&self, key: &str);
+    fn assert_context_not_contains(&self, key: &str);
+    fn assert_header_eq(&self, key: &str, value: &str);
+    async fn assert_body_eq<T>(&mut self, value: T)
+    where
+        T: for<'de> Deserialize<'de> + Eq + PartialEq + Debug + Serialize;
+    async fn assert_canned_body(&mut self);
+    fn assert_status_code(&self, status_code: ::http::StatusCode);
+    async fn assert_contains_error(&mut self, error: &Value);
+}
+
 #[cfg(test)]
 mod test_for_harness {
     use ::http::HeaderMap;
@@ -402,6 +443,8 @@ mod test_for_harness {
     use tokio::join;
 
     use super::*;
+    use crate::Context;
+    use crate::graphql;
     use crate::metrics::FutureMetricsExt;
     use crate::plugin::Plugin;
     use crate::services::router;
@@ -617,5 +660,285 @@ mod test_for_harness {
         }
         .with_metrics()
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_router_service_assertions() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.router_service(|mut req| async move {
+            req.assert_context_contains("request-context-key");
+            req.assert_context_not_contains("non-existent-key");
+            req.assert_context_eq("request-context-key", "request-context-value".to_string());
+            req.assert_header_eq("x-request-header", "request-value");
+            req.assert_body_eq(serde_json::json!({"query": "topProducts"}))
+                .await;
+            let context = req.context.clone();
+            context
+                .insert("response-context-key", "response-context-value".to_string())
+                .expect("context");
+            Ok(router::Response::fake_builder()
+                .data(serde_json::json!({"field": "value"}))
+                .header("x-custom-header", "test-value")
+                .context(context)
+                .build()
+                .unwrap())
+        });
+
+        let context = Context::new();
+        context
+            .insert("request-context-key", "request-context-value".to_string())
+            .unwrap();
+        let mut response = service
+            .call(
+                router::Request::fake_builder()
+                    .header("x-request-header", "request-value")
+                    .context(context)
+                    .body(serde_json::json!({"query": "topProducts"}).to_string())
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        response.assert_header_eq("x-custom-header", "test-value");
+        response.assert_context_contains("response-context-key");
+        response.assert_context_eq("response-context-key", "response-context-value".to_string());
+        response.assert_context_not_contains("non-existent-key");
+        response.assert_status_code(::http::StatusCode::OK);
+        response
+            .assert_body_eq(serde_json::json!({"data": {"field": "value"}}))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_service_assertions() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.supergraph_service(|mut req| async move {
+            req.assert_context_contains("request-context-key");
+            req.assert_context_not_contains("non-existent-key");
+            req.assert_context_eq("request-context-key", "request-context-value".to_string());
+            req.assert_header_eq("x-request-header", "request-value");
+            req.assert_body_eq(serde_json::json!({"query": "topProducts"}))
+                .await;
+            let context = req.context.clone();
+            context
+                .insert("response-context-key", "response-context-value".to_string())
+                .expect("context");
+            Ok(supergraph::Response::fake_builder()
+                .data(serde_json::json!({"field": "value"}))
+                .header("x-custom-header", "test-value")
+                .context(context)
+                .build()
+                .unwrap())
+        });
+
+        let context = Context::new();
+        context
+            .insert("request-context-key", "request-context-value".to_string())
+            .unwrap();
+        let mut response = service
+            .call(
+                supergraph::Request::fake_builder()
+                    .header("x-request-header", "request-value")
+                    .context(context)
+                    .query("topProducts".to_string())
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        response.assert_header_eq("x-custom-header", "test-value");
+        response.assert_context_contains("response-context-key");
+        response.assert_context_eq("response-context-key", "response-context-value".to_string());
+        response.assert_context_not_contains("non-existent-key");
+        response.assert_status_code(::http::StatusCode::OK);
+        response
+            .assert_body_eq(serde_json::json!([{"data": {"field": "value"}}]))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_service_assertions() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.subgraph_service("test_subgraph", |mut req| async move {
+            req.assert_context_contains("request-context-key");
+            req.assert_context_not_contains("non-existent-key");
+            req.assert_context_eq("request-context-key", "request-context-value".to_string());
+            req.assert_header_eq("x-request-header", "request-value");
+            req.assert_body_eq(serde_json::json!({"query": "topProducts"}))
+                .await;
+            let context = req.context.clone();
+            context
+                .insert("response-context-key", "response-context-value".to_string())
+                .expect("context");
+            let mut headers = HeaderMap::new();
+            headers.insert("x-custom-header", "test-value".parse().unwrap());
+            Ok(subgraph::Response::fake_builder()
+                .data(serde_json::json!({"field": "value"}))
+                .headers(headers)
+                .context(context)
+                .build())
+        });
+
+        let context = Context::new();
+        context
+            .insert("request-context-key", "request-context-value".to_string())
+            .unwrap();
+        let mut response = service
+            .call(
+                subgraph::Request::fake_builder()
+                    .subgraph_request(
+                        ::http::Request::builder()
+                            .header("x-request-header", "request-value")
+                            .body(
+                                graphql::Request::fake_builder()
+                                    .query("topProducts".to_string())
+                                    .build(),
+                            )
+                            .unwrap(),
+                    )
+                    .context(context)
+                    .build(),
+            )
+            .await
+            .unwrap();
+        response.assert_header_eq("x-custom-header", "test-value");
+        response.assert_context_contains("response-context-key");
+        response.assert_context_eq("response-context-key", "response-context-value".to_string());
+        response.assert_context_not_contains("non-existent-key");
+        response.assert_status_code(::http::StatusCode::OK);
+        response
+            .assert_body_eq(serde_json::json!({"data": {"field": "value"}}))
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_canned_router_request_response() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.router_service(|mut req| async move {
+            req.assert_canned_body().await;
+            req.canned_result()
+        });
+
+        let mut response = service
+            .call(router::Request::canned_request())
+            .await
+            .unwrap();
+        response.assert_canned_body().await;
+    }
+
+    #[tokio::test]
+    async fn test_canned_supergraph_request_response() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.supergraph_service(|mut req| async move {
+            req.assert_canned_body().await;
+            req.canned_result()
+        });
+
+        let mut response = service
+            .call(supergraph::Request::canned_request())
+            .await
+            .unwrap();
+        response.assert_canned_body().await;
+    }
+
+    #[tokio::test]
+    async fn test_canned_subgraph_request_response() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.subgraph_service("test_subgraph", |mut req| async move {
+            req.assert_canned_body().await;
+            req.canned_result()
+        });
+
+        let mut response = service
+            .call(subgraph::Request::canned_request())
+            .await
+            .unwrap();
+        response.assert_canned_body().await
+    }
+
+    #[tokio::test]
+    async fn test_router_service_assert_contains_error() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.router_service(|_req| async {
+            Ok(router::Response::fake_builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("Test error")
+                        .extension_code("TEST_ERROR")
+                        .build(),
+                )
+                .build()
+                .unwrap())
+        });
+
+        let mut response = service.call_default().await.unwrap();
+        response
+            .assert_contains_error(
+                &serde_json::json!({"message": "Test error", "extensions":{"code": "TEST_ERROR"}}),
+            )
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_service_assert_contains_error() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.supergraph_service(|_req| async {
+            Ok(supergraph::Response::fake_builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("Test error")
+                        .extension_code("TEST_ERROR")
+                        .build(),
+                )
+                .build()
+                .unwrap())
+        });
+
+        let mut response = service.call_default().await.unwrap();
+        response
+            .assert_contains_error(
+                &serde_json::json!({"message": "Test error", "extensions":{"code": "TEST_ERROR"}}),
+            )
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_service_assert_error_contains_error() {
+        let test_harness: PluginTestHarness<MyTestPlugin> =
+            PluginTestHarness::builder().build().await;
+
+        let service = test_harness.subgraph_service("test_subgraph", |_req| async {
+            Ok(subgraph::Response::fake_builder()
+                .error(
+                    graphql::Error::builder()
+                        .message("Test error")
+                        .extension_code("TEST_ERROR")
+                        .build(),
+                )
+                .build())
+        });
+
+        let mut response = service.call_default().await.unwrap();
+        response
+            .assert_contains_error(
+                &serde_json::json!({"message": "Test error", "extensions":{"code": "TEST_ERROR"}}),
+            )
+            .await;
     }
 }
