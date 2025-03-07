@@ -822,7 +822,7 @@ async fn build_jwks_search_components() -> JwksManager {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -925,7 +925,7 @@ struct Claims {
     iss: Option<String>,
 }
 
-fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
+fn make_manager(jwk: &Jwk, issuers: Option<Issuers>) -> JwksManager {
     let jwks = JwkSet {
         keys: vec![jwk.clone()],
     };
@@ -933,7 +933,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
     let url = Url::from_str("file:///jwks.json").unwrap();
     let list = vec![JwksConfig {
         url: url.clone(),
-        issuer,
+        issuers,
         algorithms: None,
         poll_interval: Duration::from_secs(60),
         headers: Vec::new(),
@@ -967,7 +967,10 @@ async fn issuer_check() {
         }),
     };
 
-    let manager = make_manager(&jwk, Some("hello".to_string()));
+    let manager = make_manager(
+        &jwk,
+        Some(HashSet::from(["hello".to_string(), "goodbye".to_string()])),
+    );
 
     // No issuer
     let token = encode(
@@ -1032,7 +1035,7 @@ async fn issuer_check() {
             )
             .unwrap();
             assert_eq!(response, graphql::Response::builder()
-        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
@@ -1071,7 +1074,7 @@ async fn issuer_check() {
             )
             .unwrap();
             assert_eq!(response, graphql::Response::builder()
-            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from '\"goodbye\", \"hello\"'").build()]).build());
         }
         ControlFlow::Continue(_) => {
             panic!("issuer check should have failed")
@@ -1105,7 +1108,7 @@ async fn issuer_check() {
             )
             .unwrap();
             assert_eq!(response, graphql::Response::builder()
-        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from JWKS configured to only accept from 'hello'").build()]).build());
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
@@ -1132,7 +1135,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1164,7 +1167,7 @@ async fn it_rejects_and_accepts_keys_with_restricted_algorithms_and_unknown_jwks
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: Some(HashSet::from([Algorithm::RS256])),
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1203,7 +1206,7 @@ async fn it_accepts_key_without_use_or_keyops() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1234,7 +1237,7 @@ async fn it_accepts_elliptic_curve_key_without_alg() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1265,7 +1268,7 @@ async fn it_accepts_rsa_key_without_alg() {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
         urls.push(JwksConfig {
             url,
-            issuer: None,
+            issuers: None,
             algorithms: None,
             poll_interval: Duration::from_secs(60),
             headers: Vec::new(),
@@ -1320,7 +1323,7 @@ async fn jwks_send_headers() {
 
     let _jwks_manager = JwksManager::new(vec![JwksConfig {
         url,
-        issuer: None,
+        issuers: None,
         algorithms: Some(HashSet::from([Algorithm::RS256])),
         poll_interval: Duration::from_secs(60),
         headers: vec![Header {

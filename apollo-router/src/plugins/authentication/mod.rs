@@ -51,6 +51,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::connector::ConnectorAuth;
+use crate::plugins::authentication::jwks::Issuers;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::AuthConfig;
@@ -104,7 +105,7 @@ pub(crate) enum AuthenticationError<'a> {
     /// Cannot find a suitable key for: alg: '{0:?}', kid: '{1:?}' in JWKS list
     CannotFindSuitableKey(Algorithm, Option<String>),
 
-    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
+    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from JWKS configured to only accept from '{expected}'
     InvalidIssuer { expected: String, token: String },
 
     /// Unsupported key algorithm: {0}
@@ -164,8 +165,8 @@ struct JwksConf {
     )]
     #[schemars(with = "String", default = "default_poll_interval")]
     poll_interval: Duration,
-    /// Expected issuer for tokens verified by that JWKS
-    issuer: Option<String>,
+    /// Accepted issuers for tokens verified by a JWKS
+    issuers: Option<Issuers>,
     /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
     #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
@@ -255,13 +256,13 @@ struct JWTCriteria {
 fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Option<Vec<(Option<String>, Jwk)>> {
+) -> Option<Vec<(Option<Issuers>, Jwk)>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     let mut found_highest_score = false;
     for JwkSetInfo {
         jwks,
-        issuer,
+        issuers,
         algorithms,
     } in jwks_manager.iter_jwks()
     {
@@ -370,7 +371,7 @@ fn search_jwks(
                 found_highest_score = true;
             }
 
-            candidates.push((key_score, (issuer.clone(), key)));
+            candidates.push((key_score, (issuers.clone(), key)));
         }
     }
 
@@ -479,7 +480,7 @@ impl PluginPrivate for AuthenticationPlugin {
                 let url: Url = Url::from_str(jwks_conf.url.as_str())?;
                 list.push(JwksConfig {
                     url,
-                    issuer: jwks_conf.issuer.clone(),
+                    issuers: jwks_conf.issuers.clone(),
                     algorithms: jwks_conf
                         .algorithms
                         .as_ref()
@@ -659,25 +660,32 @@ fn authenticate(
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
     if let Some(keys) = search_jwks(jwks_manager, &criteria) {
-        let (issuer, token_data) = match decode_jwt(jwt, keys, criteria) {
+        let (issuers, token_data) = match decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
                 return failure_message(request.context, auth_error, status_code);
             }
         };
 
-        if let Some(configured_issuer) = issuer {
+        if let Some(configured_issuers) = issuers {
             if let Some(token_issuer) = token_data
                 .claims
                 .as_object()
                 .and_then(|o| o.get("iss"))
                 .and_then(|value| value.as_str())
             {
-                if configured_issuer != token_issuer {
+                if !configured_issuers.contains(token_issuer) {
+                    let mut issuers_for_error: Vec<String> =
+                        configured_issuers.into_iter().collect();
+                    issuers_for_error.sort(); // done to maintain consistent ordering in error message
                     return failure_message(
                         request.context,
                         AuthenticationError::InvalidIssuer {
-                            expected: configured_issuer,
+                            expected: issuers_for_error
+                                .iter()
+                                .map(|element| format!("{:?}", element))
+                                .collect::<Vec<_>>()
+                                .join(", "),
                             token: token_issuer.to_string(),
                         },
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -816,11 +824,11 @@ fn extract_jwt<'a, 'b: 'a>(
 
 fn decode_jwt(
     jwt: &str,
-    keys: Vec<(Option<String>, Jwk)>,
+    keys: Vec<(Option<Issuers>, Jwk)>,
     criteria: JWTCriteria,
-) -> Result<(Option<String>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+) -> Result<(Option<Issuers>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
     let mut error = None;
-    for (issuer, jwk) in keys.into_iter() {
+    for (issuers, jwk) in keys.into_iter() {
         let decoding_key = match DecodingKey::from_jwk(&jwk) {
             Ok(k) => k,
             Err(e) => {
@@ -861,7 +869,7 @@ fn decode_jwt(
         validation.validate_aud = false;
 
         match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => return Ok((issuer, v)),
+            Ok(v) => return Ok((issuers, v)),
             Err(e) => {
                 error = Some((
                     AuthenticationError::CannotDecodeJWT(e),

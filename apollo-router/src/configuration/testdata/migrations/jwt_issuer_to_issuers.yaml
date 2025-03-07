@@ -1,0 +1,16 @@
+authentication:
+  router:
+    jwt:
+      jwks:
+        - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+          issuer: https://issuer.one
+          poll_interval: <optional poll interval>
+          headers:
+            - name: User-Agent
+              value: router
+        - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+          issuer: https://issuer.two
+          poll_interval: <optional poll interval>
+          headers:
+            - name: User-Agent
+              value: router
