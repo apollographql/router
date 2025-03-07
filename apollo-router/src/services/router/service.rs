@@ -892,8 +892,6 @@ impl RouterService {
                 None => "".into(),
                 Some(path) => path.to_string(),
             };
-            // TBD(tim): do we want to also transmit warnings to the user-facing "apollo.router.graphql_error" instrument?
-            // Can see arguments for both sides...
             let entry = map.entry(code).or_insert(0u64);
             *entry += 1;
 
