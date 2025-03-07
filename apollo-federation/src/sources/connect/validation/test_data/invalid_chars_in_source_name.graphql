@@ -10,6 +10,10 @@ extend schema
     name: "areallylongnamethatisoversixtythreecharacterstakesalongwhiletotypebutthisshoulddoit"
     http: { baseURL: "http://127.0.0.1" }
   )
+  @source(  # Check all valid chars
+    name: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-",
+    http: { baseURL: "http://127.0.0.1" }
+  )
 
 type Query {
   resources1: [String!]!
