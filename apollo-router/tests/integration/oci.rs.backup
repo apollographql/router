@@ -140,7 +140,9 @@ async fn setup_mock_oci_server(schema_content: &str) -> (MockServer, String) {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
     // Set up a mock OCI registry with a test schema
-    let (_mock_server, artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
+    let (mock_server, artifact_reference) = setup_mock_oci_server(LOCAL_SCHEMA).await;
+    tracing::debug!("Set up mock OCI server at: {:?}", mock_server.uri());
+
     // Set up mock subgraph servers
     let (_subgraphs_server, subgraph_overrides) = setup_mock_subgraphs().await;
 
@@ -150,7 +152,7 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
         .env(HashMap::from([
             (
                 String::from("APOLLO_KEY"),
-                String::from("service:test-graph:abc123def456ghi789jkl012mno345pqr678stu901vwx234yz").into(),
+                String::from("test-api-key").into(),
             ),
             (
                 String::from("APOLLO_GRAPH_ARTIFACT_REFERENCE"),
@@ -158,7 +160,6 @@ async fn test_router_boots_with_oci_config() -> Result<(), BoxError> {
             ),
         ]))
         .subgraph_overrides(subgraph_overrides)
-        .log("trace,apollo_router=trace,oci_client=debug,jsonpath_lib=info")
         .build()
         .await;
     

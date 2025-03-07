@@ -122,9 +122,13 @@ async fn pull_oci(
 
 /// Fetch an OCI bundle
 pub(crate) async fn fetch_oci(oci_config: OciConfig) -> Result<OciContent, OciError> {
+    tracing::debug!("OCI 1");
     let reference: Reference = oci_config.reference.as_str().parse()?;
+    tracing::debug!("OCI 2");
     let auth = build_auth(&reference, &oci_config.apollo_key);
+    tracing::debug!("OCI 3");
     let host = reference.registry();
+    tracing::debug!("OCI 4");
     let protocol = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
         ClientProtocol::Http
     } else {
