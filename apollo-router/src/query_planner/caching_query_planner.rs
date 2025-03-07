@@ -515,11 +515,7 @@ where
                 .plan_options(caching_key.plan_options)
                 .build();
 
-            // some clients might timeout and cancel the request before query planning is finished,
-            // so we execute it in a task that can continue even after the request was canceled and
-            // the join handle was dropped. That way, the next similar query will use the cache instead
-            // of restarting the query planner until another timeout
-            tokio::task::spawn(
+            let qp_task = tokio::spawn(
                 async move {
                     let service = match self.delegate.ready().await {
                         Ok(service) => service,
@@ -598,9 +594,16 @@ where
                     }
                 }
                 .in_current_span(),
-            )
-            .await
-            .map_err(|e| {
+            );
+
+            let _abort_guard = scopeguard::guard(qp_task.abort_handle(), |abort_handle| {
+                // Abort is a no-op if the task has already completed.
+                abort_handle.abort();
+            });
+
+            // Receive the result of planning. If the request is cancelled, we may be dropped at
+            // this await point. The `abort_guard` then propagates that to query planning.
+            qp_task.await.map_err(|e| {
                 CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
                     e.to_string(),
                 )))
@@ -734,6 +737,8 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use mockall::mock;
     use mockall::predicate::*;
     use test_log::test;
@@ -808,53 +813,30 @@ mod tests {
         .await
         .unwrap();
 
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "query Me { me { username } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
         for _ in 0..5 {
             assert!(
                 planner
-                    .call(query_planner::CachingRequest::new(
-                        "query Me { me { username } }".to_string(),
-                        Some("".into()),
-                        context.clone()
-                    ))
+                    .call(
+                        query_planner::CachingRequest::fake_builder()
+                            .configuration(configuration.clone())
+                            .schema(schema.clone())
+                            .query("query Me { me { username } }")
+                            .build()
+                    )
                     .await
                     .is_err()
             );
         }
-        let doc2 = Query::parse_document(
-            "query Me { me { name { first } } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc2));
 
         assert!(
             planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { name { first } } }".to_string(),
-                    Some("".into()),
-                    context.clone()
-                ))
+                .call(
+                    query_planner::CachingRequest::fake_builder()
+                        .configuration(configuration.clone())
+                        .schema(schema.clone())
+                        .query("query Me { me { name { first } } }")
+                        .build()
+                )
                 .await
                 .is_err()
         );
@@ -923,11 +905,12 @@ mod tests {
 
         for _ in 0..5 {
             let _ = planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { username } }".to_string(),
-                    Some("".into()),
-                    context.clone(),
-                ))
+                .call(
+                    query_planner::CachingRequest::builder()
+                        .query("query Me { me { username } }")
+                        .context(context.clone())
+                        .build(),
+                )
                 .await
                 .unwrap();
             assert!(
@@ -970,7 +953,7 @@ mod tests {
                 planner
             });
 
-        let configuration = Default::default();
+        let configuration = Arc::new(Default::default());
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
@@ -984,61 +967,133 @@ mod tests {
         .await
         .unwrap();
 
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "{
-              __schema {
-                  types {
-                  name
-                }
-              }
-            }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
         assert!(
             planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                    __schema {
-                        types {
-                        name
-                      }
-                    }
-                  }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                ))
+                .call(
+                    query_planner::CachingRequest::fake_builder()
+                        .configuration(configuration.clone())
+                        .schema(schema.clone())
+                        .query("{ __schema { types { name } } }")
+                        .build()
+                )
                 .await
                 .is_ok()
         );
 
         assert!(
             planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                        __schema {
-                            types {
-                            name
-                          }
-                        }
-                      }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                ))
+                .call(
+                    query_planner::CachingRequest::fake_builder()
+                        .configuration(configuration.clone())
+                        .schema(schema.clone())
+                        .query("{ __schema { types { name } } }")
+                        .build()
+                )
                 .await
                 .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cancellation_propagation() {
+        #[derive(Debug, PartialEq, Eq)]
+        enum Status {
+            NotStarted,
+            Planning,
+            Cancelled,
+        }
+
+        #[derive(Clone)]
+        struct NeverCompletesQueryPlanner {
+            status: tokio::sync::mpsc::Sender<Status>,
+        }
+
+        impl Service<QueryPlannerRequest> for NeverCompletesQueryPlanner {
+            type Response = QueryPlannerResponse;
+
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                let status = self.status.clone();
+                Box::pin(async move {
+                    let _guard = scopeguard::guard(status.clone(), |status| {
+                        // Executed on Drop, thus needs to be sync
+                        tokio::spawn(async move {
+                            status
+                                .send(Status::Cancelled)
+                                .await
+                                .expect("test is wrong if the channel is closed");
+                        });
+                    });
+
+                    status
+                        .send(Status::Planning)
+                        .await
+                        .expect("test is wrong if the channel is closed");
+                    Ok(std::future::pending::<QueryPlannerResponse>().await)
+                })
+            }
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+        tx.send(Status::NotStarted)
+            .await
+            .expect("test is wrong if the channel is closed");
+
+        let delegate = NeverCompletesQueryPlanner { status: tx };
+        let configuration = Arc::new(crate::Configuration::default());
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let fut = planner.call(
+            query_planner::CachingRequest::fake_builder()
+                .configuration(configuration)
+                .schema(schema)
+                .query("query Me { me { name { first } } }")
+                .operation_name("Me")
+                .build(),
+        );
+
+        let handle = tokio::task::spawn(fut);
+
+        const SECOND: Duration = Duration::from_secs(1);
+
+        assert_eq!(
+            tokio::time::timeout(SECOND, rx.recv()).await.unwrap(),
+            Some(Status::NotStarted),
+        );
+
+        assert_eq!(
+            tokio::time::timeout(SECOND, rx.recv()).await.unwrap(),
+            Some(Status::Planning),
+            "should have started planning"
+        );
+
+        handle.abort();
+
+        assert_eq!(
+            tokio::time::timeout(SECOND, rx.recv()).await.unwrap(),
+            Some(Status::Cancelled),
+            "should have cancelled planning"
         );
     }
 }
