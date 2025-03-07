@@ -737,7 +737,6 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU8;
     use std::time::Duration;
 
     use mockall::mock;
@@ -1050,13 +1049,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancellation_propagation() {
-        const NOT_STARTED: u8 = 0;
-        const PLANNING: u8 = 1;
-        const CANCELLED: u8 = 2;
+        #[derive(Debug, PartialEq, Eq)]
+        enum Status {
+            NotStarted,
+            Planning,
+            Cancelled,
+        }
 
         #[derive(Clone)]
         struct NeverCompletesQueryPlanner {
-            status: Arc<AtomicU8>,
+            status: tokio::sync::mpsc::Sender<Status>,
         }
 
         impl Service<QueryPlannerRequest> for NeverCompletesQueryPlanner {
@@ -1077,19 +1079,30 @@ mod tests {
                 let status = self.status.clone();
                 Box::pin(async move {
                     let _guard = scopeguard::guard(status.clone(), |status| {
-                        status.store(CANCELLED, std::sync::atomic::Ordering::Release);
+                        // Executed on Drop, thus needs to be sync
+                        tokio::spawn(async move {
+                            status
+                                .send(Status::Cancelled)
+                                .await
+                                .expect("test is wrong if the channel is closed");
+                        });
                     });
 
-                    status.store(PLANNING, std::sync::atomic::Ordering::Release);
+                    status
+                        .send(Status::Planning)
+                        .await
+                        .expect("test is wrong if the channel is closed");
                     Ok(std::future::pending::<QueryPlannerResponse>().await)
                 })
             }
         }
 
-        let status = Arc::new(AtomicU8::new(NOT_STARTED));
-        let delegate = NeverCompletesQueryPlanner {
-            status: status.clone(),
-        };
+        let (tx, mut rx) = tokio::sync::mpsc::channel(100);
+        tx.send(Status::NotStarted)
+            .await
+            .expect("test is wrong if the channel is closed");
+
+        let delegate = NeverCompletesQueryPlanner { status: tx };
         let configuration = Arc::new(crate::Configuration::default());
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
@@ -1124,20 +1137,25 @@ mod tests {
         ));
 
         let handle = tokio::task::spawn(fut);
-        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        const SECOND: Duration = Duration::from_secs(1);
 
         assert_eq!(
-            status.load(std::sync::atomic::Ordering::Acquire),
-            PLANNING,
+            tokio::time::timeout(SECOND, rx.recv()).await.unwrap(),
+            Some(Status::NotStarted),
+        );
+
+        assert_eq!(
+            tokio::time::timeout(SECOND, rx.recv()).await.unwrap(),
+            Some(Status::Planning),
             "should have started planning"
         );
 
         handle.abort();
-        tokio::time::sleep(Duration::from_millis(25)).await;
 
         assert_eq!(
-            status.load(std::sync::atomic::Ordering::Acquire),
-            CANCELLED,
+            tokio::time::timeout(SECOND, rx.recv()).await.unwrap(),
+            Some(Status::Cancelled),
             "should have cancelled planning"
         );
     }
