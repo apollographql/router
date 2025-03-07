@@ -103,20 +103,25 @@ impl ConfigurationSource {
                                 if let Some(rhai_plugin) =
                                     configuration.apollo_plugins.plugins.get("rhai")
                                 {
-                                    let current_directory = std::env::current_dir();
-                                    if current_directory.is_err() {
-                                        tracing::error!("No current directory found",);
-                                        return stream::empty().boxed();
-                                    }
                                     let scripts_path = match rhai_plugin["scripts"].as_str() {
                                         Some(path) => Path::new(path),
                                         None => Path::new("rhai"),
                                     };
-                                    let scripts_watch =
-                                        current_directory.unwrap().join(scripts_path);
+                                    // If our path is relative, add it to the current dir
+                                    let scripts_watch = if scripts_path.is_relative() {
+                                        let current_directory = std::env::current_dir();
+                                        if current_directory.is_err() {
+                                            tracing::error!("No current directory found",);
+                                            return stream::empty().boxed();
+                                        }
+                                        current_directory.unwrap().join(scripts_path)
+                                    } else {
+                                        scripts_path.into()
+                                    };
                                     let rhai_watcher = crate::files::watch_rhai(&scripts_watch)
                                         .filter_map(move |_| future::ready(Some(RhaiReload)))
                                         .boxed();
+                                    // Select across both our streams
                                     futures::stream::select(config_watcher, rhai_watcher).boxed()
                                 } else {
                                     config_watcher
