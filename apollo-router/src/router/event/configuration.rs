@@ -10,6 +10,7 @@ use futures::prelude::*;
 use crate::Configuration;
 use crate::router::Event;
 use crate::router::Event::NoMoreConfiguration;
+use crate::router::Event::RhaiReload;
 use crate::router::Event::UpdateConfiguration;
 use crate::uplink::UplinkConfig;
 
@@ -79,7 +80,7 @@ impl ConfigurationSource {
                     match ConfigurationSource::read_config(&path) {
                         Ok(mut configuration) => {
                             if watch {
-                                crate::files::watch(&path)
+                                let config_watcher = crate::files::watch(&path)
                                     .filter_map(move |_| {
                                         let path = path.clone();
                                         let uplink_config = uplink_config.clone();
@@ -98,7 +99,28 @@ impl ConfigurationSource {
                                             }
                                         }
                                     })
-                                    .boxed()
+                                    .boxed();
+                                if let Some(rhai_plugin) =
+                                    configuration.apollo_plugins.plugins.get("rhai")
+                                {
+                                    let current_directory = std::env::current_dir();
+                                    if current_directory.is_err() {
+                                        tracing::error!("No current directory found",);
+                                        return stream::empty().boxed();
+                                    }
+                                    let scripts_path = match rhai_plugin["scripts"].as_str() {
+                                        Some(path) => Path::new(path),
+                                        None => Path::new("rhai"),
+                                    };
+                                    let scripts_watch =
+                                        current_directory.unwrap().join(scripts_path);
+                                    let rhai_watcher = crate::files::watch_rhai(&scripts_watch)
+                                        .filter_map(move |_| future::ready(Some(RhaiReload)))
+                                        .boxed();
+                                    futures::stream::select(config_watcher, rhai_watcher).boxed()
+                                } else {
+                                    config_watcher
+                                }
                             } else {
                                 configuration.uplink = uplink_config.clone();
                                 stream::once(future::ready(UpdateConfiguration(configuration)))
