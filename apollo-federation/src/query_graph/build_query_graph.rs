@@ -2370,7 +2370,7 @@ fn context_parse_error(context: &str, message: &str) -> FederationError {
     .into()
 }
 
-fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+pub(crate) fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     // PORT_NOTE: The original JS regex, as shown below
     //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
     // makes use of negative lookaheads, which aren't supported natively by Rust's regex crate.

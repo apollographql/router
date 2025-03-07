@@ -1,0 +1,147 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/federation/v2.9")
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  \`SECURITY\` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  \`EXECUTION\` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+directive @federation__key(
+  fields: federation__FieldSet!
+  resolvable: Boolean = true
+) repeatable on OBJECT | INTERFACE
+
+directive @federation__requires(
+  fields: federation__FieldSet!
+) on FIELD_DEFINITION
+
+directive @federation__provides(
+  fields: federation__FieldSet!
+) on FIELD_DEFINITION
+
+directive @federation__external(reason: String) on OBJECT | FIELD_DEFINITION
+
+directive @federation__tag(
+  name: String!
+) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+directive @federation__extends on OBJECT | INTERFACE
+
+directive @federation__shareable on OBJECT | FIELD_DEFINITION
+
+directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @federation__override(
+  from: String!
+  label: String
+) on FIELD_DEFINITION
+
+directive @federation__composeDirective(name: String) repeatable on SCHEMA
+
+directive @federation__interfaceObject on OBJECT
+
+directive @federation__authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @federation__requiresScopes(
+  scopes: [[federation__Scope!]!]!
+) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @federation__cost(
+  weight: Int!
+) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+
+directive @federation__listSize(
+  assumedSize: Int
+  slicingArguments: [String!]
+  sizedFields: [String!]
+  requireOneSlicingArgument: Boolean = true
+) on FIELD_DEFINITION
+
+directive @federation__fromContext(
+  field: federation__ContextFieldValue
+) on ARGUMENT_DEFINITION
+
+directive @federation__context(
+  name: String!
+) repeatable on INTERFACE | OBJECT | UNION
+
+scalar federation__ContextFieldValue
+
+scalar federation__FieldSet
+
+scalar federation__Scope
+
+type Query {
+  i1: I1
+  o2: O2
+  o3: O3
+  o4WithExternals: O4 @federation__provides(fields: "externalField")
+  o4WithoutExternals: O4
+  o5: O5Context
+}
+
+interface I1 {
+  a: Int
+}
+
+type O1 implements I1 {
+  a: Int
+  b: String
+}
+
+type O2 {
+  hasRequirement: String
+    @federation__requires(fields: "isRequired isAlsoRequired")
+  isRequired: Boolean
+  isAlsoRequired: Int
+}
+
+type O3 @federation__key(fields: "keyField1 subKey { keyField2 }") {
+  keyField1: String
+  subKey: O3SubKey
+  nonKeyField: String
+}
+
+type O3SubKey {
+  keyField2: String
+}
+
+type O4 {
+  c: String
+  externalField: Int @federation__external
+  externalFieldNeverProvided: String @federation__external
+}
+
+type O5Context @federation__context(name: "o5_context") {
+  usedInContext: String
+  notUsedInContext: Int
+  wrapper: O5Wrapper
+}
+
+type O5Wrapper {
+  inner: O5
+}
+
+type O5 {
+  usesContext(
+    arg1: String
+      @federation__fromContext(field: "$o5_context { usedInContext }")
+  ): String
+}
