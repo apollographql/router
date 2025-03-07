@@ -61,10 +61,10 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
+use crate::services::router::pipeline_handle::PipelineHandle;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
-#[cfg(test)]
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
@@ -844,6 +844,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
+    _pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -895,6 +896,17 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
+        // Create a handle that will help us keep track of this pipeline.
+        // A metric is exposed that allows the use to see if pipelines are being hung onto.
+        let schema_id = supergraph_creator.schema().schema_id.clone();
+        let launch_id = supergraph_creator.schema().launch_id.clone();
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(
+            schema_id.to_string(),
+            launch_id.map(|id| id.to_string()),
+            config_hash,
+        );
+
         Ok(Self {
             supergraph_creator,
             static_page,
@@ -902,6 +914,7 @@ impl RouterCreator {
             query_analysis_layer,
             persisted_query_layer,
             batching: configuration.batching.clone(),
+            _pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 

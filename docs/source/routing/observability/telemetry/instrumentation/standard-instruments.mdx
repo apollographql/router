@@ -116,7 +116,13 @@ The initial call to Uplink during router startup is not reflected in metrics.
 ### Telemetry
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
-  - `error` = One of `channel closed`, `channel full`.
+  - `error`: One of `channel closed`, `channel full`.
+
+### Internals
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration
 
 ### Deprecated
 

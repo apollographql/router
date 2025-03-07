@@ -296,4 +296,8 @@ async fn test_gauges_on_reload() {
             None,
         )
         .await;
+
+    router
+        .assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
+        .await;
 }

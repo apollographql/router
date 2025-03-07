@@ -1,5 +1,7 @@
 //! Logic for loading configuration in to an object model
 use std::fmt;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::io;
 use std::io::BufReader;
 use std::iter;
@@ -323,6 +325,12 @@ impl Configuration {
 }
 
 impl Configuration {
+    pub(crate) fn hash(&self) -> String {
+        let mut hasher = std::hash::DefaultHasher::default();
+        self.validated_yaml.hash(&mut hasher);
+        hasher.finish().to_string()
+    }
+
     fn notify(
         apollo_plugins: &Map<String, Value>,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
