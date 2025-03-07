@@ -514,7 +514,7 @@ impl EntityCache {
                 concurrent_requests: 10,
             })),
             invalidation,
-            subgraph_enums: dbg!(Arc::new(get_subgraph_enums(&supergraph_schema))),
+            subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
         })
     }
