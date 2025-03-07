@@ -1,6 +1,6 @@
 /docs/ @apollographql/docs
 /.changesets/ @apollographql/docs
-/apollo-federation/ @apollographql/fed-core @goto-bus-stop @SimonSapin @lrlna
+/apollo-federation/ @apollographql/fed-core @apollographql/rust-platform
 /apollo-federation/src/sources/connect @apollographql/connectors
 /apollo-router/ @apollographql/router-core @apollographql/fed-core
 /apollo-router/src/plugins/connectors @apollographql/connectors
