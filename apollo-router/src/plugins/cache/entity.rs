@@ -228,7 +228,6 @@ impl Plugin for EntityCache {
                 }
             };
         }
-        dbg!(&init.subgraph_schemas);
         let mut subgraph_storages = HashMap::new();
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
@@ -521,7 +520,7 @@ impl EntityCache {
     }
 }
 
-/// Get the map of subgraph enum mapped with subgraph name
+/// Get the map of subgraph enum variant mapped with subgraph name
 fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
     let mut subgraph_enums = HashMap::new();
     if let Some(graph_enum) = supergraph_schema.get_enum("join__Graph") {
