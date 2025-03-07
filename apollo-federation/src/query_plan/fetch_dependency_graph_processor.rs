@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 
 use super::QueryPathElement;
@@ -341,29 +342,20 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         node: Option<PlanNode>,
     ) -> Result<DeferredDeferBlock, FederationError> {
         /// Produce a query path with only the relevant elements: fields and type conditions.
-        fn op_path_to_query_path(
-            path: &[Arc<OpPathElement>],
-        ) -> Result<Vec<QueryPathElement>, FederationError> {
+        fn op_path_to_query_path(path: &[Arc<OpPathElement>]) -> Vec<QueryPathElement> {
             path.iter()
-                .map(
-                    |element| -> Result<Option<QueryPathElement>, FederationError> {
-                        match &**element {
-                            OpPathElement::Field(field) => {
-                                Ok(Some(QueryPathElement::Field(field.try_into()?)))
-                            }
-                            OpPathElement::InlineFragment(inline) => {
-                                match &inline.type_condition_position {
-                                    Some(_) => Ok(Some(QueryPathElement::InlineFragment(
-                                        inline.try_into()?,
-                                    ))),
-                                    None => Ok(None),
-                                }
-                            }
-                        }
-                    },
-                )
-                .filter_map(|result| result.transpose())
-                .collect::<Result<Vec<_>, _>>()
+                .filter_map(|element| match &**element {
+                    OpPathElement::Field(field) => Some(QueryPathElement::Field {
+                        response_key: field.response_name().clone(),
+                    }),
+                    OpPathElement::InlineFragment(inline) => inline
+                        .type_condition_position
+                        .as_ref()
+                        .map(|cond| QueryPathElement::InlineFragment {
+                            type_condition: cond.type_name().clone(),
+                        }),
+                })
+                .collect()
         }
 
         Ok(DeferredDeferBlock {
@@ -378,7 +370,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             } else {
                 Some(defer_info.label.clone())
             },
-            query_path: op_path_to_query_path(&defer_info.path.full_path)?,
+            query_path: op_path_to_query_path(&defer_info.path.full_path),
             // Note that if the deferred block has nested @defer,
             // then the `value` is going to be a `DeferNode`
             // and we'll use it's own `subselection`, so we don't need it here.
@@ -386,8 +378,9 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 defer_info
                     .sub_selection
                     .without_empty_branches()?
-                    .map(|filtered| filtered.as_ref().try_into())
+                    .map(|filtered| executable::SelectionSet::try_from(filtered.as_ref()))
                     .transpose()?
+                    .map(|selection_set| selection_set.serialize().no_indent().to_string())
             } else {
                 None
             },
@@ -405,8 +398,9 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             primary: PrimaryDeferBlock {
                 sub_selection: sub_selection
                     .without_empty_branches()?
-                    .map(|filtered| filtered.as_ref().try_into())
-                    .transpose()?,
+                    .map(|filtered| executable::SelectionSet::try_from(filtered.as_ref()))
+                    .transpose()?
+                    .map(|selection_set| selection_set.serialize().no_indent().to_string()),
                 node: main.map(Box::new),
             },
             deferred,
