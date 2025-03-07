@@ -737,6 +737,9 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU8;
+    use std::time::Duration;
+
     use mockall::mock;
     use mockall::predicate::*;
     use test_log::test;
@@ -1042,6 +1045,100 @@ mod tests {
                 ))
                 .await
                 .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cancellation_propagation() {
+        const NOT_STARTED: u8 = 0;
+        const PLANNING: u8 = 1;
+        const CANCELLED: u8 = 2;
+
+        #[derive(Clone)]
+        struct NeverCompletesQueryPlanner {
+            status: Arc<AtomicU8>,
+        }
+
+        impl Service<QueryPlannerRequest> for NeverCompletesQueryPlanner {
+            type Response = QueryPlannerResponse;
+
+            type Error = MaybeBackPressureError<QueryPlannerError>;
+
+            type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(
+                &mut self,
+                _cx: &mut task::Context<'_>,
+            ) -> task::Poll<Result<(), Self::Error>> {
+                task::Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, _req: QueryPlannerRequest) -> Self::Future {
+                let status = self.status.clone();
+                Box::pin(async move {
+                    let _guard = scopeguard::guard(status.clone(), |status| {
+                        status.store(CANCELLED, std::sync::atomic::Ordering::Release);
+                    });
+
+                    status.store(PLANNING, std::sync::atomic::Ordering::Release);
+                    Ok(std::future::pending::<QueryPlannerResponse>().await)
+                })
+            }
+        }
+
+        let status = Arc::new(AtomicU8::new(NOT_STARTED));
+        let delegate = NeverCompletesQueryPlanner {
+            status: status.clone(),
+        };
+        let configuration = Arc::new(crate::Configuration::default());
+        let schema = include_str!("testdata/schema.graphql");
+        let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
+
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::default(),
+        )
+        .await
+        .unwrap();
+
+        let doc = Query::parse_document(
+            "query Me { me { name { first } } }",
+            None,
+            &schema,
+            &configuration,
+        )
+        .unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        let fut = planner.call(query_planner::CachingRequest::new(
+            "query Me { me { name { first } } }".to_string(),
+            Some("".into()),
+            context.clone(),
+        ));
+
+        let handle = tokio::task::spawn(fut);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        assert_eq!(
+            status.load(std::sync::atomic::Ordering::Acquire),
+            PLANNING,
+            "should have started planning"
+        );
+
+        handle.abort();
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        assert_eq!(
+            status.load(std::sync::atomic::Ordering::Acquire),
+            CANCELLED,
+            "should have cancelled planning"
         );
     }
 }
