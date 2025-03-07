@@ -11,6 +11,7 @@ use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
@@ -20,6 +21,7 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::SyncCounter;
+use opentelemetry::metrics::SyncGauge;
 use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
@@ -315,6 +317,18 @@ impl<T: Copy> AsyncInstrument<T> for AggregateObservableUpDownCounter<T> {
     }
 }
 
+pub(crate) struct AggregateGauge<T> {
+    delegates: Vec<Gauge<T>>,
+}
+
+impl<T: Copy> SyncGauge<T> for AggregateGauge<T> {
+    fn record(&self, value: T, attributes: &[KeyValue]) {
+        for gauge in &self.delegates {
+            gauge.record(value, attributes)
+        }
+    }
+}
+
 pub(crate) struct AggregateObservableGauge<T> {
     delegates: Vec<(ObservableGauge<T>, Option<DroppingUnregister>)>,
 }
@@ -450,6 +464,9 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         UpDownCounter,
         AggregateUpDownCounter
     );
+    aggregate_instrument_fn!(u64_gauge, u64, Gauge, AggregateGauge);
+    aggregate_instrument_fn!(i64_gauge, i64, Gauge, AggregateGauge);
+    aggregate_instrument_fn!(f64_gauge, f64, Gauge, AggregateGauge);
 
     aggregate_observable_instrument_fn!(
         i64_observable_up_down_counter,
