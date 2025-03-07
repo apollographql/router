@@ -5,9 +5,11 @@ use fred::error::RedisError;
 use fred::types::Scanner;
 use futures::StreamExt;
 use futures::stream;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use tokio::sync::Semaphore;
@@ -225,7 +227,7 @@ pub(crate) enum InvalidationRequest {
     Entity {
         subgraph: String,
         r#type: String,
-        key: Value,
+        key: IndexMap<ByteString, Value>,
     },
 }
 
