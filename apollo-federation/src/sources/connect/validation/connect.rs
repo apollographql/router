@@ -1,16 +1,18 @@
+//! Parsing and validation of `@connect` directives
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::collections::IndexSet;
-use apollo_compiler::executable::Selection;
 use apollo_compiler::parser::SourceMap;
-use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 
+use self::entity::validate_entity_arg;
+use self::selection::get_seen_fields_from_selection;
+use self::selection::validate_body_selection;
 use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
@@ -19,39 +21,45 @@ use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
-use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
-use super::resolvable_key_fields;
-use super::selection::validate_body_selection;
-use super::selection::validate_selection;
 use super::source::SourceName;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
-pub(super) fn validate_extended_type(
-    extended_type: &ExtendedType,
+mod entity;
+mod selection;
+
+pub(super) fn fields_seen_by_all_connects(
     schema: &SchemaInfo,
     all_source_names: &[SourceName],
-    seen_fields: &mut IndexSet<(Name, Name)>,
-) -> Vec<Message> {
-    match extended_type {
-        ExtendedType::Object(object) => {
-            validate_object_fields(object, schema, all_source_names, seen_fields)
+) -> Result<Vec<(Name, Name)>, Vec<Message>> {
+    let mut messages = Vec::new();
+    let mut seen_fields = Vec::new();
+
+    for object in schema
+        .types
+        .values()
+        .filter_map(|extended_type| {
+            if let ExtendedType::Object(node) = extended_type {
+                Some(node)
+            } else {
+                None
+            }
+        })
+        .filter(|object| !object.is_built_in())
+    {
+        match fields_seen_by_object_connectors(object, schema, all_source_names) {
+            Ok(fields) => seen_fields.extend(fields),
+            Err(errs) => messages.extend(errs),
         }
-        ExtendedType::Union(union_type) => vec![validate_abstract_type(
-            SourceSpan::recompose(union_type.location(), union_type.name.location()),
-            &schema.sources,
-            "union",
-        )],
-        ExtendedType::Interface(interface) => vec![validate_abstract_type(
-            SourceSpan::recompose(interface.location(), interface.name.location()),
-            &schema.sources,
-            "interface",
-        )],
-        _ => Vec::new(),
+    }
+    if messages.is_empty() {
+        Ok(seen_fields)
+    } else {
+        Err(messages)
     }
 }
 
@@ -62,43 +70,12 @@ pub(crate) enum ObjectCategory {
     Other,
 }
 
-/// Make sure that any `@connect` directives on object fields are valid, and that all fields
-/// are resolvable by some combination of `@connect` directives.
-fn validate_object_fields(
+/// Make sure that any `@connect` directives on object fields are valid
+fn fields_seen_by_object_connectors(
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
-    seen_fields: &mut IndexSet<(Name, Name)>,
-) -> Vec<Message> {
-    if object.is_built_in() {
-        return Vec::new();
-    }
-
-    // Mark resolvable key fields as seen
-    let mut selections: Vec<(Name, Selection)> = resolvable_key_fields(object, schema)
-        .flat_map(|(field_set, _)| {
-            field_set
-                .selection_set
-                .selections
-                .iter()
-                .map(|selection| (object.name.clone(), selection.clone()))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    while !selections.is_empty() {
-        if let Some((type_name, selection)) = selections.pop() {
-            if let Some(field) = selection.as_field() {
-                let t = (type_name, field.name.clone());
-                if !seen_fields.contains(&t) {
-                    seen_fields.insert(t);
-                    field.selection_set.selections.iter().for_each(|selection| {
-                        selections.push((field.ty().inner_named_type().clone(), selection.clone()));
-                    });
-                }
-            }
-        }
-    }
-
+) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let source_map = &schema.sources;
     let is_subscription = schema
         .schema_definition
@@ -106,14 +83,14 @@ fn validate_object_fields(
         .as_ref()
         .is_some_and(|sub| sub.name == object.name);
     if is_subscription {
-        return vec![Message {
+        return Err(vec![Message {
             code: Code::SubscriptionInConnectors,
             message: format!(
                 "A subscription root type is not supported when using `@{connect_directive_name}`.",
                 connect_directive_name = schema.connect_directive_name,
             ),
             locations: object.line_column_range(source_map).into_iter().collect(),
-        }];
+        }]);
     }
 
     let object_category = if schema
@@ -133,30 +110,28 @@ fn validate_object_fields(
     } else {
         ObjectCategory::Other
     };
-    object
-        .fields
-        .values()
-        .flat_map(|field| {
-            validate_field(
-                field,
-                object_category,
-                source_names,
-                object,
-                schema,
-                seen_fields,
-            )
-        })
-        .collect()
+    let mut seen_fields = Vec::new();
+    let mut messages = Vec::new();
+    for field in object.fields.values() {
+        match fields_seen_by_connector(field, object_category, source_names, object, schema) {
+            Ok(fields) => seen_fields.extend(fields),
+            Err(errs) => messages.extend(errs),
+        }
+    }
+    if messages.is_empty() {
+        Ok(seen_fields)
+    } else {
+        Err(messages)
+    }
 }
 
-fn validate_field(
+fn fields_seen_by_connector(
     field: &Component<FieldDefinition>,
     category: ObjectCategory,
     source_names: &[SourceName],
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
-    seen_fields: &mut IndexSet<(Name, Name)>,
-) -> Vec<Message> {
+) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let source_map = &schema.sources;
     let mut errors = Vec::new();
     let connect_directives = field
@@ -184,11 +159,11 @@ fn validate_field(
             _ => (),
         }
 
-        return errors;
+        return Err(errors);
     };
 
     // mark the field with a @connect directive as seen
-    seen_fields.insert((object.name.clone(), field.name.clone()));
+    let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
 
     // direct recursion isn't allowed, like a connector on User.friends: [User]
     if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
@@ -211,7 +186,10 @@ fn validate_field(
             field_coordinate,
         };
 
-        errors.extend(validate_selection(connect_coordinate, schema, seen_fields).err());
+        match get_seen_fields_from_selection(connect_coordinate, schema) {
+            Ok(seen) => seen_fields.extend(seen),
+            Err(error) => errors.push(error),
+        }
 
         errors
             .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
@@ -230,7 +208,7 @@ fn validate_field(
                     .into_iter()
                     .collect(),
             });
-            return errors;
+            return Err(errors);
         };
 
         let url_template = match method::validate(
@@ -311,23 +289,10 @@ fn validate_field(
             schema,
         ));
     }
-    errors
-}
-
-fn validate_abstract_type(
-    node: Option<SourceSpan>,
-    source_map: &SourceMap,
-    keyword: &str,
-) -> Message {
-    Message {
-        code: Code::ConnectorsUnsupportedAbstractType,
-        message: format!(
-            "Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."
-        ),
-        locations: node
-            .and_then(|location| location.line_column_range(source_map))
-            .into_iter()
-            .collect(),
+    if errors.is_empty() {
+        Ok(seen_fields)
+    } else {
+        Err(errors)
     }
 }
 

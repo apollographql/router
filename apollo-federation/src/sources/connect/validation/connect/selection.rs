@@ -1,10 +1,12 @@
+//! Validate and check semantics of the `@connect(selection:)` argument
+
 use std::fmt::Display;
 use std::iter::once;
 use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::collections::IndexSet;
+use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
@@ -16,10 +18,6 @@ use shape::Shape;
 use super::Code;
 use super::Message;
 use super::Name;
-use super::Value;
-use super::coordinates::ConnectDirectiveCoordinate;
-use super::coordinates::SelectionCoordinate;
-use super::expression;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
@@ -30,7 +28,10 @@ use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::string_template::Expression;
+use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
+use crate::sources::connect::validation::coordinates::SelectionCoordinate;
 use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
+use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -39,11 +40,10 @@ use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
 
-pub(super) fn validate_selection(
+pub(super) fn get_seen_fields_from_selection(
     coordinate: ConnectDirectiveCoordinate,
     schema: &SchemaInfo,
-    seen_fields: &mut IndexSet<(Name, Name)>,
-) -> Result<(), Message> {
+) -> Result<Vec<(Name, Name)>, Message> {
     let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
 
     let context = VariableContext::new(
@@ -65,11 +65,11 @@ pub(super) fn validate_selection(
 
     let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
         // TODO: Validate scalar return types
-        return Ok(());
+        return Ok(Vec::new());
     };
     let Some(sub_selection) = json_selection.next_subselection() else {
         // TODO: Validate scalar selections
-        return Ok(());
+        return Ok(Vec::new());
     };
 
     let group = Group {
@@ -78,14 +78,13 @@ pub(super) fn validate_selection(
         definition: field,
     };
 
-    SelectionValidator {
-        root: PathPart::Root(coordinate.field_coordinate.object),
+    SelectionValidator::new(
         schema,
-        path: Vec::new(),
+        PathPart::Root(coordinate.field_coordinate.object),
         selection_arg,
-        seen_fields,
-    }
+    )
     .walk(group)
+    .map(|validator| validator.seen_fields)
 }
 
 pub(super) fn validate_body_selection(
@@ -260,15 +259,31 @@ struct SelectionArg<'schema> {
     coordinate: SelectionCoordinate<'schema>,
 }
 
-struct SelectionValidator<'schema, 'a> {
+struct SelectionValidator<'schema> {
     schema: &'schema SchemaInfo<'schema>,
     root: PathPart<'schema>,
     path: Vec<PathPart<'schema>>,
     selection_arg: SelectionArg<'schema>,
-    seen_fields: &'a mut IndexSet<(Name, Name)>,
+    seen_fields: Vec<(Name, Name)>,
 }
 
-impl SelectionValidator<'_, '_> {
+impl<'schema> SelectionValidator<'schema> {
+    fn new(
+        schema: &'schema SchemaInfo<'schema>,
+        root: PathPart<'schema>,
+        selection_arg: SelectionArg<'schema>,
+    ) -> Self {
+        Self {
+            schema,
+            root,
+            path: Vec::new(),
+            selection_arg,
+            seen_fields: Vec::new(),
+        }
+    }
+}
+
+impl SelectionValidator<'_> {
     fn check_for_circular_reference(
         &self,
         field: Field,
@@ -334,6 +349,24 @@ impl SelectionValidator<'_, '_> {
             })
             .into_iter()
     }
+
+    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
+        once(self.root).chain(self.path.iter().copied())
+    }
+
+    fn path_string(&self, tail: &FieldDefinition) -> String {
+        self.path_with_root()
+            .map(|part| match part {
+                PathPart::Root(ty) => ty.name.as_str(),
+                PathPart::Field { definition, .. } => definition.name.as_str(),
+            })
+            .chain(once(tail.name.as_str()))
+            .join(".")
+    }
+
+    fn last_field(&self) -> &PathPart {
+        self.path.last().unwrap_or(&self.root)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -380,7 +413,7 @@ struct Group<'schema> {
 
 // TODO: Once there is location data for JSONSelection, return multiple errors instead of stopping
 //  at the first
-impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidator<'schema, '_> {
+impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidator<'schema> {
     /// If the both the selection and the schema agree that this field is an object, then we
     /// provide it back to the visitor to be walked.
     ///
@@ -442,7 +475,7 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
     }
 }
 
-impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
+impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema> {
     type Error = Message;
 
     fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
@@ -458,7 +491,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
         })?;
         let is_group = field.next_subselection().is_some();
 
-        self.seen_fields.insert((
+        self.seen_fields.push((
             self.last_field().ty().name.clone(),
             field.definition.name.clone(),
         ));
@@ -505,25 +538,5 @@ impl<'schema> FieldVisitor<Field<'schema>> for SelectionValidator<'schema, '_> {
             }),
             (_, false) => Ok(()),
         }
-    }
-}
-
-impl SelectionValidator<'_, '_> {
-    fn path_with_root(&self) -> impl Iterator<Item = PathPart> {
-        once(self.root).chain(self.path.iter().copied())
-    }
-
-    fn path_string(&self, tail: &FieldDefinition) -> String {
-        self.path_with_root()
-            .map(|part| match part {
-                PathPart::Root(ty) => ty.name.as_str(),
-                PathPart::Field { definition, .. } => definition.name.as_str(),
-            })
-            .chain(once(tail.name.as_str()))
-            .join(".")
-    }
-
-    fn last_field(&self) -> &PathPart {
-        self.path.last().unwrap_or(&self.root)
     }
 }

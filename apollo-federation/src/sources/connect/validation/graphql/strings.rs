@@ -219,6 +219,7 @@ mod tests {
     use apollo_compiler::schema::ExtendedType;
     use pretty_assertions::assert_eq;
 
+    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::validation::graphql::GraphQLString;
     use crate::sources::connect::validation::graphql::SchemaInfo;
 
@@ -256,7 +257,7 @@ mod tests {
         let string = GraphQLString::new(value, &schema.sources).unwrap();
         assert_eq!(string.as_str(), "https://example.com");
         let name = "unused".try_into().unwrap();
-        let schema_info = SchemaInfo::new(&schema, SCHEMA, &name, &name);
+        let schema_info = SchemaInfo::new(&schema, ConnectSpec::V0_1, SCHEMA, &name, &name);
         assert_eq!(
             string.line_col_for_subslice(2..5, &schema_info),
             Some(
@@ -279,7 +280,7 @@ mod tests {
         let string = GraphQLString::new(value, &schema.sources).unwrap();
         assert_eq!(string.as_str(), "something\nsomethingElse {\n  nested\n}");
         let name = "unused".try_into().unwrap();
-        let schema_info = SchemaInfo::new(&schema, SCHEMA, &name, &name);
+        let schema_info = SchemaInfo::new(&schema, ConnectSpec::V0_1, SCHEMA, &name, &name);
         assert_eq!("nested", &string.as_str()[28..34]);
         assert_eq!(
             string.line_col_for_subslice(28..34, &schema_info),

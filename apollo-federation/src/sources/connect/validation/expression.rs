@@ -340,6 +340,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::JSONSelection;
     use crate::sources::connect::validation::coordinates::FieldCoordinate;
 
@@ -400,7 +401,13 @@ mod tests {
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
         let source_directive = name!("source");
-        let schema_info = SchemaInfo::new(&schema, &schema_str, &directive.name, &source_directive);
+        let schema_info = SchemaInfo::new(
+            &schema,
+            ConnectSpec::V0_1,
+            &schema_str,
+            &directive.name,
+            &source_directive,
+        );
         let expr_string = GraphQLString::new(
             &directive
                 .argument_by_name("http", &schema)

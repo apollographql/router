@@ -1,5 +1,4 @@
-mod compare_keys;
-mod keys;
+//! Validations for the `@connect(entity:)` argument.
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -12,19 +11,16 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
-pub(super) use keys::EntityKeyChecker;
-pub(super) use keys::field_set_error;
 
 use super::Code;
 use super::Message;
-use super::coordinates::connect_directive_entity_argument_coordinate;
-use super::coordinates::field_with_connect_directive_entity_true_coordinate;
-use super::extended_type::ObjectCategory;
+use super::ObjectCategory;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
+use crate::sources::connect::validation::coordinates::connect_directive_entity_argument_coordinate;
+use crate::sources::connect::validation::coordinates::field_with_connect_directive_entity_true_coordinate;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::variable::VariableReference;
 
 /// Applies additional validations to `@connect` if `entity` is `true`.
 pub(super) fn validate_entity_arg(
@@ -136,6 +132,7 @@ pub(super) fn validate_entity_arg(
         field,
         entity_type: object_type,
     })
+    .map(|_| ())
 }
 
 #[derive(Clone, Debug)]

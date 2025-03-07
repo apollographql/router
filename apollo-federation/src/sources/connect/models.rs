@@ -193,7 +193,7 @@ impl Connector {
     pub(crate) fn resolvable_key(
         &self,
         schema: &Schema,
-    ) -> Result<Option<Valid<FieldSet>>, FederationError> {
+    ) -> Result<Option<Valid<FieldSet>>, String> {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {
@@ -204,7 +204,7 @@ impl Connector {
                     .get(schema)
                     .map(|f| f.ty.inner_named_type())
                     .map_err(|_| {
-                        internal_error!(
+                        format!(
                             "Missing field {}.{}",
                             self.id.directive.field.type_name(),
                             self.id.directive.field.field_name()
@@ -216,9 +216,7 @@ impl Connector {
                     self.variable_references(),
                     EntityResolver::Explicit,
                 )
-                .map_err(|_| {
-                    internal_error!("Failed to create key for connector {}", self.id.label)
-                })
+                .map_err(|_| format!("Failed to create key for connector {}", self.id.label))
             }
             Some(EntityResolver::Implicit) => make_key_field_set_from_variables(
                 schema,
@@ -226,7 +224,7 @@ impl Connector {
                 self.variable_references(),
                 EntityResolver::Implicit,
             )
-            .map_err(|_| internal_error!("Failed to create key for connector {}", self.id.label)),
+            .map_err(|_| format!("Failed to create key for connector {}", self.id.label)),
         }
     }
 }
