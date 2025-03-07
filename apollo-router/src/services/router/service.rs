@@ -33,6 +33,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
+use crate::services::supergraph::service::HasSchema;
 
 use super::Body;
 use super::ClientRequestAccepts;
@@ -80,6 +81,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::services::router::pipeline_handle::PipelineHandle;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
@@ -844,6 +846,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
+    _pipeline_handle: PipelineHandle
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -895,6 +898,13 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
+        // Create a handle that will help us keep track of this pipeline.
+        // A metric is exposed that allows the use to see if pipelines are being hung onto.
+        let schema_id = supergraph_creator.schema().schema_id.clone();
+        let launch_id = supergraph_creator.schema().launch_id.clone();
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(schema_id.to_string(), launch_id.map(|id|id.to_string()), config_hash);
+
         Ok(Self {
             supergraph_creator,
             static_page,
@@ -902,6 +912,7 @@ impl RouterCreator {
             query_analysis_layer,
             persisted_query_layer,
             batching: configuration.batching.clone(),
+            _pipeline_handle: pipeline_handle,
         })
     }
 
