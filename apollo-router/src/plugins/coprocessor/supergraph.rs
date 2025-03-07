@@ -110,7 +110,7 @@ impl SupergraphStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: supergraph request stage error: {error}"
+                            "coprocessor: supergraph request stage error: {error}"
                         );
                         error
                     });
@@ -150,7 +150,7 @@ impl SupergraphStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: supergraph response stage error: {error}"
+                            "coprocessor: supergraph response stage error: {error}"
                         );
                         error
                     });

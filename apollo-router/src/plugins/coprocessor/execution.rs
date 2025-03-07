@@ -104,7 +104,7 @@ impl ExecutionStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: execution request stage error: {error}"
+                            "coprocessor: execution request stage error: {error}"
                         );
                         error
                     });
@@ -145,7 +145,7 @@ impl ExecutionStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: execution response stage error: {error}"
+                            "coprocessor: execution response stage error: {error}"
                         );
                         error
                     });

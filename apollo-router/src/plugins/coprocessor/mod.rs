@@ -479,7 +479,7 @@ impl RouterStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: router request stage error: {error}"
+                            "coprocessor: router request stage error: {error}"
                         );
                         error
                     });
@@ -518,7 +518,7 @@ impl RouterStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: router response stage error: {error}"
+                            "coprocessor: router response stage error: {error}"
                         );
                         error
                     });
@@ -617,7 +617,7 @@ impl SubgraphStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: subgraph request stage error: {error}"
+                            "coprocessor: subgraph request stage error: {error}"
                         );
                         error
                     });
@@ -657,7 +657,7 @@ impl SubgraphStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: subgraph response stage error: {error}"
+                            "coprocessor: subgraph response stage error: {error}"
                         );
                         error
                     });
