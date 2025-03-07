@@ -1287,6 +1287,7 @@ pub(crate) fn hash_additional_data(
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
+    body.variables.sort_keys();
     digest.update(serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
@@ -1513,7 +1514,6 @@ fn hash_other_representation(
 ) -> String {
     // We had to sort it to be deterministic
     representation.sort_keys();
-    // We have to hash the representation because it can contains PII
     let mut digest = Sha256::new();
     digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
     hex::encode(digest.finalize().as_slice())

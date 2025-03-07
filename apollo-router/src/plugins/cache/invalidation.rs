@@ -100,7 +100,7 @@ impl Invalidation {
         &self,
         redis_storage: &RedisCacheStorage,
         origin: &'static str,
-        request: &InvalidationRequest,
+        request: &mut InvalidationRequest,
     ) -> Result<u64, InvalidationError> {
         let key_prefix = request.key_prefix();
         let subgraph = request.subgraph_name();
@@ -169,7 +169,7 @@ impl Invalidation {
         let mut count = 0;
         let mut errors = Vec::new();
         let mut futures = Vec::new();
-        for request in requests {
+        for mut request in requests {
             let redis_storage = match self.storage.get(request.subgraph_name()) {
                 Some(s) => s,
                 None => continue,
@@ -183,7 +183,7 @@ impl Invalidation {
                 let start = Instant::now();
 
                 let res = self
-                    .handle_request(redis_storage, origin, &request)
+                    .handle_request(redis_storage, origin, &mut request)
                     .instrument(tracing::info_span!("cache.invalidation.request"))
                     .await;
 
@@ -232,7 +232,8 @@ pub(crate) enum InvalidationRequest {
 }
 
 impl InvalidationRequest {
-    fn key_prefix(&self) -> String {
+    /// Compute a cache key prefix. For entity keys, this destructively sorts all objects.
+    fn key_prefix(&mut self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
                 format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:*",)
