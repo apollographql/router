@@ -160,7 +160,6 @@ impl Service<SubgraphRequest> for MockSubgraph {
     }
 
     fn call(&mut self, mut req: SubgraphRequest) -> Self::Future {
-        dbg!("iciiii");
         if let Some(map_request_fn) = &self.map_request_fn {
             req = map_request_fn.clone()(req);
         }

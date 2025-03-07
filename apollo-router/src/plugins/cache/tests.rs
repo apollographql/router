@@ -277,133 +277,133 @@ async fn insert() {
     insta::assert_json_snapshot!(response);
 }
 
-// #[tokio::test]
-// async fn insert_with_requires() {
-//     let valid_schema =
-//         Arc::new(Schema::parse_and_validate(SCHEMA_REQUIRES, "test.graphql").unwrap());
-//     let query = "query { topProducts { name shippingEstimate price } }";
+#[tokio::test]
+async fn insert_with_requires() {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_REQUIRES, "test.graphql").unwrap());
+    let query = "query { topProducts { name shippingEstimate price } }";
 
-//     let subgraphs = MockedSubgraphs([
-//         ("products", MockSubgraph::builder().with_json(
-//                 serde_json::json!{{"query":"{topProducts{__typename name upc}}"}},
-//                 serde_json::json!{{"data": {"topProducts": {
-//                     "__typename": "Product",
-//                     "upc": "1",
-//                     "name": "Test"
-//                 }}}}
-//         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
-//         ("inventory", MockSubgraph::builder().with_json(
-//             serde_json::json!{{
-//                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Product{ __typename upc shippingEstimate price }}}",
-//             "variables": {
-//                 "representations": [
-//                     {
-//                         "upc": "1",
-//                         "__typename": "Product",
-//                         "weight": 5,
-//                         "price": 150
-//                     }
-//                 ]
-//             }}},
-//             serde_json::json!{{"data": {
-//                 "_entities": [{
-//                     "__typename": "Product",
-//                     "upc": 1,
-//                     "shippingEstimate": 15
-//                 }]
-//             }}}
-//         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
-//     ].into_iter().collect());
+    let subgraphs = MockedSubgraphs([
+        ("products", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{ topProducts { __typename upc name price weight } }"}},
+                serde_json::json!{{"data": {"topProducts": [{
+                    "__typename": "Product",
+                    "upc": "1",
+                    "name": "Test",
+                    "price": 150,
+                    "weight": 5
+                }]}}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
+        ("inventory", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
+                "variables": {
+                    "representations": [
+                        {
+                            "price": 150,
+                            "weight": 5,
+                            "upc": "1",
+                            "__typename": "Product"
+                        }
+                    ]
+            }}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "shippingEstimate": 15
+                }]
+            }}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
+    ].into_iter().collect());
 
-//     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
-//         .await
-//         .unwrap();
-//     let map = [
-//         (
-//             "products".to_string(),
-//             Subgraph {
-//                 redis: None,
-//                 private_id: Some("sub".to_string()),
-//                 enabled: true,
-//                 ttl: None,
-//                 ..Default::default()
-//             },
-//         ),
-//         (
-//             "inventory".to_string(),
-//             Subgraph {
-//                 redis: None,
-//                 private_id: Some("sub".to_string()),
-//                 enabled: true,
-//                 ttl: None,
-//                 ..Default::default()
-//             },
-//         ),
-//     ]
-//     .into_iter()
-//     .collect();
-//     let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
-//         .await
-//         .unwrap();
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let map = [
+        (
+            "products".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "inventory".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+        .await
+        .unwrap();
 
-//     let service = TestHarness::builder()
-//         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
-//         .unwrap()
-//         .schema(SCHEMA)
-//         .extra_plugin(entity_cache)
-//         .extra_plugin(subgraphs)
-//         .build_supergraph()
-//         .await
-//         .unwrap();
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA_REQUIRES)
+        .extra_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
 
-//     let request = supergraph::Request::fake_builder()
-//         .query(query)
-//         .context(Context::new())
-//         .build()
-//         .unwrap();
-//     let mut response = service.oneshot(request).await.unwrap();
-//     // let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
-//     // let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
-//     // cache_keys.sort();
-//     // insta::assert_json_snapshot!(cache_keys);
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
 
-//     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
-//     let response = response.next_response().await.unwrap();
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let response = response.next_response().await.unwrap();
 
-//     insta::assert_json_snapshot!(response);
+    insta::assert_json_snapshot!(response);
 
-//     // Now testing without any mock subgraphs, all the data should come from the cache
-//     let entity_cache =
-//         EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
-//             .await
-//             .unwrap();
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
-//     let service = TestHarness::builder()
-//         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
-//         .unwrap()
-//         .schema(SCHEMA)
-//         .extra_plugin(entity_cache)
-//         .build_supergraph()
-//         .await
-//         .unwrap();
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA_REQUIRES)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
 
-//     let request = supergraph::Request::fake_builder()
-//         .query(query)
-//         .context(Context::new())
-//         .build()
-//         .unwrap();
-//     let mut response = service.oneshot(request).await.unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
 
-//     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
-//     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
-//     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
-//     cache_keys.sort();
-//     insta::assert_json_snapshot!(cache_keys);
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
 
-//     let response = response.next_response().await.unwrap();
+    let response = response.next_response().await.unwrap();
 
-//     insta::assert_json_snapshot!(response);
-// }
+    insta::assert_json_snapshot!(response);
+}
 
 #[tokio::test]
 async fn no_cache_control() {
