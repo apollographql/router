@@ -86,6 +86,35 @@ impl CachingRequest {
     }
 }
 
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl CachingRequest {
+    /// Construct an as-simple-as-possible request with the right Context values for the query
+    /// planner to do its job.
+    #[builder]
+    pub(crate) fn fake_new(
+        configuration: Option<Arc<crate::Configuration>>,
+        schema: Arc<crate::spec::Schema>,
+        query: String,
+        operation_name: Option<String>,
+    ) -> Self {
+        let configuration = configuration.unwrap_or_default();
+        let doc =
+            crate::spec::Query::parse_document(&query, None, &schema, &configuration).unwrap();
+
+        let context = Context::new();
+        context
+            .extensions()
+            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+
+        Self {
+            query,
+            operation_name,
+            context,
+        }
+    }
+}
+
 assert_impl_all!(Response: Send);
 /// [`Context`] and [`QueryPlan`] for the response.
 pub(crate) struct Response {

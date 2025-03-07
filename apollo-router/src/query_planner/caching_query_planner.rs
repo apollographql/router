@@ -1117,24 +1117,14 @@ mod tests {
         .await
         .unwrap();
 
-        let doc = Query::parse_document(
-            "query Me { me { name { first } } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
-
-        let fut = planner.call(query_planner::CachingRequest::new(
-            "query Me { me { name { first } } }".to_string(),
-            Some("".into()),
-            context.clone(),
-        ));
+        let fut = planner.call(
+            query_planner::CachingRequest::fake_builder()
+                .configuration(configuration)
+                .schema(schema)
+                .query("query Me { me { name { first } } }")
+                .operation_name("Me")
+                .build(),
+        );
 
         let handle = tokio::task::spawn(fut);
 
