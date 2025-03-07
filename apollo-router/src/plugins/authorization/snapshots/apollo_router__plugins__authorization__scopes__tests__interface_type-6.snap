@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/plugins/authorization/scopes.rs
+expression: "TestResult {\n    query: QUERY3,\n    extracted_scopes: &extracted_scopes,\n    scopes: Vec::new(),\n    result: doc,\n    paths,\n}"
+---
+query:
+
+        query {
+            test
+            a {
+                id
+            }
+        }
+        
+extracted_scopes: {"a", "b"}
+request scopes: []
+filtered:
+{
+  test
+}
+
+paths: ["/a"]
