@@ -528,9 +528,9 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
             |(enum_name, enum_value_def)| {
                 let subgraph_name = enum_value_def
                     .directives
-                    .get("join__graph")
-                    .and_then(|directive| directive.specified_argument_by_name("name"))
-                    .and_then(|arg| arg.as_str())?
+                    .get("join__graph")?
+                    .specified_argument_by_name("name")?
+                    .as_str()?
                     .to_string();
 
                 Some((enum_name.to_string(), subgraph_name))
