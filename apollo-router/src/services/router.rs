@@ -43,6 +43,7 @@ pub mod body;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
+pub(crate) mod pipeline_handle;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
