@@ -467,7 +467,7 @@ mod test {
             .build()
             .expect("expecting valid request")
             .try_into()
-            .unwrap();
+            .expect("expecting router request");
 
         let response = router_service
             .ready()

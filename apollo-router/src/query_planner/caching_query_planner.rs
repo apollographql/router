@@ -515,11 +515,7 @@ where
                 .plan_options(caching_key.plan_options)
                 .build();
 
-            // some clients might timeout and cancel the request before query planning is finished,
-            // so we execute it in a task that can continue even after the request was canceled and
-            // the join handle was dropped. That way, the next similar query will use the cache instead
-            // of restarting the query planner until another timeout
-            tokio::task::spawn(
+            let qp_task = tokio::spawn(
                 async move {
                     let service = match self.delegate.ready().await {
                         Ok(service) => service,
@@ -598,9 +594,16 @@ where
                     }
                 }
                 .in_current_span(),
-            )
-            .await
-            .map_err(|e| {
+            );
+
+            let _abort_guard = scopeguard::guard(qp_task.abort_handle(), |abort_handle| {
+                // Abort is a no-op if the task has already completed.
+                abort_handle.abort();
+            });
+
+            // Receive the result of planning. If the request is cancelled, we may be dropped at
+            // this await point. The `abort_guard` then propagates that to query planning.
+            qp_task.await.map_err(|e| {
                 CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
                     e.to_string(),
                 )))

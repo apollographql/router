@@ -372,6 +372,7 @@ dependencies = [
  "rustls-pemfile 2.2.0",
  "ryu",
  "schemars",
+ "scopeguard",
  "semver",
  "serde",
  "serde_derive_default",
