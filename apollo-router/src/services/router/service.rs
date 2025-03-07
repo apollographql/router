@@ -76,7 +76,6 @@ use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
-#[cfg(test)]
 use crate::services::HasSchema;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
@@ -95,6 +94,7 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::supergraph;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
@@ -950,6 +950,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
+    _pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -1001,6 +1002,17 @@ impl RouterCreator {
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
 
+        // Create a handle that will help us keep track of this pipeline.
+        // A metric is exposed that allows the use to see if pipelines are being hung onto.
+        let schema_id = supergraph_creator.schema().schema_id.clone();
+        let launch_id = supergraph_creator.schema().launch_id.clone();
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(
+            schema_id.to_string(),
+            launch_id.map(|id| id.to_string()),
+            config_hash,
+        );
+
         let oltp_error_metrics_mode: OtlpErrorMetricsMode =
             match configuration.apollo_plugins.plugins.get("telemetry") {
                 Some(telemetry_config) => {
@@ -1039,6 +1051,7 @@ impl RouterCreator {
         Ok(Self {
             supergraph_creator,
             sb,
+            _pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 

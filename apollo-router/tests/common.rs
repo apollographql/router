@@ -913,6 +913,8 @@ impl IntegrationTest {
     pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
         let now = Instant::now();
         let mut last_metrics = String::new();
+        let text = regex::escape(text).replace("<any>", ".+");
+        let re = Regex::new(&format!("(?m)^{}", text)).expect("Invalid regex");
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -921,7 +923,7 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                if metrics.contains(text) {
+                if re.is_match(&metrics) {
                     return;
                 }
                 last_metrics = metrics;
