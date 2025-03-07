@@ -26,6 +26,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
+use crate::spec::query::ERROR_CODE_RESPONSE_VALIDATION;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
 ///
@@ -163,6 +164,41 @@ impl Error {
             })?;
 
         Ok(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
+
+    pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
+        let value_completion = ensure_object!(value).ok()?;
+        let mut extensions = value_completion
+            .get("extensions")
+            .and_then(|e: &Value| -> Option<Object> {
+                serde_json_bytes::from_value(e.clone()).ok()
+            })
+            .unwrap_or_default();
+        extensions.insert("code", ERROR_CODE_RESPONSE_VALIDATION.into());
+        extensions.insert("severity", tracing::Level::WARN.as_str().into());
+
+        let message = value_completion
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|m| m.to_string())
+            .unwrap_or_default();
+        let locations = value_completion
+            .get("locations")
+            .map(|l: &Value| skip_invalid_locations(l.clone()))
+            .map(|l: Value| serde_json_bytes::from_value(l).unwrap_or_default())
+            .unwrap_or_default();
+        let path =
+            value_completion
+                .get("path")
+                .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
+                    serde_json_bytes::from_value(p.clone()).ok()
+                });
+        Some(Error {
             message,
             locations,
             path,
