@@ -1432,16 +1432,18 @@ dependencies = [
 
 [[package]]
 name = "buildstructor"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3907aac66c65520545ae3cb3c195306e20d5ed5c90bfbb992e061cf12a104d0"
+checksum = "caabaaee17b2a78d7aa349a33edc9090c6bb47e6dfb25b0da281df57628bba68"
 dependencies = [
- "lazy_static",
  "proc-macro2",
  "quote",
  "str_inflector",
  "syn 2.0.90",
+<<<<<<< HEAD
  "thiserror",
+=======
+>>>>>>> dac91cf6 (Upgrade to Rust 1.85 (#6836))
  "try_match",
 ]
 
@@ -3855,12 +3857,17 @@ version = "0.16.2+1.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee4126d8b4ee5c9d9ea891dd875cfdc1e9d0950437179104b183d7d8a74d24e8"
 dependencies = [
+<<<<<<< HEAD
  "cc",
  "libc",
  "libssh2-sys",
  "libz-sys",
  "openssl-sys",
  "pkg-config",
+=======
+ "cfg-if",
+ "windows-targets 0.52.6",
+>>>>>>> dac91cf6 (Upgrade to Rust 1.85 (#6836))
 ]
 
 [[package]]
@@ -5093,11 +5100,26 @@ version = "0.11.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d2d8d10f3c6ded6da8b05b5fb3b8a5082514344d56c9f871412d29b4e075b4"
 dependencies = [
+<<<<<<< HEAD
  "anyhow",
  "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+=======
+ "heck 0.5.0",
+ "itertools 0.13.0",
+ "log",
+ "multimap 0.10.0",
+ "once_cell",
+ "petgraph",
+ "prettyplease",
+ "prost 0.13.4",
+ "prost-types 0.13.4",
+ "regex",
+ "syn 2.0.90",
+ "tempfile",
+>>>>>>> dac91cf6 (Upgrade to Rust 1.85 (#6836))
 ]
 
 [[package]]

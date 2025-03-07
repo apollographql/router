@@ -70,7 +70,16 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
+<<<<<<< HEAD
     pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
+=======
+    #[allow(clippy::needless_lifetimes)] // needless in `new` but not in generated builder methods
+    pub(crate) async fn new<'a, 'b>(
+        config: Option<&'a str>,
+        schema: Option<&'b str>,
+        license: Option<LicenseState>,
+    ) -> Self {
+>>>>>>> dac91cf6 (Upgrade to Rust 1.85 (#6836))
         let factory = crate::plugin::plugins()
             .find(|factory| factory.type_id == TypeId::of::<T>())
             .expect("plugin not registered");

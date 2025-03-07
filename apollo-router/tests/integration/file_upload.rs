@@ -249,7 +249,7 @@ async fn it_uploads_a_massive_file() -> Result<(), BoxError> {
     // Upload a stream of 10GB
     const ONE_MB: usize = 1024 * 1024;
     const TEN_GB: usize = 10 * 1024 * ONE_MB;
-    const FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
+    static FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
     const CHUNK_COUNT: usize = TEN_GB / ONE_MB;
 
     // Upload a file that is 1GB in size of 0xAA
@@ -743,7 +743,7 @@ async fn it_fails_with_file_count_limits() -> Result<(), BoxError> {
 async fn it_fails_with_file_size_limit() -> Result<(), BoxError> {
     // Create a file that passes the limit set in the config (512KB)
     const ONE_MB: usize = 1024 * 1024;
-    const FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
+    static FILE_CHUNK: [u8; ONE_MB] = [0xAA; ONE_MB];
 
     // Construct the parts of the multipart request as defined by the schema for multiple files
     let request = helper::create_request(

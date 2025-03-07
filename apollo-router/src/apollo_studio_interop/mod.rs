@@ -892,7 +892,7 @@ fn format_selection_set(
             let use_separator = field_str
                 .chars()
                 .last()
-                .map_or(false, |c| c.is_alphanumeric() || c == '_');
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
             if i < fields.len() - 1 && use_separator {
                 f.write_str(" ")?;
             }
@@ -978,7 +978,7 @@ fn format_field(
                     || arg_string
                         .chars()
                         .last()
-                        .map_or(true, |c| c.is_alphanumeric() || c == '_'))
+                        .is_none_or(|c| c.is_alphanumeric() || c == '_'))
             {
                 write!(f, "{}", separator)?;
             }

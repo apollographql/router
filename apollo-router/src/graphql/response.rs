@@ -59,7 +59,6 @@ pub struct Response {
 impl Response {
     /// Constructor
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         label: Option<String>,
         data: Option<Value>,
