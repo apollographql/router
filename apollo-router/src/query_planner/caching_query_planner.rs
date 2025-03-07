@@ -813,53 +813,30 @@ mod tests {
         .await
         .unwrap();
 
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "query Me { me { username } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
         for _ in 0..5 {
             assert!(
                 planner
-                    .call(query_planner::CachingRequest::new(
-                        "query Me { me { username } }".to_string(),
-                        Some("".into()),
-                        context.clone()
-                    ))
+                    .call(
+                        query_planner::CachingRequest::fake_builder()
+                            .configuration(configuration.clone())
+                            .schema(schema.clone())
+                            .query("query Me { me { username } }")
+                            .build()
+                    )
                     .await
                     .is_err()
             );
         }
-        let doc2 = Query::parse_document(
-            "query Me { me { name { first } } }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc2));
 
         assert!(
             planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { name { first } } }".to_string(),
-                    Some("".into()),
-                    context.clone()
-                ))
+                .call(
+                    query_planner::CachingRequest::fake_builder()
+                        .configuration(configuration.clone())
+                        .schema(schema.clone())
+                        .query("query Me { me { name { first } } }")
+                        .build()
+                )
                 .await
                 .is_err()
         );
@@ -928,11 +905,12 @@ mod tests {
 
         for _ in 0..5 {
             let _ = planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { username } }".to_string(),
-                    Some("".into()),
-                    context.clone(),
-                ))
+                .call(
+                    query_planner::CachingRequest::builder()
+                        .query("query Me { me { username } }")
+                        .context(context.clone())
+                        .build(),
+                )
                 .await
                 .unwrap();
             assert!(
@@ -975,7 +953,7 @@ mod tests {
                 planner
             });
 
-        let configuration = Default::default();
+        let configuration = Arc::new(Default::default());
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
@@ -989,59 +967,28 @@ mod tests {
         .await
         .unwrap();
 
-        let configuration = Configuration::default();
-
-        let doc1 = Query::parse_document(
-            "{
-              __schema {
-                  types {
-                  name
-                }
-              }
-            }",
-            None,
-            &schema,
-            &configuration,
-        )
-        .unwrap();
-
-        let context = Context::new();
-        context
-            .extensions()
-            .with_lock(|lock| lock.insert::<ParsedDocument>(doc1));
-
         assert!(
             planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                    __schema {
-                        types {
-                        name
-                      }
-                    }
-                  }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                ))
+                .call(
+                    query_planner::CachingRequest::fake_builder()
+                        .configuration(configuration.clone())
+                        .schema(schema.clone())
+                        .query("{ __schema { types { name } } }")
+                        .build()
+                )
                 .await
                 .is_ok()
         );
 
         assert!(
             planner
-                .call(query_planner::CachingRequest::new(
-                    "{
-                        __schema {
-                            types {
-                            name
-                          }
-                        }
-                      }"
-                    .to_string(),
-                    Some("".into()),
-                    context.clone(),
-                ))
+                .call(
+                    query_planner::CachingRequest::fake_builder()
+                        .configuration(configuration.clone())
+                        .schema(schema.clone())
+                        .query("{ __schema { types { name } } }")
+                        .build()
+                )
                 .await
                 .is_ok()
         );
