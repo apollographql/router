@@ -213,4 +213,29 @@ mod tests {
         // Evidence of fearless parallel sleep:
         assert!(start.elapsed() < Duration::from_millis(1_400));
     }
+
+    #[tokio::test]
+    async fn test_cancel() {
+        let (side_channel_sender, side_channel_receiver) = oneshot::channel();
+        let side_channel_sender = std::panic::AssertUnwindSafe(side_channel_sender);
+        let queue_receiver = execute(Priority::P1, move |status| {
+            // https://internals.rust-lang.org/t/assertunwindsafe-interacts-poorly-with-2021-capture-rules/21721
+            let side_channel_sender = side_channel_sender;
+            // We expect the first iteration to succeed,
+            // but let’s add lots of margin for CI machines with super-busy CPU cores
+            for _ in 0..1_000 {
+                std::thread::sleep(Duration::from_millis(10));
+                if status.check_for_cooperative_cancellation().is_break() {
+                    side_channel_sender.0.send(Ok(())).unwrap();
+                    return;
+                }
+            }
+            side_channel_sender.0.send(Err(())).unwrap();
+        });
+        drop(queue_receiver);
+        match side_channel_receiver.await {
+            Ok(Ok(())) => {}
+            e => panic!("job did not cancel as expected: {e:?}"),
+        };
+    }
 }
