@@ -35,3 +35,6 @@ dockerfiles/federation2-demo
 
 # dhat
 dhat-heap.json
+
+# env file
+.env

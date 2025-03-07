@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::task::Poll;
@@ -643,6 +644,17 @@ async fn subscription_task(
                         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
                         .map(|p| p.config.clone());
 
+                    let connector_sources: HashSet<String> = execution_service_factory.schema
+                        .connectors
+                        .as_ref()
+                        .map(|c| {
+                            c.by_service_name
+                                .iter()
+                                .map(|(_, connector)| connector.source_config_key())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
                     let fetch_service_factory = Arc::new(FetchServiceFactory::new(
                         execution_service_factory.schema.clone(),
                                     execution_service_factory.subgraph_schemas.clone(),
@@ -662,6 +674,7 @@ async fn subscription_task(
                                         Arc::new(ConnectorRequestServiceFactory::new(
                                             Arc::new(http_service_factory),
                                             execution_service_factory.plugins.clone(),
+                                            connector_sources
                                         )),
                                     )),
                                  ),
@@ -940,6 +953,17 @@ impl PluggableSupergraphServiceBuilder {
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
 
+        let connector_sources: HashSet<String> = schema
+            .connectors
+            .as_ref()
+            .map(|c| {
+                c.by_service_name
+                    .iter()
+                    .map(|(_, connector)| connector.source_config_key())
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let fetch_service_factory = Arc::new(FetchServiceFactory::new(
             schema.clone(),
             subgraph_schemas.clone(),
@@ -964,6 +988,7 @@ impl PluggableSupergraphServiceBuilder {
                 Arc::new(ConnectorRequestServiceFactory::new(
                     Arc::new(self.http_service_factory),
                     self.plugins.clone(),
+                    connector_sources,
                 )),
             )),
         ));
