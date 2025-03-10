@@ -661,6 +661,18 @@ impl DefinitionVariant {
             representative_field: self.representative_field.clone(),
         }
     }
+
+    pub fn new(
+        boolean_clause: Clause,
+        representative_field: Field,
+        sub_selection_response_shape: Option<ResponseShape>,
+    ) -> Self {
+        DefinitionVariant {
+            boolean_clause,
+            representative_field,
+            sub_selection_response_shape,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -688,6 +700,16 @@ impl PossibleDefinitionsPerTypeCondition {
         PossibleDefinitionsPerTypeCondition {
             field_selection_key: self.field_selection_key.clone(),
             conditional_variants: new_variants,
+        }
+    }
+
+    pub fn new(
+        field_selection_key: FieldSelectionKey,
+        conditional_variants: Vec<DefinitionVariant>,
+    ) -> Self {
+        PossibleDefinitionsPerTypeCondition {
+            field_selection_key,
+            conditional_variants,
         }
     }
 
