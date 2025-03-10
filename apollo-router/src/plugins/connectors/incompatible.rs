@@ -10,7 +10,6 @@ use headers::HeadersIncompatPlugin;
 use rhai::RhaiIncompatPlugin;
 use telemetry::TelemetryIncompatPlugin;
 use tls::TlsIncompatPlugin;
-use traffic_shaping::TrafficShapingIncompatPlugin;
 use url_override::UrlOverrideIncompatPlugin;
 
 use crate::Configuration;
@@ -24,7 +23,6 @@ mod headers;
 mod rhai;
 mod telemetry;
 mod tls;
-mod traffic_shaping;
 mod url_override;
 
 /// Pair of explicitly configured subgraphs for a plugin
@@ -96,7 +94,6 @@ pub(crate) fn warn_incompatible_plugins(config: &Configuration, connectors: &Con
         RhaiIncompatPlugin::from_config(config).map(boxify!()),
         TelemetryIncompatPlugin::from_config(config).map(boxify!()),
         TlsIncompatPlugin::from_config(config).map(boxify!()),
-        TrafficShapingIncompatPlugin::from_config(config).map(boxify!()),
         UrlOverrideIncompatPlugin::from_config(config).map(boxify!()),
     ]
     .into_iter()
