@@ -22,6 +22,7 @@ use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::ObjectFieldDefinitionPosition;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::models::Header;
@@ -88,11 +89,12 @@ pub(crate) fn extract_connect_directive_arguments(
                             )
                         };
 
-                        let position = ObjectOrInterfaceFieldDirectivePosition {
-                            field: field_pos,
-                            directive_name: directive.name.clone(),
-                            directive_index: i,
-                        };
+                        let position =
+                            ConnectorPosition::Field(ObjectOrInterfaceFieldDirectivePosition {
+                                field: field_pos,
+                                directive_name: directive.name.clone(),
+                                directive_index: i,
+                            });
                         ConnectDirectiveArguments::from_position_and_directive(
                             position,
                             directive,
@@ -193,7 +195,7 @@ impl SourceHTTPArguments {
 
 impl ConnectDirectiveArguments {
     fn from_position_and_directive(
-        position: ObjectOrInterfaceFieldDirectivePosition,
+        position: ConnectorPosition,
         value: &Node<Directive>,
         version_info: &VersionInfo,
     ) -> Result<Self, FederationError> {
@@ -496,14 +498,16 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r###"
+            @r#"
         [
             ConnectDirectiveArguments {
-                position: ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.users),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
+                position: Field(
+                    ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.users),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                ),
                 source: Some(
                     "json",
                 ),
@@ -556,11 +560,13 @@ mod tests {
                 entity: false,
             },
             ConnectDirectiveArguments {
-                position: ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.posts),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
+                position: Field(
+                    ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.posts),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                ),
                 source: Some(
                     "json",
                 ),
@@ -625,7 +631,7 @@ mod tests {
                 entity: false,
             },
         ]
-        "###
+        "#
         );
     }
 }

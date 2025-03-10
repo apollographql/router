@@ -11,11 +11,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             source_name: Some(
                 "example",
             ),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Mutation.createUser),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Mutation.createUser),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: Some(
@@ -309,11 +311,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             source_name: Some(
                 "example",
             ),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.filterUsersByEmailDomain),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.filterUsersByEmailDomain),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: Some(
@@ -476,11 +480,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             source_name: Some(
                 "example",
             ),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.usersByCompany),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.usersByCompany),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: Some(
@@ -687,11 +693,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             source_name: Some(
                 "example",
             ),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.user),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.user),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: Some(

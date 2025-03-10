@@ -23,6 +23,7 @@ use super::coordinates::source_name_value_coordinate;
 use super::http::headers;
 use super::http::method;
 use super::source::SourceName;
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -75,6 +76,27 @@ fn fields_seen_by_object_connectors(
     schema: &SchemaInfo,
     source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
+    // TODO: find a better place for feature gates like this
+    if schema.connect_link.spec == ConnectSpec::V0_1
+        && object
+            .directives
+            .iter()
+            .any(|d| d.name == *schema.connect_directive_name())
+    {
+        return Err(vec![Message {
+            code: Code::FeatureUnavailable,
+            message: format!(
+                "Using `@{connect_directive_name}` on `type {object_name}` requires connectors v0.2. Learn more at https://go.apollo.dev/connectors/changelog.",
+                object_name = object.name,
+                connect_directive_name = schema.connect_directive_name(),
+            ),
+            locations: object
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        }]);
+    }
+
     let object_category = if schema
         .schema_definition
         .query
