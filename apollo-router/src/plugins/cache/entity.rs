@@ -5,11 +5,11 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use http::header;
 use http::header::CACHE_CONTROL;
 use indexmap::IndexMap;
@@ -411,13 +411,9 @@ impl Plugin for EntityCache {
                     private_id,
                     invalidation: self.invalidation.clone(),
                     expose_keys_in_context: self.expose_keys_in_context,
-<<<<<<< HEAD
-                })));
-=======
                     supergraph_schema: self.supergraph_schema.clone(),
                     subgraph_enums: self.subgraph_enums.clone(),
-                });
->>>>>>> d0db5d84 (fix(entity_caching): do not include other fields from representation variable than the entity keys (#6888))
+                })));
             tower::util::BoxService::new(inner)
         } else {
             ServiceBuilder::new()
@@ -462,7 +458,9 @@ impl Plugin for EntityCache {
                     map.insert(endpoint_config.listen.clone(), endpoint);
                 }
                 None => {
-                    tracing::warn!("Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured");
+                    tracing::warn!(
+                        "Cannot start entity caching invalidation endpoint because the listen address and endpoint is not configured"
+                    );
                 }
             }
         }
@@ -518,11 +516,6 @@ impl EntityCache {
     }
 }
 
-<<<<<<< HEAD
-struct CacheService(Option<InnerCacheService>);
-struct InnerCacheService {
-    service: subgraph::BoxService,
-=======
 /// Get the map of subgraph enum variant mapped with subgraph name
 fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, String> {
     let mut subgraph_enums = HashMap::new();
@@ -544,10 +537,9 @@ fn get_subgraph_enums(supergraph_schema: &Valid<Schema>) -> HashMap<String, Stri
     subgraph_enums
 }
 
-#[derive(Clone)]
-struct CacheService {
-    service: subgraph::BoxCloneService,
->>>>>>> d0db5d84 (fix(entity_caching): do not include other fields from representation variable than the entity keys (#6888))
+struct CacheService(Option<InnerCacheService>);
+struct InnerCacheService {
+    service: subgraph::BoxService,
     name: String,
     entity_type: Option<String>,
     storage: RedisCacheStorage,
@@ -1438,14 +1430,9 @@ fn extract_cache_keys(
         // - entity key: invalidate a specific entity
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
-<<<<<<< HEAD
-        let mut key = String::new();
-        let _ = write!(&mut key, "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}");
-=======
         let mut key = format!(
             "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:representation:{hashed_representation}:hash:{query_hash}:data:{additional_data_hash}"
         );
->>>>>>> d0db5d84 (fix(entity_caching): do not include other fields from representation variable than the entity keys (#6888))
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
@@ -1463,12 +1450,12 @@ fn extract_cache_keys(
     Ok(res)
 }
 
-fn get_entity_keys_from_supergraph_schema(
-    typename: &str,
-    subgraph_name: &str,
-    supergraph_schema: &Valid<Schema>,
-    subgraph_enums: &HashMap<String, String>,
-) -> Result<impl Iterator<Item = Name>, BoxError> {
+fn get_entity_keys_from_supergraph_schema<'a, 'b>(
+    typename: &'b str,
+    subgraph_name: &'b str,
+    supergraph_schema: &'a Valid<Schema>,
+    subgraph_enums: &'a HashMap<String, String>,
+) -> Result<impl Iterator<Item = Name> + use<'a, 'b>, BoxError> {
     let entity_keys = supergraph_schema
         .types
         .get(typename)
