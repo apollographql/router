@@ -720,7 +720,7 @@ async fn test_tracing_connect_span() {
             assert!(
                 attributes
                     .fields()
-                    .field("apollo.connector.field.name")
+                    .field("apollo.connector.coordinate")
                     .is_some()
             );
             assert!(

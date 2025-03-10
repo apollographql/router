@@ -7,7 +7,6 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
@@ -135,7 +134,12 @@ impl Connector {
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
-        let parent_type_name = connect.position.field.type_name().clone();
+        let parent_type_name = connect.position.parent_type_name().ok_or_else(|| {
+            internal_error!(
+                "Missing parent type name for connector {}",
+                connect.position.coordinate()
+            )
+        })?;
         let schema_def = &schema.schema_definition;
         let on_query = schema_def
             .query
@@ -180,10 +184,6 @@ impl Connector {
         Ok((id, connector))
     }
 
-    pub fn field_name(&self) -> &Name {
-        self.id.directive.field.field_name()
-    }
-
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
         self.transport.variable_references().chain(
             self.selection
@@ -201,34 +201,39 @@ impl Connector {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {
-                let output_type = self
-                    .id
-                    .directive
-                    .field
-                    .get(schema)
-                    .map(|f| f.ty.inner_named_type())
-                    .map_err(|_| {
-                        format!(
-                            "Missing field {}.{}",
-                            self.id.directive.field.type_name(),
-                            self.id.directive.field.field_name()
-                        )
+                let output_type =
+                    self.id.directive.base_type_name(schema).ok_or_else(|| {
+                        format!("Missing field {}", self.id.directive.coordinate())
                     })?;
                 make_key_field_set_from_variables(
                     schema,
-                    output_type,
+                    &output_type,
                     self.variable_references(),
                     EntityResolver::Explicit,
                 )
-                .map_err(|_| format!("Failed to create key for connector {}", self.id.label))
+                .map_err(|_| {
+                    format!(
+                        "Failed to create key for connector {}",
+                        self.id.coordinate()
+                    )
+                })
             }
-            Some(EntityResolver::Implicit) => make_key_field_set_from_variables(
-                schema,
-                self.id.directive.field.type_name(),
-                self.variable_references(),
-                EntityResolver::Implicit,
-            )
-            .map_err(|_| format!("Failed to create key for connector {}", self.id.label)),
+            Some(EntityResolver::Implicit) => {
+                make_key_field_set_from_variables(
+                    schema,
+                    &self.id.directive.parent_type_name().ok_or_else(|| {
+                        format!("Missing type {}", self.id.directive.coordinate())
+                    })?,
+                    self.variable_references(),
+                    EntityResolver::Implicit,
+                )
+                .map_err(|_| {
+                    format!(
+                        "Failed to create key for connector {}",
+                        self.id.coordinate()
+                    )
+                })
+            }
         }
     }
 
@@ -571,7 +576,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -579,11 +584,13 @@ mod tests {
                 source_name: Some(
                     "json",
                 ),
-                directive: ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.users),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
+                directive: Field(
+                    ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.users),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                ),
             }: Connector {
                 id: ConnectId {
                     label: "connectors.json http: GET /users",
@@ -591,11 +598,13 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
-                    directive: ObjectOrInterfaceFieldDirectivePosition {
-                        field: Object(Query.users),
-                        directive_name: "connect",
-                        directive_index: 0,
-                    },
+                    directive: Field(
+                        ObjectOrInterfaceFieldDirectivePosition {
+                            field: Object(Query.users),
+                            directive_name: "connect",
+                            directive_index: 0,
+                        },
+                    ),
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
@@ -699,11 +708,13 @@ mod tests {
                 source_name: Some(
                     "json",
                 ),
-                directive: ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.posts),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
+                directive: Field(
+                    ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.posts),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                ),
             }: Connector {
                 id: ConnectId {
                     label: "connectors.json http: GET /posts",
@@ -711,11 +722,13 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
-                    directive: ObjectOrInterfaceFieldDirectivePosition {
-                        field: Object(Query.posts),
-                        directive_name: "connect",
-                        directive_index: 0,
-                    },
+                    directive: Field(
+                        ObjectOrInterfaceFieldDirectivePosition {
+                            field: Object(Query.posts),
+                            directive_name: "connect",
+                            directive_index: 0,
+                        },
+                    ),
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
@@ -826,6 +839,6 @@ mod tests {
                 response_variables: {},
             },
         }
-        "###);
+        "#);
     }
 }

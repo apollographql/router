@@ -261,6 +261,8 @@ pub enum Code {
     NullabilityMismatch,
     /// The version set in the connectors `@link` URL is not recognized.
     UnknownConnectorsVersion,
+    /// Feature unavailable
+    FeatureUnavailable,
 }
 
 impl Code {

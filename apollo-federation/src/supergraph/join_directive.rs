@@ -165,6 +165,43 @@ pub(super) fn extract(
         }
     }
 
+    for obj_pos in &join_directives.object_types {
+        let ty = obj_pos.get(supergraph_schema.schema())?;
+        let directives = ty
+            .directives
+            .iter()
+            .filter_map(|d| {
+                if d.name == JOIN_DIRECTIVE {
+                    Some(to_real_directive(d))
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for (directive, subgraph_enum_values) in directives {
+            for subgraph_enum_value in subgraph_enum_values {
+                let subgraph = get_subgraph(
+                    subgraphs,
+                    graph_enum_value_name_to_subgraph_name,
+                    &subgraph_enum_value,
+                )?;
+
+                if subgraph
+                    .schema
+                    .try_get_type(obj_pos.type_name.clone())
+                    .map(|t| matches!(t, TypeDefinitionPosition::Object(_)))
+                    .unwrap_or_default()
+                {
+                    obj_pos.insert_directive(
+                        &mut subgraph.schema,
+                        Node::new(directive.clone()).into(),
+                    )?;
+                }
+            }
+        }
+    }
+
     // TODO
     // - join_directives.directive_arguments
     // - join_directives.enum_types
@@ -174,7 +211,6 @@ pub(super) fn extract(
     // - join_directives.interface_field_arguments
     // - join_directives.interface_types
     // - join_directives.object_field_arguments
-    // - join_directives.object_types
     // - join_directives.scalar_types
     // - join_directives.union_types
 

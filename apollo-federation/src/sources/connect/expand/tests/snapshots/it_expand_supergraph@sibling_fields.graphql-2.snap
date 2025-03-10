@@ -9,11 +9,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             label: "connectors. http: GET https://my.api/t",
             subgraph_name: "connectors",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.f),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.f),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -106,11 +108,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             label: "connectors. http: GET https://my.api/t/{$this.k.id}",
             subgraph_name: "connectors",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(T.b),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(T.b),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
