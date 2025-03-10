@@ -203,7 +203,7 @@ impl RawResponse {
 }
 
 // --- MAPPED RESPONSE ---------------------------------------------------------
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum MappedResponse {
     /// This is equivalent to RawResponse::Error, but it also represents errors
     /// when the request is semantically unsuccessful (e.g. 404, 500).
