@@ -440,20 +440,15 @@ pub(crate) async fn create_http_services(
     }
 
     // Also create client service factories for connector sources
-    let connector_sources: HashSet<String> = schema
+    let connector_sources = schema
         .connectors
         .as_ref()
-        .map(|c| {
-            c.by_service_name
-                .iter()
-                .map(|(_, connector)| connector.source_config_key())
-                .collect()
-        })
+        .map(|c| c.source_config_keys.clone())
         .unwrap_or_default();
 
-    for name in connector_sources {
+    for name in connector_sources.iter() {
         let http_service = crate::services::http::HttpClientService::from_config(
-            &name,
+            name,
             configuration,
             &tls_root_store,
             shaping.connector_client_config(&name),

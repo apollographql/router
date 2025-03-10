@@ -265,10 +265,10 @@ impl ConnectorRequestServiceFactory {
     pub(crate) fn new(
         http_client_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         plugins: Arc<Plugins>,
-        connector_sources: HashSet<String>,
+        connector_sources: Arc<HashSet<String>>,
     ) -> Self {
         let mut map = HashMap::with_capacity(connector_sources.len());
-        for source in connector_sources {
+        for source in connector_sources.iter() {
             let service = Buffer::new(
                 plugins
                     .iter()
@@ -283,7 +283,7 @@ impl ConnectorRequestServiceFactory {
                     .boxed(),
                 DEFAULT_BUFFER_SIZE,
             );
-            map.insert(source, service);
+            map.insert(source.clone(), service);
         }
 
         Self {
