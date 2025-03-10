@@ -90,10 +90,14 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
             r#"
             traffic_shaping:
                 router:
-                    timeout: 1ns
+                    # NB: Normally in tests we would set the timeout to 1ns. But here,
+                    # we are testing a feature that requires GraphQL parsing. If the timeout
+                    # is set to almost 0, then we might time out well before we get to the parser.
+                    # This value could still be racey, but hopefully we can get away with it.
+                    timeout: 100ms
             "#,
         )
-        .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(250)))
         .build()
         .await;
 
@@ -114,7 +118,7 @@ async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError>
     assert!(response.contains("GATEWAY_TIMEOUT"));
 
     router
-        .wait_for_log_message(r#""otel.name":"GraphQL Operation""#)
+        .wait_for_log_message(r#""otel.name":"query UniqueName""#)
         .await;
 
     router.graceful_shutdown().await;
