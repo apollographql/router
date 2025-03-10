@@ -122,7 +122,7 @@ pub(crate) struct ErrorsConfiguration {
     /// Handling of errors coming from subgraph
     pub(crate) subgraph: SubgraphErrorConfig,
 
-    /// Configuration for storing and sending error metrics via OTLP
+    /// Send error metrics via OTLP with additional dimensions [`extensions.service`, `extensions.code`]
     pub(crate) experimental_otlp_error_metrics: OtlpErrorMetricsMode,
 }
 
@@ -142,6 +142,9 @@ pub(crate) struct ErrorConfiguration {
     pub(crate) send: bool,
     /// Redact subgraph errors to Apollo Studio
     pub(crate) redact: bool,
+    /// Allows additional dimension `extensions.code` to be sent with errors
+    /// even when `redact` is set to `true`.  Has no effect when `redact` is false.
+    pub(crate) redaction_policy: ErrorRedactionPolicy,
 }
 
 impl Default for ErrorConfiguration {
@@ -149,6 +152,7 @@ impl Default for ErrorConfiguration {
         Self {
             send: true,
             redact: true,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         }
     }
 }
@@ -163,15 +167,27 @@ impl SubgraphErrorConfig {
     }
 }
 
-/// Open Telemetry error metrics mode
+/// Extended Open Telemetry error metrics mode
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
 pub(crate) enum OtlpErrorMetricsMode {
-    /// Do not store OTLP error metrics
+    /// Do not send extended OTLP error metrics
     #[default]
     Disabled,
-    /// Send OTLP error metrics to Apollo Studio
+    /// Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`].
+    /// If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.
     Enabled,
+}
+
+/// Allow some error fields to be send to Apollo Studio even when `redact` is true.
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ErrorRedactionPolicy {
+    /// Applies redaction to all error details.
+    #[default]
+    Strict,
+    /// Modifies the `redact` setting by excluding the `extensions.code` field in errors from redaction.
+    Extended,
 }
 
 const fn default_field_level_instrumentation_sampler() -> SamplerOption {
