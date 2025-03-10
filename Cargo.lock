@@ -219,8 +219,8 @@ dependencies = [
  "serde_json_bytes",
  "sha1",
  "shape",
- "strum 0.26.3",
- "strum_macros 0.26.4",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
  "tempfile",
  "thiserror 1.0.69",
  "time",
@@ -386,7 +386,7 @@ dependencies = [
  "shellexpand",
  "similar",
  "static_assertions",
- "strum_macros 0.26.4",
+ "strum_macros 0.27.1",
  "sys-info",
  "sysinfo",
  "tempfile",
@@ -6302,9 +6302,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ecd92a088fb2500b2f146c9ddc5da9950bb7264d3f00932cd2a6fb369c26c46"
+checksum = "a6a27c10711f94d1042b4c96d483556ec84371864e25d0e1cf3dc1024b0880b1"
 dependencies = [
  "ahash",
  "bytes",
@@ -6585,9 +6585,9 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.26.3"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
 
 [[package]]
 name = "strum_macros"
@@ -6604,9 +6604,9 @@ dependencies = [
 
 [[package]]
 name = "strum_macros"
-version = "0.26.4"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
