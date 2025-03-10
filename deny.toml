@@ -100,7 +100,6 @@ highlight = "all"
 
 # List of crates to deny
 deny = [
-<<<<<<< HEAD
   # `cargo-scaffold` uses `git2` which uses `libssh2-sys` and `libgit2-sys`.
   # Both require `openssl-sys`. Adding this rule in this way is sufficient to
   # allow those to use `openssl-sys` (not a runtime dependency), leveraging the
@@ -120,14 +119,11 @@ deny = [
   { name = "libgit2-sys", wrappers = ["git2"] },
   # Note! This line is required to support the above exception.
   { name = "libssh2-sys", wrappers = ["libgit2-sys"] },
-=======
-  { crate = "openssl-sys" },
   # Prevent adding new dependencies on protobuf that may use code with
   # a security advisory in it (see `[advisories]`).
   # If you *must* add a new crate to the "wrappers" here, carefully audit
   # that it is *not* affected by any of the advisories above.
   { crate = "protobuf:<3.7.2", wrappers = ["prometheus", "opentelemetry-prometheus"] },
->>>>>>> 5384ede6 (Add exemption for RUSTSEC-2024-0437 and prevent adding new vulnerable dependencies (#6962))
 ]
 
 # This section is considered when running `cargo deny check sources`.
