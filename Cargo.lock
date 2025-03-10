@@ -203,7 +203,7 @@ dependencies = [
  "http 1.2.0",
  "indexmap 2.7.1",
  "insta",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "line-col",
  "multimap 0.10.0",
  "nom",
@@ -219,8 +219,8 @@ dependencies = [
  "serde_json_bytes",
  "sha1",
  "shape",
- "strum 0.26.3",
- "strum_macros 0.26.4",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
  "tempfile",
  "thiserror 1.0.69",
  "time",
@@ -315,7 +315,7 @@ dependencies = [
  "hyperlocal",
  "indexmap 2.7.1",
  "insta",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "itoa",
  "jsonpath-rust",
  "jsonpath_lib",
@@ -385,7 +385,7 @@ dependencies = [
  "shellexpand",
  "similar",
  "static_assertions",
- "strum_macros 0.26.4",
+ "strum_macros 0.27.1",
  "sys-info",
  "sysinfo",
  "tempfile",
@@ -1408,7 +1408,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "lazy_static",
  "lazycell",
  "log",
@@ -3887,6 +3887,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4055,7 +4064,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5227,7 +5236,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0f3e5beed80eb580c68e2c600937ac2c4eedabdfd5ef1e5b7ea4f3fba84497b"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.13.0",
  "log",
  "multimap 0.10.0",
@@ -5248,7 +5257,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bddcdb20abf9501610992b6759a4c888aef7d1a7247ef75e2404275ac24af1"
 dependencies = [
  "anyhow",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.90",
@@ -5890,21 +5899,21 @@ dependencies = [
 
 [[package]]
 name = "rstest"
-version = "0.22.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b423f0e62bdd61734b67cd21ff50871dfaeb9cc74f869dcd6af974fbcb19936"
+checksum = "6fc39292f8613e913f7df8fa892b8944ceb47c247b78e1b1ae2f09e019be789d"
 dependencies = [
- "futures",
  "futures-timer",
+ "futures-util",
  "rstest_macros",
  "rustc_version",
 ]
 
 [[package]]
 name = "rstest_macros"
-version = "0.22.0"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5e1711e7d14f74b12a58411c542185ef7fb7f2e7f8ee6e2940a883628522b42"
+checksum = "1f168d99749d307be9de54d23fd226628d99768225ef08f6ffb52e0182a27746"
 dependencies = [
  "cfg-if",
  "glob",
@@ -6292,9 +6301,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ecd92a088fb2500b2f146c9ddc5da9950bb7264d3f00932cd2a6fb369c26c46"
+checksum = "a6a27c10711f94d1042b4c96d483556ec84371864e25d0e1cf3dc1024b0880b1"
 dependencies = [
  "ahash",
  "bytes",
@@ -6575,9 +6584,9 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.26.3"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
 
 [[package]]
 name = "strum_macros"
@@ -6594,9 +6603,9 @@ dependencies = [
 
 [[package]]
 name = "strum_macros"
-version = "0.26.4"
+version = "0.27.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -7854,7 +7863,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
