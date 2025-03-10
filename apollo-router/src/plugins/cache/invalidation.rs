@@ -4,10 +4,15 @@ use std::time::Instant;
 use fred::error::RedisError;
 use fred::types::Scanner;
 use futures::stream;
+<<<<<<< HEAD
 use futures::StreamExt;
+=======
+use indexmap::IndexMap;
+>>>>>>> d0db5d84 (fix(entity_caching): do not include other fields from representation variable than the entity keys (#6888))
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use tokio::sync::Semaphore;
@@ -225,7 +230,7 @@ pub(crate) enum InvalidationRequest {
     Entity {
         subgraph: String,
         r#type: String,
-        key: Value,
+        key: IndexMap<ByteString, Value>,
     },
 }
 
