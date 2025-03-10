@@ -823,7 +823,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     );
 
     let s: String = client
-        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:representation::hash:b9b8a9c94830cf56329ec2db7d7728881a6ba19cc1587710473e732e775a5870:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
         .await
         .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -867,7 +867,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:hash:572a2cdde770584306cd0def24555773323b1738e9a303c7abc1721b6f9f2ec4:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:representation::hash:572a2cdde770584306cd0def24555773323b1738e9a303c7abc1721b6f9f2ec4:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -877,6 +877,30 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
             "reviews": [{
                 "body": "I can sit on it",
                 "author": {"__typename": "User", "id": "1"}
+            }]
+        }}
+    );
+    let s:String = client
+          .get("version:1.0:subgraph:reviews:type:Product:entity:4e48855987eae27208b466b941ecda5fb9b88abc03301afef6e4099a981889e9:representation::hash:572a2cdde770584306cd0def24555773323b1738e9a303c7abc1721b6f9f2ec4:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .await
+          .unwrap();
+    let v: Value = serde_json::from_str(&s).unwrap();
+    assert_eq!(
+        v.as_object().unwrap().get("data").unwrap(),
+        &json! {{
+            "reviews": [{
+                "body": "I can sit on it",
+                "author": {
+                    "__typename": "User",
+                    "id": "1"
+                }
+            },
+            {
+                "body": "I can eat on it",
+                "author": {
+                    "__typename": "User",
+                    "id": "2"
+                }
             }]
         }}
     );
