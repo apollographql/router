@@ -627,7 +627,14 @@ async fn it_stores_operation_error_when_config_is_enabled() {
             serde_json::json!({
                 "apollo": {
                     "errors": {
-                        "experimental_otlp_error_metrics": "enabled"
+                        "experimental_otlp_error_metrics": "enabled",
+                        "subgraph": {
+                            "subgraphs": {
+                                "myIgnoredSubgraph": {
+                                    "send": false,
+                                }
+                            }
+                        }
                     }
                 }
             }),
@@ -652,6 +659,12 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                             .message("some other error")
                             .extension_code("SOME_OTHER_ERROR_CODE")
                             .extension("service", "myOtherSubgraph")
+                            .path(Path::from("obj/arr/@/firstElementField"))
+                            .build(),
+                        graphql::Error::builder()
+                            .message("some ignored error")
+                            .extension_code("SOME_IGNORED_ERROR_CODE")
+                            .extension("service", "myIgnoredSubgraph")
                             .path(Path::from("obj/arr/@/firstElementField"))
                             .build(),
                     ])
@@ -736,6 +749,21 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                 KeyValue::new("graphql.error.extensions.severity", "WARN"),
                 KeyValue::new("graphql.error.path", "/someType/someField"),
                 KeyValue::new("apollo.router.error.service", ""),
+            ]
+        );
+        assert_counter_not_exists!(
+            "apollo.router.operations.error",
+            u64,
+            &[
+                KeyValue::new("apollo.operation.id", operation_id),
+                KeyValue::new("graphql.operation.name", operation_name),
+                KeyValue::new("graphql.operation.type", operation_type),
+                KeyValue::new("apollo.client.name", client_name),
+                KeyValue::new("apollo.client.version", client_version),
+                KeyValue::new("graphql.error.extensions.code", "SOME_IGNORED_ERROR_CODE"),
+                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
+                KeyValue::new("apollo.router.error.service", "myIgnoredSubgraph"),
             ]
         );
     }
