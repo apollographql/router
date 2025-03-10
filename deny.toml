@@ -106,7 +106,7 @@ deny = [
   # a security advisory in it (see `[advisories]`).
   # If you *must* add a new crate to the "wrappers" here, carefully audit
   # that it is *not* affected by any of the advisories above.
-  { crate = "protobuf:<=3.4.0", wrappers = ["prometheus", "opentelemetry-prometheus"] },
+  { crate = "protobuf:<3.7.2", wrappers = ["prometheus", "opentelemetry-prometheus"] },
 ]
 
 # This section is considered when running `cargo deny check sources`.
