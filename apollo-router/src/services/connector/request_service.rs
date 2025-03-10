@@ -170,7 +170,7 @@ pub(crate) enum TransportRequest {
 }
 
 /// Response from an underlying transport
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub(crate) enum TransportResponse {
     /// A response from an HTTP transport

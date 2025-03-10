@@ -10,7 +10,7 @@ pub(crate) struct HttpRequest {
 }
 
 /// Response from an HTTP transport
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub(crate) struct HttpResponse {
     /// The response parts - the body is consumed by applying the JSON mapping
