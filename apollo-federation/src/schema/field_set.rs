@@ -70,7 +70,9 @@ pub(crate) fn parse_field_set(
     // A field set should not contain any named fragments.
     let fragments = Default::default();
     let selection_set =
-        SelectionSet::from_selection_set(&field_set.selection_set, &fragments, schema)?;
+        SelectionSet::from_selection_set(&field_set.selection_set, &fragments, schema, &||
+            // never cancel
+            Ok(()))?;
 
     // Validate that the field set has no aliases.
     check_absence_of_aliases(&selection_set)?;
@@ -197,7 +199,10 @@ pub(crate) fn validate_field_value(
     // A field value should not contain any named fragments.
     let fragments = Default::default();
     let selection_set =
-        SelectionSet::from_selection_set(&field_value.selection_set, &fragments, schema)?;
+        SelectionSet::from_selection_set(&field_value.selection_set, &fragments, schema, &|| {
+            // never cancel
+            Ok(())
+        })?;
 
     // Validate that the field value has no aliases.
     check_absence_of_aliases(&selection_set)?;

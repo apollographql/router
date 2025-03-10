@@ -87,7 +87,17 @@ pub(super) fn parse_and_expand(
         .next()
         .expect("must have an operation");
 
-    normalize_operation(operation, &doc.fragments, schema, &Default::default())
+    normalize_operation(
+        operation,
+        &doc.fragments,
+        schema,
+        &Default::default(),
+        &never_cancel,
+    )
+}
+
+pub(crate) fn never_cancel() -> Result<(), SingleFederationError> {
+    Ok(())
 }
 
 #[test]

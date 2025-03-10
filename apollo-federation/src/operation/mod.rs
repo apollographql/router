@@ -56,7 +56,7 @@ use crate::utils::FallibleIterator;
 mod contains;
 mod directive_list;
 mod merging;
-pub(crate) mod optimize;
+mod optimize;
 mod rebase;
 mod simplify;
 #[cfg(test)]
@@ -1150,7 +1150,7 @@ impl SelectionSet {
             source_text,
         )?;
         let fragments = Default::default();
-        SelectionSet::from_selection_set(&selection_set, &fragments, &schema)
+        SelectionSet::from_selection_set(&selection_set, &fragments, &schema, &never_cancel)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -1189,6 +1189,7 @@ impl SelectionSet {
         selection_set: &executable::SelectionSet,
         fragments_cache: &FragmentSpreadCache,
         schema: &ValidFederationSchema,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<SelectionSet, FederationError> {
         let type_position: CompositeTypeDefinitionPosition =
             schema.get_type(selection_set.ty.clone())?.try_into()?;
@@ -1199,6 +1200,7 @@ impl SelectionSet {
             &mut normalized_selections,
             fragments_cache,
             schema,
+            check_cancellation,
         )?;
         let mut merged = SelectionSet {
             schema: schema.clone(),
@@ -1216,8 +1218,10 @@ impl SelectionSet {
         destination: &mut Vec<Selection>,
         fragments_cache: &FragmentSpreadCache,
         schema: &ValidFederationSchema,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<(), FederationError> {
         for selection in selections {
+            check_cancellation()?;
             match selection {
                 executable::Selection::Field(field_selection) => {
                     let Some(normalized_field_selection) = FieldSelection::from_field(
@@ -1225,6 +1229,7 @@ impl SelectionSet {
                         parent_type_position,
                         fragments_cache,
                         schema,
+                        check_cancellation,
                     )?
                     else {
                         continue;
@@ -1279,6 +1284,7 @@ impl SelectionSet {
                             destination,
                             fragments_cache,
                             schema,
+                            check_cancellation,
                         )?;
                     } else {
                         let normalized_inline_fragment_selection =
@@ -1287,6 +1293,7 @@ impl SelectionSet {
                                 parent_type_position,
                                 fragments_cache,
                                 schema,
+                                check_cancellation,
                             )?;
                         destination.push(Selection::InlineFragment(Arc::new(
                             normalized_inline_fragment_selection,
@@ -2251,6 +2258,7 @@ impl FieldSelection {
         parent_type_position: &CompositeTypeDefinitionPosition,
         fragments_cache: &FragmentSpreadCache,
         schema: &ValidFederationSchema,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<Option<FieldSelection>, FederationError> {
         // Skip __schema/__type introspection fields as router takes care of those, and they do not
         // need to be query planned.
@@ -2282,6 +2290,7 @@ impl FieldSelection {
                     &field.selection_set,
                     fragments_cache,
                     schema,
+                    check_cancellation,
                 )?)
             } else {
                 None
@@ -2347,6 +2356,7 @@ impl InlineFragmentSelection {
         parent_type_position: &CompositeTypeDefinitionPosition,
         fragments_cache: &FragmentSpreadCache,
         schema: &ValidFederationSchema,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let type_condition_position: Option<CompositeTypeDefinitionPosition> =
             if let Some(type_condition) = &inline_fragment.type_condition {
@@ -2358,6 +2368,7 @@ impl InlineFragmentSelection {
             &inline_fragment.selection_set,
             fragments_cache,
             schema,
+            check_cancellation,
         )?;
         let new_inline_fragment = InlineFragment {
             schema: schema.clone(),
@@ -3106,8 +3117,12 @@ pub(crate) struct FragmentSpreadCache {
 
 impl FragmentSpreadCache {
     // in order to normalize selection sets, we need to process them in dependency order
-    fn init(fragments: &IndexMap<Name, Node<Fragment>>, schema: &ValidFederationSchema) -> Self {
-        FragmentSpreadCache::normalize_in_dependency_order(fragments, schema)
+    fn init(
+        fragments: &IndexMap<Name, Node<Fragment>>,
+        schema: &ValidFederationSchema,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+    ) -> Self {
+        FragmentSpreadCache::normalize_in_dependency_order(fragments, schema, check_cancellation)
     }
 
     fn insert(&mut self, fragment_name: &Name, selection_set: SelectionSet) {
@@ -3128,6 +3143,7 @@ impl FragmentSpreadCache {
     fn normalize_in_dependency_order(
         fragments: &IndexMap<Name, Node<Fragment>>,
         schema: &ValidFederationSchema,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> FragmentSpreadCache {
         struct FragmentDependencies {
             fragment: Node<Fragment>,
@@ -3168,6 +3184,7 @@ impl FragmentSpreadCache {
                         &info.fragment.selection_set,
                         &cache,
                         schema,
+                        check_cancellation,
                     ) {
                         cache.insert(&info.fragment.name, normalized);
                     } else {
@@ -3214,10 +3231,15 @@ pub(crate) fn normalize_operation(
     fragments: &IndexMap<Name, Node<Fragment>>,
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<NormalizedOperation, FederationError> {
-    let fragment_cache = FragmentSpreadCache::init(fragments, schema);
-    let mut normalized_selection_set =
-        SelectionSet::from_selection_set(&operation.selection_set, &fragment_cache, schema)?;
+    let fragment_cache = FragmentSpreadCache::init(fragments, schema, check_cancellation);
+    let mut normalized_selection_set = SelectionSet::from_selection_set(
+        &operation.selection_set,
+        &fragment_cache,
+        schema,
+        check_cancellation,
+    )?;
     // We clear up the fragments since we've expanded all.
     // Also note that expanding fragment usually generate unnecessary fragments/inefficient
     // selections, so it basically always make sense to flatten afterwards.

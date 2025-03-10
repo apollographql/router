@@ -368,6 +368,11 @@ impl QueryPlanner {
             &document.fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
+            &|| {
+                QueryPlanningParameters::check_cancellation_with(
+                    &options.check_for_cooperative_cancellation,
+                )
+            },
         )?;
 
         let NormalizedDefer {
