@@ -569,6 +569,7 @@ impl PluginPrivate for AuthenticationPlugin {
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
+        _: String,
     ) -> crate::services::connector::request_service::BoxService {
         if let Some(auth) = &self.connector {
             auth.connector_request_service(service)
