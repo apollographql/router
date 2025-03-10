@@ -451,7 +451,7 @@ pub(crate) async fn create_http_services(
             name,
             configuration,
             &tls_root_store,
-            shaping.connector_client_config(&name),
+            shaping.connector_client_config(name),
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
