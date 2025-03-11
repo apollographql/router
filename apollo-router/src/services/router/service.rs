@@ -1004,14 +1004,14 @@ impl RouterCreator {
 
         // Create a handle that will help us keep track of this pipeline.
         // A metric is exposed that allows the use to see if pipelines are being hung onto.
-        let schema_id = supergraph_creator.schema().schema_id.clone();
-        let launch_id = supergraph_creator.schema().launch_id.clone();
+        let schema_id = supergraph_creator.schema().schema_id.to_string();
+        let launch_id = supergraph_creator
+            .schema()
+            .launch_id
+            .as_ref()
+            .map(|launch_id| launch_id.to_string());
         let config_hash = configuration.hash();
-        let pipeline_handle = PipelineHandle::new(
-            schema_id.to_string(),
-            launch_id.map(|id| id.to_string()),
-            config_hash,
-        );
+        let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
         let oltp_error_metrics_mode: OtlpErrorMetricsMode =
             match configuration.apollo_plugins.plugins.get("telemetry") {
