@@ -54,3 +54,5 @@ impl Drop for PipelineHandle {
         }
     }
 }
+
+pub(crate) const PIPELINE_METRIC: &str = "apollo.router.pipelines";

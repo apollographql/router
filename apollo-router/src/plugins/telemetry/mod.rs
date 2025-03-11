@@ -30,9 +30,7 @@ use once_cell::sync::OnceCell;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::global::GlobalTracerProvider;
-use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::MetricsError;
-use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -94,7 +92,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::instrument::InstrumentLayer;
 use crate::metrics::aggregation::MeterProviderType;
 use crate::metrics::filter::FilterMeterProvider;
-use crate::metrics::meter_provider;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -146,7 +143,6 @@ use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
-use crate::services::router::pipeline_handle::pipelines;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
@@ -266,30 +262,10 @@ struct BuiltinInstruments {
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     connector_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
-    _gauges: Vec<ObservableGauge<u64>>,
+    _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
-    let mut gauges = Vec::new();
-    let meter = meter_provider().meter("apollo/router");
-    gauges.push(
-        meter
-            .u64_observable_gauge("apollo.router.pipelines")
-            .with_description("The number of request pipelines active in the router")
-            .with_callback(|i| {
-                for (pipeline, count) in &*pipelines() {
-                    let mut attributes = Vec::with_capacity(3);
-                    attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
-                    if let Some(launch_id) = &pipeline.launch_id {
-                        attributes.push(KeyValue::new("launch.id", launch_id.clone()));
-                    }
-                    attributes.push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
-
-                    i.observe(*count, &attributes);
-                }
-            })
-            .init(),
-    );
     BuiltinInstruments {
         graphql_custom_instruments: Arc::new(config.new_builtin_graphql_instruments()),
         router_custom_instruments: Arc::new(config.new_builtin_router_instruments()),
@@ -297,7 +273,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
         connector_custom_instruments: Arc::new(config.new_builtin_connector_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
-        _gauges: gauges,
+        _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
 }
 
