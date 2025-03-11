@@ -886,7 +886,18 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contained(&self, msg: &str) {
+    pub fn print_logs(&mut self) {
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            self.logs.push(line.to_string());
+        }
+
+        for line in &self.logs {
+            println!("{}", line);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 return;
@@ -911,9 +922,33 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+<<<<<<< HEAD
+=======
+    pub async fn assert_log_not_contained(&self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Checks the metrics contain the supplied string in prometheus format.
+    /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.
+    /// For example:
+    /// ```rust,ignore
+    /// router.assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
+    /// ```
+    /// Will allow the metric to be checked even if the config hash and schema id are fluid.
+>>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
     pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
         let now = Instant::now();
         let mut last_metrics = String::new();
+        let text = regex::escape(text).replace("<any>", ".+");
+        let re = Regex::new(&format!("(?m)^{}", text)).expect("Invalid regex");
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -922,7 +957,7 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                if metrics.contains(text) {
+                if re.is_match(&metrics) {
                     return;
                 }
                 last_metrics = metrics;

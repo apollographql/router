@@ -1,5 +1,6 @@
 //! Logic for loading configuration in to an object model
 use std::fmt;
+use std::hash::Hash;
 use std::io;
 use std::io::BufReader;
 use std::iter;
@@ -36,6 +37,7 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
+use sha2::Digest;
 use thiserror::Error;
 
 use self::cors::Cors;
@@ -118,7 +120,7 @@ pub enum ConfigurationError {
 #[derivative(Debug)]
 // We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
-    /// The raw configuration string.
+    /// The raw configuration value.
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
@@ -323,6 +325,18 @@ impl Configuration {
 }
 
 impl Configuration {
+    pub(crate) fn hash(&self) -> String {
+        let mut hasher = sha2::Sha256::new();
+        let defaulted_raw = self
+            .validated_yaml
+            .as_ref()
+            .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
+            .unwrap_or_default();
+        hasher.update(defaulted_raw);
+        let hash: String = format!("{:x}", hasher.finalize());
+        hash
+    }
+
     fn notify(
         apollo_plugins: &Map<String, Value>,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
