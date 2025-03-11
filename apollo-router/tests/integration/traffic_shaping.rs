@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use insta::assert_yaml_snapshot;
@@ -78,6 +79,50 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
 
     // We need to add support for http.client metrics ROUTER-991
     //router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_TIMEOUT",otel_scope_name="apollo/router"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_timeout() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(format!(
+            r#"
+            {PROMETHEUS_CONFIG}
+            traffic_shaping:
+                connector:
+                    sources:
+                        connectors.jsonPlaceholder:
+                            timeout: 1ns
+            "#
+        ))
+        .supergraph(PathBuf::from_iter([
+            "..",
+            "apollo-router",
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id}}","variables":{}}))
+                .build(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let response = response.text().await?;
+    assert!(response.contains("GATEWAY_TIMEOUT"));
+    assert_yaml_snapshot!(response);
 
     router.graceful_shutdown().await;
     Ok(())
@@ -229,6 +274,79 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
     assert_yaml_snapshot!(response);
 
     let (_, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+    let response = response.text().await?;
+    assert!(response.contains("REQUEST_RATE_LIMITED"));
+    assert_yaml_snapshot!(response);
+
+    router.assert_metrics_contains(r#"apollo_router_graphql_error_total{code="REQUEST_RATE_LIMITED",otel_scope_name="apollo/router"} 1"#, None).await;
+
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connector_rate_limit() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(format!(
+            r#"
+            {PROMETHEUS_CONFIG}
+            include_subgraph_errors:
+                all: true
+            traffic_shaping:
+                connector:
+                    sources:
+                        connectors.jsonPlaceholder:
+                            global_rate_limit:
+                                capacity: 1
+                                interval: 10min
+            connectors:
+                sources:
+                    connectors.jsonPlaceholder:
+                        $config:
+                            my.config.value: true
+            "#,
+        ))
+        .supergraph(PathBuf::from_iter([
+            "..",
+            "apollo-router",
+            "tests",
+            "fixtures",
+            "connectors",
+            "quickstart.graphql",
+        ]))
+        .responder(ResponseTemplate::new(200).set_body_json(json!([{
+            "id": 1,
+            "title": "Awesome post",
+            "body:": "This is a really great post",
+            "userId": 1
+        }])))
+        .http_method("GET")
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id}}","variables":{}}))
+                .build(),
+        )
+        .await;
+    assert_eq!(response.status(), 200);
+    let response = response.text().await?;
+    assert!(!response.contains("REQUEST_RATE_LIMITED"));
+    assert_yaml_snapshot!(response);
+
+    let (_, response) = router
+        .execute_query(
+            Query::builder()
+                .body(json!({"query":"query ExampleQuery {posts{id}}","variables":{}}))
+                .build(),
+        )
+        .await;
     assert_eq!(response.status(), 200);
     let response = response.text().await?;
     assert!(response.contains("REQUEST_RATE_LIMITED"));
