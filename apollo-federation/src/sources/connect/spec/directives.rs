@@ -24,6 +24,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::ObjectFieldDefinitionPosition;
+use crate::sources::connect::id::ObjectTypeDefinitionDirectivePosition;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::models::Header;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -53,6 +54,7 @@ pub(crate) fn extract_connect_directive_arguments(
     name: &Name,
     version_info: &VersionInfo,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
+    // connect on fields
     schema
         .types
         .iter()
@@ -103,6 +105,33 @@ pub(crate) fn extract_connect_directive_arguments(
                     })
             })
         })
+        .chain(
+            // connect on types
+            schema
+                .types
+                .iter()
+                .filter_map(|(_, ty)| match ty {
+                    apollo_compiler::schema::ExtendedType::Object(node) => Some(node),
+                    _ => None,
+                })
+                .flat_map(|ty| {
+                    ty.directives
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, directive)| directive.name == *name)
+                        .map(move |(i, directive)| {
+                            let position =
+                                ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
+                                    type_name: ty.name.clone(),
+                                    directive_name: directive.name.clone(),
+                                    directive_index: i,
+                                });
+                            ConnectDirectiveArguments::from_position_and_directive(
+                                position, directive,
+                            )
+                        })
+                }),
+        )
         .collect()
 }
 

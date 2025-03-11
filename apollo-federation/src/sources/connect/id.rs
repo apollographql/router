@@ -12,9 +12,9 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ObjectTypeDefinitionDirectivePosition {
-    type_name: Name,
-    directive_name: Name,
-    directive_index: usize,
+    pub(super) type_name: Name,
+    pub(super) directive_name: Name,
+    pub(super) directive_index: usize,
 }
 
 /// Stores information about the position of the @connect directive, either
@@ -118,5 +118,29 @@ impl ConnectorPosition {
             ),
             ConnectorPosition::Type(pos) => format!("{}_{}", pos.type_name, pos.directive_index),
         }
+    }
+
+    pub(super) fn on_query(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .query
+            .as_ref()
+            .map(|query| match self {
+                ConnectorPosition::Field(pos) => *pos.field.type_name() == query.name,
+                ConnectorPosition::Type(_) => false,
+            })
+            .unwrap_or_default()
+    }
+
+    pub(super) fn on_mutation(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .mutation
+            .as_ref()
+            .map(|mutation| match self {
+                ConnectorPosition::Field(pos) => *pos.field.type_name() == mutation.name,
+                ConnectorPosition::Type(_) => false,
+            })
+            .unwrap_or_default()
     }
 }

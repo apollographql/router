@@ -134,24 +134,8 @@ impl Connector {
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
-        let parent_type_name = connect.position.parent_type_name().ok_or_else(|| {
-            internal_error!(
-                "Missing parent type name for connector {}",
-                connect.position.coordinate()
-            )
-        })?;
-        let schema_def = &schema.schema_definition;
-        let on_query = schema_def
-            .query
-            .as_ref()
-            .map(|ty| ty.name == parent_type_name)
-            .unwrap_or(false);
-        let on_mutation = schema_def
-            .mutation
-            .as_ref()
-            .map(|ty| ty.name == parent_type_name)
-            .unwrap_or(false);
-        let on_root_type = on_query || on_mutation;
+        let on_root_type =
+            connect.position.on_query(schema) || connect.position.on_mutation(schema);
 
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
@@ -562,6 +546,7 @@ mod tests {
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
+    static SIMPLE_SUPERGRAPH_V0_2: &str = include_str!("./tests/schemas/simple_v0_2.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -840,5 +825,15 @@ mod tests {
             },
         }
         "#);
+    }
+
+    #[test]
+    fn test_from_schema_v0_2() {
+        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH_V0_2);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let connectors =
+            Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_2)
+                .unwrap();
+        assert_debug_snapshot!(&connectors);
     }
 }
