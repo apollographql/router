@@ -52,7 +52,7 @@ impl PersistedQueryManifestPoller {
                     local_pq_list
                 );
 
-                let local_manifest: String =
+                let raw_manifest: String =
                     read_to_string(local_pq_list.clone())
                         .await
                         .map_err(|e| -> BoxError {
@@ -63,33 +63,9 @@ impl PersistedQueryManifestPoller {
                             .into()
                         })?;
 
-                let manifest_file: SignedUrlChunk =
-                    serde_json::from_str(&local_manifest).map_err(|e| -> BoxError {
-                        format!(
-                            "could not parse local persisted query list file {}: {}",
-                            local_pq_list.clone(),
-                            e
-                        )
-                        .into()
-                    })?;
+                let signed_url_chunk = SignedUrlChunk::parse_and_validate(&raw_manifest)?;
 
-                if manifest_file.format != "apollo-persisted-query-manifest" {
-                    return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
-                }
-
-                if manifest_file.version != 1 {
-                    return Err("persisted query manifest chunk version is not 1".into());
-                }
-
-                for operation in manifest_file.operations {
-                    manifest.insert(
-                        FullPersistedQueryOperationId {
-                            operation_id: operation.id,
-                            client_name: operation.client_name,
-                        },
-                        operation.body,
-                    );
-                }
+                manifest.add_chunk(&signed_url_chunk);
             }
 
             let freeform_graphql_behavior = get_freeform_graphql_behavior(&config, &manifest);
@@ -379,22 +355,14 @@ async fn manifest_from_chunks(
 
 async fn add_chunk_to_operations(
     chunk: PersistedQueriesManifestChunk,
-    operations: &mut PersistedQueryManifest,
+    manifest: &mut PersistedQueryManifest,
     http_client: Client,
 ) -> Result<(), BoxError> {
     let mut it = chunk.urls.iter().peekable();
     while let Some(chunk_url) = it.next() {
         match fetch_chunk(http_client.clone(), chunk_url).await {
             Ok(chunk) => {
-                for operation in chunk.operations {
-                    operations.insert(
-                        FullPersistedQueryOperationId {
-                            operation_id: operation.id,
-                            client_name: operation.client_name,
-                        },
-                        operation.body,
-                    );
-                }
+                manifest.add_chunk(&chunk);
                 return Ok(());
             }
             Err(e) => {
@@ -442,15 +410,7 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
             .into()
         })?;
 
-    if chunk.format != "apollo-persisted-query-manifest" {
-        return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
-    }
-
-    if chunk.version != 1 {
-        return Err("persisted query manifest chunk version is not 1".into());
-    }
-
-    Ok(chunk)
+    chunk.validate()
 }
 
 /// Types of events produced by the manifest poller.

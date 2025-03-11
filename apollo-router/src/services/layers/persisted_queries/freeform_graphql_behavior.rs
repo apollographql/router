@@ -202,25 +202,21 @@ pub(super) fn get_freeform_graphql_behavior(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::layers::persisted_queries::FullPersistedQueryOperationId;
+    use crate::services::layers::persisted_queries::manifest::ManifestOperation;
 
     #[test]
     fn safelist_body_normalization() {
-        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from([
-            (
-                FullPersistedQueryOperationId {
-                    operation_id: "valid-syntax".to_string(),
-                    client_name: None,
-                },
-                "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah".to_string(),
-            ),
-            (
-                FullPersistedQueryOperationId {
-                    operation_id: "invalid-syntax".to_string(),
-                    client_name: None,
-                },
-                "}}}".to_string(),
-            ),
+        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from(vec![
+            ManifestOperation {
+                id: "valid-syntax".to_string(),
+                body: "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah".to_string(),
+                client_name: None,
+            },
+            ManifestOperation {
+                id: "invalid-syntax".to_string(),
+                body: "}}}".to_string(),
+                client_name: None,
+            },
         ]));
 
         let is_allowed = |body: &str| -> bool {
