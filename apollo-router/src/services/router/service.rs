@@ -359,7 +359,7 @@ impl RouterService {
                         Self::count_value_completion_errors(
                             value_completion,
                             &context,
-                            &self.oltp_error_metrics_mode,
+                            &self.apollo_telemetry_config.errors,
                         );
                     }
 
@@ -959,14 +959,14 @@ impl RouterService {
     fn count_value_completion_errors(
         value_completion: &Value,
         context: &Context,
-        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
+        errors_config: &ErrorsConfiguration,
     ) {
         if let Some(vc_array) = value_completion.as_array() {
             let errors: Vec<graphql::Error> = vc_array
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
-            Self::count_errors(&errors, context, oltp_error_metrics_mode);
+            Self::count_errors(&errors, context, errors_config);
         }
     }
 }
