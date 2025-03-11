@@ -1,3 +1,6 @@
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::hash::Hash;
 
 use apollo_compiler::Name;
@@ -24,19 +27,6 @@ pub(crate) enum ConnectorPosition {
     Field(ObjectOrInterfaceFieldDirectivePosition),
     #[allow(unused)]
     Type(ObjectTypeDefinitionDirectivePosition),
-}
-
-/// Reifies the connector position into schema definitions
-#[derive(Debug)]
-pub(crate) enum ConnectedElement<'schema> {
-    Field {
-        parent_type: &'schema ExtendedType,
-        field_def: &'schema Component<FieldDefinition>,
-    },
-    Type {
-        #[allow(unused)]
-        type_def: &'schema ExtendedType,
-    },
 }
 
 impl ConnectorPosition {
@@ -140,6 +130,56 @@ impl ConnectorPosition {
             .map(|mutation| match self {
                 ConnectorPosition::Field(pos) => *pos.field.type_name() == mutation.name,
                 ConnectorPosition::Type(_) => false,
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Reifies the connector position into schema definitions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectedElement<'schema> {
+    Field {
+        parent_type: &'schema ExtendedType,
+        field_def: &'schema Component<FieldDefinition>,
+    },
+    Type {
+        type_def: &'schema ExtendedType,
+    },
+}
+
+impl Display for ConnectedElement<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Field {
+                parent_type,
+                field_def,
+            } => write!(f, "{}.{}", parent_type.name(), field_def.name),
+            Self::Type { type_def } => write!(f, "{}", type_def.name()),
+        }
+    }
+}
+
+impl ConnectedElement<'_> {
+    pub(super) fn on_query(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .query
+            .as_ref()
+            .map(|query| match self {
+                ConnectedElement::Field { parent_type, .. } => *parent_type.name() == query.name,
+                ConnectedElement::Type { .. } => false,
+            })
+            .unwrap_or_default()
+    }
+
+    pub(super) fn on_mutation(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .mutation
+            .as_ref()
+            .map(|mutation| match self {
+                ConnectedElement::Field { parent_type, .. } => *parent_type.name() == mutation.name,
+                ConnectedElement::Type { .. } => todo!(),
             })
             .unwrap_or_default()
     }

@@ -293,9 +293,7 @@ expression: "&connectors"
         ),
         config: None,
         max_requests: None,
-        entity_resolver: Some(
-            Implicit,
-        ),
+        entity_resolver: None,
         spec: V0_2,
         request_variables: {},
         response_variables: {},

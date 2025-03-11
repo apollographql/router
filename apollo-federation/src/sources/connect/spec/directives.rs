@@ -127,7 +127,9 @@ pub(crate) fn extract_connect_directive_arguments(
                                     directive_index: i,
                                 });
                             ConnectDirectiveArguments::from_position_and_directive(
-                                position, directive,
+                                position,
+                                directive,
+                                version_info,
                             )
                         })
                 }),

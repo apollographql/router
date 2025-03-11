@@ -40,6 +40,7 @@ use crate::internal_error;
 use crate::link::Link;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::header::HeaderValue;
+use crate::sources::connect::id::ConnectorPosition;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
@@ -126,6 +127,8 @@ impl Connector {
             .as_ref()
             .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
 
+        let entity_resolver = determine_entity_resolver(&connect, schema);
+
         let source_name = source.map(|s| s.name.clone());
         let connect_http = connect
             .http
@@ -134,20 +137,11 @@ impl Connector {
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
 
-        let on_root_type =
-            connect.position.on_query(schema) || connect.position.on_mutation(schema);
-
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
             subgraph_name: subgraph_name.to_string(),
             source_name: source_name.clone(),
             directive: connect.position,
-        };
-
-        let entity_resolver = match (connect.entity, on_root_type) {
-            (true, _) => Some(EntityResolver::Explicit),
-            (_, false) => Some(EntityResolver::Implicit),
-            _ => None,
         };
 
         let request_variables = transport.variables().collect();
@@ -241,6 +235,22 @@ fn make_label(
 ) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
     format!("{}{} {}", subgraph_name, source, transport.label())
+}
+
+fn determine_entity_resolver(
+    connect: &ConnectDirectiveArguments,
+    schema: &Schema,
+) -> Option<EntityResolver> {
+    let on_root_type = connect.position.on_query(schema) || connect.position.on_mutation(schema);
+
+    match connect.position {
+        ConnectorPosition::Field(_) => match (connect.entity, on_root_type) {
+            (true, _) => Some(EntityResolver::Explicit), // Query.foo @connect(entity: true)
+            (_, false) => Some(EntityResolver::Implicit), // Foo.bar @connect
+            _ => None,
+        },
+        ConnectorPosition::Type(_) => None, // TODO
+    }
 }
 
 // --- HTTP JSON ---------------------------------------------------------------
