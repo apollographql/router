@@ -1,5 +1,6 @@
 //! Implements support for persisted queries and safelisting at the supergraph service stage.
 
+mod freeform_graphql_behavior;
 mod id_extractor;
 mod manifest_poller;
 
@@ -454,7 +455,7 @@ mod tests {
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
     use crate::metrics::FutureMetricsExt;
-    use crate::services::layers::persisted_queries::manifest_poller::FreeformGraphQLBehavior;
+    use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
