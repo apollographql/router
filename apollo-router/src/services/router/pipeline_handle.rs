@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::sync::MutexGuard;
 use std::sync::OnceLock;
+
+use parking_lot::Mutex;
+use parking_lot::MutexGuard;
 
 /// A pipeline is used to keep track of how many pipelines we have active. It's associated with an instance of RouterCreator
 /// The telemetry plugin has a gauge to expose this data
@@ -23,10 +24,7 @@ pub(crate) struct PipelineHandle {
 
 static PIPELINES: OnceLock<Mutex<HashMap<PipelineRef, u64>>> = OnceLock::new();
 pub(crate) fn pipelines() -> MutexGuard<'static, HashMap<PipelineRef, u64>> {
-    PIPELINES
-        .get_or_init(Default::default)
-        .lock()
-        .expect("poisoned")
+    PIPELINES.get_or_init(Default::default).lock()
 }
 
 impl PipelineHandle {
