@@ -329,7 +329,7 @@ tracing-opentelemetry = "0.25.0"
 tracing-test = "0.2.5"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
-libtest-mimic = "0.7.3"
+libtest-mimic = "0.8.0"
 rstest = "0.25.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
