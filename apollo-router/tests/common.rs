@@ -882,7 +882,18 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contained(&self, msg: &str) {
+    pub fn print_logs(&mut self) {
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            self.logs.push(line.to_string());
+        }
+
+        for line in &self.logs {
+            println!("{}", line);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 return;
