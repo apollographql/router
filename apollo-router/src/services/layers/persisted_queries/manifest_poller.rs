@@ -427,6 +427,7 @@ fn create_hot_reload_stream(
 
 #[cfg(test)]
 mod tests {
+    use tokio::io::AsyncWriteExt;
     use url::Url;
 
     use super::*;
@@ -507,5 +508,145 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hot_reload_config_enforcement() {
+        let err = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(PersistedQueries::builder().hot_reload(true).build())
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "`persisted_queries.hot_reload` requires `local_manifests`"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hot_reload_stream_initial_load() {
+        let (_, body, _) = fake_manifest();
+        let id = "5678".to_string();
+
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        ])
+                        .hot_reload(true)
+                        .build(),
+                )
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hot_reload_stream_reloads_on_file_change() {
+        // Note: this directly matches the contents of the file in the fixtures
+        // directory in order to ensure the fixture is restored after we modify
+        // it for this test.
+        const ORIGINAL_MANIFEST_CONTENTS: &str = r#"{
+  "format": "apollo-persisted-query-manifest",
+  "version": 1,
+  "operations": [
+    {
+      "id": "5678",
+      "name": "typename",
+      "type": "query",
+      "body": "query { typename }"
+    }
+  ]
+}
+"#;
+
+        const UPDATED_MANIFEST_CONTENTS: &str = r#"{
+  "format": "apollo-persisted-query-manifest",
+  "version": 1,
+  "operations": [
+    {
+      "id": "1234",
+      "name": "typename",
+      "type": "query",
+      "body": "query { typename }"
+    }
+  ]
+}
+"#;
+
+        let original_id = "5678".to_string();
+        let updated_id = "1234".to_string();
+        let body = "query { typename }".to_string();
+
+        let manifest_manager = PersistedQueryManifestPoller::new(
+            Configuration::fake_builder()
+                .apq(Apq::fake_new(Some(false)))
+                .persisted_query(
+                    PersistedQueries::builder()
+                        .enabled(true)
+                        .local_manifests(vec![
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
+                        ])
+                        .hot_reload(true)
+                        .build(),
+                )
+                .build()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            manifest_manager.get_operation_body(&original_id, None),
+            Some(body.clone())
+        );
+
+        // Change the file
+        let mut file = tokio::fs::File::create("tests/fixtures/persisted-queries-manifest.json")
+            .await
+            .unwrap();
+        file.write_all(UPDATED_MANIFEST_CONTENTS.as_bytes())
+            .await
+            .unwrap();
+        file.sync_all().await.unwrap();
+
+        // Wait for the file to be reloaded
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        // The original ID should be gone
+        assert_eq!(
+            manifest_manager.get_operation_body(&original_id, None),
+            None
+        );
+        // The updated ID should be present
+        assert_eq!(
+            manifest_manager.get_operation_body(&updated_id, None),
+            Some(body.clone())
+        );
+
+        // Cleanup, restore the original file
+        let mut file = tokio::fs::File::create("tests/fixtures/persisted-queries-manifest.json")
+            .await
+            .unwrap();
+        file.write_all(ORIGINAL_MANIFEST_CONTENTS.as_bytes())
+            .await
+            .unwrap();
+        file.sync_all().await.unwrap();
+
+        // Ensure the restoration is successful
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        assert_eq!(
+            manifest_manager.get_operation_body(&original_id, None),
+            Some(body)
+        );
     }
 }
