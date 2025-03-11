@@ -30,9 +30,9 @@ pub(crate) fn pipelines() -> MutexGuard<'static, HashMap<PipelineRef, u64>> {
 impl PipelineHandle {
     pub(crate) fn new(schema_id: String, launch_id: Option<String>, config_hash: String) -> Self {
         let pipeline_ref = PipelineRef {
-            schema_id: schema_id.to_string(),
+            schema_id,
             launch_id,
-            config_hash: config_hash.to_string(),
+            config_hash,
         };
         pipelines()
             .entry(pipeline_ref.clone())
