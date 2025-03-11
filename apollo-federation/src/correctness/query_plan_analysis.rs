@@ -355,17 +355,22 @@ fn interpret_fetch_node(
     conditions: &[Literal],
     fetch: &FetchNode,
 ) -> Result<ResponseShape, String> {
-    let mut result = if let Some(_requires) = &fetch.requires {
+    let operation_doc = fetch
+        .operation_document
+        .as_parsed()
+        .map_err(|e| e.to_string())?;
+    let mut result = if !fetch.requires.is_empty() {
         // TODO: check requires
         // Response shapes per entity selection
         let response_shapes =
-            compute_response_shape_for_entity_fetch_operation(&fetch.operation_document, schema)
-                .map_err(|e| {
+            compute_response_shape_for_entity_fetch_operation(operation_doc, schema).map_err(
+                |e| {
                     format!(
                         "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
                         format_federation_error(e),
                     )
-                })?;
+                },
+            )?;
 
         // Compute the merged result from the individual entity response shapes.
         merge_response_shapes(response_shapes.iter()).map_err(|e| {
@@ -375,7 +380,7 @@ fn interpret_fetch_node(
             )
         })
     } else {
-        compute_response_shape_for_operation(&fetch.operation_document, schema).map_err(|e| {
+        compute_response_shape_for_operation(operation_doc, schema).map_err(|e| {
             format!(
                 "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
                 format_federation_error(e),
