@@ -34,3 +34,12 @@ And then run it with:
 # Only works on Linux
 cargo +nightly fuzz run federation
 ```
+
+### Connectors
+
+This target fuzzes the Connector's Mapping Language and ensures that it continues to compose and that it
+successfully handles requests to a running router instance with the fuzzed schema.
+
+```
+cargo +nightly fuzz run connectors
+```

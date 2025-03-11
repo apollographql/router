@@ -138,12 +138,12 @@ fn basic_subscription_with_single_subgraph() {
 }
 
 #[test]
-fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
+fn trying_to_use_defer_with_a_subscription_results_in_an_error() {
     let config = QueryPlannerConfig {
         incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
         ..Default::default()
     };
-    let (api_schema, planner) = planner!(
+    let planner = planner!(
         config = config,
     SubgraphA: r#"
         type Query {
@@ -171,7 +171,7 @@ fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
     "#);
 
     let document = ExecutableDocument::parse_and_validate(
-        api_schema.schema(),
+        planner.api_schema().schema(),
         r#"
         subscription MySubscription {
           onNewUser {

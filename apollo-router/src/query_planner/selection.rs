@@ -692,9 +692,9 @@ mod tests {
           @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
           query: Query
         }
-        
+
         directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-        
+
         directive @join__field(
           graph: join__Graph
           requires: join__FieldSet
@@ -704,14 +704,14 @@ mod tests {
           override: String
           usedOverridden: Boolean
         ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-        
+
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        
+
         directive @join__implements(
           graph: join__Graph!
           interface: String!
         ) repeatable on OBJECT | INTERFACE
-        
+
         directive @join__type(
           graph: join__Graph!
           key: join__FieldSet
@@ -719,27 +719,27 @@ mod tests {
           resolvable: Boolean! = true
           isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-        
+
         directive @join__unionMember(
           graph: join__Graph!
           member: String!
         ) repeatable on UNION
-        
+
         directive @link(
           url: String
           as: String
           for: link__Purpose
           import: [link__Import]
         ) repeatable on SCHEMA
-        
+
         scalar join__FieldSet
-        
+
         enum join__Graph {
             TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
         }
-        
+
         scalar link__Import
-        
+
         enum link__Purpose {
           SECURITY
           EXECUTION

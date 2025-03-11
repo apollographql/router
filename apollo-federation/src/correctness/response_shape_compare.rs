@@ -13,6 +13,7 @@ use super::response_shape::ResponseShape;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
+#[derive(Debug)]
 pub struct ComparisonError {
     description: String,
 }
@@ -117,17 +118,16 @@ pub(crate) fn compare_response_shapes_with_constraint<T: PathConstraint>(
 }
 
 /// Collect and merge all definitions applicable to the given type condition.
+/// Returns `None` if no definitions are applicable.
 fn collect_definitions_for_type_condition(
     defs: &PossibleDefinitions,
     filter_cond: &NormalizedTypeCondition,
-) -> Result<PossibleDefinitionsPerTypeCondition, ComparisonError> {
+) -> Result<Option<PossibleDefinitionsPerTypeCondition>, ComparisonError> {
     let mut filter_iter = defs
         .iter()
         .filter(|(type_cond, _)| filter_cond.implies(type_cond));
     let Some((_type_cond, first)) = filter_iter.next() else {
-        return Err(ComparisonError::new(format!(
-            "no definitions found for type condition: {filter_cond}"
-        )));
+        return Ok(None);
     };
     let mut digest = first.clone();
     // Merge the rest of filter_iter into digest.
@@ -141,7 +141,7 @@ fn collect_definitions_for_type_condition(
                 ))
             })
     )?;
-    Ok(digest)
+    Ok(Some(digest))
 }
 
 fn path_constraint_allows_type_condition<T: PathConstraint>(
@@ -180,19 +180,18 @@ fn compare_possible_definitions<T: PathConstraint>(
 
         // First try: Use the single exact match (common case).
         if let Some(other_def) = other.get(this_cond) {
-            let result = compare_possible_definitions_per_type_condition(
+            if let Ok(result) = compare_possible_definitions_per_type_condition(
                 &updated_constraint,
                 this_def,
                 other_def,
-            );
-            if let Ok(result) = result {
+            ) {
                 return Ok(result);
             }
             // fall through
         }
 
         // Second try: Collect all definitions implied by the `this_cond`.
-        if let Ok(other_def) = collect_definitions_for_type_condition(other, this_cond) {
+        if let Some(other_def) = collect_definitions_for_type_condition(other, this_cond)? {
             let result = compare_possible_definitions_per_type_condition(
                 &updated_constraint,
                 this_def,
@@ -205,11 +204,11 @@ fn compare_possible_definitions<T: PathConstraint>(
                     if this_cond.ground_set().len() == 1 {
                         // Single object type has no other option. Stop and report the error.
                         let detail = detail_single_object_type_condition(this_cond);
-                        return Err(ComparisonError::new(format!(
-                            "mismatch for type condition: {this_cond}{detail}\n{}",
-                            err.description()
+                        return Err(err.add_description(&format!(
+                            "mismatch for type condition: {this_cond}{detail}",
                         )));
                     }
+                    // fall through
                 }
             }
             // fall through
@@ -220,12 +219,12 @@ fn compare_possible_definitions<T: PathConstraint>(
         let mut ground_set_iter = ground_set_iter.filter(|ty| path_constraint.allows(ty));
         ground_set_iter.try_for_each(|ground_ty| {
             let filter_cond = NormalizedTypeCondition::from_object_type(ground_ty);
-            let other_def =
-                collect_definitions_for_type_condition(other, &filter_cond).map_err(|e| {
-                    e.add_description(&format!(
-                        "missing type condition: {this_cond} (case: {ground_ty})"
-                    ))
-                })?;
+            let Some(other_def) = collect_definitions_for_type_condition(other, &filter_cond)?
+            else {
+                return Err(ComparisonError::new(format!(
+                    "no definitions found for type condition: {this_cond} (case: {ground_ty})"
+                )));
+            };
             let updated_constraint = path_constraint.under_type_condition(&filter_cond);
             compare_possible_definitions_per_type_condition(
                 &updated_constraint,
