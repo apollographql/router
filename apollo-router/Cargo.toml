@@ -56,7 +56,6 @@ ci = []
 snapshot = ["axum-server", "serde_regex"]
 
 [dependencies]
-arc-swap = "1.6.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.0.0" }
