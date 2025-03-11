@@ -42,18 +42,6 @@ impl PipelineHandle {
     }
 }
 
-impl Clone for PipelineHandle {
-    fn clone(&self) -> Self {
-        pipelines()
-            .entry(self.pipeline_ref.clone())
-            .and_modify(|p| *p += 1)
-            .or_insert(1);
-        PipelineHandle {
-            pipeline_ref: self.pipeline_ref.clone(),
-        }
-    }
-}
-
 impl Drop for PipelineHandle {
     fn drop(&mut self) {
         let mut pipelines = pipelines();
