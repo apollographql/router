@@ -1,9 +1,10 @@
 use displaydoc::Display;
-use thiserror::Error;
-use jsonwebtoken::errors::Error as JWTError;
-use tower::BoxError;
 use jsonwebtoken::Algorithm;
+use jsonwebtoken::errors::{Error as JWTError, ErrorKind};
 use jsonwebtoken::jwk::KeyAlgorithm;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tower::BoxError;
 
 #[derive(Debug, Display, Error)]
 pub(crate) enum AuthenticationError<'a> {
@@ -44,54 +45,73 @@ pub(crate) enum AuthenticationError<'a> {
     UnsupportedKeyAlgorithm(KeyAlgorithm),
 }
 
+fn jwt_error_to_reason(jwt_err: &JWTError) -> &'static str {
+    let kind = jwt_err.kind();
+    match kind {
+        ErrorKind::InvalidToken => "INVALID_TOKEN",
+        ErrorKind::InvalidSignature => "INVALID_SIGNATURE",
+        ErrorKind::InvalidEcdsaKey => "INVALID_ECDSA_KEY",
+        ErrorKind::InvalidRsaKey(_) => "INVALID_RSA_KEY",
+        ErrorKind::RsaFailedSigning => "RSA_FAILED_SIGNING",
+        ErrorKind::InvalidAlgorithmName => "INVALID_ALGORITHM_NAME",
+        ErrorKind::InvalidKeyFormat => "INVALID_KEY_FORMAT",
+        ErrorKind::MissingRequiredClaim(_) => "MISSING_REQUIRED_CLAIM",
+        ErrorKind::ExpiredSignature => "EXPIRED_SIGNATURE",
+        ErrorKind::InvalidIssuer => "INVALID_ISSUER",
+        ErrorKind::InvalidAudience => "INVALID_AUDIENCE",
+        ErrorKind::InvalidSubject => "INVALID_SUBJECT",
+        ErrorKind::ImmatureSignature => "IMMATURE_SIGNATURE",
+        ErrorKind::InvalidAlgorithm => "INVALID_ALGORITHM",
+        ErrorKind::MissingAlgorithm => "MISSING_ALGORITHM",
+        ErrorKind::Base64(_) => "BASE64_ERROR",
+        ErrorKind::Json(_) => "JSON_ERROR",
+        ErrorKind::Utf8(_) => "UTF8_ERROR",
+        ErrorKind::Crypto(_) => "CRYPTO_ERROR",
+        // ErrorKind is non-exhaustive
+        _ => "UNKNOWN_ERROR",
+    }
+}
+
 impl<'a> AuthenticationError<'a> {
-    pub(crate) fn as_context_object(&self) -> serde_json_bytes::Value {
+    pub(crate) fn as_context_object(&self) -> ErrorContext {
         let (code, reason) = match self {
-            // TODO What should we put for the reason?
-            AuthenticationError::CannotConvertToString => {
-                ("CANNOT_CONVERT_TO_STRING", "")
+            AuthenticationError::CannotConvertToString => ("CANNOT_CONVERT_TO_STRING", None),
+            AuthenticationError::InvalidPrefix(_, _) => ("INVALID_PREFIX", None),
+            AuthenticationError::MissingJWT(_) => ("MISSING_JWT", None),
+            AuthenticationError::InvalidHeader(_, jwt_err) => {
+                ("INVALID_HEADER", Some(jwt_error_to_reason(jwt_err).into()))
             }
-            AuthenticationError::InvalidPrefix(_, _) => {
-                ("INVALID_PREFIX", "")
-            }
-            AuthenticationError::MissingJWT(_) => {
-                ("MISSING_JWT", "")
-            }
-            AuthenticationError::InvalidHeader(_, _) => {
-                ("INVALID_HEADER", "")
-            }
-            AuthenticationError::CannotCreateDecodingKey(_) => {
-                ("CANNOT_CREATE_DECODING_KEY", "")
-            }
-            AuthenticationError::JWKHasNoAlgorithm => {
-                ("JWK_HAS_NO_ALGORITHM", "")
-            }
-            AuthenticationError::CannotDecodeJWT(_) => {
-                ("CANNOT_DECODE_JWT", "")
-            }
+            AuthenticationError::CannotCreateDecodingKey(jwt_err) => (
+                "CANNOT_CREATE_DECODING_KEY",
+                Some(jwt_error_to_reason(jwt_err).into()),
+            ),
+            AuthenticationError::JWKHasNoAlgorithm => ("JWK_HAS_NO_ALGORITHM", None),
+            AuthenticationError::CannotDecodeJWT(jwt_err) => (
+                "CANNOT_DECODE_JWT",
+                Some(jwt_error_to_reason(jwt_err).into()),
+            ),
             AuthenticationError::CannotInsertClaimsIntoContext(_) => {
-                ("CANNOT_INSERT_CLAIMS_INTO_CONTEXT", "")
+                ("CANNOT_INSERT_CLAIMS_INTO_CONTEXT", None)
             }
-            AuthenticationError::CannotFindKID(_) => {
-                ("CANNOT_FIND_KID", "")
-            }
-            AuthenticationError::CannotFindSuitableKey(_, _) => {
-                ("CANNOT_FIND_SUITABLE_KEY", "")
-            }
-            AuthenticationError::InvalidIssuer { .. } => {
-                ("INVALID_ISSUER", "")
-            }
-            AuthenticationError::UnsupportedKeyAlgorithm(_) => {
-                ("UNSUPPORTED_KEY_ALGORITHM", "")
-            }
+            AuthenticationError::CannotFindKID(_) => ("CANNOT_FIND_KID", None),
+            AuthenticationError::CannotFindSuitableKey(_, _) => ("CANNOT_FIND_SUITABLE_KEY", None),
+            AuthenticationError::InvalidIssuer { .. } => ("INVALID_ISSUER", None),
+            AuthenticationError::UnsupportedKeyAlgorithm(_) => ("UNSUPPORTED_KEY_ALGORITHM", None),
         };
 
-        serde_json_bytes::json!({
-            "message": self.to_string(),
-            "code": code,
-            "reason": reason
-        })
+        ErrorContext {
+            message: self.to_string(),
+            code: code.into(),
+            reason,
+        }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct ErrorContext {
+    pub(super) message: String,
+    pub(super) code: String,
+    pub(super) reason: Option<String>,
 }
 
 #[derive(Error, Debug)]

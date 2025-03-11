@@ -6,21 +6,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http::HeaderName;
-use http::HeaderValue;
-use http::StatusCode;
-use http::header;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::decode_header;
-use once_cell::sync::Lazy;
-use reqwest::Client;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
-use url::Url;
-use error::{AuthenticationError, Error};
 use self::jwks::JwksManager;
 use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
@@ -34,20 +19,36 @@ use crate::plugin::PluginPrivate;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::connector::ConnectorAuth;
+use crate::plugins::authentication::error::ErrorContext;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::plugins::authentication::subgraph::AuthConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
+use error::{AuthenticationError, Error};
+use http::HeaderName;
+use http::HeaderValue;
+use http::StatusCode;
+use http::header;
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::decode_header;
+use once_cell::sync::Lazy;
+use reqwest::Client;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+use url::Url;
 
 mod connector;
 pub(crate) mod jwks;
 pub(crate) mod subgraph;
 
+mod error;
 #[cfg(test)]
 mod tests;
-mod error;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo::authentication::jwt_claims";
@@ -370,6 +371,46 @@ impl AuthenticationPlugin {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+enum JwtStatus {
+    Failure {
+        r#type: String,
+        name: String,
+        error: ErrorContext,
+    },
+    Success {
+        r#type: String,
+        name: String,
+    },
+}
+
+impl JwtStatus {
+    fn new_failure(header_name: impl Into<String>, error_context: ErrorContext) -> Self {
+        Self::Failure {
+            r#type: "header".into(),
+            name: header_name.into(),
+            error: error_context,
+        }
+    }
+
+    fn new_success(cookie_name: impl Into<String>) -> Self {
+        Self::Success {
+            r#type: "cookie".into(),
+            name: cookie_name.into(),
+        }
+    }
+
+    /// Returns the error context if the status is a failure; Otherwise, returns None.
+    fn error(&self) -> Option<&ErrorContext> {
+        match self {
+            Self::Failure { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+}
+
+const JWT_CONTEXT_KEY: &str = "apollo::authentication::jwt_status";
+
 fn authenticate(
     config: &JWTConf,
     jwks_manager: &JwksManager,
@@ -390,15 +431,14 @@ fn authenticate(
             1,
             authentication.jwt.failed = true
         );
-        tracing::info!(message = %error, "jwt authentication failure");
+        tracing::error!(message = %error, "jwt authentication failure");
 
         let _ = context.insert_json_value(
-            "apollo::authentication::jwt_status",
-            serde_json_bytes::json!({
-                    "type": "header",
-                    "name": config.header_name,
-                    "error": error.as_context_object()
-                })
+            JWT_CONTEXT_KEY,
+            serde_json_bytes::json!(JwtStatus::new_failure(
+                config.header_name.clone(),
+                error.as_context_object()
+            )),
         );
 
         let response = router::Response::infallible_builder()
@@ -493,7 +533,7 @@ fn authenticate(
 
         if let Err(e) = request
             .context
-            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, token_data.claims)
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, token_data.claims.clone())
         {
             return failure_message(
                 request.context,
@@ -508,6 +548,15 @@ fn authenticate(
             "Number of requests with JWT authentication",
             1
         );
+
+        let _ = request.context.insert_json_value(
+            JWT_CONTEXT_KEY,
+            serde_json_bytes::json!(JwtStatus::new_success(
+                // TODO how do I actually set this correctly?
+                config.header_name.clone()
+            )),
+        );
+
         return ControlFlow::Continue(request);
     }
 
