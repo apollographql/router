@@ -9,21 +9,30 @@ use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 
-fn plan_with_check(
-    check_for_cooperative_cancellation: &dyn Fn() -> ControlFlow<()>,
-) -> Result<QueryPlan, FederationError> {
-    let planner = planner!(
-        Subgraph1: r#"
-          type Query {
-            t: T
-          }
+macro_rules! plan_with_check {
+    ($check_for_cooperative_cancellation:expr) => {
+        run_planner_with_check(
+            $check_for_cooperative_cancellation,
+            planner!(
+                Subgraph1: r#"
+                type Query {
+                    t: T
+                }
 
-          type T @key(fields: "id") {
-            id: ID!
-            x: Int
-          }
-        "#,
-    );
+                type T @key(fields: "id") {
+                    id: ID!
+                    x: Int
+                }
+                "#
+            )
+        )
+    };
+}
+
+fn run_planner_with_check(
+    check_for_cooperative_cancellation: &dyn Fn() -> ControlFlow<()>,
+    planner: apollo_federation::query_plan::query_planner::QueryPlanner,
+) -> Result<QueryPlan, FederationError> {
     let api_schema = planner.api_schema();
     let doc = r#"
       query {
@@ -56,7 +65,7 @@ fn assert_cancelled(result: Result<QueryPlan, FederationError>) {
 #[test]
 fn test_callback_is_called() {
     let counter = Cell::new(0);
-    let result = plan_with_check(&|| {
+    let result = plan_with_check!(&|| {
         counter.set(counter.get() + 1);
         ControlFlow::Continue(())
     });
@@ -69,7 +78,7 @@ fn test_callback_is_called() {
 #[test]
 fn test_cancel_as_soon_as_possible() {
     let counter = Cell::new(0);
-    let result = plan_with_check(&|| {
+    let result = plan_with_check!(&|| {
         counter.set(counter.get() + 1);
         ControlFlow::Break(())
     });
@@ -80,7 +89,7 @@ fn test_cancel_as_soon_as_possible() {
 #[test]
 fn test_cancel_near_the_middle() {
     let counter = Cell::new(0);
-    let result = plan_with_check(&|| {
+    let result = plan_with_check!(&|| {
         counter.set(counter.get() + 1);
         if counter.get() == 5 {
             ControlFlow::Break(())
@@ -95,7 +104,7 @@ fn test_cancel_near_the_middle() {
 #[test]
 fn test_cancel_late_enough_that_planning_finishes() {
     let counter = Cell::new(0);
-    let result = plan_with_check(&|| {
+    let result = plan_with_check!(&|| {
         counter.set(counter.get() + 1);
         if counter.get() >= 1_000 {
             ControlFlow::Break(())
