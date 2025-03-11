@@ -58,6 +58,30 @@ pub(crate) enum ConditionResolution {
     },
 }
 
+impl std::fmt::Display for ConditionResolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConditionResolution::Satisfied {
+                cost,
+                path_tree,
+                context_map,
+            } => {
+                writeln!(f, "Satisfied: cost={cost}")?;
+                if let Some(path_tree) = path_tree {
+                    writeln!(f, "path_tree:\n{path_tree}")?;
+                }
+                if let Some(context_map) = context_map {
+                    writeln!(f, ", context_map:\n{context_map:?}")?;
+                }
+                Ok(())
+            }
+            ConditionResolution::Unsatisfied { reason } => {
+                write!(f, "Unsatisfied: reason={:?}", reason)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum UnsatisfiedConditionReason {
     NoPostRequireKey,
