@@ -13,6 +13,7 @@ use super::response_shape::ResponseShape;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
+#[derive(Debug)]
 pub struct ComparisonError {
     description: String,
 }

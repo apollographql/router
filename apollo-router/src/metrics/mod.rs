@@ -1286,6 +1286,13 @@ mod test {
     }
 
     #[test]
+    fn test_gauge_record() {
+        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        gauge.record(5, &[]);
+        assert_gauge!("test", 5);
+    }
+
+    #[test]
     fn test_no_attributes() {
         u64_counter!("test", "test description", 1);
         assert_counter!("test", 1);

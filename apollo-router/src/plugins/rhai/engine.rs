@@ -1737,12 +1737,11 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
-        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: block.engine.clone(),
-            ast: block.ast.clone(),
+            engine: self.engine.clone(),
+            ast: self.ast.clone(),
         };
         let mut guard = scope.lock();
         // Note: We don't use `process_error()` here, because this code executes in the context of
@@ -1752,20 +1751,18 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                block
-                    .engine
+                self.engine
                     .call_fn(
                         &mut guard,
-                        &block.ast,
+                        &self.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                block
-                    .engine
-                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
+                self.engine
+                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1890,10 +1887,6 @@ impl Rhai {
     }
 
     pub(super) fn ast_has_function(&self, name: &str) -> bool {
-        self.block
-            .load()
-            .ast
-            .iter_fn_def()
-            .any(|fn_def| fn_def.name == name)
+        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
     }
 }
