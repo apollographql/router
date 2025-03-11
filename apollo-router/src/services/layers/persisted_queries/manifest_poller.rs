@@ -1,40 +1,26 @@
 //!  Persisted query manifest poller. Once created, will poll for updates continuously, reading persisted queries into memory.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
 use futures::prelude::*;
 use parking_lot::RwLock;
 use reqwest::Client;
-use serde::Deserialize;
-use serde::Serialize;
 use tokio::fs::read_to_string;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::Configuration;
-use crate::services::layers::persisted_queries::freeform_graphql_behavior::get_freeform_graphql_behavior;
 use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
 use crate::uplink::stream_from_uplink_transforming_new_response;
 
-use super::freeform_graphql_behavior::{FreeformGraphQLAction, FreeformGraphQLBehavior};
-
-/// The full identifier for an operation in a PQ list consists of an operation
-/// ID and an optional client name.
-#[derive(Debug, Clone, Eq, Hash, PartialEq)]
-pub struct FullPersistedQueryOperationId {
-    /// The operation ID (usually a hash).
-    pub operation_id: String,
-    /// The client name associated with the operation; if None, can be any client.
-    pub client_name: Option<String>,
-}
-
-/// An in memory cache of persisted queries.
-pub type PersistedQueryManifest = HashMap<FullPersistedQueryOperationId, String>;
+use super::freeform_graphql_behavior::{
+    FreeformGraphQLAction, FreeformGraphQLBehavior, get_freeform_graphql_behavior,
+};
+use super::manifest::{FullPersistedQueryOperationId, PersistedQueryManifest, SignedUrlChunk};
 
 #[derive(Debug)]
 pub(crate) struct PersistedQueryManifestPollerState {
@@ -481,23 +467,6 @@ pub(crate) enum ManifestPollEvent {
 pub(crate) enum ManifestPollResultOnStartup {
     LoadedOperations,
     Err(BoxError),
-}
-
-/// The format of each persisted query chunk returned from uplink.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub(crate) struct SignedUrlChunk {
-    pub(crate) format: String,
-    pub(crate) version: u64,
-    pub(crate) operations: Vec<Operation>,
-}
-
-/// A single operation containing an ID and a body,
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Operation {
-    pub(crate) id: String,
-    pub(crate) body: String,
-    pub(crate) client_name: Option<String>,
 }
 
 #[cfg(test)]

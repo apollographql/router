@@ -2,6 +2,7 @@
 
 mod freeform_graphql_behavior;
 mod id_extractor;
+mod manifest;
 mod manifest_poller;
 
 #[cfg(test)]
@@ -11,8 +12,8 @@ use http::HeaderValue;
 use http::StatusCode;
 use http::header::CACHE_CONTROL;
 use id_extractor::PersistedQueryIdExtractor;
-pub use manifest_poller::FullPersistedQueryOperationId;
-pub use manifest_poller::PersistedQueryManifest;
+pub use manifest::FullPersistedQueryOperationId;
+pub use manifest::PersistedQueryManifest;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 
