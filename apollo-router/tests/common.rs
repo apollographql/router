@@ -63,7 +63,9 @@ use uuid::Uuid;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
+use wiremock::http::Method;
 use wiremock::matchers::method;
+use wiremock::matchers::path_regex;
 
 pub struct Query {
     traced: bool,
@@ -387,6 +389,7 @@ impl IntegrationTest {
         mut subgraph_overrides: HashMap<String, String>,
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+        http_method: Option<String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -404,6 +407,11 @@ impl IntegrationTest {
             .entry("products".into())
             .or_insert(url.clone());
 
+        // Add a default override for jsonPlaceholder (connectors), if not specified
+        subgraph_overrides
+            .entry("jsonPlaceholder".into())
+            .or_insert(url.clone());
+
         // Insert the overrides into the config
         let config_str = merge_overrides(&config, &subgraph_overrides, None, &redis_namespace);
 
@@ -418,8 +426,15 @@ impl IntegrationTest {
             .start()
             .await;
 
+        // Allow for GET or POST so that connectors works
+        let http_method = match http_method.unwrap_or("POST".to_string()).as_str() {
+            "GET" => Method::Get,
+            "POST" => Method::Post,
+            _ => panic!("Unknown http method specified"),
+        };
         let subgraph_context = Arc::new(Mutex::new(None));
-        Mock::given(method("POST"))
+        Mock::given(method(http_method))
+            .and(path_regex(".*")) // Match any path so that connectors functions
             .respond_with(TracedResponder {
                 response_template: responder.unwrap_or_else(|| {
                     ResponseTemplate::new(200).set_body_json(json!({

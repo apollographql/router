@@ -96,6 +96,7 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::supergraph;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
@@ -346,6 +347,15 @@ impl RouterService {
                     if !response.errors.is_empty() {
                         Self::count_errors(
                             &response.errors,
+                            &context,
+                            &self.oltp_error_metrics_mode,
+                        );
+                    }
+                    if let Some(value_completion) =
+                        response.extensions.get(EXTENSIONS_VALUE_COMPLETION_KEY)
+                    {
+                        Self::count_value_completion_errors(
+                            value_completion,
                             &context,
                             &self.oltp_error_metrics_mode,
                         );
@@ -877,6 +887,7 @@ impl RouterService {
                 .and_then(|s| s.as_str())
                 .unwrap_or_default()
                 .to_string();
+            let severity = error.extensions.get("severity").and_then(|s| s.as_str());
             let path = match &error.path {
                 None => "".into(),
                 Some(path) => path.to_string(),
@@ -886,6 +897,9 @@ impl RouterService {
 
             if matches!(oltp_error_metrics_mode, OtlpErrorMetricsMode::Enabled) {
                 let code_str = code.unwrap_or_default().to_string();
+                let severity_str = severity
+                    .unwrap_or(tracing::Level::ERROR.as_str())
+                    .to_string();
                 u64_counter!(
                     "apollo.router.operations.error",
                     "Number of errors returned by operation",
@@ -896,6 +910,7 @@ impl RouterService {
                     "apollo.client.name" = client_name.clone(),
                     "apollo.client.version" = client_version.clone(),
                     "graphql.error.extensions.code" = code_str,
+                    "graphql.error.extensions.severity" = severity_str,
                     "graphql.error.path" = path,
                     "apollo.router.error.service" = service
                 );
@@ -927,6 +942,20 @@ impl RouterService {
             .collect();
 
         Self::count_errors(&errors, context, oltp_error_metrics_mode);
+    }
+
+    fn count_value_completion_errors(
+        value_completion: &Value,
+        context: &Context,
+        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
+    ) {
+        if let Some(vc_array) = value_completion.as_array() {
+            let errors: Vec<graphql::Error> = vc_array
+                .iter()
+                .filter_map(graphql::Error::from_value_completion_value)
+                .collect();
+            Self::count_errors(&errors, context, oltp_error_metrics_mode);
+        }
     }
 }
 

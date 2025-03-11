@@ -908,15 +908,20 @@ impl PluginPrivate for Telemetry {
     fn connector_request_service(
         &self,
         service: connector::request_service::BoxService,
+        source_name: String,
     ) -> connector::request_service::BoxService {
         let req_fn_config = self.config.clone();
         let res_fn_config = self.config.clone();
+        let span_mode = self.config.instrumentation.spans.mode;
         let static_connector_instruments = self
             .builtin_instruments
             .read()
             .connector_custom_instruments
             .clone();
         ServiceBuilder::new()
+            .instrument(move |_req: &connector::request_service::Request| {
+                span_mode.create_connector(source_name.as_str())
+            })
             .map_future_with_request_data(
                 move |request: &connector::request_service::Request| {
                     let custom_instruments = req_fn_config
