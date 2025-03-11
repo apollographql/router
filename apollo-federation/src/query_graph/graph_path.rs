@@ -2012,7 +2012,7 @@ where
             for edge in to_advance.next_edges()? {
                 debug!(
                     "Testing edge {edge}",
-                    edge = EdgeIndexDisplay::new(edge, self.graph.clone())
+                    edge = EdgeIndexDisplay::new(edge, &self.graph)
                 );
                 let span = debug_span!(" |");
                 let _guard = span.enter();
@@ -3734,22 +3734,22 @@ impl OpGraphPath {
     }
 }
 
-struct EdgeIndexDisplay<TEdge>
+struct EdgeIndexDisplay<'graph, TEdge>
 where
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
     _phantom_data_for_edge: PhantomData<TEdge>,
-    graph: Arc<QueryGraph>,
+    graph: &'graph Arc<QueryGraph>,
     edge_index: EdgeIndex,
 }
 
-impl<TEdge> EdgeIndexDisplay<TEdge>
+impl<'graph, TEdge> EdgeIndexDisplay<'graph, TEdge>
 where
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
 {
-    fn new(edge_index: EdgeIndex, graph: Arc<QueryGraph>) -> Self {
+    fn new(edge_index: EdgeIndex, graph: &'graph Arc<QueryGraph>) -> Self {
         Self {
             _phantom_data_for_edge: Default::default(),
             graph,
@@ -3758,7 +3758,7 @@ where
     }
 }
 
-impl<TEdge> Display for EdgeIndexDisplay<TEdge>
+impl<TEdge> Display for EdgeIndexDisplay<'_, TEdge>
 where
     TEdge: Copy + Into<Option<EdgeIndex>>,
     EdgeIndex: Into<TEdge>,
