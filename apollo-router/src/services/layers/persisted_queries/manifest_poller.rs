@@ -14,15 +14,14 @@ use tokio::sync::mpsc;
 use tower::BoxError;
 
 use crate::Configuration;
+use crate::services::layers::persisted_queries::freeform_graphql_behavior::get_freeform_graphql_behavior;
 use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
 use crate::uplink::stream_from_uplink_transforming_new_response;
 
-use super::freeform_graphql_behavior::{
-    FreeformGraphQLAction, FreeformGraphQLBehavior, FreeformGraphQLSafelist,
-};
+use super::freeform_graphql_behavior::{FreeformGraphQLAction, FreeformGraphQLBehavior};
 
 /// The full identifier for an operation in a PQ list consists of an operation
 /// ID and an optional client name.
@@ -55,7 +54,7 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(manifest_files) = config.persisted_queries.local_manifests {
+        if let Some(manifest_files) = &config.persisted_queries.local_manifests {
             if manifest_files.is_empty() {
                 return Err("no local persisted query list files specified".into());
             }
@@ -107,27 +106,7 @@ impl PersistedQueryManifestPoller {
                 }
             }
 
-            let freeform_graphql_behavior = if config.persisted_queries.safelist.enabled {
-                if config.persisted_queries.safelist.require_id {
-                    FreeformGraphQLBehavior::DenyAll {
-                        log_unknown: config.persisted_queries.log_unknown,
-                    }
-                } else {
-                    FreeformGraphQLBehavior::AllowIfInSafelist {
-                        safelist: FreeformGraphQLSafelist::new(&manifest),
-                        log_unknown: config.persisted_queries.log_unknown,
-                    }
-                }
-            } else if config.persisted_queries.log_unknown {
-                FreeformGraphQLBehavior::LogUnlessInSafelist {
-                    safelist: FreeformGraphQLSafelist::new(&manifest),
-                    apq_enabled: config.apq.enabled,
-                }
-            } else {
-                FreeformGraphQLBehavior::AllowAll {
-                    apq_enabled: config.apq.enabled,
-                }
-            };
+            let freeform_graphql_behavior = get_freeform_graphql_behavior(&config, &manifest);
 
             let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
                 persisted_query_manifest: manifest.clone(),
@@ -324,27 +303,8 @@ async fn poll_uplink(
     while let Some(event) = uplink_executor.next().await {
         match event {
             ManifestPollEvent::NewManifest(new_manifest) => {
-                let freeform_graphql_behavior = if config.persisted_queries.safelist.enabled {
-                    if config.persisted_queries.safelist.require_id {
-                        FreeformGraphQLBehavior::DenyAll {
-                            log_unknown: config.persisted_queries.log_unknown,
-                        }
-                    } else {
-                        FreeformGraphQLBehavior::AllowIfInSafelist {
-                            safelist: FreeformGraphQLSafelist::new(&new_manifest),
-                            log_unknown: config.persisted_queries.log_unknown,
-                        }
-                    }
-                } else if config.persisted_queries.log_unknown {
-                    FreeformGraphQLBehavior::LogUnlessInSafelist {
-                        safelist: FreeformGraphQLSafelist::new(&new_manifest),
-                        apq_enabled: config.apq.enabled,
-                    }
-                } else {
-                    FreeformGraphQLBehavior::AllowAll {
-                        apq_enabled: config.apq.enabled,
-                    }
-                };
+                let freeform_graphql_behavior =
+                    get_freeform_graphql_behavior(&config, &new_manifest);
 
                 let new_state = PersistedQueryManifestPollerState {
                     persisted_query_manifest: new_manifest,
@@ -598,51 +558,6 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(manifest_manager.get_operation_body(&id, None), Some(body))
-    }
-
-    #[test]
-    fn safelist_body_normalization() {
-        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from([
-            (
-                FullPersistedQueryOperationId {
-                    operation_id: "valid-syntax".to_string(),
-                    client_name: None,
-                },
-                "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah".to_string(),
-            ),
-            (
-                FullPersistedQueryOperationId {
-                    operation_id: "invalid-syntax".to_string(),
-                    client_name: None,
-                },
-                "}}}".to_string(),
-            ),
-        ]));
-
-        let is_allowed = |body: &str| -> bool {
-            safelist.is_allowed(ast::Document::parse(body, "").as_ref().map_err(|_| body))
-        };
-
-        // Precise string matches.
-        assert!(is_allowed(
-            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah"
-        ));
-
-        // Reordering definitions and reformatting a bit matches.
-        assert!(is_allowed(
-            "#comment\n  fragment, B on U  , { b    c }    query SomeOp {  ...A ...B }  fragment    \nA on T { a }"
-        ));
-
-        // Reordering fields does not match!
-        assert!(!is_allowed(
-            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{c b  } # yeah"
-        ));
-
-        // Documents with invalid syntax don't match...
-        assert!(!is_allowed("}}}}"));
-
-        // ... unless they precisely match a safelisted document that also has invalid syntax.
-        assert!(is_allowed("}}}"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

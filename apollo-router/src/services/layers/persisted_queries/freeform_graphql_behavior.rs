@@ -1,3 +1,5 @@
+use crate::Configuration;
+
 use super::PersistedQueryManifest;
 use apollo_compiler::ast;
 use std::collections::HashSet;
@@ -166,5 +168,84 @@ impl FreeformGraphQLSafelist {
                 new_document.to_string()
             }
         }
+    }
+}
+
+/// Determine behavior based on PQ configuration
+pub(super) fn get_freeform_graphql_behavior(
+    config: &Configuration,
+    new_manifest: &PersistedQueryManifest,
+) -> FreeformGraphQLBehavior {
+    if config.persisted_queries.safelist.enabled {
+        if config.persisted_queries.safelist.require_id {
+            FreeformGraphQLBehavior::DenyAll {
+                log_unknown: config.persisted_queries.log_unknown,
+            }
+        } else {
+            FreeformGraphQLBehavior::AllowIfInSafelist {
+                safelist: FreeformGraphQLSafelist::new(new_manifest),
+                log_unknown: config.persisted_queries.log_unknown,
+            }
+        }
+    } else if config.persisted_queries.log_unknown {
+        FreeformGraphQLBehavior::LogUnlessInSafelist {
+            safelist: FreeformGraphQLSafelist::new(new_manifest),
+            apq_enabled: config.apq.enabled,
+        }
+    } else {
+        FreeformGraphQLBehavior::AllowAll {
+            apq_enabled: config.apq.enabled,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::layers::persisted_queries::FullPersistedQueryOperationId;
+
+    #[test]
+    fn safelist_body_normalization() {
+        let safelist = FreeformGraphQLSafelist::new(&PersistedQueryManifest::from([
+            (
+                FullPersistedQueryOperationId {
+                    operation_id: "valid-syntax".to_string(),
+                    client_name: None,
+                },
+                "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah".to_string(),
+            ),
+            (
+                FullPersistedQueryOperationId {
+                    operation_id: "invalid-syntax".to_string(),
+                    client_name: None,
+                },
+                "}}}".to_string(),
+            ),
+        ]));
+
+        let is_allowed = |body: &str| -> bool {
+            safelist.is_allowed(ast::Document::parse(body, "").as_ref().map_err(|_| body))
+        };
+
+        // Precise string matches.
+        assert!(is_allowed(
+            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{b c  } # yeah"
+        ));
+
+        // Reordering definitions and reformatting a bit matches.
+        assert!(is_allowed(
+            "#comment\n  fragment, B on U  , { b    c }    query SomeOp {  ...A ...B }  fragment    \nA on T { a }"
+        ));
+
+        // Reordering fields does not match!
+        assert!(!is_allowed(
+            "fragment A on T { a }    query SomeOp { ...A ...B }    fragment,,, B on U{c b  } # yeah"
+        ));
+
+        // Documents with invalid syntax don't match...
+        assert!(!is_allowed("}}}}"));
+
+        // ... unless they precisely match a safelisted document that also has invalid syntax.
+        assert!(is_allowed("}}}"));
     }
 }
