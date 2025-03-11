@@ -925,6 +925,13 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    /// Checks the metrics contain the supplied string in prometheus format.
+    /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.
+    /// For example:
+    /// ```rust,ignore
+    /// router.assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
+    /// ```
+    /// Will allow the metric to be checked even if the config hash and schema id are fluid.
     pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
         let now = Instant::now();
         let mut last_metrics = String::new();
