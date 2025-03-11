@@ -1,5 +1,6 @@
 //!  Persisted query manifest poller. Once created, will poll for updates continuously, reading persisted queries into memory.
 
+use std::pin::Pin;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
@@ -40,100 +41,40 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(manifest_files) = &config.persisted_queries.local_manifests {
-            if manifest_files.is_empty() {
-                return Err("no local persisted query list files specified".into());
-            }
-            let mut manifest = PersistedQueryManifest::new();
+        let manifest_source = ManifestSource::from_config(&config)?;
+        let manifest_stream = create_manifest_stream(manifest_source).await?;
 
-            for local_pq_list in manifest_files {
-                tracing::info!(
-                    "Loading persisted query list from local file: {}",
-                    local_pq_list
-                );
+        // Initialize state
+        let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
+            persisted_query_manifest: PersistedQueryManifest::new(),
+            freeform_graphql_behavior: FreeformGraphQLBehavior::DenyAll { log_unknown: false },
+        }));
 
-                let raw_manifest: String =
-                    read_to_string(local_pq_list.clone())
-                        .await
-                        .map_err(|e| -> BoxError {
-                            format!(
-                                "could not read local persisted query list file {}: {}",
-                                local_pq_list, e
-                            )
-                            .into()
-                        })?;
+        // Start the background polling task
+        let (_drop_signal, drop_receiver) = mpsc::channel::<()>(1);
+        let (ready_sender, mut ready_receiver) = mpsc::channel::<ManifestPollResultOnStartup>(1);
 
-                let signed_url_chunk = SignedUrlChunk::parse_and_validate(&raw_manifest)?;
+        let state_clone = state.clone();
+        let config_clone = config.clone();
 
-                manifest.add_chunk(&signed_url_chunk);
-            }
-
-            let freeform_graphql_behavior = get_freeform_graphql_behavior(&config, &manifest);
-
-            let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
-                persisted_query_manifest: manifest.clone(),
-                freeform_graphql_behavior,
-            }));
-
-            tracing::info!(
-                "Loaded {} persisted queries from local file.",
-                manifest.len()
-            );
-
-            Ok(Self {
-                state,
-                _drop_signal: mpsc::channel::<()>(1).0,
-            })
-        } else if let Some(uplink_config) = config.uplink.as_ref() {
-            // Note that the contents of this Arc<RwLock> will be overwritten by poll_uplink before
-            // we return from this `new` method, so the particular choice of freeform_graphql_behavior
-            // here does not matter. (Can we improve this? We could use an Option but then we'd just
-            // end up `unwrap`ping a lot later. Perhaps MaybeUninit, but that's even worse?)
-            let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
-                persisted_query_manifest: PersistedQueryManifest::new(),
-                freeform_graphql_behavior: FreeformGraphQLBehavior::DenyAll { log_unknown: false },
-            }));
-
-            let http_client = Client::builder().timeout(uplink_config.timeout).gzip(true).build()
-            .map_err(|e| -> BoxError {
-                format!(
-                    "could not initialize HTTP client for fetching persisted queries manifest chunks: {}",
-                    e
-                ).into()
-            })?;
-
-            let (_drop_signal, drop_receiver) = mpsc::channel::<()>(1);
-            let (ready_sender, mut ready_receiver) =
-                mpsc::channel::<ManifestPollResultOnStartup>(1);
-
-            // start polling uplink for persisted query chunks
-            tokio::task::spawn(poll_uplink(
-                uplink_config.clone(),
-                state.clone(),
-                config,
+        tokio::task::spawn(async move {
+            poll_manifest_stream(
+                manifest_stream,
+                state_clone,
+                config_clone,
                 ready_sender,
                 drop_receiver,
-                http_client,
-            ));
+            )
+            .await;
+        });
 
-            // wait for the uplink poller to report its first success and continue
-            // or report the error
-            match ready_receiver.recv().await {
-                Some(startup_result) => match startup_result {
-                    ManifestPollResultOnStartup::LoadedOperations => (),
-                    ManifestPollResultOnStartup::Err(error) => return Err(error),
-                },
-                None => {
-                    return Err("could not receive ready event for persisted query layer".into());
-                }
-            }
-
-            Ok(Self {
+        match ready_receiver.recv().await {
+            Some(ManifestPollResultOnStartup::LoadedOperations) => Ok(Self {
                 state,
                 _drop_signal,
-            })
-        } else {
-            Err("persisted queries requires Apollo GraphOS. ensure that you have set APOLLO_KEY and APOLLO_GRAPH_REF environment variables".into())
+            }),
+            Some(ManifestPollResultOnStartup::Err(e)) => Err(e),
+            None => Err("could not receive ready event for persisted query layer".into()),
         }
     }
 
@@ -206,130 +147,7 @@ impl PersistedQueryManifestPoller {
     }
 }
 
-async fn poll_uplink(
-    uplink_config: UplinkConfig,
-    state: Arc<RwLock<PersistedQueryManifestPollerState>>,
-    config: Configuration,
-    ready_sender: mpsc::Sender<ManifestPollResultOnStartup>,
-    mut drop_receiver: mpsc::Receiver<()>,
-    http_client: Client,
-) {
-    let http_client = http_client.clone();
-    let mut uplink_executor = stream::select_all(vec![
-        stream_from_uplink_transforming_new_response::<
-            PersistedQueriesManifestQuery,
-            MaybePersistedQueriesManifestChunks,
-            Option<PersistedQueryManifest>,
-        >(uplink_config.clone(), move |response| {
-            let http_client = http_client.clone();
-            Box::new(Box::pin(async move {
-                match response {
-                    Some(chunks) => manifest_from_chunks(chunks, http_client)
-                        .await
-                        .map(Some)
-                        .map_err(|err| {
-                            format!("could not download persisted query lists: {}", err).into()
-                        }),
-                    None => Ok(None),
-                }
-            }))
-        })
-        .map(|res| match res {
-            Ok(Some(new_manifest)) => ManifestPollEvent::NewManifest(new_manifest),
-            Ok(None) => ManifestPollEvent::NoPersistedQueryList {
-                graph_ref: uplink_config.apollo_graph_ref.clone(),
-            },
-            Err(e) => ManifestPollEvent::Err(e.into()),
-        })
-        .boxed(),
-        drop_receiver
-            .recv()
-            .into_stream()
-            .filter_map(|res| {
-                future::ready(match res {
-                    None => Some(ManifestPollEvent::Shutdown),
-                    Some(()) => Some(ManifestPollEvent::Err(
-                        "received message on drop channel in persisted query layer, which never \
-                         gets sent"
-                            .into(),
-                    )),
-                })
-            })
-            .boxed(),
-    ])
-    .take_while(|msg| future::ready(!matches!(msg, ManifestPollEvent::Shutdown)))
-    .boxed();
-
-    let mut ready_sender_once = Some(ready_sender);
-
-    while let Some(event) = uplink_executor.next().await {
-        match event {
-            ManifestPollEvent::NewManifest(new_manifest) => {
-                let freeform_graphql_behavior =
-                    get_freeform_graphql_behavior(&config, &new_manifest);
-
-                let new_state = PersistedQueryManifestPollerState {
-                    persisted_query_manifest: new_manifest,
-                    freeform_graphql_behavior,
-                };
-
-                *state.write() = new_state;
-
-                send_startup_event_or_log_error(
-                    &mut ready_sender_once,
-                    ManifestPollResultOnStartup::LoadedOperations,
-                )
-                .await;
-            }
-            ManifestPollEvent::Err(e) => {
-                send_startup_event_or_log_error(
-                    &mut ready_sender_once,
-                    ManifestPollResultOnStartup::Err(e),
-                )
-                .await
-            }
-            ManifestPollEvent::NoPersistedQueryList { graph_ref } => {
-                send_startup_event_or_log_error(
-                    &mut ready_sender_once,
-                    ManifestPollResultOnStartup::Err(
-                        format!("no persisted query list found for graph ref {}", &graph_ref)
-                            .into(),
-                    ),
-                )
-                .await
-            }
-            // this event is a no-op because we `take_while` on messages that are not this one
-            ManifestPollEvent::Shutdown => (),
-        }
-    }
-
-    async fn send_startup_event_or_log_error(
-        ready_sender: &mut Option<mpsc::Sender<ManifestPollResultOnStartup>>,
-        message: ManifestPollResultOnStartup,
-    ) {
-        match (ready_sender.take(), message) {
-            (Some(ready_sender), message) => {
-                if let Err(e) = ready_sender.send(message).await {
-                    tracing::debug!(
-                        "could not send startup event for the persisted query layer: {e}"
-                    );
-                }
-            }
-            (None, ManifestPollResultOnStartup::Err(err)) => {
-                // We've already successfully started up, but we received some sort of error. This doesn't
-                // need to break our functional router, but we can log in case folks are interested.
-                tracing::error!(
-                    "error while polling uplink for persisted query manifests: {}",
-                    err
-                )
-            }
-            // Do nothing in the normal background "new manifest" case.
-            (None, ManifestPollResultOnStartup::LoadedOperations) => {}
-        }
-    }
-}
-
-async fn manifest_from_chunks(
+async fn manifest_from_uplink_chunks(
     new_chunks: Vec<PersistedQueriesManifestChunk>,
     http_client: Client,
 ) -> Result<PersistedQueryManifest, BoxError> {
@@ -337,7 +155,7 @@ async fn manifest_from_chunks(
     tracing::debug!("ingesting new persisted queries: {:?}", &new_chunks);
     // TODO: consider doing these fetches in parallel
     for new_chunk in new_chunks {
-        add_chunk_to_operations(
+        fetch_chunk_into_manifest(
             new_chunk,
             &mut new_persisted_query_manifest,
             http_client.clone(),
@@ -353,7 +171,7 @@ async fn manifest_from_chunks(
     Ok(new_persisted_query_manifest)
 }
 
-async fn add_chunk_to_operations(
+async fn fetch_chunk_into_manifest(
     chunk: PersistedQueriesManifestChunk,
     manifest: &mut PersistedQueryManifest,
     http_client: Client,
@@ -413,20 +231,148 @@ async fn fetch_chunk(http_client: Client, chunk_url: &String) -> Result<SignedUr
     chunk.validate()
 }
 
-/// Types of events produced by the manifest poller.
-#[derive(Debug)]
-pub(crate) enum ManifestPollEvent {
-    NewManifest(PersistedQueryManifest),
-    NoPersistedQueryList { graph_ref: String },
-    Err(BoxError),
-    Shutdown,
-}
-
 /// The result of the first time build of the persisted query manifest.
 #[derive(Debug)]
 pub(crate) enum ManifestPollResultOnStartup {
     LoadedOperations,
     Err(BoxError),
+}
+
+/// The source of persisted query manifests
+#[derive(Debug)]
+enum ManifestSource {
+    LocalStatic(Vec<String>),
+    Uplink(UplinkConfig),
+}
+
+impl ManifestSource {
+    fn from_config(config: &Configuration) -> Result<Self, BoxError> {
+        let source = if let Some(paths) = &config.persisted_queries.local_manifests {
+            ManifestSource::LocalStatic(paths.clone())
+        } else if let Some(uplink_config) = config.uplink.as_ref() {
+            ManifestSource::Uplink(uplink_config.clone())
+        } else {
+            return Err(
+                "persisted queries requires either local_manifests or Apollo GraphOS configuration"
+                    .into(),
+            );
+        };
+
+        Ok(source)
+    }
+}
+
+/// A stream of manifest updates
+type ManifestStream = dyn Stream<Item = Result<PersistedQueryManifest, BoxError>> + Send + 'static;
+
+async fn create_manifest_stream(
+    source: ManifestSource,
+) -> Result<Pin<Box<ManifestStream>>, BoxError> {
+    match source {
+        ManifestSource::LocalStatic(paths) => Ok(stream::once(load_local_manifests(paths)).boxed()),
+        ManifestSource::Uplink(uplink_config) => {
+            let client = Client::builder()
+                .timeout(uplink_config.timeout)
+                .gzip(true)
+                .build()?;
+            Ok(create_uplink_stream(uplink_config, client).boxed())
+        }
+    }
+}
+
+async fn poll_manifest_stream(
+    mut manifest_stream: Pin<Box<ManifestStream>>,
+    state: Arc<RwLock<PersistedQueryManifestPollerState>>,
+    config: Configuration,
+    ready_sender: mpsc::Sender<ManifestPollResultOnStartup>,
+    mut drop_receiver: mpsc::Receiver<()>,
+) {
+    let mut ready_sender = Some(ready_sender);
+
+    loop {
+        tokio::select! {
+            manifest_result = manifest_stream.next() => {
+                match manifest_result {
+                    Some(Ok(new_manifest)) => {
+                        let freeform_graphql_behavior =
+                            get_freeform_graphql_behavior(&config, &new_manifest);
+
+                        *state.write() = PersistedQueryManifestPollerState {
+                            persisted_query_manifest: new_manifest,
+                            freeform_graphql_behavior,
+                        };
+
+                        if let Some(sender) = ready_sender.take() {
+                            let _ = sender.send(ManifestPollResultOnStartup::LoadedOperations).await;
+                        }
+                    }
+                    Some(Err(e)) => {
+                        if let Some(sender) = ready_sender.take() {
+                            let _ = sender.send(ManifestPollResultOnStartup::Err(e)).await;
+                        } else {
+                            tracing::error!("Error polling manifest: {}", e);
+                        }
+                    }
+                    None => break,
+                }
+            }
+            _ = drop_receiver.recv() => break,
+        }
+    }
+}
+
+async fn load_local_manifests(paths: Vec<String>) -> Result<PersistedQueryManifest, BoxError> {
+    let mut complete_manifest = PersistedQueryManifest::new();
+
+    for path in paths.iter() {
+        let raw_file_contents = read_to_string(path).await.map_err(|e| -> BoxError {
+            format!(
+                "Failed to read persisted query list file at path: {}, {}",
+                path, e
+            )
+            .into()
+        })?;
+
+        let chunk = SignedUrlChunk::parse_and_validate(&raw_file_contents)?;
+        complete_manifest.add_chunk(&chunk);
+    }
+
+    tracing::info!(
+        "Loaded {} persisted queries from local files.",
+        complete_manifest.len()
+    );
+
+    Ok(complete_manifest)
+}
+
+fn create_uplink_stream(
+    uplink_config: UplinkConfig,
+    http_client: Client,
+) -> impl Stream<Item = Result<PersistedQueryManifest, BoxError>> {
+    let result = stream_from_uplink_transforming_new_response::<
+        PersistedQueriesManifestQuery,
+        MaybePersistedQueriesManifestChunks,
+        Option<PersistedQueryManifest>,
+    >(uplink_config, move |response| {
+        let http_client = http_client.clone();
+        Box::new(Box::pin(async move {
+            match response {
+                Some(chunks) => manifest_from_uplink_chunks(chunks, http_client)
+                    .await
+                    .map(Some)
+                    .map_err(|e| -> BoxError { e.into() }),
+                None => Ok(None),
+            }
+        }))
+    })
+    .filter_map(|result| async move {
+        match result {
+            Ok(Some(manifest)) => Some(Ok(manifest)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e.into())),
+        }
+    });
+    result
 }
 
 #[cfg(test)]
