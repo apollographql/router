@@ -1,5 +1,6 @@
 //!  Persisted query manifest poller. Once created, will poll for updates continuously, reading persisted queries into memory.
 
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -242,12 +243,19 @@ pub(crate) enum ManifestPollResultOnStartup {
 #[derive(Debug)]
 enum ManifestSource {
     LocalStatic(Vec<String>),
+    LocalHotReload(Vec<String>),
     Uplink(UplinkConfig),
 }
 
 impl ManifestSource {
     fn from_config(config: &Configuration) -> Result<Self, BoxError> {
-        let source = if let Some(paths) = &config.persisted_queries.local_manifests {
+        let source = if config.persisted_queries.hot_reload {
+            if let Some(paths) = &config.persisted_queries.local_manifests {
+                ManifestSource::LocalHotReload(paths.clone())
+            } else {
+                return Err("`persisted_queries.hot_reload` requires `local_manifests`".into());
+            }
+        } else if let Some(paths) = &config.persisted_queries.local_manifests {
             ManifestSource::LocalStatic(paths.clone())
         } else if let Some(uplink_config) = config.uplink.as_ref() {
             ManifestSource::Uplink(uplink_config.clone())
@@ -270,6 +278,7 @@ async fn create_manifest_stream(
 ) -> Result<Pin<Box<ManifestStream>>, BoxError> {
     match source {
         ManifestSource::LocalStatic(paths) => Ok(stream::once(load_local_manifests(paths)).boxed()),
+        ManifestSource::LocalHotReload(paths) => Ok(create_hot_reload_stream(paths).boxed()),
         ManifestSource::Uplink(uplink_config) => {
             let client = Client::builder()
                 .timeout(uplink_config.timeout)
@@ -373,6 +382,47 @@ fn create_uplink_stream(
         }
     });
     result
+}
+
+fn create_hot_reload_stream(
+    paths: Vec<String>,
+) -> impl Stream<Item = Result<PersistedQueryManifest, BoxError>> {
+    // Create file watchers for each path
+    let file_watchers = paths.into_iter().map(|raw_path| {
+        crate::files::watch(std::path::Path::new(&raw_path.clone())).then(move |_| {
+            let raw_path = raw_path.clone();
+            async move {
+                match read_to_string(&raw_path).await {
+                    Ok(raw_file_contents) => {
+                        match SignedUrlChunk::parse_and_validate(&raw_file_contents) {
+                            Ok(chunk) => Ok((raw_path, chunk)),
+                            Err(e) => Err(e.into()),
+                        }
+                    }
+                    Err(e) => Err(e.into()),
+                }
+            }
+            .boxed()
+        })
+    });
+
+    // We need to keep track of the local manifest chunks so we can replace them when
+    // they change.
+    let mut chunks: HashMap<String, SignedUrlChunk> = HashMap::new();
+
+    // Combine all watchers into a single stream
+    stream::select_all(file_watchers).map(move |result| {
+        result.map(|(path, chunk)| {
+            chunks.insert(path, chunk);
+
+            let mut manifest = PersistedQueryManifest::new();
+            for chunk in chunks.values() {
+                manifest.add_chunk(chunk);
+            }
+
+            manifest
+        })
+    })
 }
 
 #[cfg(test)]
