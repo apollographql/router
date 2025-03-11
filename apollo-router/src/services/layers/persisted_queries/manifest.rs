@@ -1,8 +1,9 @@
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-};
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::ops::DerefMut;
+
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 
 /// The full identifier for an operation in a PQ list consists of an operation
@@ -60,19 +61,12 @@ impl SignedUrlChunk {
 
 /// An in memory cache of persisted queries.
 // pub type PersistedQueryManifest = HashMap<FullPersistedQueryOperationId, String>;
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PersistedQueryManifest {
     inner: HashMap<FullPersistedQueryOperationId, String>,
 }
 
 impl PersistedQueryManifest {
-    /// Create a new manifest.
-    pub fn new() -> Self {
-        Self {
-            inner: HashMap::new(),
-        }
-    }
-
     /// Add a chunk to the manifest.
     pub(crate) fn add_chunk(&mut self, chunk: &SignedUrlChunk) {
         for operation in &chunk.operations {
@@ -89,7 +83,7 @@ impl PersistedQueryManifest {
 
 impl From<Vec<ManifestOperation>> for PersistedQueryManifest {
     fn from(operations: Vec<ManifestOperation>) -> Self {
-        let mut manifest = PersistedQueryManifest::new();
+        let mut manifest = PersistedQueryManifest::default();
         for operation in operations {
             manifest.insert(
                 FullPersistedQueryOperationId {

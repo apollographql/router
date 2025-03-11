@@ -1,8 +1,9 @@
-use crate::Configuration;
+use std::collections::HashSet;
+
+use apollo_compiler::ast;
 
 use super::PersistedQueryManifest;
-use apollo_compiler::ast;
-use std::collections::HashSet;
+use crate::Configuration;
 
 /// Describes whether the router should allow or deny a given request.
 /// with an error, or allow it but log the operation as unknown.

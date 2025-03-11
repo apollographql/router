@@ -12,17 +12,18 @@ use tokio::fs::read_to_string;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
+use super::freeform_graphql_behavior::FreeformGraphQLAction;
+use super::freeform_graphql_behavior::FreeformGraphQLBehavior;
+use super::freeform_graphql_behavior::get_freeform_graphql_behavior;
+use super::manifest::FullPersistedQueryOperationId;
+use super::manifest::PersistedQueryManifest;
+use super::manifest::SignedUrlChunk;
 use crate::Configuration;
 use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
 use crate::uplink::stream_from_uplink_transforming_new_response;
-
-use super::freeform_graphql_behavior::{
-    FreeformGraphQLAction, FreeformGraphQLBehavior, get_freeform_graphql_behavior,
-};
-use super::manifest::{FullPersistedQueryOperationId, PersistedQueryManifest, SignedUrlChunk};
 
 #[derive(Debug)]
 pub(crate) struct PersistedQueryManifestPollerState {
@@ -47,7 +48,7 @@ impl PersistedQueryManifestPoller {
 
         // Initialize state
         let state = Arc::new(RwLock::new(PersistedQueryManifestPollerState {
-            persisted_query_manifest: PersistedQueryManifest::new(),
+            persisted_query_manifest: PersistedQueryManifest::default(),
             freeform_graphql_behavior: FreeformGraphQLBehavior::DenyAll { log_unknown: false },
         }));
 
@@ -152,7 +153,7 @@ async fn manifest_from_uplink_chunks(
     new_chunks: Vec<PersistedQueriesManifestChunk>,
     http_client: Client,
 ) -> Result<PersistedQueryManifest, BoxError> {
-    let mut new_persisted_query_manifest = PersistedQueryManifest::new();
+    let mut new_persisted_query_manifest = PersistedQueryManifest::default();
     tracing::debug!("ingesting new persisted queries: {:?}", &new_chunks);
     // TODO: consider doing these fetches in parallel
     for new_chunk in new_chunks {
@@ -331,7 +332,7 @@ async fn poll_manifest_stream(
 }
 
 async fn load_local_manifests(paths: Vec<String>) -> Result<PersistedQueryManifest, BoxError> {
-    let mut complete_manifest = PersistedQueryManifest::new();
+    let mut complete_manifest = PersistedQueryManifest::default();
 
     for path in paths.iter() {
         let raw_file_contents = read_to_string(path).await.map_err(|e| -> BoxError {
@@ -358,7 +359,7 @@ fn create_uplink_stream(
     uplink_config: UplinkConfig,
     http_client: Client,
 ) -> impl Stream<Item = Result<PersistedQueryManifest, BoxError>> {
-    let result = stream_from_uplink_transforming_new_response::<
+    stream_from_uplink_transforming_new_response::<
         PersistedQueriesManifestQuery,
         MaybePersistedQueriesManifestChunks,
         Option<PersistedQueryManifest>,
@@ -369,7 +370,7 @@ fn create_uplink_stream(
                 Some(chunks) => manifest_from_uplink_chunks(chunks, http_client)
                     .await
                     .map(Some)
-                    .map_err(|e| -> BoxError { e.into() }),
+                    .map_err(|e| -> BoxError { e }),
                 None => Ok(None),
             }
         }))
@@ -380,8 +381,7 @@ fn create_uplink_stream(
             Ok(None) => None,
             Err(e) => Some(Err(e.into())),
         }
-    });
-    result
+    })
 }
 
 fn create_hot_reload_stream(
@@ -396,7 +396,7 @@ fn create_hot_reload_stream(
                     Ok(raw_file_contents) => {
                         match SignedUrlChunk::parse_and_validate(&raw_file_contents) {
                             Ok(chunk) => Ok((raw_path, chunk)),
-                            Err(e) => Err(e.into()),
+                            Err(e) => Err(e),
                         }
                     }
                     Err(e) => Err(e.into()),
@@ -415,7 +415,7 @@ fn create_hot_reload_stream(
         result.map(|(path, chunk)| {
             chunks.insert(path, chunk);
 
-            let mut manifest = PersistedQueryManifest::new();
+            let mut manifest = PersistedQueryManifest::default();
             for chunk in chunks.values() {
                 manifest.add_chunk(chunk);
             }

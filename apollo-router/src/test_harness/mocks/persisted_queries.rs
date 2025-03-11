@@ -34,7 +34,7 @@ pub fn fake_manifest() -> (String, String, PersistedQueryManifest) {
 
 /// Mocks an uplink server with a persisted query list containing no operations.
 pub async fn mock_empty_pq_uplink() -> (UplinkMockGuard, UplinkConfig) {
-    mock_pq_uplink(&PersistedQueryManifest::new()).await
+    mock_pq_uplink(&PersistedQueryManifest::default()).await
 }
 
 /// Mocks an uplink server with a persisted query list with a delay.

@@ -12,7 +12,9 @@ use http::HeaderValue;
 use http::StatusCode;
 use http::header::CACHE_CONTROL;
 use id_extractor::PersistedQueryIdExtractor;
-pub use manifest::{FullPersistedQueryOperationId, ManifestOperation, PersistedQueryManifest};
+pub use manifest::FullPersistedQueryOperationId;
+pub use manifest::ManifestOperation;
+pub use manifest::PersistedQueryManifest;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 
