@@ -55,6 +55,7 @@ use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 use crate::spec::query::subselections::BooleanValues;
 
 /// [`Service`] for query execution.
@@ -478,7 +479,7 @@ impl ExecutionService {
                     .extensions
                     .iter()
                     .map(|(key, value)| {
-                        if key.as_str() == "valueCompletion" {
+                        if key.as_str() == EXTENSIONS_VALUE_COMPLETION_KEY {
                             let value = match value.as_array() {
                                 None => Value::Null,
                                 Some(v) => Value::Array(

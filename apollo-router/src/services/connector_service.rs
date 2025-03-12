@@ -196,6 +196,7 @@ async fn execute(
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
     let connector = Arc::new(connector);
+    let source_name = connector.source_config_key();
     let debug = &context
         .extensions()
         .with_lock(|lock| lock.get::<Arc<Mutex<ConnectorContext>>>().cloned());
@@ -203,11 +204,14 @@ async fn execute(
     let tasks = make_requests(request, &context, connector, service_name, debug)
         .map_err(BoxError::from)?
         .into_iter()
-        .map(move |request| async {
-            connector_request_service_factory
-                .create()
-                .oneshot(request)
-                .await
+        .map(move |request| {
+            let source_name = source_name.clone();
+            async move {
+                connector_request_service_factory
+                    .create(source_name)
+                    .oneshot(request)
+                    .await
+            }
         });
 
     aggregate_responses(
@@ -261,6 +265,7 @@ impl ConnectorServiceFactory {
             Default::default(),
             Default::default(),
             Arc::new(ConnectorRequestServiceFactory::new(
+                Default::default(),
                 Default::default(),
                 Default::default(),
             )),
