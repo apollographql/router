@@ -406,9 +406,11 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let external_directive_definition = federation_spec_definition
-            .external_directive_definition(schema)?
-            .clone();
+        let Ok(external_directive_definition) =
+            federation_spec_definition.external_directive_definition(schema)
+        else {
+            return Ok(Default::default());
+        };
 
         let external_directive_referencers = schema
             .referencers
