@@ -468,19 +468,6 @@ impl RouterService {
             .and_then(|r| my_self.translate_request(&context, parts, r))
             .await
         {
-            Ok((requests, is_batch)) if is_batch && self.batching.exceeds_batch_size(&requests) => {
-                return router::Response::error_builder()
-                    .error(
-                        graphql::Error::builder()
-                            .message(format!("Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}", requests.len(), self.batching.maximum_size.unwrap_or_default()))
-                            .extension_code("CONTENT_TOO_LARGE")
-                            .build()
-                    )
-                    .status_code(http::StatusCode::PAYLOAD_TOO_LARGE)
-                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .context(context)
-                    .build();
-            }
             Ok(requests) => requests,
             Err(err) => {
                 return router::Response::error_builder()
@@ -695,6 +682,15 @@ impl RouterService {
                 }
             }
         };
+
+        if is_batch && self.batching.exceeds_batch_size(&result) {
+            return Err(TranslateError {
+                status: StatusCode::PAYLOAD_TOO_LARGE,
+                extension_code: "CONTENT_TOO_LARGE".to_string(),
+                extension_details:format!("Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}", result.len(), self.batching.maximum_size.unwrap_or_default())                            
+            });
+        }
+
         Ok((result, is_batch))
     }
 
