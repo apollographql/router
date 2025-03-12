@@ -34,6 +34,7 @@ use crate::services::router::service::from_supergraph_mock_callback_and_configur
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 use crate::test_harness::BlockQueryPlanningSignal;
 use crate::test_harness::make_fake_batch;
 
@@ -638,6 +639,10 @@ async fn it_stores_operation_error_when_config_is_enabled() {
             move |req| {
                 let example_response = graphql::Response::builder()
                     .data(json!({"data": null}))
+                    .extension(EXTENSIONS_VALUE_COMPLETION_KEY, json!([{
+                        "message": "Cannot return null for non-nullable field SomeType.someField",
+                        "path": Path::from("someType/someField")
+                    }]))
                     .errors(vec![
                         graphql::Error::builder()
                             .message("some error")
@@ -653,7 +658,6 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                             .build(),
                     ])
                     .build();
-
                 Ok(SupergraphResponse::new_from_graphql_response(
                     example_response,
                     req.context,
@@ -698,6 +702,7 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                 KeyValue::new("apollo.client.name", client_name),
                 KeyValue::new("apollo.client.version", client_version),
                 KeyValue::new("graphql.error.extensions.code", "SOME_ERROR_CODE"),
+                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
                 KeyValue::new("graphql.error.path", "/obj/field"),
                 KeyValue::new("apollo.router.error.service", "mySubgraph"),
             ]
@@ -712,8 +717,27 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                 KeyValue::new("apollo.client.name", client_name),
                 KeyValue::new("apollo.client.version", client_version),
                 KeyValue::new("graphql.error.extensions.code", "SOME_OTHER_ERROR_CODE"),
+                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
                 KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
                 KeyValue::new("apollo.router.error.service", "myOtherSubgraph"),
+            ]
+        );
+        assert_counter!(
+            "apollo.router.operations.error",
+            1,
+            &[
+                KeyValue::new("apollo.operation.id", operation_id),
+                KeyValue::new("graphql.operation.name", operation_name),
+                KeyValue::new("graphql.operation.type", operation_type),
+                KeyValue::new("apollo.client.name", client_name),
+                KeyValue::new("apollo.client.version", client_version),
+                KeyValue::new(
+                    "graphql.error.extensions.code",
+                    "RESPONSE_VALIDATION_FAILED"
+                ),
+                KeyValue::new("graphql.error.extensions.severity", "WARN"),
+                KeyValue::new("graphql.error.path", "/someType/someField"),
+                KeyValue::new("apollo.router.error.service", ""),
             ]
         );
     }
