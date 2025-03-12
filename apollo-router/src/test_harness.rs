@@ -47,6 +47,28 @@ pub(crate) mod http_client;
 #[cfg(any(test, feature = "snapshot"))]
 pub(crate) mod http_snapshot;
 
+/// When the query planner is given an instance of this type, it will wait for the type to be
+/// signalled before completing planning. This can be used to do time and order-sensitive tests
+/// with the query planner.
+#[derive(Clone)]
+pub(crate) struct BlockQueryPlanningSignal {
+    rx: crossbeam_channel::Receiver<()>,
+}
+
+impl BlockQueryPlanningSignal {
+    /// Create a sender/receiver pair for artificially blocking query planning progress.
+    pub(crate) fn pair() -> (crossbeam_channel::Sender<()>, Self) {
+        let (tx, rx) = crossbeam_channel::unbounded();
+
+        (tx, Self { rx })
+    }
+
+    /// Returns a receiver that can be passed to the query planner to artificially block planning progress.
+    pub(crate) fn into_receiver(self) -> crossbeam_channel::Receiver<()> {
+        self.rx
+    }
+}
+
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].
 ///
 /// This allows tests, benchmarks, etc

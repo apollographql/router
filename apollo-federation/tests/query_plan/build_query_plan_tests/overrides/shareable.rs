@@ -46,7 +46,7 @@ fn it_overrides_to_s2_when_label_is_provided() {
         "#,
         QueryPlanOptions {
             override_conditions: vec!["test".to_string()],
-            check_for_cooperative_cancellation: None,
+            ..Default::default()
         },
         @r###"
           QueryPlan {
@@ -159,7 +159,7 @@ fn it_overrides_f1_to_s3_when_label_is_provided() {
         "#,
         QueryPlanOptions {
             override_conditions: vec!["test".to_string()],
-            check_for_cooperative_cancellation: None,
+            ..Default::default()
         },
         @r###"
           QueryPlan {

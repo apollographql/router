@@ -54,6 +54,7 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::spec::operation_limits::OperationLimits;
+use crate::test_harness::BlockQueryPlanningSignal;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -124,6 +125,7 @@ impl QueryPlannerService {
         doc: &ParsedDocument,
         operation: Option<String>,
         plan_options: PlanOptions,
+        test_block_planning_progress: Option<BlockQueryPlanningSignal>,
         // Initialization code that needs mutable access to the plan,
         // before we potentially share it in Arc with a background thread
         // for "both" mode.
@@ -132,6 +134,8 @@ impl QueryPlannerService {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
+        let test_block_planning_progress =
+            test_block_planning_progress.map(|signal| signal.into_receiver());
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
@@ -139,6 +143,7 @@ impl QueryPlannerService {
             let query_plan_options = QueryPlanOptions {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
+                test_block_planning_progress,
             };
 
             let result = operation
@@ -161,6 +166,7 @@ impl QueryPlannerService {
             let result = result.map_err(FederationErrorBridge::from);
 
             let elapsed = start.elapsed().as_secs_f64();
+            // TODO(@goto-bus-stop): add an attribute to indicate cancellation
             metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
 
             let plan = result?;
@@ -287,13 +293,20 @@ impl QueryPlannerService {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
         query_metrics: OperationLimits<u32>,
+        test_block_planning_progress: Option<BlockQueryPlanningSignal>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let plan_result = self
-            .plan_inner(doc, operation.clone(), plan_options, |root_node| {
-                root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
-                root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
-                Ok(())
-            })
+            .plan_inner(
+                doc,
+                operation.clone(),
+                plan_options,
+                test_block_planning_progress,
+                |root_node| {
+                    root_node.init_parsed_operations_and_hash_subqueries(&self.subgraph_schemas)?;
+                    root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
+                    Ok(())
+                },
+            )
             .await?;
         let QueryPlanResult {
             query_plan_root_node,
@@ -372,6 +385,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
             document,
             metadata,
             plan_options,
+            test_block_planning_progress,
         } = req;
 
         let this = self.clone();
@@ -417,6 +431,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                         plan_options,
                     },
                     doc,
+                    test_block_planning_progress,
                 )
                 .await;
 
@@ -447,6 +462,7 @@ impl QueryPlannerService {
         &self,
         mut key: QueryKey,
         mut doc: ParsedDocument,
+        test_block_planning_progress: Option<BlockQueryPlanningSignal>,
     ) -> Result<QueryPlannerContent, MaybeBackPressureError<QueryPlannerError>> {
         let mut query_metrics = Default::default();
         let mut selections = self
@@ -554,6 +570,7 @@ impl QueryPlannerService {
             key.plan_options,
             &doc,
             query_metrics,
+            test_block_planning_progress,
         )
         .await
     }
@@ -703,7 +720,8 @@ mod tests {
                 selections,
                 PlanOptions::default(),
                 &doc,
-                query_metrics
+                query_metrics,
+                None,
             )
                 .await
                 .unwrap_err();
@@ -1055,6 +1073,7 @@ mod tests {
                     plan_options: PlanOptions::default(),
                 },
                 doc,
+                None,
             )
             .await
             .unwrap();
@@ -1111,6 +1130,7 @@ mod tests {
                     plan_options,
                 },
                 doc,
+                None,
             )
             .await;
         match result {

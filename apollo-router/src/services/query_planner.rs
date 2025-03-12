@@ -14,6 +14,7 @@ use crate::compute_job::MaybeBackPressureError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
+use crate::test_harness::BlockQueryPlanningSignal;
 
 /// Options for planning a query
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -33,6 +34,8 @@ pub(crate) struct Request {
     pub(crate) document: ParsedDocument,
     pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
+    #[derivative(Debug = "ignore")]
+    pub(crate) test_block_planning_progress: Option<BlockQueryPlanningSignal>,
 }
 
 #[buildstructor::buildstructor]
@@ -47,6 +50,7 @@ impl Request {
         document: ParsedDocument,
         metadata: crate::plugins::authorization::CacheKeyMetadata,
         plan_options: PlanOptions,
+        test_block_planning_progress: Option<BlockQueryPlanningSignal>,
     ) -> Request {
         Self {
             query,
@@ -54,6 +58,7 @@ impl Request {
             document,
             metadata,
             plan_options,
+            test_block_planning_progress,
         }
     }
 }

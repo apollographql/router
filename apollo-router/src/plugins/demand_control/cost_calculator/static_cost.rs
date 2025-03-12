@@ -739,13 +739,14 @@ mod tests {
             .with_lock(|lock| lock.insert::<ParsedDocument>(query.clone()));
 
         let planner_res = planner
-            .call(QueryPlannerRequest::new(
-                query_str.to_string(),
-                None,
-                query,
-                CacheKeyMetadata::default(),
-                PlanOptions::default(),
-            ))
+            .call(
+                QueryPlannerRequest::builder()
+                    .query(query_str)
+                    .document(query)
+                    .metadata(CacheKeyMetadata::default())
+                    .plan_options(PlanOptions::default())
+                    .build(),
+            )
             .await
             .unwrap();
         let query_plan = match planner_res.content.unwrap() {

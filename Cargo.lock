@@ -195,6 +195,7 @@ version = "2.0.0"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
+ "crossbeam-channel",
  "derive_more",
  "dhat",
  "either",

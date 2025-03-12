@@ -23,6 +23,7 @@ apollo-compiler.workspace = true
 time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
+crossbeam-channel.workspace = true
 derive_more = "0.99.17"
 http.workspace = true
 hashbrown = "0.15.1"

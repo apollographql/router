@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use futures::stream::StreamExt;
 use http::HeaderMap;
@@ -33,6 +34,7 @@ use crate::services::router::service::from_supergraph_mock_callback_and_configur
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::test_harness::BlockQueryPlanningSignal;
 use crate::test_harness::make_fake_batch;
 
 // Test Vary processing
@@ -717,4 +719,119 @@ async fn it_stores_operation_error_when_config_is_enabled() {
     }
     .with_metrics()
     .await;
+}
+
+/// This tests a testing feature! For testing query plan cancellation, we can thread a
+/// BlockQueryPlanningSignal through request context to control when query planning completes.
+///
+/// This test does *not* test cancellation, but tests that the BlockQueryPlanningSignal works as
+/// expected, ensuring that the actual cancellation tests are working too.
+#[tokio::test(flavor = "multi_thread")]
+async fn it_can_externally_control_query_planning_progress() {
+    let service = crate::TestHarness::builder().build_router().await.unwrap();
+
+    let (control, signal) = BlockQueryPlanningSignal::pair();
+
+    let context = Context::new();
+    context
+        .extensions()
+        .with_lock(|context| context.insert(signal));
+
+    let post_request = supergraph::Request::builder()
+        .query("{ topProducts(first: 5) { upc } }")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::POST)
+        .context(context)
+        .build()
+        .unwrap()
+        .try_into()
+        .expect("should turn into a router request");
+
+    let is_in_flight = Arc::new(AtomicBool::new(false));
+    let response = tokio::spawn({
+        let is_in_flight = is_in_flight.clone();
+        async move {
+            is_in_flight.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = scopeguard::guard(is_in_flight, |is_in_flight| {
+                is_in_flight.store(false, std::sync::atomic::Ordering::Release);
+            });
+
+            service.oneshot(post_request).await
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(
+        is_in_flight.load(std::sync::atomic::Ordering::Acquire),
+        "the request should still be processing"
+    );
+    control.send(()).expect("other side should be waiting");
+
+    let response = response
+        .await
+        .expect("task should finish")
+        .expect("response should be complete");
+
+    assert_eq!(response.response.status(), http::StatusCode::OK);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_propagates_cancellation_to_query_planning() {
+    let service = crate::TestHarness::builder().build_router().await.unwrap();
+
+    let (control, signal) = BlockQueryPlanningSignal::pair();
+
+    let context = Context::new();
+    context
+        .extensions()
+        .with_lock(|context| context.insert(signal));
+
+    let post_request = supergraph::Request::builder()
+        .query("{ topProducts(first: 5) { upc } }")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::POST)
+        .context(context)
+        .build()
+        .unwrap()
+        .try_into()
+        .expect("should turn into a router request");
+
+    let is_in_flight = Arc::new(AtomicBool::new(false));
+    let task = tokio::spawn({
+        let is_in_flight = is_in_flight.clone();
+        async move {
+            is_in_flight.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = scopeguard::guard(is_in_flight, |is_in_flight| {
+                is_in_flight.store(false, std::sync::atomic::Ordering::Release);
+            });
+
+            service.oneshot(post_request).await
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(
+        is_in_flight.load(std::sync::atomic::Ordering::Acquire),
+        "the request should still be processing"
+    );
+    task.abort();
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(
+        !is_in_flight.load(std::sync::atomic::Ordering::Acquire),
+        "the request should be aborted"
+    );
+
+    // Asserts query planning was aborted
+    // FIXME(@goto-bus-stop): is this a reliable expectation, or will it be easily broken by a
+    // refactor? Ideally, I would assert a metric here.
+    assert!(
+        control.send(()).is_err(),
+        "query planning should not be waiting for the signal anymore"
+    );
 }

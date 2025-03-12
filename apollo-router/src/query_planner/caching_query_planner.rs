@@ -46,6 +46,7 @@ use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
+use crate::test_harness::BlockQueryPlanningSignal;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -337,13 +338,13 @@ where
                 };
 
                 loop {
-                    let request = QueryPlannerRequest {
-                        query: query.clone(),
-                        operation_name: operation_name.clone(),
-                        document: doc.clone(),
-                        metadata: caching_key.metadata.clone(),
-                        plan_options: caching_key.plan_options.clone(),
-                    };
+                    let request = QueryPlannerRequest::builder()
+                        .query(query.clone())
+                        .and_operation_name(operation_name.clone())
+                        .document(doc.clone())
+                        .metadata(caching_key.metadata.clone())
+                        .plan_options(caching_key.plan_options.clone())
+                        .build();
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
                         Err(_) => break 'all_cache_keys_loop,
@@ -507,12 +508,21 @@ where
                 context,
             } = request;
 
+            let test_block_planning_progress = if cfg!(test) {
+                context
+                    .extensions()
+                    .with_lock(|locked| locked.get::<BlockQueryPlanningSignal>().cloned())
+            } else {
+                // Don't needlessly lock context extensions
+                None
+            };
             let request = QueryPlannerRequest::builder()
                 .query(query)
                 .and_operation_name(operation_name)
                 .document(doc)
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
+                .and_test_block_planning_progress(test_block_planning_progress)
                 .build();
 
             let qp_task = tokio::spawn(

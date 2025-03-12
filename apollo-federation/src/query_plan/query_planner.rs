@@ -182,6 +182,12 @@ pub struct QueryPlanOptions<'a> {
     pub override_conditions: Vec<String>,
 
     pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+
+    /// For testing, it can be useful to force query planning to take a long time. By providing a
+    /// channel receiver here, a test can block completion of query planning until a message is
+    /// sent. Query planning will continuously check for cooperative cancellation during this time.
+    #[doc(hidden)]
+    pub test_block_planning_progress: Option<crossbeam_channel::Receiver<()>>,
 }
 
 impl std::fmt::Debug for QueryPlanOptions<'_> {
@@ -191,6 +197,14 @@ impl std::fmt::Debug for QueryPlanOptions<'_> {
             .field(
                 "check_for_cooperative_cancellation",
                 if self.check_for_cooperative_cancellation.is_some() {
+                    &"Some(...)"
+                } else {
+                    &"None"
+                },
+            )
+            .field(
+                "test_block_planning_progress",
+                if self.test_block_planning_progress.is_some() {
                     &"Some(...)"
                 } else {
                     &"None"
@@ -488,6 +502,15 @@ impl QueryPlanner {
             Some(PlanNode::Condition(inner)) => Some(TopLevelPlanNode::Condition(inner)),
             None => None,
         };
+
+        if let Some(block) = options.test_block_planning_progress {
+            while block
+                .recv_timeout(std::time::Duration::from_millis(10))
+                .is_err()
+            {
+                parameters.check_cancellation()?;
+            }
+        }
 
         let plan = QueryPlan {
             node: root_node,
