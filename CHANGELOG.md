@@ -418,7 +418,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 # [1.59.0] - 2024-12-17
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -689,7 +689,7 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 # [1.58.1] - 2024-12-05
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -720,7 +720,7 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 # [1.58.0] - 2024-11-27
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -1023,7 +1023,7 @@ By [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollogr
 # [1.57.1] - 2024-10-31
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -1042,7 +1042,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 # [1.57.0] - 2024-10-22
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -1184,7 +1184,7 @@ By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apol
 # [1.56.0] - 2024-10-01
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -1270,7 +1270,7 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 # [1.55.0] - 2024-09-24
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -1442,7 +1442,7 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 # [1.54.0] - 2024-09-10
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
@@ -1549,7 +1549,7 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 # [1.53.0] - 2024-08-28
 
 > [!IMPORTANT]
-> Router version 1.53.0 though to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
 > setting the priority sampled flag on spans 100% of the time.
 > This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
 >
