@@ -304,6 +304,7 @@ async fn poll_manifest_stream(
             manifest_result = manifest_stream.next() => {
                 match manifest_result {
                     Some(Ok(new_manifest)) => {
+                        let operation_count = new_manifest.len();
                         let freeform_graphql_behavior =
                             get_freeform_graphql_behavior(&config, &new_manifest);
 
@@ -311,6 +312,7 @@ async fn poll_manifest_stream(
                             persisted_query_manifest: new_manifest,
                             freeform_graphql_behavior,
                         };
+                        tracing::info!("persisted query manifest successfully updated ({} operations total)", operation_count);
 
                         if let Some(sender) = ready_sender.take() {
                             let _ = sender.send(ManifestPollResultOnStartup::LoadedOperations).await;
@@ -413,6 +415,10 @@ fn create_hot_reload_stream(
     // Combine all watchers into a single stream
     stream::select_all(file_watchers).map(move |result| {
         result.map(|(path, chunk)| {
+            tracing::info!(
+                "hot reloading persisted query manifest file at path: {}",
+                path
+            );
             chunks.insert(path, chunk);
 
             let mut manifest = PersistedQueryManifest::default();
