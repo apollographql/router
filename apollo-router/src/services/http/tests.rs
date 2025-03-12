@@ -180,7 +180,7 @@ async fn tls_self_signed() {
             client_authentication: None,
         },
     );
-    let subgraph_service = HttpClientService::from_config(
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
         "test",
         &config,
         &rustls::RootCertStore::empty(),
@@ -239,7 +239,7 @@ async fn tls_custom_root() {
             client_authentication: None,
         },
     );
-    let subgraph_service = HttpClientService::from_config(
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
         "test",
         &config,
         &rustls::RootCertStore::empty(),
@@ -366,7 +366,7 @@ async fn tls_client_auth() {
             })),
         },
     );
-    let subgraph_service = HttpClientService::from_config(
+    let subgraph_service = HttpClientService::from_config_for_subgraph(
         "test",
         &config,
         &rustls::RootCertStore::empty(),

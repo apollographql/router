@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -1040,6 +1041,7 @@ pub(crate) struct Tls {
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
     pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
+    pub(crate) connector: ConnectorConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
