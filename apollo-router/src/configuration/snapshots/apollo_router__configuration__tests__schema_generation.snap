@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1597,6 +1596,10 @@ snapshot_kind: text
           "description": "#/definitions/SubgraphShaping",
           "nullable": true
         },
+        "connector": {
+          "$ref": "#/definitions/ConnectorsShapingConfig",
+          "description": "#/definitions/ConnectorsShapingConfig"
+        },
         "deduplicate_variables": {
           "default": null,
           "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
@@ -2060,6 +2063,37 @@ snapshot_kind: text
         }
       ]
     },
+    "ConnectorShaping": {
+      "additionalProperties": false,
+      "properties": {
+        "compression": {
+          "$ref": "#/definitions/Compression",
+          "description": "#/definitions/Compression",
+          "nullable": true
+        },
+        "dns_resolution_strategy": {
+          "$ref": "#/definitions/DnsResolutionStrategy",
+          "description": "#/definitions/DnsResolutionStrategy",
+          "nullable": true
+        },
+        "experimental_http2": {
+          "$ref": "#/definitions/Http2Config",
+          "description": "#/definitions/Http2Config",
+          "nullable": true
+        },
+        "global_rate_limit": {
+          "$ref": "#/definitions/RateLimitConf",
+          "description": "#/definitions/RateLimitConf",
+          "nullable": true
+        },
+        "timeout": {
+          "default": null,
+          "description": "Enable timeout for connectors requests",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "ConnectorSource": {
       "oneOf": [
         {
@@ -2131,6 +2165,25 @@ snapshot_kind: text
           "default": {},
           "deprecated": true,
           "description": "A map of subgraph name to connectors config for that subgraph",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorsShapingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/ConnectorShaping",
+          "description": "#/definitions/ConnectorShaping",
+          "nullable": true
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/ConnectorShaping",
+            "description": "#/definitions/ConnectorShaping"
+          },
+          "description": "Applied on specific connector sources",
           "type": "object"
         }
       },
