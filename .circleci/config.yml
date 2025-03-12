@@ -32,13 +32,13 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/nightly/router:build
+      - image: ghcr.io/apollographql/nightly/router:build-arm64
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/nightly/router:build
+      - image: ghcr.io/apollographql/nightly/router:build-arm64
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
