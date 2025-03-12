@@ -687,7 +687,11 @@ impl RouterService {
             return Err(TranslateError {
                 status: StatusCode::PAYLOAD_TOO_LARGE,
                 extension_code: "CONTENT_TOO_LARGE".to_string(),
-                extension_details:format!("Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}", result.len(), self.batching.maximum_size.unwrap_or_default())                            
+                extension_details: format!(
+                    "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                    result.len(),
+                    self.batching.maximum_size.unwrap_or_default()
+                ),
             });
         }
 
