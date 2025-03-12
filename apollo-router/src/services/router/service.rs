@@ -51,21 +51,6 @@ use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
-<<<<<<< HEAD
-=======
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::HasPlugins;
-use crate::services::HasSchema;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
-use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
-use crate::services::SupergraphCreator;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
@@ -74,15 +59,11 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-<<<<<<< HEAD
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
-#[cfg(test)]
-=======
 use crate::services::router::pipeline_handle::PipelineHandle;
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
-use crate::services::supergraph;
 use crate::services::HasPlugins;
+use crate::services::HasSchema;
 #[cfg(test)]
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
@@ -858,16 +839,12 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
-<<<<<<< HEAD
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
-=======
-    sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
     _pipeline_handle: Arc<PipelineHandle>,
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -918,18 +895,6 @@ impl RouterCreator {
         // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
-
-<<<<<<< HEAD
-        Ok(Self {
-            supergraph_creator,
-            static_page,
-            apq_layer,
-            query_analysis_layer,
-            persisted_query_layer,
-            batching: configuration.batching.clone(),
-=======
-        // Create a handle that will help us keep track of this pipeline.
-        // A metric is exposed that allows the use to see if pipelines are being hung onto.
         let schema_id = supergraph_creator.schema().schema_id.to_string();
         let launch_id = supergraph_creator
             .schema()
@@ -939,46 +904,14 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let oltp_error_metrics_mode: OtlpErrorMetricsMode =
-            match configuration.apollo_plugins.plugins.get("telemetry") {
-                Some(telemetry_config) => {
-                    match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                        Ok(conf) => conf.apollo.errors.experimental_otlp_error_metrics,
-                        _ => OtlpErrorMetricsMode::default(),
-                    }
-                }
-                _ => OtlpErrorMetricsMode::default(),
-            };
-
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
-            supergraph_creator.create(),
-            apq_layer,
-            persisted_query_layer,
-            query_analysis_layer,
-            configuration.batching.clone(),
-            oltp_error_metrics_mode,
-        ));
-
-        // NOTE: This is the start of the router pipeline (router_service)
-        let sb = Buffer::new(
-            ServiceBuilder::new()
-                .layer(static_page.clone())
-                .service(
-                    supergraph_creator
-                        .plugins()
-                        .iter()
-                        .rev()
-                        .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-                )
-                .boxed(),
-            DEFAULT_BUFFER_SIZE,
-        );
-
         Ok(Self {
             supergraph_creator,
-            sb,
+            static_page,
+            apq_layer,
+            query_analysis_layer,
+            persisted_query_layer,
+            batching: configuration.batching.clone(),
             _pipeline_handle: Arc::new(pipeline_handle),
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
         })
     }
 

@@ -3,21 +3,13 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-<<<<<<< HEAD
-use opentelemetry::metrics::Unit;
-use opentelemetry_api::metrics::Counter;
-use opentelemetry_api::metrics::Histogram;
-use opentelemetry_api::metrics::MeterProvider;
-use opentelemetry_api::metrics::UpDownCounter;
-use opentelemetry_api::KeyValue;
-=======
-use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::UpDownCounter;
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
+use opentelemetry::KeyValue;
+use opentelemetry_api::metrics::Unit;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
 use opentelemetry_semantic_conventions::trace::SERVER_PORT;
@@ -42,11 +34,7 @@ use super::selectors::CacheKind;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
-<<<<<<< HEAD
-=======
 use crate::metrics::meter_provider;
-use crate::plugins::telemetry::config_new::Selectors;
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -68,8 +56,8 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PIPELINE_METRIC;
 use crate::services::router::pipeline_handle::pipelines;
+use crate::services::router::pipeline_handle::PIPELINE_METRIC;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;

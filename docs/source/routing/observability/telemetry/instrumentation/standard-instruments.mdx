@@ -116,25 +116,6 @@ The initial call to Uplink during router startup is not reflected in metrics.
 ### Telemetry
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
-<<<<<<< HEAD
-  - `error` = One of `channel closed`, `channel full`.
-
-### Deprecated
-
-The following metrics have been deprecated and should not be used.
-
-- `apollo_router_span` - **Deprecated**: use `apollo_router_processing_time` instead.
-- `apollo_router_deduplicated_subscriptions_total` - **Deprecated**: use the `apollo.router.operations.subscriptions` metric's `subscriptions.deduplicated` attribute.
-- `apollo_authentication_failure_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric's `authentication.jwt.failed` attribute.
-- `apollo_authentication_success_count` - **Deprecated**: use the `apollo.router.operations.authentication.jwt` metric instead. If the `authentication.jwt.failed` attribute is *absent* or `false`, the authentication succeeded.
-- `apollo_require_authentication_failure_count` - **Deprecated**: use the `http.server.request.duration` metric's `http.response.status_code` attribute. Requests with authentication failures have HTTP status code 401.
-- `apollo_router_timeout` - **Deprecated**: this metric conflates timed-out requests from client to the router, and requests from the router to subgraphs. Timed-out requests have HTTP status code 504. Use the `http.response.status_code` attribute on the `http.server.request.duration` metric to identify timed-out router requests, and the same attribute on the `http.client.request.duration` metric to identify timed-out subgraph requests.
-- `apollo_router_session_count_active` - **Deprecated**: Number of in-flight GraphQL requests. It is replaced by `http.server.active_requests` metric configured in [instruments](./instruments).
-- `apollo_router_http_requests_total` - **Deprecated**: Total number of HTTP requests by HTTP status. It is replaced by `http.server.request.duration` metric configured in [instruments](./instruments).
-- `apollo_router_http_request_duration_seconds_bucket` - **Deprecated**: HTTP router request duration. It is replaced by `http.server.request.duration` metric configured in [instruments](./instruments).
-- `apollo_router_http_request_duration_seconds_bucket` - **Deprecated**: HTTP subgraph request duration (replaced by `http.client.request.duration` metric configured in [instruments](./instruments)), attributes:
-  - `subgraph`: (Optional) The subgraph being queried
-=======
   - `error`: One of `channel closed`, `channel full`.
 
 ### Internals
@@ -142,4 +123,3 @@ The following metrics have been deprecated and should not be used.
     - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
     - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
     - `config.hash` - The hash of the configuration
->>>>>>> 71e5fe45 (Add apollo.router.pipelines metrics (#6967))
