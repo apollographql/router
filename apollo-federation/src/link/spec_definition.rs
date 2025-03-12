@@ -33,14 +33,6 @@ pub(crate) trait SpecDefinition {
         &self.url().version
     }
 
-    fn feature_in_schema(&self, schema: &FederationSchema) -> Option<Arc<Link>> {
-        schema
-            .metadata()?
-            .by_identity
-            .get(&self.url().identity)
-            .cloned()
-    }
-
     fn is_spec_type_name(
         &self,
         schema: &FederationSchema,
@@ -149,7 +141,7 @@ pub(crate) trait SpecDefinition {
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for type_spec in self.type_specs() {
             // TODO: In JS, `check_or_add` take in the "feature" (ie. the link), and we'll likely need to
-            // do the same here to account for renamed directives and imports
+            // do the same here and below to account for renamed directives and imports
             if let Err(err) = type_spec.check_or_add(schema) {
                 errors.push(err);
             }

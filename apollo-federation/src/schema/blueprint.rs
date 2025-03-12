@@ -1,7 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::DirectiveDefinition;
 use apollo_compiler::ast::NamedType;
 
 use crate::error::FederationError;
@@ -13,6 +12,7 @@ use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
+use crate::schema::position::DirectiveDefinitionPosition;
 
 #[allow(dead_code)]
 struct CoreFeature {
@@ -29,7 +29,7 @@ trait SchemaBlueprint {
         &self,
         _schema: &mut FederationSchema,
         _directive: &Directive,
-    ) -> Result<Option<DirectiveDefinition>, FederationError>;
+    ) -> Result<Option<DirectiveDefinitionPosition>, FederationError>;
 
     fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError>;
 
@@ -64,7 +64,7 @@ impl SchemaBlueprint for DefaultBlueprint {
         &self,
         _schema: &mut FederationSchema,
         _directive: &Directive,
-    ) -> Result<Option<DirectiveDefinition>, FederationError> {
+    ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         Ok(None)
     }
 
@@ -129,15 +129,13 @@ impl SchemaBlueprint for FederationBlueprint {
         &self,
         schema: &mut FederationSchema,
         directive: &Directive,
-    ) -> Result<Option<DirectiveDefinition>, FederationError> {
-        // TODO: This needs to be generalized for different link names in the same way as bootstrapping process does it
+    ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
             let latest_version = LINK_VERSIONS.versions().last().unwrap();
             let link_spec = LINK_VERSIONS.find(latest_version).unwrap();
             link_spec.add_elements_to_schema(schema)?;
         }
-        // TODO: Return the definition
-        Ok(None)
+        Ok(schema.get_directive_definition(&DEFAULT_LINK_NAME))
     }
 
     fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError> {
