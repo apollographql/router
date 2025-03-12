@@ -748,5 +748,5 @@ async fn test_query_with_nested_query_enum_param() {
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
     let report = get_metrics_report_mocked(reports, req).await;
-    assert_report!(report)
+    assert_report!(report);
 }
