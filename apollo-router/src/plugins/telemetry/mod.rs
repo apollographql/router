@@ -199,11 +199,7 @@ pub(crate) struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
-    pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    builtin_instruments: RwLock<BuiltinInstruments>,
     activation: Mutex<TelemetryActivation>,
 }
 
@@ -263,6 +259,7 @@ struct BuiltinInstruments {
     supergraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     subgraph_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
     cache_custom_instruments: Arc<HashMap<String, StaticInstrument>>,
+    _pipeline_instruments: Arc<HashMap<String, StaticInstrument>>,
 }
 
 fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments {
@@ -272,6 +269,7 @@ fn create_builtin_instruments(config: &InstrumentsConfig) -> BuiltinInstruments 
         supergraph_custom_instruments: Arc::new(config.new_builtin_supergraph_instruments()),
         subgraph_custom_instruments: Arc::new(config.new_builtin_subgraph_instruments()),
         cache_custom_instruments: Arc::new(config.new_builtin_cache_instruments()),
+        _pipeline_instruments: Arc::new(config.new_pipeline_instruments()),
     }
 }
 
@@ -300,14 +298,6 @@ impl PluginPrivate for Telemetry {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
 
-        let BuiltinInstruments {
-            graphql_custom_instruments,
-            router_custom_instruments,
-            supergraph_custom_instruments,
-            subgraph_custom_instruments,
-            cache_custom_instruments,
-        } = create_builtin_instruments(&config.instrumentation.instruments);
-
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -326,11 +316,9 @@ impl PluginPrivate for Telemetry {
                     .map(FilterMeterProvider::public),
                 is_active: false,
             }),
-            graphql_custom_instruments: RwLock::new(graphql_custom_instruments),
-            router_custom_instruments: RwLock::new(router_custom_instruments),
-            supergraph_custom_instruments: RwLock::new(supergraph_custom_instruments),
-            subgraph_custom_instruments: RwLock::new(subgraph_custom_instruments),
-            cache_custom_instruments: RwLock::new(cache_custom_instruments),
+            builtin_instruments: RwLock::new(create_builtin_instruments(
+                &config.instrumentation.instruments,
+            )),
             config: Arc::new(config),
         })
     }
@@ -345,7 +333,11 @@ impl PluginPrivate for Telemetry {
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let static_router_instruments = self.router_custom_instruments.read().clone();
+        let static_router_instruments = self
+            .builtin_instruments
+            .read()
+            .router_custom_instruments
+            .clone();
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -573,8 +565,16 @@ impl PluginPrivate for Telemetry {
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
-        let static_supergraph_instruments = self.supergraph_custom_instruments.read().clone();
-        let static_graphql_instruments = self.graphql_custom_instruments.read().clone();
+        let static_supergraph_instruments = self
+            .builtin_instruments
+            .read()
+            .supergraph_custom_instruments
+            .clone();
+        let static_graphql_instruments = self
+            .builtin_instruments
+            .read()
+            .graphql_custom_instruments
+            .clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
                 &config_instrument.apollo,
@@ -730,8 +730,16 @@ impl PluginPrivate for Telemetry {
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
-        let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
-        let static_cache_instruments = self.cache_custom_instruments.read().clone();
+        let static_subgraph_instruments = self
+            .builtin_instruments
+            .read()
+            .subgraph_custom_instruments
+            .clone();
+        let static_cache_instruments = self
+            .builtin_instruments
+            .read()
+            .cache_custom_instruments
+            .clone();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
@@ -884,20 +892,8 @@ impl PluginPrivate for Telemetry {
 
         activation.reload_metrics();
 
-        let BuiltinInstruments {
-            graphql_custom_instruments,
-            router_custom_instruments,
-            supergraph_custom_instruments,
-            subgraph_custom_instruments,
-            cache_custom_instruments,
-        } = create_builtin_instruments(&self.config.instrumentation.instruments);
-
-        *self.graphql_custom_instruments.write() = graphql_custom_instruments;
-        *self.router_custom_instruments.write() = router_custom_instruments;
-        *self.supergraph_custom_instruments.write() = supergraph_custom_instruments;
-        *self.subgraph_custom_instruments.write() = subgraph_custom_instruments;
-        *self.cache_custom_instruments.write() = cache_custom_instruments;
-
+        *self.builtin_instruments.write() =
+            create_builtin_instruments(&self.config.instrumentation.instruments);
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;
     }

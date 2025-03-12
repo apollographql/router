@@ -61,10 +61,10 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
+use crate::services::router::pipeline_handle::PipelineHandle;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
-#[cfg(test)]
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
@@ -844,6 +844,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
+    _pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -894,6 +895,14 @@ impl RouterCreator {
         // Fixing this will require a larger refactor to bring APQ into the router lifecycle.
         // For now just call activate to make the gauges work on the happy path.
         apq_layer.activate();
+        let schema_id = supergraph_creator.schema().schema_id.to_string();
+        let launch_id = supergraph_creator
+            .schema()
+            .launch_id
+            .as_ref()
+            .map(|launch_id| launch_id.to_string());
+        let config_hash = configuration.hash();
+        let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
         Ok(Self {
             supergraph_creator,
@@ -902,6 +911,7 @@ impl RouterCreator {
             query_analysis_layer,
             persisted_query_layer,
             batching: configuration.batching.clone(),
+            _pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 

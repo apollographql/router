@@ -40,6 +40,7 @@ pub type Body = hyper::Body;
 pub type Error = hyper::Error;
 
 pub mod body;
+pub(crate) mod pipeline_handle;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
