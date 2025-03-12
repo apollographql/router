@@ -21,7 +21,6 @@ use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecificati
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
 
-    // TODO: Can we make this more generic than Vec?
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
@@ -48,8 +47,10 @@ pub(crate) trait SpecDefinition {
         name_in_schema: &Name,
     ) -> Result<bool, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            // TODO: Can probably just return bool from this fn
-            return Ok(false);
+            return Err(SingleFederationError::Internal {
+                message: "Schema is not a core schema (add @link first)".to_owned(),
+            }
+            .into());
         };
         Ok(metadata
             .source_link_of_type(name_in_schema)
@@ -132,7 +133,10 @@ pub(crate) trait SpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Option<Arc<Link>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Ok(None);
+            return Err(SingleFederationError::Internal {
+                message: "Schema is not a core schema (add @link first)".to_owned(),
+            }
+            .into());
         };
         Ok(metadata.for_identity(self.identity()))
     }
@@ -144,21 +148,23 @@ pub(crate) trait SpecDefinition {
     fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for type_spec in self.type_specs() {
-            // TODO: JS took 2 more arguments, but we didn't carry them over in the original port. Check if needed
+            // TODO: In JS, `check_or_add` take in the "feature" (ie. the link), and we'll likely need to
+            // do the same here to account for renamed directives and imports
             if let Err(err) = type_spec.check_or_add(schema) {
                 errors.push(err);
             }
         }
 
         for directive_spec in self.directive_specs() {
-            // TODO: JS took 2 more arguments, but we didn't carry them over in the original port. Check if needed
             if let Err(err) = directive_spec.check_or_add(schema) {
                 errors.push(err);
             }
         }
 
-        if errors.errors.len() > 0 {
+        if errors.errors.len() > 1 {
             Err(FederationError::MultipleFederationErrors(errors))
+        } else if let Some(error) = errors.errors.pop() {
+            Err(FederationError::SingleFederationError(error))
         } else {
             Ok(())
         }
