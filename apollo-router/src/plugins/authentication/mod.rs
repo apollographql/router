@@ -484,7 +484,7 @@ fn authenticate(
         let extracted_jwt = jwks::extract_jwt(
             source,
             config.ignore_other_prefixes,
-            &request.router_request.headers(),
+            request.router_request.headers(),
         );
 
         match extracted_jwt {
@@ -602,7 +602,7 @@ fn authenticate(
     // We can't find a key to process this JWT.
     let err = criteria.kid.map_or_else(
         || AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
-        |kid| AuthenticationError::CannotFindKID(kid),
+        AuthenticationError::CannotFindKID,
     );
 
     failure_message(

@@ -610,7 +610,7 @@ pub(super) fn decode_jwt(
             Err((
                 criteria.kid.map_or_else(
                     || AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
-                    |kid| AuthenticationError::CannotFindKID(kid),
+                    AuthenticationError::CannotFindKID,
                 ),
                 StatusCode::UNAUTHORIZED,
             ))
