@@ -11,6 +11,7 @@ use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
 use super::normalize_operation;
+use crate::SingleFederationError;
 use crate::error::FederationError;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::ValidFederationSchema;
@@ -214,6 +215,7 @@ fn can_remove_introspection_selections() {
             &executable_document.fragments,
             &schema,
             &IndexSet::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -931,6 +933,7 @@ scalar FieldSet
             &executable_document.fragments,
             &schema,
             &interface_objects,
+            &never_cancel,
         )
         .unwrap();
         let expected = r#"query TestQuery {
@@ -1065,6 +1068,7 @@ mod make_selection_tests {
             &Default::default(),
             &schema,
             &Default::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1163,6 +1167,7 @@ mod lazy_map_tests {
             &Default::default(),
             &schema,
             &Default::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1221,6 +1226,7 @@ mod lazy_map_tests {
             &Default::default(),
             &schema,
             &Default::default(),
+            &never_cancel,
         )
         .unwrap();
 
@@ -1426,6 +1432,7 @@ fn test_expand_all_fragments1() {
             &executable_document.fragments,
             &schema,
             &IndexSet::default(),
+            &never_cancel,
         )
         .unwrap();
         insta::assert_snapshot!(normalized_operation, @r###"

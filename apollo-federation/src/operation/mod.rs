@@ -39,6 +39,8 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+#[cfg(test)]
+use crate::operation::tests::never_cancel;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -224,8 +226,9 @@ impl NormalizedOperation {
             directives: operation.directives.clone().into(),
             selection_set: SelectionSet::from_selection_set(
                 &operation.selection_set,
-                &FragmentSpreadCache::init(&document.fragments, &schema),
+                &FragmentSpreadCache::init(&document.fragments, &schema, &never_cancel),
                 &schema,
+                &never_cancel,
             )?,
         };
         Ok(normalized_operation)
