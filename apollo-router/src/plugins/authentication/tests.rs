@@ -675,7 +675,7 @@ async fn it_inserts_success_jwt_status_into_context() {
 
     match jwt_context {
         JwtStatus::Success { r#type, name } => {
-            assert_eq!(r#type, "cookie");
+            assert_eq!(r#type, "header");
             assert!(name.eq_ignore_ascii_case("Authorization"));
         }
         JwtStatus::Failure { .. } => panic!("expected a success but got {:?}", jwt_context),

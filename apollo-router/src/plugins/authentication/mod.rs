@@ -388,18 +388,34 @@ enum JwtStatus {
 }
 
 impl JwtStatus {
-    fn new_failure(header_name: impl Into<String>, error_context: ErrorContext) -> Self {
+    fn new_failure(source: Option<&Source>, error_context: ErrorContext) -> Self {
+        let (r#type, name) = match source {
+            Some(Source::Header { name, .. }) => ("header", name.as_str()),
+            Some(Source::Cookie { name }) => ("cookie", name.as_str()),
+            None => ("unknown", "unknown"),
+        };
+
         Self::Failure {
-            r#type: "header".into(),
-            name: header_name.into(),
+            r#type: r#type.into(),
+            name: name.into(),
             error: error_context,
         }
     }
 
-    fn new_success(cookie_name: impl Into<String>) -> Self {
-        Self::Success {
-            r#type: "cookie".into(),
-            name: cookie_name.into(),
+    fn new_success(source: Option<&Source>) -> Self {
+        match source {
+            Some(Source::Header { name, .. }) => Self::Success {
+                r#type: "header".into(),
+                name: name.into(),
+            },
+            Some(Source::Cookie { name }) => Self::Success {
+                r#type: "cookie".into(),
+                name: name.into(),
+            },
+            None => Self::Success {
+                r#type: "unknown".into(),
+                name: "unknown".into(),
+            },
         }
     }
 
@@ -427,6 +443,7 @@ fn authenticate(
         config: &JWTConf,
         error: AuthenticationError,
         status: StatusCode,
+        source: Option<&Source>,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         u64_counter!(
@@ -439,10 +456,7 @@ fn authenticate(
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
-            serde_json_bytes::json!(JwtStatus::new_failure(
-                config.header_name.clone(),
-                error.as_context_object()
-            )),
+            serde_json_bytes::json!(JwtStatus::new_failure(source, error.as_context_object())),
         );
 
         if config.on_error == OnError::Error {
@@ -465,6 +479,7 @@ fn authenticate(
     }
 
     let mut jwt = None;
+    let mut source_of_extracted_jwt = None;
     for source in &config.sources {
         let extracted_jwt = jwks::extract_jwt(
             source,
@@ -475,11 +490,18 @@ fn authenticate(
         match extracted_jwt {
             None => continue,
             Some(Ok(extracted_jwt)) => {
+                source_of_extracted_jwt = Some(source);
                 jwt = Some(extracted_jwt);
                 break;
             }
             Some(Err(error)) => {
-                return failure_message(request, config, error, StatusCode::BAD_REQUEST);
+                return failure_message(
+                    request,
+                    config,
+                    error,
+                    StatusCode::BAD_REQUEST,
+                    Some(source),
+                );
             }
         }
     }
@@ -500,6 +522,7 @@ fn authenticate(
                 config,
                 AuthenticationError::InvalidHeader(HEADER_TOKEN_TRUNCATED.to_owned(), e),
                 StatusCode::BAD_REQUEST,
+                source_of_extracted_jwt,
             );
         }
     };
@@ -517,7 +540,13 @@ fn authenticate(
         let (issuer, token_data) = match jwks::decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
-                return failure_message(request, config, auth_error, status_code);
+                return failure_message(
+                    request,
+                    config,
+                    auth_error,
+                    status_code,
+                    source_of_extracted_jwt,
+                );
             }
         };
 
@@ -537,6 +566,7 @@ fn authenticate(
                             token: token_issuer.to_string(),
                         },
                         StatusCode::INTERNAL_SERVER_ERROR,
+                        source_of_extracted_jwt,
                     );
                 }
             }
@@ -551,6 +581,7 @@ fn authenticate(
                 config,
                 AuthenticationError::CannotInsertClaimsIntoContext(e),
                 StatusCode::INTERNAL_SERVER_ERROR,
+                source_of_extracted_jwt,
             );
         }
         // This is a metric and will not appear in the logs
@@ -562,10 +593,7 @@ fn authenticate(
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
-            serde_json_bytes::json!(JwtStatus::new_success(
-                // TODO how do I actually set this correctly?
-                config.header_name.clone()
-            )),
+            serde_json_bytes::json!(JwtStatus::new_success(source_of_extracted_jwt)),
         );
 
         return ControlFlow::Continue(request);
@@ -577,7 +605,13 @@ fn authenticate(
         |kid| AuthenticationError::CannotFindKID(kid),
     );
 
-    failure_message(request, config, err, StatusCode::UNAUTHORIZED)
+    failure_message(
+        request,
+        config,
+        err,
+        StatusCode::UNAUTHORIZED,
+        source_of_extracted_jwt,
+    )
 }
 
 // This macro allows us to use it in our plugin registry!
