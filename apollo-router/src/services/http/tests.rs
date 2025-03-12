@@ -215,6 +215,66 @@ async fn tls_self_signed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn tls_self_signed_connector() {
+    let certificate_pem = include_str!("./testdata/server_self_signed.crt");
+    let key_pem = include_str!("./testdata/server.key");
+
+    let certificates = load_certs(certificate_pem).unwrap();
+    let key = load_key(key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"my_field": "abc"}"#,
+    ));
+
+    // we cannot parse a configuration from text, because certificates are generally
+    // added by file expansion and we don't have access to that here, and inserting
+    // the PEM data directly generates parsing issues due to end of line characters
+    let mut config = Configuration::default();
+    config.tls.connector.sources.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(certificate_pem.into()),
+            client_authentication: None,
+        },
+    );
+    let subgraph_service = HttpClientService::from_config_for_connector(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(
+        std::str::from_utf8(
+            &router::body::into_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"my_field": "abc"}"#
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn tls_custom_root() {
     let certificate_pem = include_str!("./testdata/server.crt");
     let ca_pem = include_str!("./testdata/CA/ca.crt");
@@ -269,6 +329,67 @@ async fn tls_custom_root() {
         )
         .unwrap(),
         r#"{"data": null}"#
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tls_custom_root_connector() {
+    let certificate_pem = include_str!("./testdata/server.crt");
+    let ca_pem = include_str!("./testdata/CA/ca.crt");
+    let key_pem = include_str!("./testdata/server.key");
+
+    let mut certificates = load_certs(certificate_pem).unwrap();
+    certificates.extend(load_certs(ca_pem).unwrap());
+    let key = load_key(key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+    tokio::task::spawn(tls_server(
+        listener,
+        certificates,
+        key,
+        r#"{"my_field": "abc"}"#,
+    ));
+
+    // we cannot parse a configuration from text, because certificates are generally
+    // added by file expansion and we don't have access to that here, and inserting
+    // the PEM data directly generates parsing issues due to end of line characters
+    let mut config = Configuration::default();
+    config.tls.connector.sources.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(ca_pem.into()),
+            client_authentication: None,
+        },
+    );
+    let subgraph_service = HttpClientService::from_config_for_connector(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        std::str::from_utf8(
+            &router::body::into_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"my_field": "abc"}"#
     );
 }
 
@@ -396,6 +517,80 @@ async fn tls_client_auth() {
         )
         .unwrap(),
         r#"{"data": null}"#
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tls_client_auth_connector() {
+    // Enable crypto
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let server_certificate_pem = include_str!("./testdata/server.crt");
+    let ca_pem = include_str!("./testdata/CA/ca.crt");
+    let server_key_pem = include_str!("./testdata/server.key");
+
+    let mut server_certificates = load_certs(server_certificate_pem).unwrap();
+    let ca_certificate = load_certs(ca_pem).unwrap().remove(0);
+    server_certificates.push(ca_certificate.clone());
+    let key = load_key(server_key_pem).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socket_addr = listener.local_addr().unwrap();
+    tokio::task::spawn(tls_server_with_client_auth(
+        listener,
+        server_certificates,
+        key,
+        ca_certificate,
+        r#"{"my_field": "abc"}"#,
+    ));
+
+    let client_certificate_pem = include_str!("./testdata/client.crt");
+    let client_key_pem = include_str!("./testdata/client.key");
+
+    let client_certificates = load_certs(client_certificate_pem).unwrap();
+    let client_key = load_key(client_key_pem).unwrap();
+
+    // we cannot parse a configuration from text, because certificates are generally
+    // added by file expansion and we don't have access to that here, and inserting
+    // the PEM data directly generates parsing issues due to end of line characters
+    let mut config = Configuration::default();
+    config.tls.connector.sources.insert(
+        "test".to_string(),
+        TlsClient {
+            certificate_authorities: Some(ca_pem.into()),
+            client_authentication: Some(Arc::new(TlsClientAuth {
+                certificate_chain: client_certificates,
+                key: client_key,
+            })),
+        },
+    );
+    let subgraph_service = HttpClientService::from_config_for_connector(
+        "test",
+        &config,
+        &rustls::RootCertStore::empty(),
+        crate::configuration::shared::Client::default(),
+    )
+    .unwrap();
+
+    let url = Uri::from_str(&format!("https://localhost:{}", socket_addr.port())).unwrap();
+    let response = subgraph_service
+        .oneshot(HttpRequest {
+            http_request: http::Request::builder()
+                .uri(url)
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .body(router::body::from_bytes(r#"{}"#))
+                .unwrap(),
+            context: Context::new(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        std::str::from_utf8(
+            &router::body::into_bytes(response.http_response.into_parts().1)
+                .await
+                .unwrap()
+        )
+        .unwrap(),
+        r#"{"my_field": "abc"}"#
     );
 }
 

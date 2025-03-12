@@ -99,42 +99,6 @@ pub(crate) struct HttpClientService {
 }
 
 impl HttpClientService {
-    /*pub(crate) fn from_config(
-        service: impl Into<String>,
-        configuration: &Configuration,
-        tls_root_store: &RootCertStore,
-        client_config: crate::configuration::shared::Client,
-    ) -> Result<Self, BoxError> {
-        let name: String = service.into();
-        let tls_cert_store = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|subgraph| subgraph.create_certificate_store())
-            .transpose()?
-            .unwrap_or_else(|| tls_root_store.clone());
-        let client_cert_config = configuration
-            .tls
-            .subgraph
-            .subgraphs
-            .get(&name)
-            .as_ref()
-            .and_then(|tls| tls.client_authentication.as_ref())
-            .or(configuration
-                .tls
-                .subgraph
-                .all
-                .client_authentication
-                .as_ref());
-
-        let tls_client_config =
-            generate_tls_client_config(tls_cert_store, client_cert_config.map(|arc| arc.as_ref()))?;
-
-        HttpClientService::new(name, tls_client_config, client_config)
-    }*/
-
     pub(crate) fn from_config_for_subgraph(
         service: impl Into<String>,
         configuration: &Configuration,
