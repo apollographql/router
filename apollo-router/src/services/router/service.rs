@@ -62,6 +62,8 @@ use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::router::pipeline_handle::PipelineHandle;
+#[cfg(test)]
+use crate::services::supergraph;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
 use crate::services::RouterRequest;
