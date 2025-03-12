@@ -64,8 +64,6 @@ use crate::services::router::body::RouterBody;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
-#[cfg(test)]
-use crate::services::HasSchema;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
