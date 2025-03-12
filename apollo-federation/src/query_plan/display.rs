@@ -359,13 +359,8 @@ fn write_selections(
 
 fn write_requires_selections(
     state: &mut State<'_, '_>,
-    mut selections: &[requires_selection::Selection],
+    selections: &[requires_selection::Selection],
 ) -> fmt::Result {
-    if let Some(requires_selection::Selection::Field(field)) = selections.first() {
-        if field.name == "_entities" {
-            selections = &field.selections
-        }
-    }
     state.write("{")?;
 
     // Manually indent and write the newline
