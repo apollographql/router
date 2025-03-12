@@ -420,7 +420,7 @@ fn add_enum_value_to_map(
         JsonValue::Array(val_list) => {
             for val in val_list {
                 add_enum_value_to_map(enum_name, val, referenced_enums);
-            }            
+            }
         }
         _ => {}
     }

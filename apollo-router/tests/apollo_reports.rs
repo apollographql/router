@@ -394,7 +394,6 @@ where
         _ => Err(anyhow!("error retrieving response")),
     };
 
-
     // We must always try to find the report regardless of if the response had failures
     for _ in 0..10 {
         let my_reports = reports.lock().await;
@@ -739,7 +738,6 @@ async fn test_demand_control_trace_batched() {
         assert_report!(report);
     }
 }
-
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_query_with_nested_query_enum_param() {

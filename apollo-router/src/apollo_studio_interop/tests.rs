@@ -548,12 +548,8 @@ async fn test_enums_with_nested_query_fragment() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_extended_refs(
-        &doc,
-        Some("QueryWithNestedQuery".into()),
-        &schema,
-        None,
-    );
+    let generated =
+        generate_extended_refs(&doc, Some("QueryWithNestedQuery".into()), &schema, None);
     assert_extended_references!(&generated);
 }
 
@@ -565,12 +561,7 @@ async fn test_enums_with_nested_query() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
 
-    let generated = generate_extended_refs(
-        &doc,
-        Some("QueryWithNestedQuery".into()),
-        &schema,
-        None,
-    );
+    let generated =
+        generate_extended_refs(&doc, Some("QueryWithNestedQuery".into()), &schema, None);
     assert_extended_references!(&generated);
 }
->>>>>>> e8c8b0467 (Write tests for inline/non-inline nested query enum reporting)
