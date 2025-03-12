@@ -442,7 +442,7 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
     source: &'a Source,
     ignore_other_prefixes: bool,
     headers: &'b HeaderMap,
-) -> Option<Result<&'b str, AuthenticationError<'a>>> {
+) -> Option<Result<&'b str, AuthenticationError>> {
     match source {
         Source::Header { name, value_prefix } => {
             // The http_request is stored in a `Router::Request` context.
@@ -464,7 +464,7 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
             let jwt_value = jwt_value_untrimmed.trim();
 
             // Make sure the format of our message matches our expectations
-            // Technically, the spec is case sensitive, but let's accept
+            // Technically, the spec is case-sensitive, but let's accept
             // case variations
             //
             let prefix_len = value_prefix.len();
@@ -475,18 +475,19 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                     None
                 } else {
                     Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed,
-                        value_prefix,
+                        jwt_value_untrimmed.to_owned(),
+                        value_prefix.to_owned(),
                     )))
                 };
             }
-            // If there's no header prefix, we need to avoid splitting the header
+            // If there's no header prefix, we avoid splitting the header
             let jwt = if value_prefix.is_empty() {
-                // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
+                // check for whitespace — we've already trimmed, so this means the request has a
+                // prefix that shouldn't exist
                 if jwt_value.contains(' ') {
                     return Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed,
-                        value_prefix,
+                        jwt_value_untrimmed.to_owned(),
+                        value_prefix.to_owned(),
                     )));
                 }
 
@@ -496,7 +497,7 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 // Otherwise, we need to split our string in (at most 2) sections.
                 let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                 if jwt_parts.len() != 2 {
-                    return Some(Err(AuthenticationError::MissingJWT(jwt_value)));
+                    return Some(Err(AuthenticationError::MissingJWT(jwt_value.to_owned())));
                 }
 
                 // We have our jwt
@@ -593,17 +594,13 @@ pub(super) fn decode_jwt(
         Some(e) => Err(e),
         None => {
             // We can't find a key to process this JWT.
-            if criteria.kid.is_some() {
-                Err((
-                    AuthenticationError::CannotFindKID(criteria.kid),
-                    StatusCode::UNAUTHORIZED,
-                ))
-            } else {
-                Err((
-                    AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
-                    StatusCode::UNAUTHORIZED,
-                ))
-            }
+            Err((
+                criteria.kid.map_or_else(
+                    || AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
+                    |kid| AuthenticationError::CannotFindKID(kid),
+                ),
+                StatusCode::UNAUTHORIZED,
+            ))
         }
     }
 }

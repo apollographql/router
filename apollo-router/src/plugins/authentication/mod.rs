@@ -10,7 +10,6 @@ use self::jwks::JwksManager;
 use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
-use crate::Context;
 use crate::configuration::connector::ConnectorConfiguration;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
@@ -72,7 +71,7 @@ struct AuthenticationPlugin {
     connector: Option<ConnectorAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
 enum OnError {
     Continue,
     #[default]
@@ -419,10 +418,10 @@ fn authenticate(
     // We are going to do a lot of similar checking so let's define a local function
     // to help reduce repetition
     fn failure_message(
-        context: Context,
+        request: router::Request,
+        config: &JWTConf,
         error: AuthenticationError,
         status: StatusCode,
-        config: &JWTConf,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
         u64_counter!(
@@ -433,7 +432,7 @@ fn authenticate(
         );
         tracing::error!(message = %error, "jwt authentication failure");
 
-        let _ = context.insert_json_value(
+        let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
             serde_json_bytes::json!(JwtStatus::new_failure(
                 config.header_name.clone(),
@@ -441,34 +440,41 @@ fn authenticate(
             )),
         );
 
-        let response = router::Response::infallible_builder()
-            .error(
-                graphql::Error::builder()
-                    .message(error.to_string())
-                    .extension_code("AUTH_ERROR")
-                    .build(),
-            )
-            .status_code(status)
-            .header(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
-            .context(context)
-            .build();
-        ControlFlow::Break(response)
+        if config.on_error == OnError::Error {
+            let response = router::Response::infallible_builder()
+                .error(
+                    graphql::Error::builder()
+                        .message(error.to_string())
+                        .extension_code("AUTH_ERROR")
+                        .build(),
+                )
+                .status_code(status)
+                .header(header::CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone())
+                .context(request.context)
+                .build();
+
+            ControlFlow::Break(response)
+        } else {
+            ControlFlow::Continue(request)
+        }
     }
 
     let mut jwt = None;
     for source in &config.sources {
-        match jwks::extract_jwt(
+        let extracted_jwt = jwks::extract_jwt(
             source,
             config.ignore_other_prefixes,
-            request.router_request.headers(),
-        ) {
+            &request.router_request.headers(),
+        );
+
+        match extracted_jwt {
             None => continue,
-            Some(Err(error)) => {
-                return failure_message(request.context, error, StatusCode::BAD_REQUEST, config);
-            }
             Some(Ok(extracted_jwt)) => {
                 jwt = Some(extracted_jwt);
                 break;
+            }
+            Some(Err(error)) => {
+                return failure_message(request, config, error, StatusCode::BAD_REQUEST);
             }
         }
     }
@@ -485,10 +491,10 @@ fn authenticate(
             // Don't reflect the jwt on error, just reply with a fixed
             // error message.
             return failure_message(
-                request.context,
-                AuthenticationError::InvalidHeader(HEADER_TOKEN_TRUNCATED, e),
-                StatusCode::BAD_REQUEST,
+                request,
                 config,
+                AuthenticationError::InvalidHeader(HEADER_TOKEN_TRUNCATED.to_owned(), e),
+                StatusCode::BAD_REQUEST,
             );
         }
     };
@@ -506,7 +512,7 @@ fn authenticate(
         let (issuer, token_data) = match jwks::decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
-                return failure_message(request.context, auth_error, status_code, config);
+                return failure_message(request, config, auth_error, status_code);
             }
         };
 
@@ -519,13 +525,13 @@ fn authenticate(
             {
                 if configured_issuer != token_issuer {
                     return failure_message(
-                        request.context,
+                        request,
+                        config,
                         AuthenticationError::InvalidIssuer {
                             expected: configured_issuer,
                             token: token_issuer.to_string(),
                         },
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        config,
                     );
                 }
             }
@@ -536,10 +542,10 @@ fn authenticate(
             .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, token_data.claims.clone())
         {
             return failure_message(
-                request.context,
+                request,
+                config,
                 AuthenticationError::CannotInsertClaimsIntoContext(e),
                 StatusCode::INTERNAL_SERVER_ERROR,
-                config,
             );
         }
         // This is a metric and will not appear in the logs
@@ -561,21 +567,12 @@ fn authenticate(
     }
 
     // We can't find a key to process this JWT.
-    if criteria.kid.is_some() {
-        failure_message(
-            request.context,
-            AuthenticationError::CannotFindKID(criteria.kid),
-            StatusCode::UNAUTHORIZED,
-            config,
-        )
-    } else {
-        failure_message(
-            request.context,
-            AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
-            StatusCode::UNAUTHORIZED,
-            config,
-        )
-    }
+    let err = criteria.kid.map_or_else(
+        || AuthenticationError::CannotFindSuitableKey(criteria.alg, None),
+        |kid| AuthenticationError::CannotFindKID(kid),
+    );
+
+    failure_message(request, config, err, StatusCode::UNAUTHORIZED)
 }
 
 // This macro allows us to use it in our plugin registry!

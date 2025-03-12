@@ -7,18 +7,18 @@ use thiserror::Error;
 use tower::BoxError;
 
 #[derive(Debug, Display, Error)]
-pub(crate) enum AuthenticationError<'a> {
+pub(crate) enum AuthenticationError {
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
     /// Header Value: '{0}' is not correctly formatted. prefix should be '{1}'
-    InvalidPrefix(&'a str, &'a str),
+    InvalidPrefix(String, String),
 
     /// Header Value: '{0}' is not correctly formatted. Missing JWT
-    MissingJWT(&'a str),
+    MissingJWT(String),
 
     /// '{0}' is not a valid JWT header: {1}
-    InvalidHeader(&'a str, JWTError),
+    InvalidHeader(String, JWTError),
 
     /// Cannot create decoding key: {0}
     CannotCreateDecodingKey(JWTError),
@@ -33,7 +33,7 @@ pub(crate) enum AuthenticationError<'a> {
     CannotInsertClaimsIntoContext(BoxError),
 
     /// Cannot find kid: '{0:?}' in JWKS list
-    CannotFindKID(Option<String>),
+    CannotFindKID(String),
 
     /// Cannot find a suitable key for: alg: '{0:?}', kid: '{1:?}' in JWKS list
     CannotFindSuitableKey(Algorithm, Option<String>),
@@ -72,7 +72,7 @@ fn jwt_error_to_reason(jwt_err: &JWTError) -> &'static str {
     }
 }
 
-impl<'a> AuthenticationError<'a> {
+impl AuthenticationError {
     pub(crate) fn as_context_object(&self) -> ErrorContext {
         let (code, reason) = match self {
             AuthenticationError::CannotConvertToString => ("CANNOT_CONVERT_TO_STRING", None),

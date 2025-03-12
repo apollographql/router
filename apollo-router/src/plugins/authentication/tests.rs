@@ -1,18 +1,20 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::ops::ControlFlow;
-use std::path::Path;
-use std::str::FromStr;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::time::Duration;
+use super::{
+    APOLLO_AUTHENTICATION_JWT_CLAIMS, HEADER_TOKEN_TRUNCATED, Header, JWT_CONTEXT_KEY, JWTConf,
+    JwtStatus, Source, authenticate,
+};
+use crate::plugin::test;
+use crate::plugins::authentication::jwks::{
+    JWTCriteria, JwksConfig, JwksManager, parse_jwks, search_jwks,
+};
+use crate::services::router;
+use crate::services::router::body::RouterBody;
+use crate::services::supergraph;
+use crate::{assert_snapshot_subscriber, graphql};
 use axum::handler::HandlerWithoutStateExt;
 use base64::Engine as _;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use insta::assert_yaml_snapshot;
-use jsonwebtoken::{Algorithm, EncodingKey};
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::EllipticCurveKeyParameters;
@@ -22,22 +24,25 @@ use jsonwebtoken::jwk::{
     AlgorithmParameters, CommonParameters, EllipticCurve, Jwk, KeyAlgorithm, KeyOperations,
     PublicKeyUse,
 };
+use jsonwebtoken::{Algorithm, EncodingKey};
 use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::ops::ControlFlow;
+use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tower::ServiceExt;
 use tracing::subscriber;
 use url::Url;
-use super::{authenticate, Header, JWTConf, JwtStatus, Source, APOLLO_AUTHENTICATION_JWT_CLAIMS, HEADER_TOKEN_TRUNCATED, JWT_CONTEXT_KEY};
-use crate::{assert_snapshot_subscriber, graphql};
-use crate::plugin::test;
-use crate::plugins::authentication::jwks::{JWTCriteria, parse_jwks, search_jwks, JwksConfig, JwksManager};
-use crate::services::router;
-use crate::services::router::body::RouterBody;
-use crate::services::supergraph;
 
 pub(crate) fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
@@ -663,7 +668,7 @@ async fn it_inserts_success_jwt_status_into_context() {
             .to_vec()
             .as_slice(),
     )
-        .unwrap();
+    .unwrap();
 
     assert_eq!(response.errors, vec![]);
 
@@ -672,6 +677,20 @@ async fn it_inserts_success_jwt_status_into_context() {
     let expected_mock_response_data = "response created within the mock";
     // with the expected message
     assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+
+    let jwt_claims = service_response
+        .context
+        .get::<_, Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("deserialization succeeds")
+        .expect("a context value was set");
+
+    assert_eq!(
+        jwt_claims,
+        serde_json::json!({
+            "exp": 10_000_000_000i64,
+            "another claim": "this is another claim"
+        })
+    );
 }
 
 #[tokio::test]
@@ -703,10 +722,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
     match error {
         Some(err) => {
             assert_eq!(err.code, "CANNOT_DECODE_JWT");
-            assert_eq!(
-                err.message,
-                "Cannot decode JWT: InvalidSignature"
-            );
+            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
         }
         None => panic!("expected an error"),
     }
@@ -720,7 +736,7 @@ async fn it_inserts_failure_jwt_status_into_context() {
             .to_vec()
             .as_slice(),
     )
-        .unwrap();
+    .unwrap();
 
     let expected_error = graphql::Error::builder()
         .message("Cannot decode JWT: InvalidSignature")
@@ -730,6 +746,16 @@ async fn it_inserts_failure_jwt_status_into_context() {
     assert_eq!(response.errors, vec![expected_error]);
 
     assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+
+    let jwt_claims = service_response
+        .context
+        .get::<_, Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("deserialization succeeds");
+
+    assert!(
+        jwt_claims.is_none(),
+        "because the JWT was invalid, no claims should be set"
+    );
 }
 
 #[tokio::test]
