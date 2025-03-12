@@ -1,35 +1,3 @@
-use super::{
-    APOLLO_AUTHENTICATION_JWT_CLAIMS, HEADER_TOKEN_TRUNCATED, Header, JWT_CONTEXT_KEY, JWTConf,
-    JwtStatus, Source, authenticate,
-};
-use crate::plugin::test;
-use crate::plugins::authentication::jwks::{
-    JWTCriteria, JwksConfig, JwksManager, parse_jwks, search_jwks,
-};
-use crate::services::router;
-use crate::services::router::body::RouterBody;
-use crate::services::supergraph;
-use crate::{assert_snapshot_subscriber, graphql};
-use axum::handler::HandlerWithoutStateExt;
-use base64::Engine as _;
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
-use insta::assert_yaml_snapshot;
-use jsonwebtoken::encode;
-use jsonwebtoken::get_current_timestamp;
-use jsonwebtoken::jwk::EllipticCurveKeyParameters;
-use jsonwebtoken::jwk::EllipticCurveKeyType;
-use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, EllipticCurve, Jwk, KeyAlgorithm, KeyOperations,
-    PublicKeyUse,
-};
-use jsonwebtoken::{Algorithm, EncodingKey};
-use mime::APPLICATION_JSON;
-use p256::ecdsa::SigningKey;
-use p256::pkcs8::EncodePrivateKey;
-use rand_core::OsRng;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
@@ -39,9 +7,58 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+use axum::handler::HandlerWithoutStateExt;
+use base64::Engine as _;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
+use http::StatusCode;
+use insta::assert_yaml_snapshot;
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::EncodingKey;
+use jsonwebtoken::encode;
+use jsonwebtoken::get_current_timestamp;
+use jsonwebtoken::jwk::AlgorithmParameters;
+use jsonwebtoken::jwk::CommonParameters;
+use jsonwebtoken::jwk::EllipticCurve;
+use jsonwebtoken::jwk::EllipticCurveKeyParameters;
+use jsonwebtoken::jwk::EllipticCurveKeyType;
+use jsonwebtoken::jwk::Jwk;
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::jwk::KeyAlgorithm;
+use jsonwebtoken::jwk::KeyOperations;
+use jsonwebtoken::jwk::PublicKeyUse;
+use mime::APPLICATION_JSON;
+use p256::ecdsa::SigningKey;
+use p256::pkcs8::EncodePrivateKey;
+use rand_core::OsRng;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::ServiceExt;
 use tracing::subscriber;
 use url::Url;
+
+use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use super::HEADER_TOKEN_TRUNCATED;
+use super::Header;
+use super::JWT_CONTEXT_KEY;
+use super::JWTConf;
+use super::JwtStatus;
+use super::Source;
+use super::authenticate;
+use crate::assert_snapshot_subscriber;
+use crate::graphql;
+use crate::plugin::test;
+use crate::plugins::authentication::jwks::JWTCriteria;
+use crate::plugins::authentication::jwks::JwksConfig;
+use crate::plugins::authentication::jwks::JwksManager;
+use crate::plugins::authentication::jwks::parse_jwks;
+use crate::plugins::authentication::jwks::search_jwks;
+use crate::services::router;
+use crate::services::router::body::RouterBody;
+use crate::services::supergraph;
 
 pub(crate) fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");

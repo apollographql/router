@@ -1,8 +1,10 @@
 use displaydoc::Display;
 use jsonwebtoken::Algorithm;
-use jsonwebtoken::errors::{Error as JWTError, ErrorKind};
+use jsonwebtoken::errors::Error as JWTError;
+use jsonwebtoken::errors::ErrorKind;
 use jsonwebtoken::jwk::KeyAlgorithm;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 use tower::BoxError;
 

@@ -2,26 +2,31 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::mem;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
-use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-use super::Header;
-use super::{APOLLO_AUTHENTICATION_JWT_CLAIMS, CLIENT, Source};
-use crate::Context;
-use crate::plugins::authentication::error::AuthenticationError;
 use futures::future::Either;
 use futures::future::join_all;
 use futures::future::select;
 use futures::pin_mut;
 use futures::stream::repeat;
 use futures::stream::select_all;
+use http::HeaderMap;
+use http::StatusCode;
 use http::header::ACCEPT;
-use http::{HeaderMap, StatusCode};
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::DecodingKey;
+use jsonwebtoken::TokenData;
+use jsonwebtoken::Validation;
+use jsonwebtoken::decode;
+use jsonwebtoken::jwk::AlgorithmParameters;
+use jsonwebtoken::jwk::EllipticCurve;
+use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::jwk::{
-    AlgorithmParameters, EllipticCurve, Jwk, KeyAlgorithm, KeyOperations, PublicKeyUse,
-};
-use jsonwebtoken::{Algorithm, DecodingKey, TokenData, Validation, decode};
+use jsonwebtoken::jwk::KeyAlgorithm;
+use jsonwebtoken::jwk::KeyOperations;
+use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -30,6 +35,14 @@ use tokio::sync::oneshot;
 use tower::BoxError;
 use tracing_futures::Instrument;
 use url::Url;
+
+use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+use super::CLIENT;
+use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
+use super::Header;
+use super::Source;
+use crate::Context;
+use crate::plugins::authentication::error::AuthenticationError;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
