@@ -408,7 +408,6 @@ impl Configuration {
             debug: QueryPlannerDebugConfig {
                 max_evaluated_plans,
                 paths_limit: self.supergraph.query_planning.experimental_paths_limit,
-                ..Default::default()
             },
         }
     }

@@ -57,6 +57,7 @@ pub(crate) struct BlockQueryPlanningSignal {
 
 impl BlockQueryPlanningSignal {
     /// Create a sender/receiver pair for artificially blocking query planning progress.
+    #[cfg(test)]
     pub(crate) fn pair() -> (crossbeam_channel::Sender<()>, Self) {
         let (tx, rx) = crossbeam_channel::unbounded();
 
