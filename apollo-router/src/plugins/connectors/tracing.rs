@@ -99,6 +99,7 @@ mod tests {
                 .into(),
             ),
             labels_by_service_name: Default::default(),
+            source_config_keys: Default::default(),
         };
 
         assert_eq!(

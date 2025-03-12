@@ -253,6 +253,7 @@ impl PluginPrivate for AuthenticationPlugin {
     fn connector_request_service(
         &self,
         service: crate::services::connector::request_service::BoxService,
+        _: String,
     ) -> crate::services::connector::request_service::BoxService {
         // Return without layering if no connector config was defined
         let Some(connector_auth) = &self.connector else {
