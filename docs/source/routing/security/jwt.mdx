@@ -201,7 +201,7 @@ The default value is `false`.
 
 ## Working with JWT claims
 
-After the GraphOS Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
+After the GraphOS Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo::authentication::jwt_claims`
 
 > - If no JWT is present for a client request, this context value is the empty tuple, `()`.
 > - If a JWT _is_ present but validation of the JWT fails, the router _rejects_ the request.
@@ -299,7 +299,7 @@ This script should be run in the router's `SupergraphService`, which executes be
 ```rhai title="claims_validation.rhai"
 fn process_request(request) {
     // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-    // constant with value `apollo_authentication::JWT::claims`
+    // constant with value `apollo::authentication::jwt_claims`
     let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
     if claims == () || !claims.contains("iss") || claims["iss"] != "https://idp.local" {
         throw #{
@@ -381,7 +381,7 @@ The router sends requests to the coprocessor with this format:
   "id": "d0a8245df0efe8aa38a80dba1147fb2e",
   "context": {
     "entries": {
-      "apollo_authentication::JWT::claims": {
+      "apollo::authentication::jwt_claims": {
         "exp": 10000000000,
         "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a"
       }
@@ -401,7 +401,7 @@ The coprocessor can then look up the user with the identifier specified in the `
   "id": "d0a8245df0efe8aa38a80dba1147fb2e",
   "context": {
     "entries": {
-      "apollo_authentication::JWT::claims": {
+      "apollo::authentication::jwt_claims": {
         "exp": 10000000000,
         "sub": "457f6bb6-789c-4e8b-8560-f3943a09e72a",
         "scope": "profile:read profile:write"
