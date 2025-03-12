@@ -339,6 +339,15 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 # [1.59.0] - 2024-12-17
 
 > [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
+
+> [!IMPORTANT]
 >
 > This release was impacted by a resource utilization regression which was fixed in [v1.59.2](#1592---2025-01-28).  See the release notes for that release for more details.  As a result, we recommend using v1.59.2 rather than v1.59.1 or v1.59.0.
 
@@ -603,6 +612,14 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 # [1.58.1] - 2024-12-05
 
 > [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
+> [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 ## 🐛 Fixes
@@ -625,6 +642,14 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 
 # [1.58.0] - 2024-11-27
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
@@ -918,9 +943,15 @@ The docs for [authorization directive composition](https://www.apollographql.com
 
 By [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollographql/router/pull/6216
 
-
-
 # [1.57.1] - 2024-10-31
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 ## 🐛 Fixes
 
@@ -933,6 +964,14 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 
 # [1.57.0] - 2024-10-22
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), updates to the query planner in this release will result in query plan caches being re-generated rather than re-used.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new query plans come into service.
@@ -1070,6 +1109,14 @@ By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apol
 # [1.56.0] - 2024-10-01
 
 > [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
+> [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 ## 🚀 Features
@@ -1147,6 +1194,14 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 
 # [1.55.0] - 2024-09-24
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
@@ -1313,6 +1368,14 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 
 # [1.54.0] - 2024-09-10
 
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
 ## 🚀 Features
 
 ### Add configurability of span attributes in logs ([Issue #5540](https://github.com/apollographql/router/issues/5540))
@@ -1412,6 +1475,14 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 
 # [1.53.0] - 2024-08-28
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
