@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::Schema;
 use bytes::Bytes;
 use fred::error::RedisErrorKind;
 use fred::mocks::MockCommand;
@@ -27,6 +28,7 @@ use crate::MockedSubgraphs;
 use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
+const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");
 #[derive(Debug)]
 pub(crate) struct MockStore {
     map: Arc<Mutex<HashMap<Bytes, Bytes>>>,
@@ -151,6 +153,7 @@ impl Mocks for MockStore {
 
 #[tokio::test]
 async fn insert() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -210,7 +213,7 @@ async fn insert() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -241,9 +244,10 @@ async fn insert() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -273,7 +277,136 @@ async fn insert() {
 }
 
 #[tokio::test]
+async fn insert_with_requires() {
+    let valid_schema =
+        Arc::new(Schema::parse_and_validate(SCHEMA_REQUIRES, "test.graphql").unwrap());
+    let query = "query { topProducts { name shippingEstimate price } }";
+
+    let subgraphs = MockedSubgraphs([
+        ("products", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{ topProducts { __typename upc name price weight } }"}},
+                serde_json::json!{{"data": {"topProducts": [{
+                    "__typename": "Product",
+                    "upc": "1",
+                    "name": "Test",
+                    "price": 150,
+                    "weight": 5
+                }]}}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
+        ("inventory", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { shippingEstimate } } }",
+                "variables": {
+                    "representations": [
+                        {
+                            "price": 150,
+                            "weight": 5,
+                            "upc": "1",
+                            "__typename": "Product"
+                        }
+                    ]
+            }}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "shippingEstimate": 15
+                }]
+            }}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
+    ].into_iter().collect());
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let map = [
+        (
+            "products".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+        (
+            "inventory".to_string(),
+            Subgraph {
+                redis: None,
+                private_id: Some("sub".to_string()),
+                enabled: true,
+                ttl: None,
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .collect();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
+        .await
+        .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA_REQUIRES)
+        .extra_plugin(entity_cache)
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA_REQUIRES)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
+    let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
+    cache_keys.sort();
+    insta::assert_json_snapshot!(cache_keys);
+
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test]
 async fn no_cache_control() {
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
     let subgraphs = MockedSubgraphs([
@@ -309,9 +442,10 @@ async fn no_cache_control() {
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
         .unwrap();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -336,9 +470,10 @@ async fn no_cache_control() {
     insta::assert_json_snapshot!(response);
 
     // Now testing without any mock subgraphs, all the data should come from the cache
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -365,6 +500,7 @@ async fn no_cache_control() {
 #[tokio::test]
 async fn private() {
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -424,7 +560,7 @@ async fn private() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -509,6 +645,7 @@ async fn private() {
 #[tokio::test]
 async fn no_data() {
     let query = "query { currentUser { allOrganizations { id name } } }";
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
 
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -579,7 +716,7 @@ async fn no_data() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -615,9 +752,10 @@ async fn no_data() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let subgraphs = MockedSubgraphs(
         [(
@@ -695,7 +833,7 @@ async fn no_data() {
 #[tokio::test]
 async fn missing_entities() {
     let query = "query { currentUser { allOrganizations { id name } } }";
-
+    let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{allOrganizations{__typename id}}}"}},
@@ -767,7 +905,7 @@ async fn missing_entities() {
     ]
     .into_iter()
     .collect();
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map)
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
         .await
         .unwrap();
 
@@ -790,9 +928,10 @@ async fn missing_entities() {
     let response = response.next_response().await.unwrap();
     insta::assert_json_snapshot!(response);
 
-    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
-        .await
-        .unwrap();
+    let entity_cache =
+        EntityCache::with_mocks(redis_cache.clone(), HashMap::new(), valid_schema.clone())
+            .await
+            .unwrap();
 
     let subgraphs = MockedSubgraphs([
             ("user", MockSubgraph::builder().with_json(

@@ -31,64 +31,6 @@ By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apol
 
 ## 🐛 Fixes
 
-### Header propagation rules passthrough ([PR #6690](https://github.com/apollographql/router/pull/6690))
-
-Header propagation contains logic to prevent headers from being propagated more than once. This was broken
-in https://github.com/apollographql/router/pull/6281 which always considered a header propagated regardless if a rule
-actually matched.
-
-This PR alters the logic so that a header is marked as fixed only when it's populated.
-
-The following will now work again:
-
-```
-headers:
-  all:
-    request:
-      - propagate:
-          named: a
-          rename: b
-      - propagate:
-          named: b
-```
-
-Note that defaulting a header WILL populate it, so make sure to include your defaults last in your propagation
-rules.
-
-```
-headers:
-  all:
-    request:
-      - propagate:
-          named: a
-          rename: b
-          default: defaulted # This will prevent any further rule evaluation for header `b`
-      - propagate:
-          named: b
-```
-
-Instead, make sure that your headers are defaulted last:
-
-```
-headers:
-  all:
-    request:
-      - propagate:
-          named: a
-          rename: b
-      - propagate:
-          named: b
-          default: defaulted # OK
-```
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6690
-
-### Entity cache: fix directive conflicts in cache-control header ([Issue #6441](https://github.com/apollographql/router/issues/6441))
-
-Unnecessary cache-control directives are created in cache-control header.  The router will now filter out unnecessary values from the `cache-control` header when the request resolves. So if there's `max-age=10, no-cache, must-revalidate, no-store`, the expected value for the cache-control header would simply be `no-store`. Please see the MDN docs for justification of this reasoning: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6543
-
 ### Query Planning: fix `__typename` selections in sibling typename optimization 
 
 The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. 
@@ -223,14 +165,6 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🐛 Fixes
 
-### Improve performance of query hashing by using a precomputed schema hash ([PR #6622](https://github.com/apollographql/router/pull/6622))
-
-The router now uses a simpler and faster query hashing algorithm with more predictable CPU and memory usage. This improvement is enabled by using a precomputed hash of the entire schema, rather than computing and hashing the subset of types and fields used by each query.
-
-For more details on why these design decisions were made, please see the [PR description](https://github.com/apollographql/router/pull/6622)
-
-By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6622
-
 ### Truncate invalid error paths ([PR #6359](https://github.com/apollographql/router/pull/6359))
 
 This fix addresses an issue where the router was silently dropping subgraph errors that included invalid paths.
@@ -247,19 +181,6 @@ By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apol
 When subgraph operations are deserialized, typically from a query plan cache, they are not automatically parsed into a full document. Instead, each node needs to initialize its operation(s) prior to execution. With this change, the primary node inside SubscriptionNode is initialized in the same way as other nodes in the plan.
 
 By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/6509
-
-### Fix increased memory usage in `sysinfo` since Router 1.59.0 ([PR #6634](https://github.com/apollographql/router/pull/6634))
-
-In version 1.59.0, Apollo Router started using the `sysinfo` crate to gather metrics about available CPUs and RAM. By default, that crate uses `rayon` internally to parallelize its handling of system processes. In turn, rayon creates a pool of long-lived threads.
-
-In a particular benchmark on a 32-core Linux server, this caused resident memory use to increase by about 150 MB. This is likely a combination of stack space (which only gets freed when the thread terminates) and per-thread space reserved by the heap allocator to reduce cross-thread synchronization cost.
-
-This regression is now fixed by:
-
-* Disabling `sysinfo`’s use of `rayon`, so the thread pool is not created and system processes information is gathered in a sequential loop.
-* Making `sysinfo` not gather that information in the first place since Router does not use it.
-
-By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6634
 
 ### Optimize demand control lookup ([PR #6450](https://github.com/apollographql/router/pull/6450))
 
