@@ -400,6 +400,7 @@ impl JwtStatus {
         }
     }
 
+    #[cfg(test)]
     /// Returns the error context if the status is a failure; Otherwise, returns None.
     fn error(&self) -> Option<&ErrorContext> {
         match self {
