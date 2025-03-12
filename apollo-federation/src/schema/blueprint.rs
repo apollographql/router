@@ -2,21 +2,17 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
+use apollo_compiler::ast::NamedType;
 
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Purpose;
-use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
 use crate::link::link_spec_definition::LINK_VERSIONS;
-use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
-
-#[allow(dead_code)]
-const FEDERATION_OPERATION_FIELDS: [&str; 2] = ["_entities", "_services"];
 
 #[allow(dead_code)]
 struct CoreFeature {
@@ -37,11 +33,11 @@ trait SchemaBlueprint {
 
     fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError>;
 
-    fn ignore_parsed_field(schema: &FederationSchema, _field_name: &str) -> bool;
+    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool;
 
     fn on_constructed(&self, _schema: &mut FederationSchema) -> Result<(), FederationError>;
 
-    fn on_added_core_feature(_schema: &mut FederationSchema, _feature: &CoreFeature);
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature);
 
     fn on_invalidation(_: &Schema);
 
@@ -76,7 +72,7 @@ impl SchemaBlueprint for DefaultBlueprint {
         Ok(())
     }
 
-    fn ignore_parsed_field(_schema: &FederationSchema, _field_name: &str) -> bool {
+    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
         false
     }
 
@@ -85,9 +81,7 @@ impl SchemaBlueprint for DefaultBlueprint {
         Ok(())
     }
 
-    fn on_added_core_feature(_schema: &mut FederationSchema, _feature: &CoreFeature) {
-        // No-op by default, but used for federation.
-    }
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {}
 
     fn on_invalidation(_: &Schema) {
         todo!()
@@ -150,14 +144,8 @@ impl SchemaBlueprint for FederationBlueprint {
         todo!()
     }
 
-    fn ignore_parsed_field(schema: &FederationSchema, field_name: &str) -> bool {
-        if !FEDERATION_OPERATION_FIELDS.contains(&field_name) {
-            return false;
-        }
-        schema
-            .subgraph_metadata
-            .as_ref()
-            .is_some_and(|meta| !meta.is_fed_2_schema())
+    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
+        todo!()
     }
 
     fn on_constructed(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
@@ -167,13 +155,8 @@ impl SchemaBlueprint for FederationBlueprint {
         Ok(())
     }
 
-    fn on_added_core_feature(schema: &mut FederationSchema, feature: &CoreFeature) {
-        DefaultBlueprint::on_added_core_feature(schema, feature);
-        if feature.url.identity == Identity::federation_identity() {
-            if let Some(spec) = FEDERATION_VERSIONS.find(&feature.url.version) {
-                let _ = spec.add_elements_to_schema(schema);
-            }
-        }
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
+        todo!()
     }
 
     fn on_invalidation(_: &Schema) {

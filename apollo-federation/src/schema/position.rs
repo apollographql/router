@@ -5310,43 +5310,57 @@ impl FederationSchema {
         )?;
         for (type_name, type_) in self.schema.types.iter() {
             match type_ {
-                ExtendedType::Scalar(_) => {
-                    self.referencers
-                        .scalar_types
-                        .insert(type_name.clone(), Default::default());
+                ExtendedType::Scalar(type_) => {
+                    ScalarTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .insert_references(type_, &mut self.referencers)?;
                 }
-                ExtendedType::Object(_) => {
-                    self.referencers
-                        .object_types
-                        .insert(type_name.clone(), Default::default());
+                ExtendedType::Object(type_) => {
+                    ObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
-                ExtendedType::Interface(_) => {
-                    self.referencers
-                        .interface_types
-                        .insert(type_name.clone(), Default::default());
+                ExtendedType::Interface(type_) => {
+                    InterfaceTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
-                ExtendedType::Union(_) => {
-                    self.referencers
-                        .union_types
-                        .insert(type_name.clone(), Default::default());
+                ExtendedType::Union(type_) => {
+                    UnionTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .insert_references(type_, &mut self.referencers)?;
                 }
-                ExtendedType::Enum(_) => {
-                    self.referencers
-                        .enum_types
-                        .insert(type_name.clone(), Default::default());
+                ExtendedType::Enum(type_) => {
+                    EnumTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .insert_references(type_, &mut self.referencers)?;
                 }
-                ExtendedType::InputObject(_) => {
-                    self.referencers
-                        .input_object_types
-                        .insert(type_name.clone(), Default::default());
+                ExtendedType::InputObject(type_) => {
+                    InputObjectTypeDefinitionPosition {
+                        type_name: type_name.clone(),
+                    }
+                    .insert_references(type_, &mut self.referencers)?;
                 }
             }
         }
-
-        for directive_name in self.schema.directive_definitions.keys() {
-            self.referencers
-                .directives
-                .insert(directive_name.clone(), Default::default());
+        for (directive_name, directive) in self.schema.directive_definitions.iter() {
+            DirectiveDefinitionPosition {
+                directive_name: directive_name.clone(),
+            }
+            .insert_references(directive, &mut self.referencers)?;
         }
         Ok(())
     }
