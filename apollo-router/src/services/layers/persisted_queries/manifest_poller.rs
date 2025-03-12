@@ -554,34 +554,35 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn hot_reload_stream_reloads_on_file_change() {
+        const FIXTURE_PATH: &str = "tests/fixtures/persisted-queries-manifest-hot-reload.json";
         // Note: this directly matches the contents of the file in the fixtures
         // directory in order to ensure the fixture is restored after we modify
         // it for this test.
         const ORIGINAL_MANIFEST_CONTENTS: &str = r#"{
-  "format": "apollo-persisted-query-manifest",
-  "version": 1,
-  "operations": [
-    {
-      "id": "5678",
-      "name": "typename",
-      "type": "query",
-      "body": "query { typename }"
-    }
-  ]
+    "format": "apollo-persisted-query-manifest",
+    "version": 1,
+    "operations": [
+        {
+            "id": "5678",
+            "name": "typename",
+            "type": "query",
+            "body": "query { typename }"
+        }
+    ]
 }
 "#;
 
         const UPDATED_MANIFEST_CONTENTS: &str = r#"{
-  "format": "apollo-persisted-query-manifest",
-  "version": 1,
-  "operations": [
-    {
-      "id": "1234",
-      "name": "typename",
-      "type": "query",
-      "body": "query { typename }"
-    }
-  ]
+    "format": "apollo-persisted-query-manifest",
+    "version": 1,
+    "operations": [
+        {
+            "id": "1234",
+            "name": "typename",
+            "type": "query",
+            "body": "query { typename }"
+        }
+    ]
 }
 "#;
 
@@ -595,9 +596,7 @@ mod tests {
                 .persisted_query(
                     PersistedQueries::builder()
                         .enabled(true)
-                        .local_manifests(vec![
-                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
-                        ])
+                        .local_manifests(vec![FIXTURE_PATH.to_string()])
                         .hot_reload(true)
                         .build(),
                 )
@@ -612,9 +611,7 @@ mod tests {
         );
 
         // Change the file
-        let mut file = tokio::fs::File::create("tests/fixtures/persisted-queries-manifest.json")
-            .await
-            .unwrap();
+        let mut file = tokio::fs::File::create(FIXTURE_PATH).await.unwrap();
         file.write_all(UPDATED_MANIFEST_CONTENTS.as_bytes())
             .await
             .unwrap();
@@ -634,9 +631,7 @@ mod tests {
         );
 
         // Cleanup, restore the original file
-        let mut file = tokio::fs::File::create("tests/fixtures/persisted-queries-manifest.json")
-            .await
-            .unwrap();
+        let mut file = tokio::fs::File::create(FIXTURE_PATH).await.unwrap();
         file.write_all(ORIGINAL_MANIFEST_CONTENTS.as_bytes())
             .await
             .unwrap();
