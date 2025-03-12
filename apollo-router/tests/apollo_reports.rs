@@ -742,7 +742,7 @@ async fn test_demand_control_trace_batched() {
 
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_same_enum() {
+async fn test_query_with_nested_query_enum_param() {
     let request = supergraph::Request::fake_builder()
         .query("query{orderAndGroup(color: RED){location(groupBy: DESC)}}")
         .build()
