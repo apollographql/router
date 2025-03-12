@@ -30,7 +30,6 @@ use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
@@ -55,7 +54,7 @@ pub(crate) fn create_an_url(filename: &str) -> String {
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
-    build_a_test_harness(None, None, false, false).await
+    build_a_test_harness(None, None, false, false, false).await
 }
 
 async fn build_a_test_harness(
@@ -63,6 +62,7 @@ async fn build_a_test_harness(
     header_value_prefix: Option<String>,
     multiple_jwks: bool,
     ignore_other_prefixes: bool,
+    continue_on_error: bool,
 ) -> router::BoxCloneService {
     // create a mock service we will use to test our plugin
     let mut mock_service = test::MockSupergraphService::new();
@@ -132,6 +132,11 @@ async fn build_a_test_harness(
 
     config["authentication"]["router"]["jwt"]["ignore_other_prefixes"] =
         serde_json::Value::Bool(ignore_other_prefixes);
+
+    if continue_on_error {
+        config["authentication"]["router"]["jwt"]["on_error"] =
+            serde_json::Value::String("Continue".to_string());
+    }
 
     crate::TestHarness::builder()
         .configuration_json(config)
@@ -440,7 +445,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
-    let test_harness = build_a_test_harness(None, None, false, true).await;
+    let test_harness = build_a_test_harness(None, None, false, true, false).await;
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
         .header(http::header::AUTHORIZATION, "Basic dXNlcjpwYXNzd29yZA==")
@@ -474,7 +479,7 @@ async fn it_accepts_when_auth_prefix_does_not_match_config_and_is_ignored() {
 
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-    let test_harness = build_a_test_harness(None, None, true, false).await;
+    let test_harness = build_a_test_harness(None, None, true, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -513,7 +518,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
     let test_harness =
-        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false).await;
+        build_a_test_harness(Some("SOMETHING".to_string()), None, false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -552,7 +557,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_aut
 #[tokio::test]
 async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
     let test_harness =
-        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false).await;
+        build_a_test_harness(None, Some("SOMETHING".to_string()), false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -590,7 +595,7 @@ async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_pre
 
 #[tokio::test]
 async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
-    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false).await;
+    let test_harness = build_a_test_harness(None, Some("".to_string()), false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -628,7 +633,7 @@ async fn it_accepts_when_no_auth_prefix_and_valid_jwt_custom_prefix() {
 
 #[tokio::test]
 async fn it_inserts_success_jwt_status_into_context() {
-    let test_harness = build_a_test_harness(None, None, false, false).await;
+    let test_harness = build_a_test_harness(None, None, false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -680,7 +685,7 @@ async fn it_inserts_success_jwt_status_into_context() {
 
     let jwt_claims = service_response
         .context
-        .get::<_, Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .get::<_, serde_json::Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         .expect("deserialization succeeds")
         .expect("a context value was set");
 
@@ -695,7 +700,7 @@ async fn it_inserts_success_jwt_status_into_context() {
 
 #[tokio::test]
 async fn it_inserts_failure_jwt_status_into_context() {
-    let test_harness = build_a_test_harness(None, None, false, false).await;
+    let test_harness = build_a_test_harness(None, None, false, false, false).await;
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -749,7 +754,68 @@ async fn it_inserts_failure_jwt_status_into_context() {
 
     let jwt_claims = service_response
         .context
-        .get::<_, Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .get::<_, serde_json::Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .expect("deserialization succeeds");
+
+    assert!(
+        jwt_claims.is_none(),
+        "because the JWT was invalid, no claims should be set"
+    );
+}
+
+#[tokio::test]
+async fn it_moves_on_after_jwt_errors_when_configured() {
+    let test_harness = build_a_test_harness(None, None, false, false, true).await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .header(
+            http::header::AUTHORIZATION,
+            "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B",
+        )
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+
+    let jwt_context = service_response
+        .context
+        .get::<_, JwtStatus>(JWT_CONTEXT_KEY)
+        .expect("deserialization succeeds")
+        .expect("a context value was set");
+
+    let error = jwt_context.error();
+    match error {
+        Some(err) => {
+            assert_eq!(err.code, "CANNOT_DECODE_JWT");
+            assert_eq!(err.message, "Cannot decode JWT: InvalidSignature");
+        }
+        None => panic!("expected an error"),
+    }
+
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+        .unwrap();
+
+    // JWT decode failure should be ignored
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let jwt_claims = service_response
+        .context
+        .get::<_, serde_json::Value>(APOLLO_AUTHENTICATION_JWT_CLAIMS)
         .expect("deserialization succeeds");
 
     assert!(
@@ -762,14 +828,14 @@ async fn it_inserts_failure_jwt_status_into_context() {
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
     let _test_harness =
-        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false).await;
+        build_a_test_harness(None, Some("SOMET HING".to_string()), false, false, false).await;
 }
 
 #[tokio::test]
 #[should_panic]
 async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
     let _test_harness =
-        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false).await;
+        build_a_test_harness(None, Some("SOMETHING ".to_string()), false, false, false).await;
 }
 
 #[tokio::test]
@@ -1139,7 +1205,7 @@ async fn issuer_check() {
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
-            let claims: Value = req
+            let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
@@ -1178,7 +1244,7 @@ async fn issuer_check() {
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
-            let claims: Value = req
+            let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
@@ -1251,7 +1317,7 @@ async fn issuer_check() {
         }
         ControlFlow::Continue(req) => {
             println!("got req with issuer check");
-            let claims: Value = req
+            let claims: serde_json::Value = req
                 .context
                 .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
