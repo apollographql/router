@@ -234,12 +234,12 @@ commands:
             - run:
                 name: Update and install dependencies
                 command: |
-                  if [[ ! -d "$HOME/.deb" ]]; then
-                    mkdir $HOME/.deb
-                    sudo apt-get update
-                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install build-essential libssl-dev libdw-dev
-                  fi
-                  sudo dpkg -i $HOME/.deb/*.deb
+                  # if [[ ! -d "$HOME/.deb" ]]; then
+                    # mkdir $HOME/.deb
+                    # sudo apt-get update
+                    # sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install build-essential libssl-dev libdw-dev
+                  # fi
+                  # sudo dpkg -i $HOME/.deb/*.deb
 
       - when:
           condition:
