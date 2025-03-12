@@ -806,7 +806,7 @@ async fn it_moves_on_after_jwt_errors_when_configured() {
             .to_vec()
             .as_slice(),
     )
-        .unwrap();
+    .unwrap();
 
     // JWT decode failure should be ignored
     assert_eq!(response.errors, vec![]);
