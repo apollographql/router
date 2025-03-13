@@ -859,7 +859,7 @@ fn removes_sibling_typename() {
         }
       }
     "#;
-    // unnecessary __typename is removed
+    // The __typename selection is hidden (attached to its sibling).
     assert_normalized!(schema, operation_with_typename, @r###"
       query TestQuery {
         foo {
@@ -889,6 +889,7 @@ fn keeps_typename_if_no_other_selection() {
         }
       }
     "#;
+    // The __typename selection is kept because it's the only selection.
     assert_normalized_equal!(
         schema,
         operation_with_single_typename,
@@ -1794,7 +1795,7 @@ fn off_by_1_error() {
       }
     "#;
 
-    // unnecessary __typename selections are dropped
+    // The __typename selections are hidden (attached to their siblings).
     assert_normalized!(schema, query,@r###"
       {
         t {
@@ -1899,6 +1900,7 @@ fn fragments_with_directive_on_typename() {
         }
     "#;
 
+    // The __typename selections are kept since they have directive applications.
     assert_normalized_equal!(
         schema,
         query,
@@ -1963,7 +1965,7 @@ fn fragments_with_non_intersecting_types() {
         }
     "#;
 
-    // dropping unnecessary __typename selection from fragment
+    // The __typename selection is hidden (attached to its sibling).
     assert_normalized!(schema, query, @r###"
         query($if: Boolean!) {
           t {
