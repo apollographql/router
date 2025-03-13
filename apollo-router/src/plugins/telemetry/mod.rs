@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use error_handler::handle_error;
 use ::tracing::Span;
 use ::tracing::info_span;
 use axum_extra::headers::HeaderName;
@@ -15,6 +14,7 @@ use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
+use error_handler::handle_error;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -153,6 +153,7 @@ pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
+mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
 mod logging;
@@ -165,7 +166,6 @@ pub(crate) mod resource;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
-pub(crate) mod error_handler;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";

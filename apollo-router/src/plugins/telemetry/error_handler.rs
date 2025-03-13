@@ -104,13 +104,13 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
 
 #[cfg(test)]
 mod tests {
-    use dashmap::DashMap;
-    use parking_lot::Mutex;
     use std::fmt::Debug;
     use std::ops::DerefMut;
     use std::sync::Arc;
     use std::time::Duration;
 
+    use dashmap::DashMap;
+    use parking_lot::Mutex;
     use tracing_core::Event;
     use tracing_core::Field;
     use tracing_core::Subscriber;
