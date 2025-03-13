@@ -448,13 +448,14 @@ mod helpers {
                 // if we have a complex input since leaf types can just be copied over.
                 if !arg_extended_type.is_built_in() {
                     match arg_type {
-                        TypeDefinitionPosition::InputObject(input) => SchemaVisitor::new(
-                            self.original_schema,
-                            to_schema,
-                            &self.directive_deny_list,
-                        )
-                        .walk(input)?,
-
+                        TypeDefinitionPosition::InputObject(input) => {
+                            SchemaVisitor::new(
+                                self.original_schema,
+                                to_schema,
+                                &self.directive_deny_list,
+                            )
+                            .walk(input)?;
+                        }
                         other => self.insert_custom_leaf(to_schema, &other)?,
                     };
                 }
