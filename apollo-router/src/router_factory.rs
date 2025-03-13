@@ -398,9 +398,19 @@ pub(crate) async fn create_http_services(
     schema: &Schema,
     configuration: &Configuration,
 ) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
-    let tls_root_store: RootCertStore = configuration
+    // Note we are grabbing these root stores once and then reusing it for each subgraph. Why?
+    // When TLS was not configured for subgraphs, the OS provided list of certificates was parsed once per subgraph, which resulted in long loading times on OSX.
+    // This generates the native root store once, and reuses it across subgraphs
+    let subgraph_tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
+    let connector_tls_root_store: RootCertStore = configuration
+        .tls
+        .connector
         .all
         .create_certificate_store()
         .transpose()?
@@ -428,10 +438,10 @@ pub(crate) async fn create_http_services(
         if connector_subgraphs.contains(name) {
             continue; // Avoid adding services for subgraphs that are actually connectors since we'll separately add them below per source
         }
-        let http_service = crate::services::http::HttpClientService::from_config(
+        let http_service = crate::services::http::HttpClientService::from_config_for_subgraph(
             name,
             configuration,
-            &tls_root_store,
+            &subgraph_tls_root_store,
             shaping.subgraph_client_config(name),
         )?;
 
@@ -447,10 +457,10 @@ pub(crate) async fn create_http_services(
         .unwrap_or_default();
 
     for name in connector_sources.iter() {
-        let http_service = crate::services::http::HttpClientService::from_config(
+        let http_service = crate::services::http::HttpClientService::from_config_for_connector(
             name,
             configuration,
-            &tls_root_store,
+            &connector_tls_root_store,
             shaping.connector_client_config(name),
         )?;
 
