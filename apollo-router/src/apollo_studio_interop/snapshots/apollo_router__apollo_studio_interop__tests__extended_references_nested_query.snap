@@ -1,8 +1,6 @@
 ---
 source: apollo-router/src/apollo_studio_interop/tests.rs
-assertion_line: 296
 expression: "&generated"
-snapshot_kind: text
 ---
 referenced_input_fields:
   EnumInputType:
