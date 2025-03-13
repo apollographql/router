@@ -191,11 +191,10 @@ mod tests {
     use apollo_compiler::name;
     use apollo_compiler::schema::Component;
 
+    use super::*;
     use crate::error::FederationError;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
-
-    use super::*;
 
     #[test]
     fn detects_federation_1_subgraphs_correctly() {

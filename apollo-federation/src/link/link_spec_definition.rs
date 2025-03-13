@@ -101,7 +101,7 @@ impl SpecDefinition for LinkSpecDefinition {
             DEFAULT_LINK_NAME,
             &self.create_definition_argument_specifications(),
             true,
-            &vec![DirectiveLocation::Schema],
+            &[DirectiveLocation::Schema],
             false,
             None,
         ))]
