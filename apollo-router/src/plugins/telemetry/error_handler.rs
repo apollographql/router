@@ -202,7 +202,7 @@ mod tests {
             let error_map = DashMap::new();
             let msg = "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged.";
             handle_error_with_map(
-                opentelemetry::global::Error::Metric(opentelemetry::metrics::MetricsError::Other(msg.to_string().into())),
+                opentelemetry::global::Error::Metric(opentelemetry::metrics::MetricsError::Other(msg.to_string())),
                 &error_map,
             );
 
