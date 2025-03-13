@@ -63,7 +63,7 @@ impl IncompatiblePlugin for TrafficShapingIncompatPlugin {
             {
                 tracing::warn!(
                     subgraph = subgraph,
-                    message = "plugin `traffic_shaping`  is explicitly configured for connector-enabled subgraph, which is not supported. You should instead target connector sources directly via traffic_shaping.connector.*",
+                    message = "plugin `traffic_shaping` is explicitly configured for connector-enabled subgraph, which is not supported. You should instead target connector sources directly via traffic_shaping.connector.*",
                     see = "https://www.apollographql.com/docs/graphos/schema-design/connectors/router#traffic-shaping",
                 );
             }
