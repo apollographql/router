@@ -53,7 +53,6 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
-use crate::utils::FallibleIterator;
 
 mod contains;
 mod directive_list;
@@ -348,25 +347,25 @@ impl Selection {
         }
     }
 
-    pub(crate) fn element(&self) -> Result<OpPathElement, FederationError> {
+    pub(crate) fn element(&self) -> OpPathElement {
         match self {
             Selection::Field(field_selection) => {
-                Ok(OpPathElement::Field(field_selection.field.clone()))
+                OpPathElement::Field(field_selection.field.clone())
             }
-            Selection::InlineFragment(inline_fragment_selection) => Ok(
-                OpPathElement::InlineFragment(inline_fragment_selection.inline_fragment.clone()),
-            ),
+            Selection::InlineFragment(inline_fragment_selection) => {
+                OpPathElement::InlineFragment(inline_fragment_selection.inline_fragment.clone())
+            }
         }
     }
 
-    pub(crate) fn operation_element(&self) -> Result<OperationElement, FederationError> {
+    pub(crate) fn operation_element(&self) -> OperationElement {
         match self {
             Selection::Field(field_selection) => {
-                Ok(OperationElement::Field(field_selection.field.clone()))
+                OperationElement::Field(field_selection.field.clone())
             }
-            Selection::InlineFragment(inline_fragment_selection) => Ok(
-                OperationElement::InlineFragment(inline_fragment_selection.inline_fragment.clone()),
-            ),
+            Selection::InlineFragment(inline_fragment_selection) => {
+                OperationElement::InlineFragment(inline_fragment_selection.inline_fragment.clone())
+            }
         }
     }
 
@@ -464,10 +463,7 @@ impl Selection {
         }
     }
 
-    pub(crate) fn any_element(
-        &self,
-        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
-    ) -> Result<bool, FederationError> {
+    pub(crate) fn any_element(&self, predicate: &mut impl FnMut(OpPathElement) -> bool) -> bool {
         match self {
             Selection::Field(field_selection) => field_selection.any_element(predicate),
             Selection::InlineFragment(inline_fragment_selection) => {
@@ -1071,9 +1067,9 @@ impl SelectionSet {
                                     self.parent_type.clone(),
                                     selection,
                                 ));
-                            } else if let Ok(element) = selection.element() {
+                            } else {
                                 if let Some(set) = selection.selection_set().cloned() {
-                                    self.stack.push((element, Self::new(set)));
+                                    self.stack.push((selection.element(), Self::new(set)));
                                 }
                             }
                         }
@@ -1488,7 +1484,7 @@ impl SelectionSet {
             return first.rebase_on(parent_type, schema);
         };
 
-        let element = first.operation_element()?.rebase_on(parent_type, schema)?;
+        let element = first.operation_element().rebase_on(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
@@ -1606,7 +1602,7 @@ impl SelectionSet {
 
     pub(crate) fn add_back_typename_in_attachments(&self) -> Result<SelectionSet, FederationError> {
         self.lazy_map(|selection| {
-            let selection_element = selection.element()?;
+            let selection_element = selection.element();
             let updated = selection
                 .map_selection_set(|ss| ss.add_back_typename_in_attachments().map(Some))?;
             let Some(sibling_typename) = selection_element.sibling_typename() else {
@@ -1616,7 +1612,7 @@ impl SelectionSet {
             // We need to add the query __typename for the current type in the current group.
             let field_element = Field::new_introspection_typename(
                 &self.schema,
-                &selection.element()?.parent_type_position(),
+                &selection.element().parent_type_position(),
                 sibling_typename.alias().cloned(),
             );
             let typename_selection =
@@ -1867,7 +1863,7 @@ impl SelectionSet {
 
         let mut selection_map = SelectionMap::new();
         for selection in self.selections.values() {
-            let path_element = selection.element()?.as_path_element();
+            let path_element = selection.element().as_path_element();
             let subselection_aliases = remaining
                 .iter()
                 .filter_map(|alias| {
@@ -2025,13 +2021,10 @@ impl SelectionSet {
     /// their fragment selection sets are recursed into. Note this method is short-circuiting.
     // PORT_NOTE: The JS codebase calls this "some()", but that's easy to confuse with "Some" in
     // Rust.
-    pub(crate) fn any_element(
-        &self,
-        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
-    ) -> Result<bool, FederationError> {
+    pub(crate) fn any_element(&self, predicate: &mut impl FnMut(OpPathElement) -> bool) -> bool {
         self.selections
             .values()
-            .fallible_any(|selection| selection.any_element(predicate))
+            .any(|selection| selection.any_element(predicate))
     }
 }
 
@@ -2310,19 +2303,16 @@ impl FieldSelection {
         }
     }
 
-    pub(crate) fn any_element(
-        &self,
-        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
-    ) -> Result<bool, FederationError> {
-        if predicate(self.field.clone().into())? {
-            return Ok(true);
+    pub(crate) fn any_element(&self, predicate: &mut impl FnMut(OpPathElement) -> bool) -> bool {
+        if predicate(self.field.clone().into()) {
+            return true;
         }
         if let Some(selection_set) = &self.selection_set {
-            if selection_set.any_element(predicate)? {
-                return Ok(true);
+            if selection_set.any_element(predicate) {
+                return true;
             }
         }
-        Ok(false)
+        false
     }
 }
 
@@ -2467,12 +2457,9 @@ impl InlineFragmentSelection {
                 .is_subtype(type_condition.type_name(), parent.type_name())
     }
 
-    pub(crate) fn any_element(
-        &self,
-        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
-    ) -> Result<bool, FederationError> {
-        if predicate(self.inline_fragment.clone().into())? {
-            return Ok(true);
+    pub(crate) fn any_element(&self, predicate: &mut impl FnMut(OpPathElement) -> bool) -> bool {
+        if predicate(self.inline_fragment.clone().into()) {
+            return true;
         }
         self.selection_set.any_element(predicate)
     }

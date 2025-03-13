@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicU64;
 
-use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
@@ -17,7 +16,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
-use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;

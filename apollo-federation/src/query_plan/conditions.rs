@@ -291,7 +291,7 @@ pub(crate) fn remove_conditions_from_selection_set(
         }
         Conditions::Variables(variable_conditions) => {
             selection_set.lazy_map(|selection| {
-                let element = selection.element()?;
+                let element = selection.element();
                 // We remove any of the conditions on the element and recurse.
                 let updated_element =
                     remove_conditions_of_element(element.clone(), variable_conditions);
