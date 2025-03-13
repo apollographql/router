@@ -125,10 +125,7 @@ pub(crate) trait SpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Option<Arc<Link>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Err(SingleFederationError::Internal {
-                message: "Schema is not a core schema (add @link first)".to_owned(),
-            }
-            .into());
+            return Ok(None);
         };
         Ok(metadata.for_identity(self.identity()))
     }
