@@ -50,7 +50,7 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
         // The version upgrade will also result in this log going away completely even if we set up custom a cardinality liimit.
         // https://github.com/open-telemetry/opentelemetry-rust/pull/2528
         if err.to_string()
-            == "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged."
+            == "Metrics error: Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged."
         {
             u64_counter!(
                 "apollo.router.telemetry.batch_processor.cardinality_overflow",
