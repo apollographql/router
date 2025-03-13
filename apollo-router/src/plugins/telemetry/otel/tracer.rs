@@ -1,5 +1,5 @@
+use opentelemetry::Context as OtelContext;
 use opentelemetry::trace as otel;
-use opentelemetry::trace::noop;
 use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::SamplingDecision;
 use opentelemetry::trace::SamplingResult;
@@ -11,7 +11,7 @@ use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
-use opentelemetry::Context as OtelContext;
+use opentelemetry::trace::noop;
 use opentelemetry_sdk::trace::Tracer as SdkTracer;
 use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
 
@@ -168,9 +168,9 @@ mod tests {
     use opentelemetry::trace::SpanBuilder;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_sdk::trace::config;
     use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::TracerProvider;
+    use opentelemetry_sdk::trace::config;
 
     use super::*;
 

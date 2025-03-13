@@ -20,12 +20,12 @@ use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
-use wiremock::matchers::body_partial_json;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::body_partial_json;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
 
 #[path = "./common.rs"]
 pub(crate) mod common;

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
 use tower::BoxError;
 
 use self::storage::CacheStorage;

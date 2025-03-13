@@ -8,11 +8,12 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
 
-use super::log;
-use super::subscription::SubscriptionHandle;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
+use super::log;
+use super::subscription::SubscriptionHandle;
+use crate::Context;
 use crate::axum_factory::CanceledRequest;
 use crate::error::Error;
 use crate::graphql::Request;
@@ -22,9 +23,6 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::query_planner::fetch::SubgraphSchemas;
-use crate::query_planner::FlattenNode;
-use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -33,13 +31,15 @@ use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::FlattenNode;
 use crate::query_planner::PARALLEL_SPAN_NAME;
+use crate::query_planner::Primary;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::Context;
 
 impl QueryPlan {
     #[allow(clippy::too_many_arguments)]
@@ -216,10 +216,12 @@ impl PlanNode {
                             .await;
                     } else {
                         tracing::error!("No subscription handle provided for a subscription");
-                        errors = vec![Error::builder()
-                            .message("no subscription handle provided for a subscription")
-                            .extension_code("NO_SUBSCRIPTION_HANDLE")
-                            .build()];
+                        errors = vec![
+                            Error::builder()
+                                .message("no subscription handle provided for a subscription")
+                                .extension_code("NO_SUBSCRIPTION_HANDLE")
+                                .build(),
+                        ];
                     };
 
                     value = Value::default();

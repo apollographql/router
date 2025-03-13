@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
-use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 use crate::query_plan::build_query_plan_support::find_fetch_nodes_for_subgraph;
 
@@ -369,8 +369,8 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
 }
 
 #[test]
-fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_starts_with_interface_object(
-) {
+fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_starts_with_interface_object()
+ {
     let planner = planner!(
         S1: SUBGRAPH1,
         S2: SUBGRAPH2,

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 
-use super::runtime_types_intersect;
 use super::DirectiveList;
 use super::Field;
 use super::FieldSelection;
@@ -13,10 +12,11 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionMap;
 use super::SelectionSet;
+use super::runtime_types_intersect;
 use crate::ensure;
 use crate::error::FederationError;
-use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
 pub(crate) enum SelectionOrSet {

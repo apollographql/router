@@ -5,14 +5,14 @@ use std::time::Duration;
 
 use ::serde::Deserialize;
 use bytes::Bytes;
-use futures::future::BoxFuture;
 use futures::Stream;
 use futures::TryFutureExt;
+use futures::future::BoxFuture;
 use global::get_text_map_propagator;
-use http::header::ACCEPT_ENCODING;
-use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 #[cfg(unix)]
@@ -22,10 +22,10 @@ use pin_project_lite::pin_project;
 use rustls::ClientConfig;
 use rustls::RootCertStore;
 use schemars::JsonSchema;
-use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::util::Either;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionBody;
 use tower_http::decompression::DecompressionLayer;
@@ -33,21 +33,21 @@ use tracing::Instrument;
 
 use super::HttpRequest;
 use super::HttpResponse;
+use crate::Configuration;
+use crate::Context;
 use crate::axum_factory::compression::Compressor;
 use crate::configuration::TlsClientAuth;
 use crate::error::FetchError;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
-use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
-use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
-use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::hickory_dns_connector::AsyncHyperResolver;
+use crate::services::hickory_dns_connector::new_async_http_connector;
 use crate::services::router::body::RouterBody;
-use crate::Configuration;
-use crate::Context;
 
 type HTTPClient =
     Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>>;

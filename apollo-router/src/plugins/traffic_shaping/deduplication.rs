@@ -110,7 +110,7 @@ where
                                         request.id,
                                     )
                                 })
-                                .map_err(|e| e.into())
+                                .map_err(|e| e.into());
                         }
                         // there was an issue with the broadcast channel, retry fetching
                         Err(_) => continue,

@@ -6,9 +6,9 @@ use opentelemetry_api::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
+use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::telemetry::TraceSpec;
-use crate::integration::IntegrationTest;
 
 pub trait Verifier {
     fn spec(&self) -> &TraceSpec;

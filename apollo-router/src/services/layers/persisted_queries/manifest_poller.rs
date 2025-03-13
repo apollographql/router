@@ -14,12 +14,12 @@ use tokio::fs::read_to_string;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
+use crate::Configuration;
+use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestQuery;
 use crate::uplink::stream_from_uplink_transforming_new_response;
-use crate::uplink::UplinkConfig;
-use crate::Configuration;
 
 /// The full identifier for an operation in a PQ list consists of an operation
 /// ID and an optional client name.
@@ -752,16 +752,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn poller_wont_start_without_uplink_connection() {
         let uplink_endpoint = Url::parse("https://definitely.not.uplink").unwrap();
-        assert!(PersistedQueryManifestPoller::new(
-            Configuration::fake_builder()
-                .uplink(UplinkConfig::for_tests(Endpoints::fallback(vec![
-                    uplink_endpoint
-                ])))
-                .build()
-                .unwrap(),
-        )
-        .await
-        .is_err());
+        assert!(
+            PersistedQueryManifestPoller::new(
+                Configuration::fake_builder()
+                    .uplink(UplinkConfig::for_tests(Endpoints::fallback(vec![
+                        uplink_endpoint
+                    ])))
+                    .build()
+                    .unwrap(),
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -839,7 +841,7 @@ mod tests {
                     PersistedQueries::builder()
                         .enabled(true)
                         .local_manifests(vec![
-                            "tests/fixtures/persisted-queries-manifest.json".to_string()
+                            "tests/fixtures/persisted-queries-manifest.json".to_string(),
                         ])
                         .build(),
                 )

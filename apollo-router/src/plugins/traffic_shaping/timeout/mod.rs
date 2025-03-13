@@ -13,9 +13,9 @@ use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
 
-use tower::util::Oneshot;
 use tower::Service;
 use tower::ServiceExt;
+use tower::util::Oneshot;
 
 use self::future::ResponseFuture;
 pub(crate) use self::layer::TimeoutLayer;

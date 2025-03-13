@@ -1,19 +1,19 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::OrderMap;
-use tracing_subscriber::layer::Context;
-use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
+use tracing_subscriber::layer::Context;
+use tracing_subscriber::registry::LookupSpan;
 
 use super::consts::OTEL_KIND;
 use super::consts::OTEL_NAME;
 use super::consts::OTEL_STATUS_CODE;
 use super::consts::OTEL_STATUS_MESSAGE;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
+use super::otel::OtelData;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
-use super::otel::OtelData;
 use super::reload::IsSampled;
 
 #[derive(Debug, Default)]

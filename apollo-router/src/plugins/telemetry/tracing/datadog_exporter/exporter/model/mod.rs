@@ -1,9 +1,9 @@
 use std::fmt::Debug;
 
 use http::uri;
+use opentelemetry_sdk::export::ExportError;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::{self};
-use opentelemetry_sdk::export::ExportError;
 use url::ParseError;
 
 use self::unified_tags::UnifiedTags;
@@ -82,7 +82,9 @@ pub enum Error {
     #[error("message pack error")]
     MessagePackError,
     /// No http client founded. User should provide one or enable features
-    #[error("http client must be set, users can enable reqwest or surf feature to use http client implementation within create")]
+    #[error(
+        "http client must be set, users can enable reqwest or surf feature to use http client implementation within create"
+    )]
     NoHttpClient,
     /// Http requests failed with following errors
     #[error(transparent)]
@@ -196,6 +198,7 @@ pub(crate) mod tests {
     use std::time::SystemTime;
 
     use base64::Engine;
+    use opentelemetry::KeyValue;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::SpanKind;
@@ -203,11 +206,10 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::KeyValue;
-    use opentelemetry_sdk::trace::EvictedHashMap;
-    use opentelemetry_sdk::trace::EvictedQueue;
     use opentelemetry_sdk::InstrumentationLibrary;
     use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::EvictedHashMap;
+    use opentelemetry_sdk::trace::EvictedQueue;
     use opentelemetry_sdk::{self};
 
     use super::*;
@@ -269,10 +271,13 @@ pub(crate) mod tests {
                 &UnifiedTags::new(),
             )?);
 
-        assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
+        assert_eq!(
+            encoded.as_str(),
+            "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
         50qHJlc291cmNlqHJlc291cmNlqHRyYWNlX2lkzwAAAAAAAAAHp3NwYW5faWTPAAAAAAAAAGOpcGFyZW50X2lkzwAAAA\
         AAAAABpXN0YXJ00wAAAAAAAAAAqGR1cmF0aW9u0wAAAAA7msoApWVycm9y0gAAAACkbWV0YYKpaG9zdC5uYW1lpHRlc3\
-        Spc3Bhbi50eXBlo3dlYqdtZXRyaWNzgbVfc2FtcGxpbmdfcHJpb3JpdHlfdjHLAAAAAAAAAAA=");
+        Spc3Bhbi50eXBlo3dlYqdtZXRyaWNzgbVfc2FtcGxpbmdfcHJpb3JpdHlfdjHLAAAAAAAAAAA="
+        );
 
         Ok(())
     }

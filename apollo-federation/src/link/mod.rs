@@ -2,22 +2,22 @@ use std::fmt;
 use std::str;
 use std::sync::Arc;
 
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
-use apollo_compiler::InvalidNameError;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use thiserror::Error;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::link_spec_definition::CORE_VERSIONS;
 use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 

@@ -22,27 +22,27 @@
 // "EX" "10"
 // ```
 
+use apollo_router::Context;
+use apollo_router::MockedSubgraphs;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
-use apollo_router::Context;
-use apollo_router::MockedSubgraphs;
 use fred::cmd;
 use fred::prelude::*;
 use fred::types::ScanType;
 use fred::types::Scanner;
 use futures::StreamExt;
-use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::Method;
-use serde_json::json;
+use http::header::CACHE_CONTROL;
 use serde_json::Value;
+use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_cache() -> Result<(), BoxError> {
@@ -108,7 +108,9 @@ async fn query_planner_cache() -> Result<(), BoxError> {
                 let key = key.as_ref().unwrap().results();
                 println!("\t{key:?}");
             }
-            panic!("key {known_cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
+            panic!(
+                "key {known_cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key."
+            );
         }
     };
     let exp: i64 = client
@@ -994,9 +996,9 @@ async fn connection_failure_blocks_startup() {
     //OSX has a different error code for connection refused
     let e = e.to_string().replace("61", "111"); //
     assert_eq!(
-            e,
-            "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
-        );
+        e,
+        "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1095,7 +1097,10 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
         "plan:router:{}:14ece7260081620bb49f1f4934cf48510e5f16c3171181768bb46a5609d7dfb7:opname:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:d9f7a00bc249cb51cfc8599f86b6dc5272967b37b1409dc4717f105b6939fe43",
         env!("CARGO_PKG_VERSION")
     );
-    assert_ne!(starting_key, new_cache_key, "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key.");
+    assert_ne!(
+        starting_key, new_cache_key,
+        "starting_key (cache key for the initial config) and new_cache_key (cache key with the updated config) should not be equal. This either means that the cache key is not being generated correctly, or that the test is not actually checking the updated key."
+    );
 
     router
         .execute_query(Query::default().with_anonymous())

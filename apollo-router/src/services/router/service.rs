@@ -9,21 +9,21 @@ use axum::response::*;
 use bytes::BufMut;
 use bytes::Bytes;
 use bytes::BytesMut;
+use futures::TryFutureExt;
+use futures::future::BoxFuture;
 use futures::future::join_all;
 use futures::future::ready;
-use futures::future::BoxFuture;
 use futures::stream;
-use futures::stream::once;
 use futures::stream::StreamExt;
-use futures::TryFutureExt;
-use http::header::CONTENT_TYPE;
-use http::header::VARY;
-use http::request::Parts;
+use futures::stream::once;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
+use http::header::VARY;
+use http::request::Parts;
 use http_body::Body as _;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
@@ -36,6 +36,10 @@ use tracing::Instrument;
 
 use super::Body;
 use super::ClientRequestAccepts;
+use crate::Configuration;
+use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
@@ -51,6 +55,18 @@ use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
+use crate::services::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::HasPlugins;
+use crate::services::HasSchema;
+use crate::services::MULTIPART_DEFER_ACCEPT;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
+use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphCreator;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::services::layers::apq::APQLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
@@ -59,27 +75,11 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
+use crate::services::router::body::get_body_bytes;
 use crate::services::router::pipeline_handle::PipelineHandle;
 #[cfg(test)]
 use crate::services::supergraph;
-use crate::services::HasPlugins;
-use crate::services::HasSchema;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
-use crate::services::SupergraphCreator;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
-use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
-use crate::Configuration;
-use crate::Context;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
@@ -120,10 +120,10 @@ impl RouterService {
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-        + Send
-        + Sync
-        + 'static
-        + Clone,
+    + Send
+    + Sync
+    + 'static
+    + Clone,
     configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
@@ -161,10 +161,10 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 #[cfg(test)]
 pub(crate) async fn from_supergraph_mock_callback(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
-        + Send
-        + Sync
-        + 'static
-        + Clone,
+    + Send
+    + Sync
+    + 'static
+    + Clone,
 ) -> impl Service<
     router::Request,
     Response = router::Response,

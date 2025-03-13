@@ -1,24 +1,24 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
-use tracing::instrument;
 use tracing::Instrument;
+use tracing::instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
-use super::selection::execute_selection_set;
 use super::selection::Selection;
-use super::subgraph_context::build_operation_with_aliasing;
+use super::selection::execute_selection_set;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
+use super::subgraph_context::build_operation_with_aliasing;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
@@ -216,10 +216,12 @@ pub(crate) struct SubgraphOperationNotInitialized;
 
 impl SubgraphOperationNotInitialized {
     pub(crate) fn into_graphql_errors(self) -> Vec<Error> {
-        vec![graphql::Error::builder()
-            .extension_code(self.code())
-            .message(self.to_string())
-            .build()]
+        vec![
+            graphql::Error::builder()
+                .extension_code(self.code())
+                .message(self.to_string())
+                .build(),
+        ]
     }
 
     pub(crate) fn code(&self) -> &'static str {
@@ -510,10 +512,12 @@ impl FetchNode {
         if !response.is_primary() {
             return (
                 Value::default(),
-                vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_string(),
-                }
-                .to_graphql_error(Some(current_dir.to_owned()))],
+                vec![
+                    FetchError::SubrequestUnexpectedPatchResponse {
+                        service: service_name.to_string(),
+                    }
+                    .to_graphql_error(Some(current_dir.to_owned())),
+                ],
             );
         }
 
@@ -527,7 +531,12 @@ impl FetchNode {
                     1
                 );
                 if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
-                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                    tracing::error!(
+                        "error sending fetch result at path {} and id {:?} for deferred response building: {}",
+                        current_dir,
+                        self.id,
+                        e
+                    );
                 }
             }
         }

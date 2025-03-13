@@ -1,5 +1,7 @@
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
@@ -7,8 +9,6 @@ use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;

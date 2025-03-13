@@ -10,6 +10,8 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
+use crate::Configuration;
+use crate::Notify;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -20,8 +22,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::Configuration;
-use crate::Notify;
 
 /// Test harness for plugins
 /// The difference between this and the regular TestHarness is that this is more suited for unit testing.

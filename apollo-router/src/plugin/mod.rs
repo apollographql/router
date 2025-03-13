@@ -26,22 +26,23 @@ use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 
-use ::serde::de::DeserializeOwned;
 use ::serde::Deserialize;
-use apollo_compiler::validation::Valid;
+use ::serde::de::DeserializeOwned;
 use apollo_compiler::Schema;
+use apollo_compiler::validation::Valid;
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
-use schemars::gen::SchemaGenerator;
 use schemars::JsonSchema;
-use tower::buffer::future::ResponseFuture;
-use tower::buffer::Buffer;
+use schemars::gen::SchemaGenerator;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
+use tower::buffer::Buffer;
+use tower::buffer::future::ResponseFuture;
 
+use crate::ListenAddr;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::notification::Notify;
@@ -50,7 +51,6 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::ListenAddr;
 
 type InstanceFactory =
     fn(PluginInit<serde_json::Value>) -> BoxFuture<'static, Result<Box<dyn DynPlugin>, BoxError>>;
@@ -823,9 +823,9 @@ macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]
@@ -838,9 +838,9 @@ macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]
@@ -858,9 +858,9 @@ macro_rules! register_private_plugin {
     ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]
@@ -873,9 +873,9 @@ macro_rules! register_private_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            use $crate::_private::once_cell::sync::Lazy;
-            use $crate::_private::PluginFactory;
             use $crate::_private::PLUGINS;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::once_cell::sync::Lazy;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
             #[linkme(crate = $crate::_private::linkme)]

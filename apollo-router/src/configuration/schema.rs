@@ -7,25 +7,25 @@ use std::mem;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
-use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
+use jsonschema::error::ValidationErrorKind;
 use schemars::gen::SchemaSettings;
 use schemars::schema::Metadata;
 use schemars::schema::RootSchema;
 use schemars::schema::SchemaObject;
+use schemars::visit::Visitor;
 use schemars::visit::visit_root_schema;
 use schemars::visit::visit_schema_object;
-use schemars::visit::Visitor;
 use yaml_rust::scanner::Marker;
 
-use super::expansion::coerce;
-use super::expansion::Expansion;
-use super::plugins;
-use super::yaml;
+use super::APOLLO_PLUGIN_PREFIX;
 use super::Configuration;
 use super::ConfigurationError;
-use super::APOLLO_PLUGIN_PREFIX;
+use super::expansion::Expansion;
+use super::expansion::coerce;
+use super::plugins;
+use super::yaml;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
 pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 

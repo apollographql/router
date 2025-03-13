@@ -1,5 +1,5 @@
-use serde::ser::SerializeMap;
 use serde::Serialize;
+use serde::ser::SerializeMap;
 
 use crate::plugins::telemetry::metrics::apollo::histogram::Histogram;
 use crate::plugins::telemetry::metrics::apollo::histogram::HistogramConfig;

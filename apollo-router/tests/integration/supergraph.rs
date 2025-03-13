@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use serde_json::json;
 use tower::BoxError;
 
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[cfg(not(feature = "hyper_header_limits"))]
 #[tokio::test(flavor = "multi_thread")]
@@ -97,8 +97,8 @@ async fn test_supergraph_allow_to_change_http1_max_headers() -> Result<(), BoxEr
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer(
-) -> Result<(), BoxError> {
+async fn test_supergraph_errors_on_http1_header_that_does_not_fit_inside_buffer()
+-> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             r#"

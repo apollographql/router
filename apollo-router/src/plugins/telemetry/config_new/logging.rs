@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::time::Duration;
 
+use schemars::JsonSchema;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::InstanceType;
 use schemars::schema::Metadata;
@@ -11,11 +12,10 @@ use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::schema::SingleOrVec;
 use schemars::schema::SubschemaValidation;
-use schemars::JsonSchema;
-use serde::de::MapAccess;
-use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Deserializer;
+use serde::de::MapAccess;
+use serde::de::Visitor;
 
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -197,8 +197,16 @@ impl JsonSchema for Format {
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
         // Does nothing, but will compile error if the
         let types = vec![
-            ("json", JsonFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html"),
-            ("text", TextFormat::json_schema(gen), "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html"),
+            (
+                "json",
+                JsonFormat::json_schema(gen),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Json.html",
+            ),
+            (
+                "text",
+                TextFormat::json_schema(gen),
+                "Tracing subscriber https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Full.html",
+            ),
         ];
 
         Schema::Object(SchemaObject {
@@ -515,7 +523,10 @@ mod test {
 
         let validate_res = logging_conf.validate();
         assert!(validate_res.is_err());
-        assert_eq!(validate_res.unwrap_err().to_string(), "'experimental_when_header' configuration for logging is invalid: body and headers must not be both false because it doesn't enable any logs");
+        assert_eq!(
+            validate_res.unwrap_err().to_string(),
+            "'experimental_when_header' configuration for logging is invalid: body and headers must not be both false because it doesn't enable any logs"
+        );
     }
 
     #[test]

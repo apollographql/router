@@ -5,7 +5,7 @@ use std::task::Context;
 use std::task::Poll;
 
 use access_json::JSONQuery;
-use http::header::HeaderName;
+use http::HeaderValue;
 use http::header::ACCEPT;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONNECTION;
@@ -13,13 +13,13 @@ use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use http::header::HOST;
+use http::header::HeaderName;
 use http::header::PROXY_AUTHENTICATE;
 use http::header::PROXY_AUTHORIZATION;
 use http::header::TE;
 use http::header::TRAILER;
 use http::header::TRANSFER_ENCODING;
 use http::header::UPGRADE;
-use http::HeaderValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -30,17 +30,17 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
-use crate::plugin::Plugin;
-use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::subgraph;
 use crate::services::SubgraphRequest;
+use crate::services::subgraph;
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -339,7 +339,11 @@ impl<S> HeadersService<S> {
                                         .insert(&insert_from_context.name, header_value);
                                 }
                                 Err(err) => {
-                                    tracing::error!("cannot convert from the context into a header value for header name '{}': {:?}", insert_from_context.name, err);
+                                    tracing::error!(
+                                        "cannot convert from the context into a header value for header name '{}': {:?}",
+                                        insert_from_context.name,
+                                        err
+                                    );
                                 }
                             }
                         }
@@ -363,7 +367,11 @@ impl<S> HeadersService<S> {
                                         .insert(&from_body.name, header_value);
                                 }
                                 Err(err) => {
-                                    tracing::error!("cannot convert from the body into a header value for header name '{}': {:?}", from_body.name, err);
+                                    tracing::error!(
+                                        "cannot convert from the body into a header value for header name '{}': {:?}",
+                                        from_body.name,
+                                        err
+                                    );
                                 }
                             }
                         } else if let Some(default_val) = &from_body.default {
@@ -460,6 +468,7 @@ mod test {
     use tower::BoxError;
 
     use super::*;
+    use crate::Context;
     use crate::graphql;
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
@@ -467,7 +476,6 @@ mod test {
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::Context;
 
     #[test]
     fn test_subgraph_config() {
@@ -520,15 +528,17 @@ mod test {
         )
         .unwrap();
 
-        assert!(serde_yaml::from_str::<Config>(
-            r#"
+        assert!(
+            serde_yaml::from_str::<Config>(
+                r#"
         all:
             request:
                 - remove:
                     matching: "d.*["
         "#,
-        )
-        .is_err());
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -4,14 +4,14 @@ use std::any::Any;
 use std::mem;
 
 use bytes::Bytes;
-use futures::future::Either;
 use futures::Stream;
 use futures::StreamExt;
-use http::header::HeaderName;
-use http::header::CONTENT_TYPE;
+use futures::future::Either;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::CONTENT_TYPE;
+use http::header::HeaderName;
 use multer::Multipart;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -24,13 +24,13 @@ use self::body::RouterBody;
 use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
+use crate::Context;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
 use crate::services;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
-use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -406,7 +406,6 @@ impl From<Response> for http::Response<Body> {
 impl<T> From<http::Request<T>> for Request
 where
     T: http_body::Body<Data = Bytes> + Send + 'static,
-
     <T as http_body::Body>::Error: Into<BoxError>,
 {
     fn from(request: http::Request<T>) -> Self {
@@ -437,7 +436,6 @@ impl From<Request> for http::Request<Body> {
 fn convert_to_body<T>(mut b: T) -> Body
 where
     T: http_body::Body<Data = Bytes> + Send + 'static,
-
     <T as http_body::Body>::Error: Into<BoxError>,
 {
     let val_any = &mut b as &mut dyn Any;

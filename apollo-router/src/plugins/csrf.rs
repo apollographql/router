@@ -2,9 +2,9 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use http::header;
 use http::HeaderMap;
 use http::StatusCode;
+use http::header;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -15,8 +15,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::supergraph;
 use crate::services::SupergraphResponse;
+use crate::services::supergraph;
 
 /// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
@@ -336,9 +336,12 @@ mod csrf_tests {
             res.errors.len(),
             res.errors
         );
-        assert_eq!(res.errors[0].message, "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
+        assert_eq!(
+            res.errors[0].message,
+            "This operation has been blocked as a potential Cross-Site Request Forgery (CSRF). \
                 Please either specify a 'content-type' header \
                 (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
-                or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight");
+                or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight"
+        );
     }
 }

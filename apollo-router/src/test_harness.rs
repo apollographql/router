@@ -16,15 +16,17 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
-use crate::plugin::test::canned;
-use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
+use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
+use crate::services::HasSchema;
+use crate::services::SupergraphCreator;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -32,8 +34,6 @@ use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::HasSchema;
-use crate::services::SupergraphCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -351,8 +351,8 @@ impl<'a> TestHarness<'a> {
 
     #[cfg(test)]
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
+        use crate::axum_factory::tests::make_axum_router;
         use crate::router_factory::RouterFactory;
 
         let (config, supergraph_creator) = self.build_common().await?;

@@ -13,6 +13,7 @@ use tower::BoxError;
 use super::attributes::StandardAttribute;
 use super::instruments::Increment;
 use super::instruments::StaticInstrument;
+use crate::Context;
 use crate::graphql;
 use crate::metrics;
 use crate::plugins::demand_control::COST_ACTUAL_KEY;
@@ -20,6 +21,7 @@ use crate::plugins::demand_control::COST_DELTA_KEY;
 use crate::plugins::demand_control::COST_ESTIMATED_KEY;
 use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -28,11 +30,9 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::Selectors;
 use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
-use crate::Context;
 
 pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
     Key::from_static_str("apollo_private.cost.estimated");
@@ -391,12 +391,12 @@ pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec
 mod test {
     use std::sync::Arc;
 
+    use crate::Context;
     use crate::context::OPERATION_NAME;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::services::supergraph;
-    use crate::Context;
 
     #[test]
     fn test_default_estimated() {
