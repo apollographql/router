@@ -314,6 +314,14 @@ expression: "&schema"
           "description": "Activates Batching (disabled by default)",
           "type": "boolean"
         },
+        "maximum_size": {
+          "default": null,
+          "description": "Maximum size for a batch",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "mode": {
           "$ref": "#/definitions/BatchingMode",
           "description": "#/definitions/BatchingMode"
