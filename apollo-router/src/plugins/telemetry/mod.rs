@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use error_handler::handle_error;
 use ::tracing::Span;
 use ::tracing::info_span;
 use axum_extra::headers::HeaderName;
@@ -14,7 +15,6 @@ use config_new::cache::CacheInstruments;
 use config_new::connector::instruments::ConnectorInstruments;
 use config_new::instruments::InstrumentsConfig;
 use config_new::instruments::StaticInstrument;
-use dashmap::DashMap;
 use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::future::ready;
@@ -26,11 +26,9 @@ use http::header;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
-use once_cell::sync::OnceCell;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::global::GlobalTracerProvider;
-use opentelemetry::metrics::MetricsError;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapCompositePropagator;
@@ -167,6 +165,7 @@ pub(crate) mod resource;
 mod span_factory;
 pub(crate) mod tracing;
 pub(crate) mod utils;
+pub(crate) mod error_handler;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
@@ -1759,88 +1758,6 @@ fn convert(
     }
 }
 
-#[derive(Eq, PartialEq, Hash)]
-enum ErrorType {
-    Trace,
-    Metric,
-    Other,
-}
-static OTEL_ERROR_LAST_LOGGED: OnceCell<DashMap<ErrorType, Instant>> = OnceCell::new();
-
-fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
-    // We have to rate limit these errors because when they happen they are very frequent.
-    // Use a dashmap to store the message type with the last time it was logged.
-    let last_logged_map = OTEL_ERROR_LAST_LOGGED.get_or_init(DashMap::new);
-
-    handle_error_internal(err, last_logged_map);
-}
-
-fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
-    err: T,
-    last_logged_map: &DashMap<ErrorType, Instant>,
-) {
-    let err = err.into();
-
-    // We don't want the dashmap to get big, so we key the error messages by type.
-    let error_type = match err {
-        opentelemetry::global::Error::Trace(_) => ErrorType::Trace,
-        opentelemetry::global::Error::Metric(_) => ErrorType::Metric,
-        _ => ErrorType::Other,
-    };
-    #[cfg(not(test))]
-    let threshold = Duration::from_secs(10);
-    #[cfg(test)]
-    let threshold = Duration::from_millis(100);
-
-    // For now we have to suppress Metrics error: reader is shut down or not registered
-    // https://github.com/open-telemetry/opentelemetry-rust/issues/1244
-    if let opentelemetry::global::Error::Metric(err) = &err {
-        if err.to_string() == "Metrics error: reader is shut down or not registered" {
-            return;
-        }
-    }
-    // Copy here so that we don't retain a mutable reference into the dashmap and lock the shard
-    let now = Instant::now();
-    let last_logged = *last_logged_map
-        .entry(error_type)
-        .and_modify(|last_logged| {
-            if last_logged.elapsed() > threshold {
-                *last_logged = now;
-            }
-        })
-        .or_insert_with(|| now);
-
-    if last_logged == now {
-        // These events are logged with explicitly no parent. This allows them to be detached from traces.
-        match err {
-            opentelemetry::global::Error::Trace(err) => {
-                ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
-            }
-            opentelemetry::global::Error::Metric(err) => {
-                if let MetricsError::Other(msg) = &err {
-                    if msg.contains("Warning") {
-                        ::tracing::warn!(parent: None, "OpenTelemetry metric warning occurred: {}", msg);
-                        return;
-                    }
-
-                    // TODO: We should be able to remove this after upgrading to 0.26.0, which addresses the double-shutdown
-                    // called out in https://github.com/open-telemetry/opentelemetry-rust/issues/1661
-                    if msg == "metrics provider already shut down" {
-                        return;
-                    }
-                }
-                ::tracing::error!(parent: None, "OpenTelemetry metric error occurred: {}", err);
-            }
-            opentelemetry::global::Error::Other(err) => {
-                ::tracing::error!(parent: None, "OpenTelemetry error occurred: {}", err)
-            }
-            other => {
-                ::tracing::error!(parent: None, "OpenTelemetry error occurred: {:?}", other)
-            }
-        }
-    }
-}
-
 register_private_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
@@ -1983,15 +1900,11 @@ struct EnableSubgraphFtv1;
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::fmt::Debug;
-    use std::ops::DerefMut;
     use std::sync::Arc;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
-    use std::time::Duration;
 
     use axum_extra::headers::HeaderName;
-    use dashmap::DashMap;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::StatusCode;
@@ -2006,21 +1919,12 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use parking_lot::Mutex;
     use serde_json::Value;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::json;
     use tower::Service;
     use tower::ServiceExt;
     use tower::util::BoxService;
-    use tracing_core::Event;
-    use tracing_core::Field;
-    use tracing_core::Subscriber;
-    use tracing_core::field::Visit;
-    use tracing_futures::WithSubscriber;
-    use tracing_subscriber::Layer;
-    use tracing_subscriber::layer::Context;
-    use tracing_subscriber::layer::SubscriberExt;
 
     use super::CustomTraceIdPropagator;
     use super::Telemetry;
@@ -2044,7 +1948,6 @@ mod tests {
     use crate::plugins::demand_control::DemandControlError;
     use crate::plugins::telemetry::EnableSubgraphFtv1;
     use crate::plugins::telemetry::config::TraceIdFormat;
-    use crate::plugins::telemetry::handle_error_internal;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -3018,79 +2921,6 @@ mod tests {
         );
         let filtered_headers = super::filter_headers(&headers, &ForwardHeaders::None);
         assert_eq!(filtered_headers.as_str(), "{}");
-    }
-
-    #[tokio::test]
-    async fn test_handle_error_throttling() {
-        let error_map = DashMap::new();
-        // Set up a fake subscriber so we can check log events. If this is useful then maybe it can be factored out into something reusable
-        #[derive(Default)]
-        struct TestVisitor {
-            log_entries: Vec<String>,
-        }
-
-        #[derive(Default, Clone)]
-        struct TestLayer {
-            visitor: Arc<Mutex<TestVisitor>>,
-        }
-        impl TestLayer {
-            fn assert_log_entry_count(&self, message: &str, expected: usize) {
-                let log_entries = self.visitor.lock().log_entries.clone();
-                let actual = log_entries.iter().filter(|e| e.contains(message)).count();
-                assert_eq!(actual, expected);
-            }
-        }
-        impl Visit for TestVisitor {
-            fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
-                self.log_entries
-                    .push(format!("{}={:?}", field.name(), value));
-            }
-        }
-
-        impl<S> Layer<S> for TestLayer
-        where
-            S: Subscriber,
-            Self: 'static,
-        {
-            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
-                event.record(self.visitor.lock().deref_mut())
-            }
-        }
-
-        let test_layer = TestLayer::default();
-
-        async {
-            // Log twice rapidly, they should get deduped
-            handle_error_internal(
-                opentelemetry::global::Error::Other("other error".to_string()),
-                &error_map,
-            );
-            handle_error_internal(
-                opentelemetry::global::Error::Other("other error".to_string()),
-                &error_map,
-            );
-            handle_error_internal(
-                opentelemetry::global::Error::Trace("trace error".to_string().into()),
-                &error_map,
-            );
-        }
-        .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
-        .await;
-
-        test_layer.assert_log_entry_count("other error", 1);
-        test_layer.assert_log_entry_count("trace error", 1);
-
-        // Sleep a bit and then log again, it should get logged
-        tokio::time::sleep(Duration::from_millis(200)).await;
-        async {
-            handle_error_internal(
-                opentelemetry::global::Error::Other("other error".to_string()),
-                &error_map,
-            );
-        }
-        .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
-        .await;
-        test_layer.assert_log_entry_count("other error", 2);
     }
 
     #[tokio::test]
