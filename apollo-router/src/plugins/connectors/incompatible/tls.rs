@@ -45,14 +45,8 @@ impl IncompatiblePlugin for TlsIncompatPlugin {
             if self.config.subgraph.subgraphs.contains_key(subgraph) {
                 tracing::warn!(
                     subgraph = subgraph,
-                    message = "plugin `tls` is explicitly configured for connector-enabled subgraph, which is not supported",
-                    see = "https://go.apollo.dev/connectors/incompat",
-                );
-            } else {
-                tracing::info!(
-                    subgraph = subgraph,
-                    message = "plugin `tls` indirectly targets a connector-enabled subgraph, which is not supported",
-                    see = "https://go.apollo.dev/connectors/incompat",
+                    message = "plugin `tls` is explicitly configured for connector-enabled subgraph, which is not supported. You should instead target connector sources directly via tls.connector.*",
+                    see = "https://www.apollographql.com/docs/graphos/schema-design/connectors/router#tls",
                 );
             }
         }
