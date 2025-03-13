@@ -138,10 +138,11 @@ impl IntrospectionCache {
         let schema = schema.clone();
         let doc = doc.clone();
         let priority = compute_job::Priority::P1; // Low priority
-        let response =
-            compute_job::execute(priority, move |_| Self::execute_introspection(&schema, &doc))
-                .await
-                .expect("Introspection panicked");
+        let response = compute_job::execute(priority, move |_| {
+            Self::execute_introspection(&schema, &doc)
+        })
+        .await
+        .expect("Introspection panicked");
         storage.insert(cache_key, response.clone()).await;
         response
     }

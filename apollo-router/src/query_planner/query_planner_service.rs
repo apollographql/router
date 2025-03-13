@@ -131,7 +131,7 @@ impl QueryPlannerService {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
-        let (plan, mut root_node) = compute_job::execute(priority, move |status: compute_job::JobStatus<'_, _>| {
+        let job = move |status: compute_job::JobStatus<'_, _>| {
             let start = Instant::now();
 
             let check = move || status.check_for_cooperative_cancellation();
@@ -166,9 +166,10 @@ impl QueryPlannerService {
                 let root_node = convert_root_query_plan_node(&plan);
                 (plan, root_node)
             })
-        })
-        .await
-        .expect("query planner panicked")?;
+        };
+        let (plan, mut root_node) = compute_job::execute(priority, job)
+            .await
+            .expect("query planner panicked")?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node)?;
         }
