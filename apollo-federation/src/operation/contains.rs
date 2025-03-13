@@ -184,7 +184,7 @@ impl SelectionSet {
 mod tests {
     use super::Containment;
     use super::ContainmentOptions;
-    use crate::operation::NormalizedOperation;
+    use crate::operation::Operation;
     use crate::schema::ValidFederationSchema;
 
     fn containment_custom(left: &str, right: &str, ignore_missing_typename: bool) -> Containment {
@@ -223,8 +223,10 @@ mod tests {
         )
         .unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
-        let left = NormalizedOperation::parse(schema.clone(), left, "left.graphql").unwrap();
-        let right = NormalizedOperation::parse(schema.clone(), right, "right.graphql").unwrap();
+        let left = Operation::parse(schema.clone(), left, "left.graphql")
+            .expect("operation is valid and can be parsed");
+        let right = Operation::parse(schema.clone(), right, "right.graphql")
+            .expect("operation is valid and can be parsed");
 
         left.selection_set.containment(
             &right.selection_set,

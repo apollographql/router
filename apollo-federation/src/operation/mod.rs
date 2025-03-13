@@ -195,7 +195,7 @@ impl ArgumentList {
 /// - Expands all named fragments into inline fragments.
 /// - Deduplicates all selections within its selection sets.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NormalizedOperation {
+pub struct Operation {
     pub(crate) schema: ValidFederationSchema,
     pub(crate) root_kind: SchemaRootDefinitionKind,
     pub(crate) name: Option<Name>,
@@ -204,7 +204,7 @@ pub struct NormalizedOperation {
     pub(crate) selection_set: SelectionSet,
 }
 
-impl NormalizedOperation {
+impl Operation {
     /// Parse an operation from a source string.
     #[cfg(any(test, doc))]
     pub fn parse(
@@ -218,7 +218,7 @@ impl NormalizedOperation {
             source_name,
         )?;
         let operation = document.operations.iter().next().expect("operation exists");
-        let normalized_operation = NormalizedOperation {
+        let normalized_operation = Operation {
             schema: schema.clone(),
             root_kind: operation.operation_type.into(),
             name: operation.name.clone(),
@@ -1400,33 +1400,35 @@ impl SelectionSet {
         Ok(())
     }
 
-    pub(crate) fn without_empty_branches(&self) -> Result<Option<Cow<'_, Self>>, FederationError> {
+    pub(crate) fn without_empty_branches(&self) -> Option<Cow<'_, Self>> {
         let filtered = self.filter_recursive_depth_first(&mut |sel| match sel {
-            Selection::Field(field) => Ok(if let Some(set) = &field.selection_set {
-                !set.is_empty()
-            } else {
-                true
-            }),
-            Selection::InlineFragment(inline) => Ok(!inline.selection_set.is_empty()),
-        })?;
-        Ok(if filtered.selections.is_empty() {
+            Selection::Field(field) => {
+                if let Some(set) = &field.selection_set {
+                    !set.is_empty()
+                } else {
+                    true
+                }
+            }
+            Selection::InlineFragment(inline) => !inline.selection_set.is_empty(),
+        });
+        if filtered.selections.is_empty() {
             None
         } else {
             Some(filtered)
-        })
+        }
     }
 
     pub(crate) fn filter_recursive_depth_first(
         &self,
-        predicate: &mut dyn FnMut(&Selection) -> Result<bool, FederationError>,
-    ) -> Result<Cow<'_, Self>, FederationError> {
-        match self.selections.filter_recursive_depth_first(predicate)? {
-            Cow::Borrowed(_) => Ok(Cow::Borrowed(self)),
-            Cow::Owned(selections) => Ok(Cow::Owned(Self {
+        predicate: &mut dyn FnMut(&Selection) -> bool,
+    ) -> Cow<'_, Self> {
+        match self.selections.filter_recursive_depth_first(predicate) {
+            Cow::Borrowed(_) => Cow::Borrowed(self),
+            Cow::Owned(selections) => Cow::Owned(Self {
                 schema: self.schema.clone(),
                 type_position: self.type_position.clone(),
                 selections: Arc::new(selections),
-            })),
+            }),
         }
     }
 
@@ -2484,7 +2486,7 @@ const DEFER_IF_ARGUMENT_NAME: Name = name!("if");
 
 pub(crate) struct NormalizedDefer {
     /// The operation modified to normalize @defer applications.
-    pub(crate) operation: NormalizedOperation,
+    pub(crate) operation: Operation,
     /// True if the operation contains any @defer applications.
     pub(crate) has_defers: bool,
     /// `@defer(label:)` values assigned by normalization.
@@ -2726,7 +2728,7 @@ impl SelectionSet {
     }
 }
 
-impl NormalizedOperation {
+impl Operation {
     fn has_defer(&self) -> bool {
         self.selection_set.has_defer()
     }
@@ -2877,10 +2879,10 @@ impl SelectionSet {
 
 // Conversion between apollo-rs and apollo-federation types.
 
-impl TryFrom<&NormalizedOperation> for executable::Operation {
+impl TryFrom<&Operation> for executable::Operation {
     type Error = FederationError;
 
-    fn try_from(normalized_operation: &NormalizedOperation) -> Result<Self, Self::Error> {
+    fn try_from(normalized_operation: &Operation) -> Result<Self, Self::Error> {
         let operation_type: executable::OperationType = normalized_operation.root_kind.into();
         Ok(Self {
             operation_type,
@@ -3014,10 +3016,10 @@ impl TryFrom<&InlineFragmentSelection> for executable::InlineFragment {
     }
 }
 
-impl TryFrom<NormalizedOperation> for Valid<executable::ExecutableDocument> {
+impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     type Error = FederationError;
 
-    fn try_from(value: NormalizedOperation) -> Result<Self, Self::Error> {
+    fn try_from(value: Operation) -> Result<Self, Self::Error> {
         let operation = executable::Operation::try_from(&value)?;
         let mut document = executable::ExecutableDocument::new();
         document.operations.insert(operation);
@@ -3028,7 +3030,7 @@ impl TryFrom<NormalizedOperation> for Valid<executable::ExecutableDocument> {
 
 // Display implementations for the operation types.
 
-impl Display for NormalizedOperation {
+impl Display for Operation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let operation: executable::Operation = match self.try_into() {
             Ok(operation) => operation,
@@ -3235,7 +3237,7 @@ pub(crate) fn normalize_operation(
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
     check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
-) -> Result<NormalizedOperation, FederationError> {
+) -> Result<Operation, FederationError> {
     let fragment_cache = FragmentSpreadCache::init(fragments, schema, check_cancellation);
     let mut normalized_selection_set = SelectionSet::from_selection_set(
         &operation.selection_set,
@@ -3252,7 +3254,7 @@ pub(crate) fn normalize_operation(
     remove_introspection(&mut normalized_selection_set);
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
-    let normalized_operation = NormalizedOperation {
+    let normalized_operation = Operation {
         schema: schema.clone(),
         root_kind: operation.operation_type.into(),
         name: operation.name.clone(),

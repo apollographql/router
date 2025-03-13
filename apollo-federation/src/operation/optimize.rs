@@ -50,7 +50,7 @@ use apollo_compiler::validation::Valid;
 use super::FieldSelection;
 use super::HasSelectionKey;
 use super::InlineFragmentSelection;
-use super::NormalizedOperation;
+use super::Operation;
 use super::Selection;
 use super::SelectionId;
 use super::SelectionMapperReturn;
@@ -124,7 +124,7 @@ impl From<SelectionOrSet> for SelectionMapperReturn {
     }
 }
 
-impl NormalizedOperation {
+impl Operation {
     /// Optimize the parsed size of the operation by generating fragments from selection sets that
     /// occur multiple times in the operation.
     pub(crate) fn generate_fragments(
@@ -457,11 +457,10 @@ mod tests {
             }
         "#;
 
-        fn operation_without_empty_branches(operation: &NormalizedOperation) -> Option<String> {
+        fn operation_without_empty_branches(operation: &Operation) -> Option<String> {
             operation
                 .selection_set
                 .without_empty_branches()
-                .unwrap()
                 .map(|s| s.to_string())
         }
 

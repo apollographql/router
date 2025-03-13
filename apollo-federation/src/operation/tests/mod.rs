@@ -6,7 +6,7 @@ use apollo_compiler::schema::Schema;
 
 use super::Field;
 use super::Name;
-use super::NormalizedOperation;
+use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
@@ -72,14 +72,14 @@ pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
     ValidFederationSchema::new(schema).expect("valid federation schema")
 }
 
-pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> NormalizedOperation {
-    NormalizedOperation::parse(schema.clone(), query, "query.graphql").expect("valid operation")
+pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
+    Operation::parse(schema.clone(), query, "query.graphql").expect("valid operation")
 }
 
 pub(super) fn parse_and_expand(
     schema: &ValidFederationSchema,
     query: &str,
-) -> Result<NormalizedOperation, FederationError> {
+) -> Result<Operation, FederationError> {
     let doc = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")?;
 
     let operation = doc
@@ -978,7 +978,7 @@ fn converting_operation_types() {
     )
     .unwrap();
     let schema = ValidFederationSchema::new(schema).unwrap();
-    insta::assert_snapshot!(NormalizedOperation::parse(
+    insta::assert_snapshot!(Operation::parse(
             schema.clone(),
             r#"
         {
@@ -1482,7 +1482,7 @@ fn used_variables() {
     "#;
 
     let valid = parse_schema(schema);
-    let operation = NormalizedOperation::parse(valid, query, "used_variables.graphql").unwrap();
+    let operation = Operation::parse(valid, query, "used_variables.graphql").unwrap();
 
     let mut variables = operation
         .selection_set

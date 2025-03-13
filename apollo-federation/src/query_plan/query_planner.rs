@@ -23,7 +23,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::internal_error;
 use crate::operation::NormalizedDefer;
-use crate::operation::NormalizedOperation;
+use crate::operation::Operation;
 use crate::operation::SelectionSet;
 use crate::operation::normalize_operation;
 use crate::query_graph::QueryGraph;
@@ -781,11 +781,9 @@ fn compute_plan_for_defer_conditionals(
 }
 
 fn generate_condition_nodes<'a>(
-    op: Arc<NormalizedOperation>,
+    op: Arc<Operation>,
     mut conditions: impl Clone + Iterator<Item = (&'a Name, &'a IndexSet<String>)>,
-    on_final_operation: &mut impl FnMut(
-        Arc<NormalizedOperation>,
-    ) -> Result<Option<PlanNode>, FederationError>,
+    on_final_operation: &mut impl FnMut(Arc<Operation>) -> Result<Option<PlanNode>, FederationError>,
 ) -> Result<Option<PlanNode>, FederationError> {
     match conditions.next() {
         None => on_final_operation(op),
@@ -817,7 +815,7 @@ impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
     pub(crate) fn compress(
         &mut self,
-        operation: NormalizedOperation,
+        operation: Operation,
     ) -> Result<Valid<ExecutableDocument>, FederationError> {
         match self {
             Self::GenerateFragments => Ok(operation.generate_fragments()?),

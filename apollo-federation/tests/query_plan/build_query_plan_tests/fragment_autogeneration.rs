@@ -450,8 +450,8 @@ fn works_with_key_chains() {
         Fetch(service: "Subgraph1") {
           {
             t {
-              id1
               __typename
+              id1
             }
           }
         },

@@ -11,7 +11,7 @@ use super::fetch_dependency_graph::FetchIdGenerator;
 use crate::ensure;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::NormalizedOperation;
+use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
@@ -72,7 +72,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// The federated query graph used for query planning.
     pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
-    pub(crate) operation: Arc<NormalizedOperation>,
+    pub(crate) operation: Arc<Operation>,
     pub(crate) fetch_id_generator: Arc<FetchIdGenerator>,
     /// The query graph node at which query planning begins.
     pub(crate) head: NodeIndex,

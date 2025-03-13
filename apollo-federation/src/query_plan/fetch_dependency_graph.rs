@@ -40,7 +40,7 @@ use crate::operation::DirectiveList;
 use crate::operation::Field;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentSelection;
-use crate::operation::NormalizedOperation;
+use crate::operation::Operation;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
@@ -2566,11 +2566,11 @@ impl FetchDependencyGraphNode {
         }
     }
 
-    pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
+    pub(crate) fn cost(&mut self) -> QueryPlanCost {
         if self.cached_cost.is_none() {
-            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0)?)
+            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0))
         }
-        Ok(self.cached_cost.unwrap())
+        self.cached_cost.unwrap()
     }
 
     pub(crate) fn to_plan_node(
@@ -3007,7 +3007,7 @@ fn operation_for_entities_fetch(
     mut variable_definitions: Vec<Node<VariableDefinition>>,
     operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
-) -> Result<NormalizedOperation, FederationError> {
+) -> Result<Operation, FederationError> {
     variable_definitions.insert(0, representations_variable_definition(subgraph_schema)?);
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
@@ -3066,7 +3066,7 @@ fn operation_for_entities_fetch(
         selections: Arc::new(map),
     };
 
-    Ok(NormalizedOperation {
+    Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone(),
@@ -3083,8 +3083,8 @@ fn operation_for_query_fetch(
     variable_definitions: Vec<Node<VariableDefinition>>,
     operation_directives: &DirectiveList,
     operation_name: &Option<Name>,
-) -> Result<NormalizedOperation, FederationError> {
-    Ok(NormalizedOperation {
+) -> Result<Operation, FederationError> {
+    Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind,
         name: operation_name.clone(),
@@ -3113,7 +3113,7 @@ fn representations_variable_definition(
 }
 
 impl SelectionSet {
-    pub(crate) fn cost(&self, depth: QueryPlanCost) -> Result<QueryPlanCost, FederationError> {
+    pub(crate) fn cost(&self, depth: QueryPlanCost) -> QueryPlanCost {
         // The cost is essentially the number of elements in the selection,
         // but we make deep element cost a tiny bit more,
         // mostly to make things a tad more deterministic
@@ -3122,17 +3122,17 @@ impl SelectionSet {
         // and one that doesn't, and both will be almost identical,
         // except that the type-exploded field will be a different depth;
         // by favoring lesser depth in that case, we favor not type-exploding).
-        self.selections.values().try_fold(0.0, |sum, selection| {
+        self.selections.values().fold(0.0, |sum, selection| {
             let subselections = match selection {
                 Selection::Field(field) => field.selection_set.as_ref(),
                 Selection::InlineFragment(inline) => Some(&inline.selection_set),
             };
             let subselections_cost = if let Some(selection_set) = subselections {
-                selection_set.cost(depth + 1.0)?
+                selection_set.cost(depth + 1.0)
             } else {
                 0.0
             };
-            Ok(sum + depth + subselections_cost)
+            sum + depth + subselections_cost
         })
     }
 }

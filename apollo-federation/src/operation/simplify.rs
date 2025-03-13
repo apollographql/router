@@ -425,7 +425,7 @@ mod tests {
     use apollo_compiler::Schema;
 
     use super::*;
-    use crate::operation::NormalizedOperation;
+    use crate::operation::Operation;
 
     #[test]
     fn does_not_duplicate_fragments_regression_router782() {
@@ -453,7 +453,7 @@ type Query {
 
         // Below, the second `... on MySpecialNode` is redundant,
         // the same selection is already guaranteed by the first.
-        let operation = NormalizedOperation::parse(
+        let operation = Operation::parse(
             schema.clone(),
             r#"
 {
