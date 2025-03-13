@@ -1084,7 +1084,7 @@ mod make_selection_tests {
                 base_selection_set.type_position.clone(),
                 selection.clone(),
             );
-            Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
+            Selection::from_element(base.element(), Some(subselections)).unwrap()
         };
 
         let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
@@ -1092,7 +1092,7 @@ mod make_selection_tests {
         let foo_with_c = clone_selection_at_path(foo, &[name!("c")]);
         let new_selection = SelectionSet::make_selection(
             &schema,
-            &foo.element().unwrap().parent_type_position(),
+            &foo.element().parent_type_position(),
             [foo_with_c, foo_with_b, foo_with_a].iter(),
         )
         .unwrap();
@@ -1206,7 +1206,7 @@ mod lazy_map_tests {
                 return Ok(updated.into());
             }
 
-            let parent_type_pos = s.element()?.parent_type_position();
+            let parent_type_pos = s.element().parent_type_position();
             // "__typename" field
             let field_element =
                 Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
