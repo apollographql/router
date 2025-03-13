@@ -77,7 +77,6 @@ fn default_cors_methods() -> Vec<String> {
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
         allow_credentials: Option<bool>,

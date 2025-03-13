@@ -1480,7 +1480,7 @@ impl Telemetry {
 
             if context
                 .get(STUDIO_EXCLUDE)
-                .map_or(false, |x| x.unwrap_or_default())
+                .is_ok_and(|x| x.unwrap_or_default())
             {
                 // The request was excluded don't report the details, but do report the operation count
                 SingleStatsReport {

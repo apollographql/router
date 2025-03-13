@@ -426,7 +426,7 @@ mod router_context {
     // Register a contains function for Context so that "in" works
     #[rhai_fn(name = "contains", pure)]
     pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
-        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+        x.get(key).is_ok_and(|v: Option<Dynamic>| v.is_some())
     }
 
     // Register a Context indexer so we can get/set context
