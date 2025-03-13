@@ -1067,10 +1067,8 @@ impl SelectionSet {
                                     self.parent_type.clone(),
                                     selection,
                                 ));
-                            } else {
-                                if let Some(set) = selection.selection_set().cloned() {
-                                    self.stack.push((selection.element(), Self::new(set)));
-                                }
+                            } else if let Some(set) = selection.selection_set().cloned() {
+                                self.stack.push((selection.element(), Self::new(set)));
                             }
                         }
                         Some((element, top)) => {
@@ -3102,6 +3100,12 @@ impl Display for OperationElement {
 }
 
 /// Holds normalized selection sets of provided fragments.
+///
+/// PORT_NOTE: The JS codebase combined the fragment spread's directives with the fragment
+/// definition's directives. This was invalid GraphQL as those directives may not be applicable
+/// on different locations. Fragment directives are currently ignored. We validate whether
+/// fragment spread directives can be applied to inline fragment and raise an error if they
+/// are not applicable.
 #[derive(Default)]
 pub(crate) struct FragmentSpreadCache {
     fragment_selection_sets: Arc<HashMap<Name, SelectionSet>>,
