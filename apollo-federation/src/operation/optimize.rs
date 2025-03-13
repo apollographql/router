@@ -59,6 +59,7 @@ use super::SelectionSet;
 use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 //=============================================================================
 // Selection/SelectionSet minus operation
 
@@ -253,20 +254,34 @@ impl<'a> FragmentGenerator<'a> {
     ) -> Result<executable::SelectionSet, FederationError> {
         let mut new_selection_set =
             executable::SelectionSet::new(selection_set.type_position.type_name().clone());
+        let mut new_selections = vec![];
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field) => {
                     let minified_field_selection = self.minify_field_selection(field)?;
-                    new_selection_set.push(minified_field_selection);
+                    if let executable::Selection::Field(field) = &minified_field_selection {
+                        if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
+                            && field.directives.is_empty()
+                            && field.alias.is_none()
+                        {
+                            // Move the plain __typename to the start of the selection set.
+                            // This looks nicer, and matches existing tests.
+                            // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
+                            // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                            new_selections.insert(0, minified_field_selection);
+                            continue;
+                        }
+                    }
+                    new_selections.push(minified_field_selection);
                 }
                 Selection::InlineFragment(inline_fragment) => {
                     let minified_selection =
                         self.minify_inline_fragment_selection(&new_selection_set, inline_fragment)?;
-                    new_selection_set.push(minified_selection);
+                    new_selections.push(minified_selection);
                 }
             }
         }
-
+        new_selection_set.extend(new_selections);
         Ok(new_selection_set)
     }
 
