@@ -1447,7 +1447,7 @@ impl Batching {
         }
     }
 
-    pub(crate) fn exceeds_batch_size<T>(&self, batch: &Vec<T>) -> bool {
+    pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
         match self.maximum_size {
             Some(maximum_size) => batch.len() > maximum_size,
             None => false,
