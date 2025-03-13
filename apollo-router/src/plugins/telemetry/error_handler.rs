@@ -45,6 +45,19 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
             return;
         }
 
+        // Keep track of the number of cardinality overflow errors otel emits
+        // This can be removed after upgrading to 0.28.0 when the cardinality limit is removed.
+        // The version upgrade will also result in this log going away completely even if we set up custom a cardinality liimit.
+        // https://github.com/open-telemetry/opentelemetry-rust/pull/2528
+        if err.to_string()
+            == "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged."
+        {
+            u64_counter!(
+                "apollo.router.telemetry.batch_processor.cardinality_overflow",
+                "A count of how often a telemetry batch hit the hard cardinality limit",
+                1
+            );
+        }
     }
 
     // Copy here so that we don't retain a mutable reference into the dashmap and lock the shard
@@ -183,5 +196,22 @@ mod tests {
         test_layer.assert_log_entry_count("other error", 2);
     }
 
+    #[tokio::test]
+    async fn test_cardinality_overflow() {
+        async {
+            let error_map = DashMap::new();
+            let msg = "Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged.";
+            handle_error_with_map(
+                opentelemetry::global::Error::Metric(opentelemetry::metrics::MetricsError::Other(msg.to_string().into())),
+                &error_map,
+            );
 
+            assert_counter!(
+                "apollo.router.telemetry.batch_processor.cardinality_overflow",
+                1
+            );
+        }
+        .with_metrics()
+        .await;
+    }
 }
