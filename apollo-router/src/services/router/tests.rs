@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use futures::stream::StreamExt;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -10,7 +12,6 @@ use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::json;
-use std::sync::Arc;
 use tower::ServiceExt;
 use tower_service::Service;
 
