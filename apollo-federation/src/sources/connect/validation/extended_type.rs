@@ -1,5 +1,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::Selection;
@@ -16,14 +17,15 @@ use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
 use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
+use super::coordinates::connect_directive_name_coordinate;
+use super::coordinates::source_name_value_coordinate;
 use super::entity::validate_entity_arg;
 use super::http::headers;
 use super::http::method;
 use super::resolvable_key_fields;
 use super::selection::validate_body_selection;
 use super::selection::validate_selection;
-use super::source_name::SourceName;
-use super::source_name::validate_source_name_arg;
+use super::source::SourceName;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -345,4 +347,49 @@ fn get_missing_connect_directive_message(
         ),
         locations: field.line_column_range(source_map).into_iter().collect(),
     }
+}
+
+pub(super) fn validate_source_name_arg(
+    field_name: &Name,
+    object_name: &Name,
+    source_name: &Node<Argument>,
+    source_names: &[SourceName],
+    schema: &SchemaInfo,
+) -> Vec<Message> {
+    let mut messages = vec![];
+
+    if source_names.iter().all(|name| name != &source_name.value) {
+        // TODO: Pick a suggestion that's not just the first defined source
+        let qualified_directive = connect_directive_name_coordinate(
+            schema.connect_directive_name,
+            &source_name.value,
+            object_name,
+            field_name,
+        );
+        if let Some(first_source_name) = source_names.first() {
+            messages.push(Message {
+                code: Code::SourceNameMismatch,
+                message: format!(
+                    "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
+                    first_source_name = first_source_name.as_str(),
+                ),
+                locations: source_name.line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        } else {
+            messages.push(Message {
+                code: Code::NoSourcesDefined,
+                message: format!(
+                    "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
+                    coordinate = source_name_value_coordinate(schema.source_directive_name, &source_name.value),
+                ),
+                locations: source_name.line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+    }
+
+    messages
 }

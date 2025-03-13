@@ -21,10 +21,9 @@ mod extended_type;
 mod graphql;
 mod http;
 mod selection;
-mod source_name;
+mod source;
 mod variable;
 
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::ops::Range;
 
@@ -44,12 +43,10 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::SchemaBuilder;
 use apollo_compiler::validation::Valid;
-use coordinates::source_http_argument_coordinate;
 use entity::EntityKeyChecker;
 use entity::field_set_error;
 use extended_type::validate_extended_type;
 use itertools::Itertools;
-use source_name::SourceName;
 use strum::IntoEnumIterator;
 use strum_macros::Display;
 use strum_macros::IntoStaticStr;
@@ -63,15 +60,10 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_RESOLVABLE_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::sources::connect::ConnectSpec;
-use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
-use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
-use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::http::headers;
+use crate::sources::connect::validation::source::SourceDirective;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
@@ -153,43 +145,12 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
         &source_directive_name,
     );
 
-    let source_directives: Vec<SourceDirective> = schema
-        .schema_definition
-        .directives
-        .iter()
-        .filter(|directive| directive.name == source_directive_name)
-        .map(|directive| validate_source(directive, &schema_info))
-        .collect();
-
-    let mut valid_source_names = HashMap::new();
+    let (source_directives, source_messages) = SourceDirective::find(&schema_info);
+    messages.extend(source_messages);
     let all_source_names = source_directives
-        .iter()
-        .map(|directive| directive.name.clone())
+        .into_iter()
+        .map(|directive| directive.name)
         .collect_vec();
-    for directive in source_directives {
-        messages.extend(directive.errors);
-        match directive.name.into_value_or_error(&schema_info.sources) {
-            Err(error) => messages.push(error),
-            Ok(name) => valid_source_names
-                .entry(name)
-                .or_insert_with(Vec::new)
-                .extend(
-                    directive
-                        .directive
-                        .node
-                        .line_column_range(&schema_info.sources),
-                ),
-        }
-    }
-    for (name, locations) in valid_source_names {
-        if locations.len() > 1 {
-            messages.push(Message {
-                message: format!("Every `@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)` must be unique. Found duplicate name {name}."),
-                code: Code::DuplicateSourceName,
-                locations,
-            });
-        }
-    }
 
     let mut seen_fields = IndexSet::default();
 
@@ -392,69 +353,6 @@ fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
-#[allow(unused)]
-const DEFAULT_CONNECT_DIRECTIVE_NAME: &str = "connect__connect";
-
-fn validate_source(directive: &Component<Directive>, schema: &SchemaInfo) -> SourceDirective {
-    let name = SourceName::from_directive(directive);
-    let mut errors = Vec::new();
-
-    if let Some(http_arg) = directive
-        .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
-        .and_then(|arg| arg.as_object())
-    {
-        // Validate URL argument
-        if let Some(url_value) = http_arg
-            .iter()
-            .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
-        {
-            if let Some(url_error) = parse_url(
-                url_value,
-                BaseUrlCoordinate {
-                    source_directive_name: &directive.name,
-                },
-                schema,
-            )
-            .err()
-            {
-                errors.push(url_error);
-            }
-        }
-
-        errors.extend(headers::validate_arg(
-            http_arg,
-            HttpHeadersCoordinate::Source {
-                directive_name: &directive.name,
-            },
-            schema,
-        ));
-    } else {
-        errors.push(Message {
-            code: Code::GraphQLError,
-            message: format!(
-                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
-                coordinate = source_http_argument_coordinate(&directive.name),
-            ),
-            locations: directive
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        })
-    }
-
-    SourceDirective {
-        name,
-        errors,
-        directive: directive.clone(),
-    }
-}
-
-/// A `@source` directive along with any errors related to it.
-struct SourceDirective {
-    name: SourceName,
-    errors: Vec<Message>,
-    directive: Component<Directive>,
-}
 
 fn parse_url<Coordinate: Display + Copy>(
     value: &Node<Value>,
