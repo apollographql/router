@@ -78,6 +78,7 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
 #[cfg(test)]
 use crate::services::supergraph;
 
@@ -868,6 +869,10 @@ impl RouterFactory for RouterCreator {
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn pipeline_ref(&self) -> &PipelineRef {
+        &self._pipeline_handle.pipeline_ref
     }
 }
 
