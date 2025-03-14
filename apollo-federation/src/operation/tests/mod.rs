@@ -6,14 +6,13 @@ use apollo_compiler::schema::Schema;
 
 use super::Field;
 use super::Name;
-use super::NamedFragments;
 use super::Operation;
 use super::Selection;
 use super::SelectionKey;
 use super::SelectionSet;
 use super::normalize_operation;
+use crate::SingleFederationError;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -44,16 +43,12 @@ macro_rules! assert_normalized_equal {
 }
 
 macro_rules! assert_equal_ops {
-    ($schema: expr, $first: expr, $second: expr) => {
-        let original_document: Valid<ExecutableDocument> =
-            $first.try_into().expect("valid document");
-        let minified_document: Valid<ExecutableDocument> =
-            $second.try_into().expect("valid document");
+    ($schema: expr, $original_document: expr, $minified_document: expr) => {
         // since compare operations just check if a query is subset of another one
         // we verify that both A ⊆ B and B ⊆ A are true which means that A = B
-        compare_operations($schema, &original_document, &minified_document)
+        compare_operations($schema, $original_document, $minified_document)
             .expect("original document is a subset of minified one");
-        compare_operations($schema, &minified_document, &original_document)
+        compare_operations($schema, $minified_document, $original_document)
             .expect("minified document is a subset of original one");
     };
 }
@@ -78,7 +73,7 @@ pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
 }
 
 pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-    Operation::parse(schema.clone(), query, "query.graphql", None).expect("valid operation")
+    Operation::parse(schema.clone(), query, "query.graphql").expect("valid operation")
 }
 
 pub(super) fn parse_and_expand(
@@ -92,11 +87,10 @@ pub(super) fn parse_and_expand(
         .iter()
         .next()
         .expect("must have an operation");
-    let fragments = NamedFragments::new(&doc.fragments, schema);
 
     normalize_operation(
         operation,
-        fragments,
+        &doc.fragments,
         schema,
         &Default::default(),
         &never_cancel,
@@ -220,7 +214,7 @@ fn can_remove_introspection_selections() {
     {
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
+            &executable_document.fragments,
             &schema,
             &IndexSet::default(),
             &never_cancel,
@@ -859,7 +853,7 @@ fn removes_sibling_typename() {
         }
       }
     "#;
-    // unnecessary __typename is removed
+    // The __typename selection is hidden (attached to its sibling).
     assert_normalized!(schema, operation_with_typename, @r###"
       query TestQuery {
         foo {
@@ -889,6 +883,7 @@ fn keeps_typename_if_no_other_selection() {
         }
       }
     "#;
+    // The __typename selection is kept because it's the only selection.
     assert_normalized_equal!(
         schema,
         operation_with_single_typename,
@@ -937,7 +932,7 @@ scalar FieldSet
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
+            &executable_document.fragments,
             &schema,
             &interface_objects,
             &never_cancel,
@@ -997,19 +992,14 @@ fn converting_operation_types() {
         fragment frag on HasA { intfField }
         "#,
             "operation.graphql",
-            None,
         )
         .unwrap(), @r###"
-        fragment frag on HasA {
-          intfField
-        }
-
         {
           intf {
             ... on HasA {
               a
+              intfField
             }
-            ...frag
           }
         }
         "###);
@@ -1077,7 +1067,7 @@ mod make_selection_tests {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
             executable_document.operations.get(None).unwrap(),
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
             &never_cancel,
@@ -1096,7 +1086,7 @@ mod make_selection_tests {
                 base_selection_set.type_position.clone(),
                 selection.clone(),
             );
-            Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
+            Selection::from_element(base.element(), Some(subselections)).unwrap()
         };
 
         let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
@@ -1104,9 +1094,8 @@ mod make_selection_tests {
         let foo_with_c = clone_selection_at_path(foo, &[name!("c")]);
         let new_selection = SelectionSet::make_selection(
             &schema,
-            &foo.element().unwrap().parent_type_position(),
+            &foo.element().parent_type_position(),
             [foo_with_c, foo_with_b, foo_with_a].iter(),
-            /*named_fragments*/ &Default::default(),
         )
         .unwrap();
         // Make sure the ordering of c, b and a is preserved.
@@ -1124,7 +1113,7 @@ mod lazy_map_tests {
         ss: &SelectionSet,
         pred: &impl Fn(&Selection) -> bool,
     ) -> Result<SelectionSet, FederationError> {
-        ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
+        ss.lazy_map(|s| {
             if !pred(s) {
                 return Ok(SelectionMapperReturn::None);
             }
@@ -1177,7 +1166,7 @@ mod lazy_map_tests {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
             executable_document.operations.get(None).unwrap(),
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
             &never_cancel,
@@ -1212,14 +1201,14 @@ mod lazy_map_tests {
         ss: &SelectionSet,
         pred: &impl Fn(&Selection) -> bool,
     ) -> Result<SelectionSet, FederationError> {
-        ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
+        ss.lazy_map(|s| {
             let to_add_typename = pred(s);
             let updated = s.map_selection_set(|ss| add_typename_if(ss, pred).map(Some))?;
             if !to_add_typename {
                 return Ok(updated.into());
             }
 
-            let parent_type_pos = s.element()?.parent_type_position();
+            let parent_type_pos = s.element().parent_type_position();
             // "__typename" field
             let field_element =
                 Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
@@ -1236,7 +1225,7 @@ mod lazy_map_tests {
         let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
         let normalized_operation = normalize_operation(
             executable_document.operations.get(None).unwrap(),
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
             &never_cancel,
@@ -1440,15 +1429,14 @@ fn test_expand_all_fragments1() {
         "#;
     let (schema, executable_document) = parse_schema_and_operation(operation_with_named_fragment);
     if let Ok(operation) = executable_document.operations.get(None) {
-        let mut normalized_operation = normalize_operation(
+        let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&executable_document.fragments, &schema),
+            &executable_document.fragments,
             &schema,
             &IndexSet::default(),
             &never_cancel,
         )
         .unwrap();
-        normalized_operation.named_fragments = Default::default();
         insta::assert_snapshot!(normalized_operation, @r###"
             {
               i1 {
@@ -1496,7 +1484,7 @@ fn used_variables() {
     "#;
 
     let valid = parse_schema(schema);
-    let operation = Operation::parse(valid, query, "used_variables.graphql", None).unwrap();
+    let operation = Operation::parse(valid, query, "used_variables.graphql").unwrap();
 
     let mut variables = operation
         .selection_set
@@ -1794,7 +1782,7 @@ fn off_by_1_error() {
       }
     "#;
 
-    // unnecessary __typename selections are dropped
+    // The __typename selections are hidden (attached to their siblings).
     assert_normalized!(schema, query,@r###"
       {
         t {
@@ -1899,6 +1887,7 @@ fn fragments_with_directive_on_typename() {
         }
     "#;
 
+    // The __typename selections are kept since they have directive applications.
     assert_normalized_equal!(
         schema,
         query,
@@ -1963,7 +1952,7 @@ fn fragments_with_non_intersecting_types() {
         }
     "#;
 
-    // dropping unnecessary __typename selection from fragment
+    // The __typename selection is hidden (attached to its sibling).
     assert_normalized!(schema, query, @r###"
         query($if: Boolean!) {
           t {
