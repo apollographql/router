@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
-use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
@@ -15,10 +14,11 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::Observer;
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry_api::Context;
 use opentelemetry_api::KeyValue;
+use opentelemetry_api::metrics::CallbackRegistration;
+use opentelemetry_api::metrics::Observer;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -250,8 +250,8 @@ mod test {
     use opentelemetry::sdk::metrics::MeterProviderBuilder;
     use opentelemetry::sdk::metrics::PeriodicReader;
     use opentelemetry::testing::metrics::InMemoryMetricsExporter;
-    use opentelemetry_api::global::GlobalMeterProvider;
     use opentelemetry_api::Context;
+    use opentelemetry_api::global::GlobalMeterProvider;
 
     use crate::metrics::filter::FilterMeterProvider;
 
@@ -298,23 +298,31 @@ mod test {
             .flat_map(|m| m.scope_metrics.into_iter())
             .flat_map(|m| m.metrics)
             .collect();
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.operations.test"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.test")
+        );
 
         assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"));
 
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.graphos.cloud.test"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.graphos.cloud.test")
+        );
 
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.unknown.test"));
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.unknown.test")
+        );
 
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.lifecycle.api_schema"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.lifecycle.api_schema")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -407,12 +415,16 @@ mod test {
             .collect();
 
         assert!(!metrics.iter().any(|m| m.name == "apollo.router.config"));
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.config.test"));
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.config.test")
+        );
         assert!(!metrics.iter().any(|m| m.name == "apollo.router.entities"));
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.entities.test"));
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.entities.test")
+        );
     }
 }

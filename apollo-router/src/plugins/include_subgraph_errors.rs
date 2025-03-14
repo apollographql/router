@@ -9,8 +9,8 @@ use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::subgraph;
 use crate::services::SubgraphResponse;
+use crate::services::subgraph;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
@@ -98,20 +98,20 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::Configuration;
     use crate::json_ext::Object;
-    use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
+    use crate::services::HasSchema;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
-    use crate::services::HasSchema;
-    use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::services::SupergraphRequest;
     use crate::spec::Schema;
-    use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR","service":"products"}}]}"#.as_bytes())

@@ -2,19 +2,21 @@ use std::collections::HashMap;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
+use http::HeaderMap;
 use http::header::HeaderName;
 use http::response::Parts;
-use http::HeaderMap;
 use multimap::MultiMap;
-use opentelemetry::sdk::metrics::reader::AggregationSelector;
+use opentelemetry::sdk::Resource;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::InstrumentKind;
-use opentelemetry::sdk::Resource;
+use opentelemetry::sdk::metrics::reader::AggregationSelector;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
 use tower::BoxError;
 
+use crate::Context;
+use crate::ListenAddr;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::graphql::Request;
@@ -27,8 +29,6 @@ use crate::plugins::telemetry::config::Conf;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::router_factory::Endpoint;
-use crate::Context;
-use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod local_type_stats;

@@ -2,29 +2,29 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use futures::stream::StreamExt;
-use http::header::CONTENT_TYPE;
-use http::header::VARY;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::Uri;
+use http::header::CONTENT_TYPE;
+use http::header::VARY;
 use mime::APPLICATION_JSON;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::Context;
 use crate::graphql;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::services::router;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::test_harness::make_fake_batch;
-use crate::Context;
 
 // Test Vary processing
 

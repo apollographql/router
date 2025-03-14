@@ -120,9 +120,9 @@ mod tests {
     use apollo_compiler::Schema;
     use bytes::Bytes;
     use insta::assert_yaml_snapshot;
-    use serde::ser::SerializeMap;
     use serde::Serialize;
     use serde::Serializer;
+    use serde::ser::SerializeMap;
 
     use super::*;
     use crate::graphql::Response;

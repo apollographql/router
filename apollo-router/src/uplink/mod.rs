@@ -197,12 +197,12 @@ where
 pub(crate) fn stream_from_uplink_transforming_new_response<Query, Response, TransformedResponse>(
     mut uplink_config: UplinkConfig,
     transform_new_response: impl Fn(
-            Response,
-        )
-            -> Box<dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin>
-        + Send
-        + Sync
-        + 'static,
+        Response,
+    ) -> Box<
+        dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin,
+    > + Send
+    + Sync
+    + 'static,
 ) -> impl Stream<Item = Result<TransformedResponse, Error>>
 where
     Query: graphql_client::GraphQLQuery,
@@ -263,7 +263,9 @@ where
                             uplink_config.poll_interval = Duration::from_secs(delay);
 
                             if let Err(e) = sender.send(Ok(response)).await {
-                                tracing::debug!("failed to push to stream. This is likely to be because the router is shutting down: {e}");
+                                tracing::debug!(
+                                    "failed to push to stream. This is likely to be because the router is shutting down: {e}"
+                                );
                                 break;
                             }
                         }
@@ -287,7 +289,9 @@ where
                                 Err(Error::UplinkErrorNoRetry { code, message })
                             };
                             if let Err(e) = sender.send(err).await {
-                                tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
+                                tracing::debug!(
+                                    "failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}"
+                                );
                                 break;
                             }
                             if !retry_later {
@@ -305,7 +309,9 @@ where
                         query = query_name
                     );
                     if let Err(e) = sender.send(Err(err)).await {
-                        tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
+                        tracing::debug!(
+                            "failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}"
+                        );
                         break;
                     }
                 }
@@ -325,12 +331,14 @@ pub(crate) async fn fetch<Query, Response, TransformedResponse>(
     endpoints: &mut Endpoints,
     // See stream_from_uplink_transforming_new_response for an explanation of
     // this argument.
-    transform_new_response: &(impl Fn(
+    transform_new_response: &(
+         impl Fn(
         Response,
     ) -> Box<dyn Future<Output = Result<TransformedResponse, BoxError>> + Send + Unpin>
-          + Send
-          + Sync
-          + 'static),
+         + Send
+         + Sync
+         + 'static
+     ),
 ) -> Result<UplinkResponse<TransformedResponse>, Error>
 where
     Query: graphql_client::GraphQLQuery,
@@ -374,10 +382,12 @@ where
                                 response: res,
                                 id,
                                 delay,
-                            })
+                            });
                         }
                         Err(err) => {
-                            tracing::debug!("failed to process results of Uplink response from {url}: {err}. Other endpoints will be tried");
+                            tracing::debug!(
+                                "failed to process results of Uplink response from {url}: {err}. Other endpoints will be tried"
+                            );
                             continue;
                         }
                     }
@@ -426,7 +436,9 @@ where
                     error = err.to_string(),
                     code = err.status().unwrap_or_default().to_string()
                 );
-                tracing::debug!("failed to fetch from Uplink endpoint {url}: {err}. Other endpoints will be tried");
+                tracing::debug!(
+                    "failed to fetch from Uplink endpoint {url}: {err}. Other endpoints will be tried"
+                );
             }
         };
     }
@@ -498,21 +510,21 @@ mod test {
     use test_query::FetchErrorCode;
     use test_query::TestQueryUplinkQuery;
     use url::Url;
-    use wiremock::matchers::method;
-    use wiremock::matchers::path;
     use wiremock::Mock;
     use wiremock::MockServer;
     use wiremock::Request;
     use wiremock::Respond;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
 
-    use crate::uplink::stream_from_uplink;
-    use crate::uplink::stream_from_uplink_transforming_new_response;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
     use crate::uplink::UplinkConfig;
     use crate::uplink::UplinkRequest;
     use crate::uplink::UplinkResponse;
+    use crate::uplink::stream_from_uplink;
+    use crate::uplink::stream_from_uplink_transforming_new_response;
 
     #[derive(GraphQLQuery)]
     #[graphql(

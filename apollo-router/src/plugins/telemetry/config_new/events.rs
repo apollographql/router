@@ -10,13 +10,14 @@ use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-use tracing::info_span;
 use tracing::Span;
+use tracing::info_span;
 
-use super::instruments::Instrumented;
 use super::Selector;
 use super::Selectors;
 use super::Stage;
+use super::instruments::Instrumented;
+use crate::Context;
 use crate::graphql;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -30,7 +31,6 @@ use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::Context;
 
 /// Events are
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
@@ -815,8 +815,8 @@ pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>
 
 #[cfg(test)]
 mod tests {
-    use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use http::header::CONTENT_LENGTH;
     use tracing::instrument::WithSubscriber;
 
     use super::*;

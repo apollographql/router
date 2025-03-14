@@ -1,6 +1,6 @@
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
-use apollo_compiler::ExecutableDocument;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
@@ -8,8 +8,10 @@ use tower::BoxError;
 
 use super::instruments::CustomCounter;
 use super::instruments::CustomInstruments;
+use crate::Context;
 use crate::graphql::ResponseVisitor;
 use crate::json_ext::Object;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
@@ -18,10 +20,8 @@ use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
@@ -203,10 +203,10 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
 pub(crate) mod test {
 
     use super::*;
+    use crate::Configuration;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
-    use crate::Configuration;
 
     #[test_log::test(tokio::test)]
     async fn basic_metric_publishing() {

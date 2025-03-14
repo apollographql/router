@@ -5,13 +5,13 @@ use std::sync::Arc;
 use apollo_compiler::executable::Selection;
 use serde_json_bytes::json;
 
+use crate::Configuration;
 use crate::cache::storage::CacheStorage;
 use crate::compute_job;
 use crate::graphql;
 use crate::query_planner::QueryKey;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::spec;
-use crate::Configuration;
 
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };

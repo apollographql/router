@@ -7,15 +7,15 @@ use std::sync::Arc;
 
 use ahash::HashMap;
 use ahash::HashMapExt;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::schema::FieldLookupError;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
 use displaydoc::Display;
+use futures::StreamExt;
 use futures::future::Either;
 use futures::stream;
-use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -24,6 +24,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::Context;
 use crate::error::Error;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
@@ -38,7 +39,6 @@ use crate::register_plugin;
 use crate::services::execution;
 use crate::services::execution::BoxService;
 use crate::services::subgraph;
-use crate::Context;
 
 pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
@@ -138,11 +138,13 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.estimated", estimated_cost.into());
                 extensions.insert("cost.max", max_cost.into());
-                Ok(vec![graphql::Error::builder()
-                    .extension_code(self.code())
-                    .extensions(extensions)
-                    .message(self.to_string())
-                    .build()])
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
             }
             DemandControlError::ActualCostTooExpensive {
                 actual_cost,
@@ -151,25 +153,33 @@ impl IntoGraphQLErrors for DemandControlError {
                 let mut extensions = Object::new();
                 extensions.insert("cost.actual", actual_cost.into());
                 extensions.insert("cost.max", max_cost.into());
-                Ok(vec![graphql::Error::builder()
-                    .extension_code(self.code())
-                    .extensions(extensions)
-                    .message(self.to_string())
-                    .build()])
+                Ok(vec![
+                    graphql::Error::builder()
+                        .extension_code(self.code())
+                        .extensions(extensions)
+                        .message(self.to_string())
+                        .build(),
+                ])
             }
-            DemandControlError::QueryParseFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code(self.code())
-                .message(self.to_string())
-                .build()]),
+            DemandControlError::QueryParseFailure(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
             DemandControlError::SubgraphOperationNotInitialized(e) => Ok(e.into_graphql_errors()),
-            DemandControlError::ContextSerializationError(_) => Ok(vec![graphql::Error::builder()
-                .extension_code(self.code())
-                .message(self.to_string())
-                .build()]),
-            DemandControlError::FederationError(_) => Ok(vec![graphql::Error::builder()
-                .extension_code(self.code())
-                .message(self.to_string())
-                .build()]),
+            DemandControlError::ContextSerializationError(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
+            DemandControlError::FederationError(_) => Ok(vec![
+                graphql::Error::builder()
+                    .extension_code(self.code())
+                    .message(self.to_string())
+                    .build(),
+            ]),
         }
     }
 }
@@ -495,14 +505,15 @@ register_plugin!("apollo", "demand_control", DemandControl);
 mod test {
     use std::sync::Arc;
 
-    use apollo_compiler::ast;
-    use apollo_compiler::validation::Valid;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast;
+    use apollo_compiler::validation::Valid;
     use futures::StreamExt;
     use schemars::JsonSchema;
     use serde::Deserialize;
 
+    use crate::Context;
     use crate::graphql;
     use crate::graphql::Response;
     use crate::metrics::FutureMetricsExt;
@@ -514,7 +525,6 @@ mod test {
     use crate::services::layers::query_analysis::ParsedDocument;
     use crate::services::layers::query_analysis::ParsedDocumentInner;
     use crate::services::subgraph;
-    use crate::Context;
 
     #[tokio::test]
     async fn test_measure_on_execution_request() {

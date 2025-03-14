@@ -9,11 +9,15 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use displaydoc::Display;
-use http::header;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header;
+use jsonwebtoken::Algorithm;
+use jsonwebtoken::DecodingKey;
+use jsonwebtoken::TokenData;
+use jsonwebtoken::Validation;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
 use jsonwebtoken::errors::Error as JWTError;
@@ -23,10 +27,6 @@ use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::KeyAlgorithm;
 use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
-use jsonwebtoken::Algorithm;
-use jsonwebtoken::DecodingKey;
-use jsonwebtoken::TokenData;
-use jsonwebtoken::Validation;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
@@ -42,18 +42,18 @@ use self::jwks::JwksManager;
 use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
+use crate::Context;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::plugin::serde::deserialize_header_name;
-use crate::plugin::serde::deserialize_header_value;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::register_plugin;
-use crate::services::router;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::Context;
+use crate::services::router;
 
 mod jwks;
 pub(crate) mod subgraph;
@@ -583,7 +583,7 @@ fn authenticate(
         ) {
             None => continue,
             Some(Err(error)) => {
-                return failure_message(request.context, error, StatusCode::BAD_REQUEST)
+                return failure_message(request.context, error, StatusCode::BAD_REQUEST);
             }
             Some(Ok(extracted_jwt)) => {
                 jwt = Some(extracted_jwt);

@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::conditional::Conditional;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -10,7 +11,6 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::span_factory::SpanMode;
 
@@ -139,13 +139,17 @@ mod test {
     use parking_lot::Mutex;
     use serde_json_bytes::path::JsonPathInst;
 
+    use crate::Context;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
     use crate::graphql;
+    use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::DefaultForLevel;
+    use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
@@ -156,14 +160,10 @@ mod test {
     use crate::plugins::telemetry::config_new::spans::RouterSpans;
     use crate::plugins::telemetry::config_new::spans::SubgraphSpans;
     use crate::plugins::telemetry::config_new::spans::SupergraphSpans;
-    use crate::plugins::telemetry::config_new::DefaultForLevel;
-    use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
-    use crate::plugins::telemetry::OTEL_NAME;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
-    use crate::Context;
 
     #[test]
     fn test_router_spans_level_none() {
@@ -179,16 +179,22 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == HTTP_REQUEST_METHOD)
+        );
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION)
+        );
         assert!(!values.iter().any(|key_val| key_val.key == URL_PATH));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == USER_AGENT_ORIGINAL)
+        );
     }
 
     #[test]
@@ -205,16 +211,22 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == HTTP_REQUEST_METHOD)
+        );
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION)
+        );
         assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == USER_AGENT_ORIGINAL)
+        );
     }
 
     #[test]
@@ -231,16 +243,22 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == HTTP_REQUEST_METHOD)
+        );
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION)
+        );
         assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == USER_AGENT_ORIGINAL)
+        );
     }
 
     #[test]
@@ -360,9 +378,11 @@ mod test {
                 )
                 .build(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT)
+        );
     }
 
     #[test]
@@ -427,9 +447,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -461,9 +483,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -492,9 +516,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -523,9 +549,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -550,9 +578,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -568,9 +598,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("my.method")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("my.method"))
+        );
     }
 
     #[test]
@@ -604,9 +636,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
 
         assert!(values.iter().any(|key_val| key_val.key
             == opentelemetry::Key::from_static_str(OTEL_NAME)
@@ -635,9 +669,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -657,9 +693,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("my_op")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("my_op"))
+        );
     }
 
     #[test]
@@ -718,9 +756,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -753,9 +793,11 @@ mod test {
                 )
                 .build(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -779,9 +821,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -811,9 +855,11 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 
     #[test]
@@ -843,8 +889,10 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+        assert!(
+            !values
+                .iter()
+                .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test"))
+        );
     }
 }

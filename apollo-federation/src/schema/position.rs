@@ -3,6 +3,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Deref;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -20,9 +23,6 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::schema::UnionType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use either::Either;
 use serde::Serialize;
 use strum::IntoEnumIterator;
@@ -32,6 +32,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
+use crate::schema::FederationSchema;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
 use crate::schema::referencer::InputObjectTypeReferencers;
@@ -40,7 +41,6 @@ use crate::schema::referencer::ObjectTypeReferencers;
 use crate::schema::referencer::Referencers;
 use crate::schema::referencer::ScalarTypeReferencers;
 use crate::schema::referencer::UnionTypeReferencers;
-use crate::schema::FederationSchema;
 
 // This is the "captures" trick for dealing with return position impl trait (RPIT), as noted in
 // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html#the-captures-trick
@@ -2016,15 +2016,11 @@ impl ObjectFieldDefinitionPosition {
         {
             enum_type_referencers.object_fields.insert(self.clone());
         } else {
-            return Err(
-                FederationError::internal(
-                    format!(
-                        "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                        self,
-                        output_type_reference.deref(),
-                    )
-                )
-            );
+            return Err(FederationError::internal(format!(
+                "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
+                self,
+                output_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -2987,13 +2983,11 @@ impl InterfaceFieldDefinitionPosition {
         {
             enum_type_referencers.interface_fields.insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                    self,
-                    output_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
+                self,
+                output_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -3219,13 +3213,11 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 .interface_field_arguments
                 .insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                    self,
-                    input_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -4598,13 +4590,11 @@ impl InputObjectFieldDefinitionPosition {
                 .input_object_fields
                 .insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                    self,
-                    input_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -4997,13 +4987,11 @@ impl DirectiveArgumentDefinitionPosition {
                 .directive_arguments
                 .insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                    self,
-                    input_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }

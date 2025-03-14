@@ -1,6 +1,6 @@
 use apollo_compiler::Schema;
-use apollo_federation::subgraph::Subgraph;
 use apollo_federation::Supergraph;
+use apollo_federation::subgraph::Subgraph;
 
 fn print_sdl(schema: &Schema) -> String {
     let mut schema = schema.clone();

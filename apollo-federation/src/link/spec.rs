@@ -2,8 +2,8 @@
 use std::fmt;
 use std::str;
 
-use apollo_compiler::name;
 use apollo_compiler::Name;
+use apollo_compiler::name;
 use thiserror::Error;
 
 use crate::error::FederationError;

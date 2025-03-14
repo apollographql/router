@@ -3,12 +3,12 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::Unit;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
@@ -21,20 +21,22 @@ use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
-use super::attributes::HttpServerAttributes;
-use super::cache::attributes::CacheAttributes;
-use super::cache::CacheInstruments;
-use super::cache::CacheInstrumentsConfig;
-use super::cache::CACHE_METRIC;
-use super::graphql::selectors::ListLength;
-use super::graphql::GraphQLInstruments;
-use super::graphql::FIELD_EXECUTION;
-use super::graphql::FIELD_LENGTH;
-use super::selectors::CacheKind;
 use super::DefaultForLevel;
 use super::Selector;
+use super::attributes::HttpServerAttributes;
+use super::cache::CACHE_METRIC;
+use super::cache::CacheInstruments;
+use super::cache::CacheInstrumentsConfig;
+use super::cache::attributes::CacheAttributes;
+use super::graphql::FIELD_EXECUTION;
+use super::graphql::FIELD_LENGTH;
+use super::graphql::GraphQLInstruments;
+use super::graphql::selectors::ListLength;
+use super::selectors::CacheKind;
+use crate::Context;
 use crate::metrics;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -43,24 +45,22 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
-use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::RouterValue;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphValue;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
-use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
-use crate::services::router::pipeline_handle::pipelines;
 use crate::services::router::pipeline_handle::PIPELINE_METRIC;
+use crate::services::router::pipeline_handle::pipelines;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 
@@ -1482,7 +1482,9 @@ where
                             })
                         }
                         None => {
-                            failfast_debug!("cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub");
+                            failfast_debug!(
+                                "cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub"
+                            );
                         }
                     }
                 }
@@ -1538,7 +1540,9 @@ where
                             });
                         }
                         None => {
-                            failfast_debug!("cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub");
+                            failfast_debug!(
+                                "cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub"
+                            );
                         }
                     }
                 }
@@ -1924,7 +1928,9 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -1964,7 +1970,9 @@ where
                 Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2021,7 +2029,9 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2109,7 +2119,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2327,7 +2339,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2366,7 +2380,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2419,7 +2435,9 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2503,7 +2521,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2596,9 +2616,9 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
+    use apollo_compiler::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::Name;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -2613,6 +2633,7 @@ mod tests {
     use serde_json_bytes::Value;
 
     use super::*;
+    use crate::Context;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
     use crate::error::Error;
@@ -2621,19 +2642,18 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
-    use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-    use crate::plugins::telemetry::config_new::instruments::Instrumented;
-    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
+    use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+    use crate::plugins::telemetry::config_new::instruments::Instrumented;
+    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::spec::operation_limits::OperationLimits;
-    use crate::Context;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -3616,10 +3636,12 @@ mod tests {
                 .header("content-type", "application/json")
                 .header("x-my-header", "TEST")
                 .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build(),
+                ])
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
@@ -3628,10 +3650,12 @@ mod tests {
                     .data(json!({
                         "price": 500
                     }))
-                    .errors(vec![graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build()])
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("nope")
+                            .extension_code("NOPE")
+                            .build(),
+                    ])
                     .build(),
                 &context_with_error,
             );
@@ -3673,10 +3697,12 @@ mod tests {
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
                 .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build(),
+                ])
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
@@ -3685,10 +3711,12 @@ mod tests {
                     .data(json!({
                         "price": 500
                     }))
-                    .errors(vec![graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build()])
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("nope")
+                            .extension_code("NOPE")
+                            .build(),
+                    ])
                     .build(),
                 &context_with_error,
             );

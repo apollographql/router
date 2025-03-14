@@ -5,14 +5,14 @@ use std::collections::HashSet;
 use axum::headers::HeaderName;
 use derivative::Derivative;
 use num_traits::ToPrimitive;
-use opentelemetry::sdk::metrics::new_view;
+use opentelemetry::Array;
+use opentelemetry::Value;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::Instrument;
 use opentelemetry::sdk::metrics::Stream;
 use opentelemetry::sdk::metrics::View;
+use opentelemetry::sdk::metrics::new_view;
 use opentelemetry::sdk::trace::SpanLimits;
-use opentelemetry::Array;
-use opentelemetry::Value;
 use opentelemetry_api::metrics::MetricsError;
 use opentelemetry_api::metrics::Unit;
 use schemars::JsonSchema;
@@ -21,15 +21,17 @@ use serde::Serialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
+use crate::Configuration;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
 use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
-    #[error("field level instrumentation sampler must sample less frequently than tracing level sampler")]
+    #[error(
+        "field level instrumentation sampler must sample less frequently than tracing level sampler"
+    )]
     InvalidFieldLevelInstrumentationSampler,
 }
 

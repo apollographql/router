@@ -4,8 +4,8 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use serde_json_bytes::ByteString;
 
-use super::error::FileUploadError;
 use super::Result as UploadResult;
+use super::error::FileUploadError;
 
 type MapPerVariable = HashMap<String, MapPerFile>;
 type MapPerFile = HashMap<String, Vec<Vec<String>>>;

@@ -1,6 +1,6 @@
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use futures::future;
 use serde::Deserialize;
@@ -11,11 +11,11 @@ use tokio::sync::mpsc;
 use tower::ServiceExt;
 use tracing_futures::Instrument;
 
+use super::OperationKind;
 use super::execution::ExecutionParameters;
 use super::fetch::SubgraphSchemas;
 use super::fetch::Variables;
 use super::rewrites;
-use super::OperationKind;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
 use crate::graphql::Error;
@@ -23,9 +23,9 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
 use crate::json_ext::Path;
-use crate::services::subgraph::BoxGqlStream;
 use crate::services::SubgraphRequest;
 use crate::services::SubscriptionTaskParams;
+use crate::services::subgraph::BoxGqlStream;
 
 pub(crate) const SUBSCRIPTION_EVENT_SPAN_NAME: &str = "subscription_event";
 pub(crate) static OPENED_SUBSCRIPTIONS: AtomicUsize = AtomicUsize::new(0);
@@ -91,10 +91,12 @@ impl SubscriptionNode {
         if parameters.subscription_handle.is_none() {
             tracing::error!("No subscription handle provided for a subscription");
             return Box::pin(async {
-                vec![Error::builder()
-                    .message("no subscription handle provided for a subscription")
-                    .extension_code("NO_SUBSCRIPTION_HANDLE")
-                    .build()]
+                vec![
+                    Error::builder()
+                        .message("no subscription handle provided for a subscription")
+                        .extension_code("NO_SUBSCRIPTION_HANDLE")
+                        .build(),
+                ]
             });
         };
         if let Some(max_opened_subscriptions) = parameters
@@ -104,10 +106,12 @@ impl SubscriptionNode {
         {
             if OPENED_SUBSCRIPTIONS.load(Ordering::Relaxed) >= max_opened_subscriptions {
                 return Box::pin(async {
-                    vec![Error::builder()
-                        .message("can't open new subscription, limit reached")
-                        .extension_code("SUBSCRIPTION_MAX_LIMIT")
-                        .build()]
+                    vec![
+                        Error::builder()
+                            .message("can't open new subscription, limit reached")
+                            .extension_code("SUBSCRIPTION_MAX_LIMIT")
+                            .build(),
+                    ]
                 });
             }
         }
@@ -122,10 +126,12 @@ impl SubscriptionNode {
                 .map(|mode| (config.clone(), mode)),
             None => {
                 return Box::pin(async {
-                    vec![Error::builder()
-                        .message("subscription support is not enabled")
-                        .extension_code("SUBSCRIPTION_DISABLED")
-                        .build()]
+                    vec![
+                        Error::builder()
+                            .message("subscription support is not enabled")
+                            .extension_code("SUBSCRIPTION_DISABLED")
+                            .build(),
+                    ]
                 });
             }
         };
@@ -137,16 +143,16 @@ impl SubscriptionNode {
                 Some((subscription_config, _mode)) => {
                     let (tx_handle, rx_handle) = mpsc::channel::<BoxGqlStream>(1);
 
-                    let subscription_conf_tx = match subscription_handle.subscription_conf_tx.take()
-                    {
-                        Some(sc) => sc,
-                        None => {
-                            return vec![Error::builder()
+                    let subscription_conf_tx =
+                        match subscription_handle.subscription_conf_tx.take() {
+                            Some(sc) => sc,
+                            None => {
+                                return vec![Error::builder()
                                 .message("no subscription conf sender provided for a subscription")
                                 .extension_code("NO_SUBSCRIPTION_CONF_TX")
                                 .build()];
-                        }
-                    };
+                            }
+                        };
 
                     let subs_params = SubscriptionTaskParams {
                         client_sender: sender,
@@ -157,10 +163,12 @@ impl SubscriptionNode {
                     };
 
                     if let Err(err) = subscription_conf_tx.send(subs_params).await {
-                        return vec![Error::builder()
-                            .message(format!("cannot send the subscription data: {err:?}"))
-                            .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
-                            .build()];
+                        return vec![
+                            Error::builder()
+                                .message(format!("cannot send the subscription data: {err:?}"))
+                                .extension_code("SUBSCRIPTION_DATA_SEND_ERROR")
+                                .build(),
+                        ];
                     }
 
                     match self
@@ -175,13 +183,15 @@ impl SubscriptionNode {
                     }
                 }
                 None => {
-                    vec![Error::builder()
-                        .message(format!(
-                            "subscription mode is not configured for subgraph {:?}",
-                            self.service_name
-                        ))
-                        .extension_code("INVALID_SUBSCRIPTION_MODE")
-                        .build()]
+                    vec![
+                        Error::builder()
+                            .message(format!(
+                                "subscription mode is not configured for subgraph {:?}",
+                                self.service_name
+                            ))
+                            .extension_code("INVALID_SUBSCRIPTION_MODE")
+                            .build(),
+                    ]
                 }
             }
         })

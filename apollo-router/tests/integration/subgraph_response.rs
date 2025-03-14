@@ -2,8 +2,8 @@ use serde_json::json;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::Query;
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 const CONFIG: &str = r#"
 include_subgraph_errors:

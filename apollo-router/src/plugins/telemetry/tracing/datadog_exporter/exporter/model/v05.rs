@@ -5,13 +5,13 @@ use opentelemetry_sdk::export::trace::SpanData;
 
 use super::unified_tags::UnifiedTagField;
 use super::unified_tags::UnifiedTags;
+use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+use crate::plugins::telemetry::tracing::datadog_exporter::Error;
+use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::intern::StringInterner;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::DD_MEASURED_KEY;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::SAMPLING_PRIORITY_KEY;
 use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
-use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
-use crate::plugins::telemetry::tracing::datadog_exporter::Error;
-use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
 
 const SPAN_NUM_ELEMENTS: u32 = 12;
 const METRICS_LEN: u32 = 2;

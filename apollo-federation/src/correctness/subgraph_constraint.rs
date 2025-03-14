@@ -10,13 +10,13 @@ use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
 use super::response_shape_compare::ComparisonError;
 use super::response_shape_compare::PathConstraint;
+use crate::ValidFederationSchema;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::utils::FallibleIterator;
-use crate::ValidFederationSchema;
 
 pub(crate) struct SubgraphConstraint<'a> {
     /// Reference to the all subgraph schemas in the supergraph.

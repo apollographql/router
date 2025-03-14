@@ -81,7 +81,10 @@ impl Drop for ExtensionsGuard<'_> {
             if runtime.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread {
                 let elapsed = self.start.elapsed();
                 if elapsed > Duration::from_millis(10) {
-                    panic!("ExtensionsGuard held for {}ms. This is probably a bug that will stall the Router and cause performance problems. Run with `RUST_BACKTRACE=1` environment variable to display a backtrace", elapsed.as_millis());
+                    panic!(
+                        "ExtensionsGuard held for {}ms. This is probably a bug that will stall the Router and cause performance problems. Run with `RUST_BACKTRACE=1` environment variable to display a backtrace",
+                        elapsed.as_millis()
+                    );
                 }
             }
         }

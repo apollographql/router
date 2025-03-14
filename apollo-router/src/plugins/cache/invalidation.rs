@@ -3,8 +3,8 @@ use std::time::Instant;
 
 use fred::error::RedisError;
 use fred::types::Scanner;
-use futures::stream;
 use futures::StreamExt;
+use futures::stream;
 use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::Deserialize;
@@ -19,8 +19,8 @@ use tracing::Instrument;
 use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
-use crate::plugins::cache::entity::hash_entity_key;
 use crate::plugins::cache::entity::ENTITY_CACHE_VERSION;
+use crate::plugins::cache::entity::hash_entity_key;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
@@ -247,7 +247,9 @@ impl InvalidationRequest {
                 key,
             } => {
                 let entity_key = hash_entity_key(key);
-                format!("version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*")
+                format!(
+                    "version:{ENTITY_CACHE_VERSION}:subgraph:{subgraph}:type:{type}:entity:{entity_key}:*"
+                )
             }
         }
     }

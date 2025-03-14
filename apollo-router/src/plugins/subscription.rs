@@ -26,6 +26,8 @@ use tower::ServiceExt;
 use tracing_futures::Instrument;
 use uuid::Uuid;
 
+use crate::Endpoint;
+use crate::ListenAddr;
 use crate::context::Context;
 use crate::graphql;
 use crate::graphql::Response;
@@ -41,8 +43,6 @@ use crate::register_plugin;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
-use crate::Endpoint;
-use crate::ListenAddr;
 
 type HmacSha256 = Hmac<sha2::Sha256>;
 pub(crate) const APOLLO_SUBSCRIPTION_PLUGIN: &str = "apollo.subscription";
@@ -716,18 +716,18 @@ mod tests {
 
     use futures::StreamExt;
     use serde_json::Value;
-    use tower::util::BoxService;
     use tower::Service;
     use tower::ServiceExt;
+    use tower::util::BoxService;
 
     use super::*;
+    use crate::Notify;
     use crate::graphql::Request;
     use crate::http_ext;
-    use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
+    use crate::plugin::test::MockSubgraphService;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::Notify;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_callback_endpoint() {
@@ -1082,10 +1082,12 @@ mod tests {
                 serde_json::to_vec(&CallbackPayload::Subscription(
                     SubscriptionPayload::Complete {
                         id: new_sub_id.clone(),
-                        errors: Some(vec![graphql::Error::builder()
-                            .message("cannot complete the subscription")
-                            .extension_code("SUBSCRIPTION_ERROR")
-                            .build()]),
+                        errors: Some(vec![
+                            graphql::Error::builder()
+                                .message("cannot complete the subscription")
+                                .extension_code("SUBSCRIPTION_ERROR")
+                                .build(),
+                        ]),
                         verifier: verifier.clone(),
                     },
                 ))
@@ -1101,10 +1103,12 @@ mod tests {
         assert_eq!(
             msg,
             graphql::Response::builder()
-                .errors(vec![graphql::Error::builder()
-                    .message("cannot complete the subscription")
-                    .extension_code("SUBSCRIPTION_ERROR")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("cannot complete the subscription")
+                        .extension_code("SUBSCRIPTION_ERROR")
+                        .build()
+                ])
                 .build()
         );
 
@@ -1178,7 +1182,21 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(subgraph_response.response.body(), &graphql::Response::builder().data(serde_json_bytes::Value::Null).error(graphql::Error::builder().message("cannot execute a subscription if it's not enabled in the configuration").extension_code("SUBSCRIPTION_DISABLED").build()).extensions(Object::default()).build());
+        assert_eq!(
+            subgraph_response.response.body(),
+            &graphql::Response::builder()
+                .data(serde_json_bytes::Value::Null)
+                .error(
+                    graphql::Error::builder()
+                        .message(
+                            "cannot execute a subscription if it's not enabled in the configuration"
+                        )
+                        .extension_code("SUBSCRIPTION_DISABLED")
+                        .build()
+                )
+                .extensions(Object::default())
+                .build()
+        );
     }
 
     #[test]

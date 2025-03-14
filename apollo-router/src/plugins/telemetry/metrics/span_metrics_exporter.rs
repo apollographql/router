@@ -3,13 +3,13 @@ use std::time::Instant;
 
 use opentelemetry_api::KeyValue;
 use opentelemetry_api::Value;
-use tracing_core::field::Visit;
-use tracing_core::span;
 use tracing_core::Field;
 use tracing_core::Subscriber;
+use tracing_core::field::Visit;
+use tracing_core::span;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;

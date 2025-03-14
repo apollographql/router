@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
@@ -21,7 +22,6 @@ use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
 use opentelemetry_api::metrics::AsyncInstrument;
 use opentelemetry_api::metrics::CallbackRegistration;
 use opentelemetry_api::metrics::Observer;
@@ -501,13 +501,18 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 #[cfg(test)]
 mod test {
-    use std::sync::atomic::AtomicBool;
-    use std::sync::atomic::AtomicI64;
     use std::sync::Arc;
     use std::sync::Weak;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::AtomicI64;
     use std::time::Duration;
 
     use async_trait::async_trait;
+    use opentelemetry::sdk::metrics::Aggregation;
+    use opentelemetry::sdk::metrics::InstrumentKind;
+    use opentelemetry::sdk::metrics::ManualReader;
+    use opentelemetry::sdk::metrics::MeterProviderBuilder;
+    use opentelemetry::sdk::metrics::Pipeline;
     use opentelemetry::sdk::metrics::data::Gauge;
     use opentelemetry::sdk::metrics::data::ResourceMetrics;
     use opentelemetry::sdk::metrics::data::Temporality;
@@ -515,17 +520,12 @@ mod test {
     use opentelemetry::sdk::metrics::reader::MetricProducer;
     use opentelemetry::sdk::metrics::reader::MetricReader;
     use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
+    use opentelemetry_api::Context;
     use opentelemetry_api::global::GlobalMeterProvider;
     use opentelemetry_api::metrics::MeterProvider;
     use opentelemetry_api::metrics::Result;
-    use opentelemetry_api::Context;
-    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
     use opentelemetry_sdk::metrics::PeriodicReader;
+    use opentelemetry_sdk::metrics::exporter::PushMetricsExporter;
     use opentelemetry_sdk::runtime;
 
     use crate::metrics::aggregation::AggregateMeterProvider;

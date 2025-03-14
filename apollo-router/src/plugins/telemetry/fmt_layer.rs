@@ -7,26 +7,26 @@ use std::marker::PhantomData;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing::field;
-use tracing_core::span::Id;
-use tracing_core::span::Record;
 use tracing_core::Event;
 use tracing_core::Field;
+use tracing_core::span::Id;
+use tracing_core::span::Record;
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::Context;
-use tracing_subscriber::Layer;
 
 use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
-use super::formatters::EventFormatter;
 use super::formatters::EXCLUDED_ATTRIBUTES;
+use super::formatters::EventFormatter;
 use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
+use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -264,8 +264,8 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::MutexGuard;
 
-    use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use http::header::CONTENT_LENGTH;
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -275,8 +275,8 @@ mod tests {
     use super::*;
     use crate::graphql;
     use crate::plugins::telemetry::config_new::events;
-    use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::events::EventLevel;
+    use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;

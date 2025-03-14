@@ -15,18 +15,18 @@ use std::num::NonZeroU64;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
 use futures::FutureExt;
-use http::header::CONTENT_ENCODING;
+use futures::future::BoxFuture;
 use http::HeaderValue;
 use http::StatusCode;
+use http::header::CONTENT_ENCODING;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::util::Either;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::util::Either;
 
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
@@ -40,10 +40,10 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::SubgraphRequest;
 use crate::services::http::service::Compression;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -253,9 +253,9 @@ impl TrafficShaping {
         Error = BoxError,
         Future = BoxFuture<'static, Result<supergraph::Response, BoxError>>,
     > + Clone
-           + Send
-           + Sync
-           + 'static
+    + Send
+    + Sync
+    + 'static
     where
         S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
             + Clone
@@ -312,9 +312,9 @@ impl TrafficShaping {
         Error = BoxError,
         Future = TrafficShapingSubgraphFuture<S>,
     > + Clone
-           + Send
-           + Sync
-           + 'static
+    + Send
+    + Sync
+    + 'static
     where
         S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
             + Clone
@@ -419,28 +419,28 @@ mod test {
     use bytes::Bytes;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
-    use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
+    use serde_json_bytes::json;
     use tower::Service;
 
     use super::*;
+    use crate::Configuration;
     use crate::json_ext::Object;
+    use crate::plugin::DynPlugin;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
-    use crate::plugin::DynPlugin;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
-    use crate::services::layers::persisted_queries::PersistedQueryLayer;
-    use crate::services::layers::query_analysis::QueryAnalysisLayer;
-    use crate::services::router;
-    use crate::services::router::service::RouterCreator;
     use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
+    use crate::services::layers::persisted_queries::PersistedQueryLayer;
+    use crate::services::layers::query_analysis::QueryAnalysisLayer;
+    use crate::services::router;
+    use crate::services::router::service::RouterCreator;
     use crate::spec::Schema;
-    use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
@@ -774,18 +774,20 @@ mod test {
             graphql::Request::default() => graphql::Response::default()
         });
 
-        assert!(&plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("test", test_service.clone())
-            .oneshot(SubgraphRequest::fake_builder().build())
-            .await
-            .unwrap()
-            .response
-            .body()
-            .errors
-            .is_empty());
+        assert!(
+            &plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .subgraph_service_internal("test", test_service.clone())
+                .oneshot(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
         assert_eq!(
             plugin
                 .as_any()
@@ -803,31 +805,35 @@ mod test {
                 .unwrap(),
             "REQUEST_RATE_LIMITED"
         );
-        assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("another", test_service.clone())
-            .oneshot(SubgraphRequest::fake_builder().build())
-            .await
-            .unwrap()
-            .response
-            .body()
-            .errors
-            .is_empty());
+        assert!(
+            plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .subgraph_service_internal("another", test_service.clone())
+                .oneshot(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .subgraph_service_internal("test", test_service.clone())
-            .oneshot(SubgraphRequest::fake_builder().build())
-            .await
-            .unwrap()
-            .response
-            .body()
-            .errors
-            .is_empty());
+        assert!(
+            plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .subgraph_service_internal("test", test_service.clone())
+                .oneshot(SubgraphRequest::fake_builder().build())
+                .await
+                .unwrap()
+                .response
+                .body()
+                .errors
+                .is_empty()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -861,19 +867,21 @@ mod test {
             mock_service
         });
 
-        assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .supergraph_service_internal(mock_service.clone())
-            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .errors
-            .is_empty());
+        assert!(
+            plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .supergraph_service_internal(mock_service.clone())
+                .oneshot(SupergraphRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .errors
+                .is_empty()
+        );
 
         assert_eq!(
             plugin
@@ -894,18 +902,20 @@ mod test {
             "REQUEST_RATE_LIMITED"
         );
         tokio::time::sleep(Duration::from_millis(300)).await;
-        assert!(plugin
-            .as_any()
-            .downcast_ref::<TrafficShaping>()
-            .unwrap()
-            .supergraph_service_internal(mock_service.clone())
-            .oneshot(SupergraphRequest::fake_builder().build().unwrap())
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .errors
-            .is_empty());
+        assert!(
+            plugin
+                .as_any()
+                .downcast_ref::<TrafficShaping>()
+                .unwrap()
+                .supergraph_service_internal(mock_service.clone())
+                .oneshot(SupergraphRequest::fake_builder().build().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .errors
+                .is_empty()
+        );
     }
 }

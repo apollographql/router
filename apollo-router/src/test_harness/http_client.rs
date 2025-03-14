@@ -4,10 +4,10 @@ use std::task::Poll;
 
 use async_compression::tokio::bufread::BrotliDecoder;
 use axum::body::BoxBody;
-use futures::stream::poll_fn;
 use futures::Future;
 use futures::Stream;
 use futures::StreamExt;
+use futures::stream::poll_fn;
 use http::HeaderValue;
 use http_body::Body;
 use mediatype::MediaType;
@@ -101,10 +101,10 @@ pub(crate) fn defer_spec_20220824_multipart<InnerService, RequestBody>(
 >
 where
     InnerService: Service<
-        http::Request<RequestBody>,
-        Response = http::Response<Pin<Box<dyn AsyncRead + Send>>>,
-        Error = BoxError,
-    >,
+            http::Request<RequestBody>,
+            Response = http::Response<Pin<Box<dyn AsyncRead + Send>>>,
+            Error = BoxError,
+        >,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<RequestBody>| {
@@ -243,10 +243,10 @@ pub(crate) fn json<InnerService>(
 >
 where
     InnerService: Service<
-        http::Request<hyper::Body>,
-        Response = http::Response<MaybeMultipart<Vec<u8>>>,
-        Error = BoxError,
-    >,
+            http::Request<hyper::Body>,
+            Response = http::Response<MaybeMultipart<Vec<u8>>>,
+            Error = BoxError,
+        >,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<serde_json::Value>| {
