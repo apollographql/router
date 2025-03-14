@@ -39,8 +39,6 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
-#[cfg(test)]
-use crate::operation::tests::never_cancel;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
@@ -67,6 +65,8 @@ pub(crate) use contains::*;
 pub(crate) use directive_list::DirectiveList;
 pub(crate) use merging::*;
 pub(crate) use rebase::*;
+#[cfg(test)]
+pub(crate) use tests::never_cancel;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 

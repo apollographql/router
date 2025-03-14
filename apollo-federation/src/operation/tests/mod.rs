@@ -97,6 +97,8 @@ pub(super) fn parse_and_expand(
     )
 }
 
+/// The `normalize_operation()` function has a `check_cancellation` parameter that we'll want to
+/// configure to never cancel during tests. We create a convenience function here for that purpose.
 pub(crate) fn never_cancel() -> Result<(), SingleFederationError> {
     Ok(())
 }
