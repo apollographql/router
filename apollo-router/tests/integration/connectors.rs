@@ -975,7 +975,7 @@ mod tls {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `tls` is explicitly configured for connector-enabled subgraph, which is not supported. You should instead target connector sources directly via tls.connector.*"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"The `tls` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `tls.connector.sources.<subgraph_name>.<source_name>`."#)
         .await;
 
         Ok(())
@@ -1020,7 +1020,7 @@ mod traffic_shaping {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `traffic_shaping` is explicitly configured for connector-enabled subgraph, which is not supported. You should instead target connector sources directly via traffic_shaping.connector.*"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"The `traffic_shaping` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `traffic_shaping.connector.sources.<subgraph_name>.<source_name>`."#)
         .await;
 
         Ok(())
