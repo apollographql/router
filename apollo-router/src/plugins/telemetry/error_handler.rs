@@ -45,16 +45,15 @@ fn handle_error_with_map<T: Into<opentelemetry::global::Error>>(
             return;
         }
 
-        // Keep track of the number of cardinality overflow errors otel emits
-        // This can be removed after upgrading to 0.28.0 when the cardinality limit is removed.
-        // The version upgrade will also result in this log going away completely even if we set up custom a cardinality liimit.
+        // Keep track of the number of cardinality overflow errors otel emits. This can be removed after upgrading to 0.28.0 when the cardinality limit is removed.
+        // The version upgrade will also cause this log to be removed from our visibility even if we were set up custom a cardinality limit.
         // https://github.com/open-telemetry/opentelemetry-rust/pull/2528
         if err.to_string()
             == "Metrics error: Warning: Maximum data points for metric stream exceeded. Entry added to overflow. Subsequent overflows to same metric until next collect will not be logged."
         {
             u64_counter!(
-                "apollo.router.telemetry.batch_processor.cardinality_overflow",
-                "A count of how often a telemetry batch hit the hard cardinality limit",
+                "apollo.router.telemetry.metrics.cardinality_overflow",
+                "A count of how often a telemetry metric hit the hard cardinality limit",
                 1
             );
         }
