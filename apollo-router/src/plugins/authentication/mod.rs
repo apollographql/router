@@ -43,7 +43,6 @@ use self::subgraph::SigningParams;
 use self::subgraph::SigningParamsConfig;
 use self::subgraph::SubgraphAuth;
 use crate::Context;
-use crate::configuration::connector::ConnectorConfiguration;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::PluginInit;
@@ -53,13 +52,12 @@ use crate::plugin::serde::deserialize_header_value;
 use crate::plugins::authentication::connector::ConnectorAuth;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
-use crate::plugins::authentication::subgraph::AuthConfig;
 use crate::plugins::authentication::subgraph::make_signing_params;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::router;
 
-mod connector;
+pub(crate) mod connector;
 mod jwks;
 pub(crate) mod subgraph;
 
@@ -216,7 +214,7 @@ struct Conf {
     /// Subgraph configuration
     subgraph: Option<subgraph::Config>,
     /// Connector configuration
-    connector: Option<ConnectorConfiguration<AuthConfig>>,
+    connector: Option<connector::Config>,
 }
 
 // We may support additional authentication mechanisms in future, so all
