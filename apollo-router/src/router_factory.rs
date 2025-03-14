@@ -794,7 +794,7 @@ pub(crate) async fn create_plugins(
 
         let errors_list = errors
             .iter()
-            .map(|error| format!("{:#}", error))
+            .map(ToString::to_string)
             .collect::<Vec<String>>()
             .join("\n");
 
