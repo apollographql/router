@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic;
@@ -67,6 +68,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
+use crate::utils::logging::snapshot;
 
 #[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
 pub(crate) struct ContextUsageEntry {
@@ -1008,7 +1010,7 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: GraphPathTriggerVariant,
+    TTrigger: GraphPathTriggerVariant + Display,
     for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
     for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
     Arc<TTrigger>: Into<GraphPathTrigger>,
@@ -1930,7 +1932,11 @@ where
             *cost += total_cost;
             *ctx_map = Some(context_map);
         }
-        debug!("Condition resolution: {resolution:?}");
+        snapshot!(
+            "ConditionResolution",
+            resolution.to_string(),
+            "Condition resolution"
+        );
         Ok(resolution)
     }
 
@@ -2000,11 +2006,14 @@ where
         heap.push(HeapElement(self.clone()));
 
         while let Some(HeapElement(to_advance)) = heap.pop() {
-            debug!("From {to_advance:?}");
+            debug!("From {to_advance}");
             let span = debug_span!(" |");
             let _guard = span.enter();
             for edge in to_advance.next_edges()? {
-                debug!("Testing edge {edge:?}");
+                debug!(
+                    "Testing edge {edge}",
+                    edge = EdgeIndexDisplay::new(edge, &self.graph)
+                );
                 let span = debug_span!(" |");
                 let _guard = span.enter();
                 let edge_weight = self.graph.edge_weight(edge)?;
@@ -2334,7 +2343,7 @@ where
                         }
                     }
                 } else {
-                    debug!("Condition unsatisfiable: {condition_resolution:?}");
+                    debug!("Condition unsatisfiable");
                 }
             }
         }
@@ -3725,11 +3734,59 @@ impl OpGraphPath {
     }
 }
 
-impl Display for OpGraphPath {
+struct EdgeIndexDisplay<'graph, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    _phantom_data_for_edge: PhantomData<TEdge>,
+    graph: &'graph Arc<QueryGraph>,
+    edge_index: EdgeIndex,
+}
+
+impl<'graph, TEdge> EdgeIndexDisplay<'graph, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn new(edge_index: EdgeIndex, graph: &'graph Arc<QueryGraph>) -> Self {
+        Self {
+            _phantom_data_for_edge: Default::default(),
+            graph,
+            edge_index,
+        }
+    }
+}
+
+impl<TEdge> Display for EdgeIndexDisplay<'_, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let e = self.edge_index;
+        let graph = self.graph.graph();
+        let (head_idx, tail_idx) = graph.edge_endpoints(e).ok_or(std::fmt::Error)?;
+        let head = &graph[head_idx];
+        let tail = &graph[tail_idx];
+        let edge = &graph[e];
+        let transition = &edge.transition;
+        write!(f, "{head} -> {tail} ({transition})")
+    }
+}
+
+impl<TTrigger, TEdge> Display for GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash + Display,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // If the path is length is 0 return "[]"
         // Traverse the path, getting the of the edge.
-        let head = &self.graph.graph()[self.head];
+        let graph = self.graph.graph();
+        let head = &graph[self.head];
         let head_is_root_node = head.is_root_node();
         if head_is_root_node && self.edges.is_empty() {
             return write!(f, "_");
@@ -3741,14 +3798,14 @@ impl Display for OpGraphPath {
             .iter()
             .cloned()
             .enumerate()
-            .try_for_each(|(i, e)| match e {
+            .try_for_each(|(i, e)| match e.into() {
                 Some(e) => {
-                    let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
-                    let node = &self.graph.graph()[tail];
+                    let tail = graph.edge_endpoints(e).ok_or(std::fmt::Error)?.1;
+                    let node = &graph[tail];
                     if i == 0 && head_is_root_node {
                         write!(f, "{node}")
                     } else {
-                        let edge = &self.graph.graph()[e];
+                        let edge = &graph[e];
                         let label = edge.transition.to_string();
 
                         if let Some(conditions) = &edge.conditions {
@@ -3770,8 +3827,14 @@ impl Display for OpGraphPath {
         }
         if !self.runtime_types_of_tail.is_empty() {
             write!(f, " (types: [")?;
-            for ty in self.runtime_types_of_tail.iter() {
+            let mut iter = self.runtime_types_of_tail.iter();
+            if let Some(ty) = iter.next() {
+                // First item
                 write!(f, "{ty}")?;
+                // The rest
+                for ty in iter {
+                    write!(f, " {ty}")?;
+                }
             }
             write!(f, "])")?;
         }
