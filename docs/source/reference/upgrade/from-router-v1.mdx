@@ -240,15 +240,30 @@ telemetry:
       common:
         service_name: "name"
         attributes:
-          supergraph:
+          router:
             static:
               - name: "env_full_name"
                 value: "deployment_env"
+            request:
+              header:
+                - named: "content-type"
+                  rename: "payload_type"
+                  default: "application/json"
 ```
 
 ```yaml
 # Router v2
 telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Add to each instrument
+        http.server.request.duration:
+          attributes:
+            custom_content_name_attribute:
+              request_header: "content-type"
+              default: "application/json"
+
   exporters:
     metrics:
       common:
