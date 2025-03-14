@@ -74,37 +74,50 @@ struct AuthenticationPlugin {
     connector: Option<ConnectorAuth>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default, PartialEq)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, PartialEq)]
 enum OnError {
     Continue,
-    #[default]
     Error,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+impl Default for OnError {
+    fn default() -> Self {
+        Self::Error
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct JWTConf {
     /// List of JWKS used to verify tokens
     jwks: Vec<JwksConf>,
     /// HTTP header expected to contain JWT
-    #[serde(default = "default_header_name")]
     header_name: String,
     /// Header value prefix
-    #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
     /// Whether to ignore any mismatched prefixes
-    #[serde(default)]
     ignore_other_prefixes: bool,
     /// Alternative sources to extract the JWT
-    #[serde(default)]
     sources: Vec<Source>,
     /// Control the behavior when an error occurs during the authentication process.
     ///
     /// Defaults to `Error`. When set to `Continue`, requests that fail JWT authentication will
     /// continue to be processed by the router, but without the JWT claims in the context. When set
     /// to `Error`, requests that fail JWT authentication will be rejected with a HTTP 403 error.
-    #[serde(default = "OnError::default")]
     on_error: OnError,
+}
+
+impl Default for JWTConf {
+    fn default() -> Self {
+        Self {
+            jwks: Default::default(),
+            header_name: default_header_name(),
+            header_value_prefix: default_header_value_prefix(),
+            ignore_other_prefixes: false,
+            sources: Default::default(),
+            on_error: Default::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
