@@ -2176,6 +2176,12 @@ expression: "&schema"
           "nullable": true,
           "type": "integer"
         },
+        "preview_connect_v0_2": {
+          "default": null,
+          "description": "Feature gate for connect spec v0.2. Set to `true` to enable the using the v0.2 spec during the preview phase.",
+          "nullable": true,
+          "type": "boolean"
+        },
         "sources": {
           "additionalProperties": {
             "$ref": "#/definitions/SourceConfiguration",
