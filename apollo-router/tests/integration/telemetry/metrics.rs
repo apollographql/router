@@ -334,7 +334,7 @@ async fn test_multi_pipelines() {
     }
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_CONFIG)
-        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(5)))
         .build()
         .await;
 
@@ -360,6 +360,14 @@ async fn test_multi_pipelines() {
         .await
         .expect("metrics");
     // There should be two instances of the pipeline metrics
-    let regex = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
-    assert_eq!(regex.captures_iter(&metrics).count(), 2);
+    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
+    assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
+
+    // There should be two connections, one active and one terminating
+    let active =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}] 1"#).expect("regex");
+    assert_eq!(active.captures_iter(&metrics).count(), 1);
+    let terminating =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}] 1"#).expect("regex");
+    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
 }

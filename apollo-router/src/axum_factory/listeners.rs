@@ -25,6 +25,7 @@ use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
+use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
@@ -32,6 +33,7 @@ use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
+use crate::services::router::pipeline_handle::PipelineRef;
 
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
 
@@ -265,6 +267,7 @@ async fn process_error(io_error: std::io::Error) {
 }
 
 pub(super) fn serve_router_on_listen_addr(
+    pipeline_ref: PipelineRef,
     mut listener: Listener,
     router: axum::Router,
     opt_max_headers: Option<usize>,
@@ -277,6 +280,7 @@ pub(super) fn serve_router_on_listen_addr(
     // accept future. If the channel received something or the sender
     // was dropped, we stop using the listener and send it back through
     // listener_receiver
+    let address = listener.local_addr().unwrap_or_default();
     let server = async move {
         tokio::pin!(shutdown_receiver);
 
@@ -291,6 +295,8 @@ pub(super) fn serve_router_on_listen_addr(
                     let app = router.clone();
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
+                    let address = address.clone();
+                    let pipeline_ref = pipeline_ref.clone();
 
                     match res {
                         Ok(res) => {
@@ -302,6 +308,7 @@ pub(super) fn serve_router_on_listen_addr(
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
+                                let mut connection_handle = ConnectionHandle::new(pipeline_ref, address);
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
@@ -347,6 +354,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
+                                                connection_handle.shutdown();
                                                 c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
@@ -392,7 +400,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
-
+                                                connection_handle.shutdown();
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
@@ -447,7 +455,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
                                                 c.graceful_shutdown();
-
+                                                connection_handle.shutdown();
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away

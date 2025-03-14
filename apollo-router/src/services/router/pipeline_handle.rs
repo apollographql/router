@@ -19,7 +19,7 @@ pub(crate) struct PipelineRef {
 /// Dropping all pipeline handles associated with the internal ref will remove the PipelineRef
 /// Clone MUST NOT be implemented for this type. Cloning will make extra copies that when dropped will throw off the global count.
 pub(crate) struct PipelineHandle {
-    pipeline_ref: PipelineRef,
+    pub(crate) pipeline_ref: PipelineRef,
 }
 
 static PIPELINES: OnceLock<Mutex<HashMap<PipelineRef, u64>>> = OnceLock::new();

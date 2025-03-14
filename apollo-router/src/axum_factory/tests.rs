@@ -69,6 +69,7 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
+use crate::metrics::FutureMetricsExt;
 use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -81,6 +82,10 @@ use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
+use crate::services::router::service::RouterCreator;
+use crate::services::supergraph;
+use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -155,6 +160,15 @@ impl RouterFactory for TestRouterFactory {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
+    }
+
+    fn pipeline_ref(&self) -> &PipelineRef {
+        static DUMMY_PIPELINE: OnceLock<PipelineRef> = OnceLock::new();
+        DUMMY_PIPELINE.get_or_init(|| PipelineRef {
+            schema_id: "dummy".to_string(),
+            launch_id: None,
+            config_hash: "dummy".to_string(),
+        })
     }
 }
 
@@ -2364,4 +2378,98 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
         error.to_string()
     );
+}
+
+
+/// This tests that the apollo.router.open_connections metric is keeps track of connections
+/// It's a replacement for the session count total metric that is more in line with otel conventions
+/// It also has pipeline information attached to it.
+#[tokio::test]
+async fn it_reports_open_connections_metric() {
+    let configuration = Configuration::fake_builder().build().unwrap();
+
+    async {
+        let (server, _client) = init_with_config(
+            router::service::empty().await,
+            Arc::new(configuration),
+            MultiMap::new(),
+        )
+            .await
+            .unwrap();
+
+
+        let url = server
+            .graphql_listen_address()
+            .as_ref()
+            .unwrap()
+            .to_string();
+
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(1)
+            .build()
+            .unwrap();
+
+        let second_client = reqwest::Client::builder()
+            .pool_max_idle_per_host(1)
+            .build()
+            .unwrap();
+
+        // Create a second client that does not reuse the same connection pool.
+        let first_response = client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
+
+        assert_gauge!(
+            "apollo.router.open_connections",
+            1,
+            "config.hash" = "dummy",
+            "schema.id" = "dummy",
+            "server.address" = "127.0.0.1",
+            "server.port" = "<any>"
+        );
+
+        let second_response = second_client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
+
+        // Both requests are in-flight
+        assert_gauge!(
+            "apollo.router.open_connections",
+            2,
+            "config.hash" = "dummy",
+            "schema.id" = "dummy",
+            "server.address" = "127.0.0.1",
+            "server.port" = "<any>"
+        );
+
+        _ = first_response.into_body().await;
+
+        // Connection is still open in the pool even though the request is complete.
+        assert_gauge!(
+            "apollo.router.open_connections",
+            2,
+            "config.hash" = "dummy",
+            "schema.id" = "dummy",
+            "server.address" = "127.0.0.1",
+            "server.port" = "<any>"
+        );
+
+        _ = second_response.into_body().await;
+
+        drop(client);
+        drop(second_client);
+
+        // XXX(@goto-bus-stop): Not ideal, but we would probably have to drop down to very
+        // low-level hyper primitives to control the shutdown of connections to the required
+        // extent. 100ms is a long time so I hope it's not flaky.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // All connections are closed
+        assert_gauge!(
+            "apollo.router.open_connections",
+            0,
+            "config.hash" = "dummy",
+            "schema.id" = "dummy",
+            "server.address" = "127.0.0.1",
+            "server.port" = "<any>"
+        );
+    }
+        .with_metrics()
+        .await;
 }

@@ -33,6 +33,8 @@ use super::graphql::GraphQLInstruments;
 use super::graphql::selectors::ListLength;
 use super::selectors::CacheKind;
 use crate::Context;
+use crate::axum_factory::connection_handle::ConnectionState;
+use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -980,6 +982,53 @@ impl InstrumentsConfig {
                                 .push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
 
                             i.observe(*count, &attributes);
+                        }
+                    })
+                    .init(),
+            ),
+        );
+
+        // This new metric will also have the pipeline information.
+        // The reason that this instrument has a different name to the one above is that we wish to also implement this in router 2.0
+        instruments.insert(
+            OPEN_CONNECTIONS_METRIC.to_string(),
+            StaticInstrument::GaugeU64(
+                meter
+                    .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
+                    .with_description("Number of currently connected clients")
+                    .with_callback(move |gauge| {
+                        let connections = crate::axum_factory::connection_handle::connections();
+                        for (connection, count) in connections.iter() {
+                            let mut attributes = Vec::with_capacity(5);
+                            if let Some((ip, port)) = connection.address.ip_and_port() {
+                                attributes.push(KeyValue::new("server.address", ip.to_string()));
+                                attributes.push(KeyValue::new("server.port", port.to_string()));
+                            } else {
+                                // Unix socket
+                                attributes.push(KeyValue::new(
+                                    "server.address",
+                                    connection.address.to_string(),
+                                ));
+                            }
+                            attributes.push(KeyValue::new(
+                                "schema.id",
+                                connection.pipeline_ref.schema_id.clone(),
+                            ));
+                            if let Some(launch_id) = &connection.pipeline_ref.launch_id {
+                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
+                            }
+                            attributes.push(KeyValue::new(
+                                "config.hash",
+                                connection.pipeline_ref.config_hash.clone(),
+                            ));
+                            attributes.push(KeyValue::new(
+                                "state",
+                                match connection.state {
+                                    ConnectionState::Active => "active",
+                                    ConnectionState::Terminating => "terminating",
+                                },
+                            ));
+                            gauge.observe(*count, &attributes);
                         }
                     })
                     .init(),

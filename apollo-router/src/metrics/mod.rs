@@ -31,7 +31,7 @@ pub(crate) mod test_utils {
     use itertools::Itertools;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
-    use opentelemetry::Array;
+    use opentelemetry::{Array, StringValue};
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
     use opentelemetry_sdk::metrics::Aggregation;
@@ -316,7 +316,7 @@ pub(crate) mod test_utils {
             attrs1
                 .iter()
                 .zip(attrs2.iter())
-                .all(|((k, v), kv)| kv.key == *k && kv.value == *v)
+                .all(|((k, v), kv)| kv.key == *k && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>"))))
         }
     }
 

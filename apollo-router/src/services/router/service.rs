@@ -95,6 +95,8 @@ use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
+#[cfg(test)]
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
@@ -1003,6 +1005,10 @@ impl RouterFactory for RouterCreator {
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn pipeline_ref(&self) -> &PipelineRef {
+        &self._pipeline_handle.pipeline_ref
     }
 }
 
