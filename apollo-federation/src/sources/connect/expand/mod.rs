@@ -26,6 +26,7 @@ use visitors::filter_directives;
 pub struct Connectors {
     pub by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     pub labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
+    pub source_config_keys: Arc<HashSet<String>>,
 }
 
 /// The result of a supergraph expansion of connect-aware subgraphs
@@ -110,12 +111,18 @@ pub fn expand_connectors(
         .map(|(service_name, connector)| (service_name.clone(), connector.id.label.clone()))
         .collect();
 
+    let source_config_keys = connectors_by_service_name
+        .iter()
+        .map(|(_, connector)| connector.source_config_key())
+        .collect();
+
     Ok(ExpansionResult::Expanded {
         raw_sdl: new_supergraph.schema().serialize().to_string(),
         api_schema: Box::new(api_schema.schema().clone()),
         connectors: Connectors {
             by_service_name: Arc::new(connectors_by_service_name),
             labels_by_service_name: Arc::new(labels_by_service_name),
+            source_config_keys: Arc::new(source_config_keys),
         },
     })
 }
@@ -441,13 +448,14 @@ mod helpers {
                 // if we have a complex input since leaf types can just be copied over.
                 if !arg_extended_type.is_built_in() {
                     match arg_type {
-                        TypeDefinitionPosition::InputObject(input) => SchemaVisitor::new(
-                            self.original_schema,
-                            to_schema,
-                            &self.directive_deny_list,
-                        )
-                        .walk(input)?,
-
+                        TypeDefinitionPosition::InputObject(input) => {
+                            SchemaVisitor::new(
+                                self.original_schema,
+                                to_schema,
+                                &self.directive_deny_list,
+                            )
+                            .walk(input)?;
+                        }
                         other => self.insert_custom_leaf(to_schema, &other)?,
                     };
                 }

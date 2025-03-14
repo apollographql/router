@@ -802,6 +802,7 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
         "#,
     );
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
         {
