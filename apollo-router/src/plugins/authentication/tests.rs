@@ -155,13 +155,16 @@ async fn build_a_test_harness(
             serde_json::Value::String("Continue".to_string());
     }
 
-    crate::TestHarness::builder()
+    match crate::TestHarness::builder()
         .configuration_json(config)
         .unwrap()
         .supergraph_hook(move |_| mock_service.clone().boxed())
         .build_router()
         .await
-        .unwrap()
+    {
+        Ok(test_harness) => test_harness,
+        Err(e) => panic!("Failed to build test harness: {}", e),
+    }
 }
 
 #[tokio::test]

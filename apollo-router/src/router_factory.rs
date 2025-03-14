@@ -792,9 +792,16 @@ pub(crate) async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
+        let errors_list = errors
+            .iter()
+            .map(|error| format!("{:#}", error))
+            .collect::<Vec<String>>()
+            .join("\n");
+
         Err(BoxError::from(format!(
-            "there were {} configuration errors",
-            errors.len()
+            "there were {} configuration errors\n{}",
+            errors.len(),
+            errors_list
         )))
     } else {
         Ok(plugin_instances)
