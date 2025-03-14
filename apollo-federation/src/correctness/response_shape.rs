@@ -411,11 +411,9 @@ impl Clause {
             self_variables.insert(lit.variable().clone(), lit.polarity());
         }
         other.0.iter().all(|lit| {
-            if let Some(polarity) = self_variables.get(lit.variable()) {
-                *polarity == lit.polarity()
-            } else {
-                false
-            }
+            self_variables
+                .get(lit.variable())
+                .is_some_and(|pol| *pol == lit.polarity())
         })
     }
 

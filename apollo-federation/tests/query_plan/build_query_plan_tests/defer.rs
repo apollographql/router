@@ -2503,7 +2503,6 @@ fn defer_test_defer_with_conditions_and_labels() {
             }
           }
         "#,
-        QueryPlanOptions::default(),
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2591,7 +2590,6 @@ fn defer_test_defer_with_conditions_and_labels() {
             }
           }
         "#,
-        QueryPlanOptions::default(),
         @r###"
           QueryPlan {
             Condition(if: $cond) {
@@ -2700,7 +2698,6 @@ fn defer_test_defer_with_condition_on_single_subgraph() {
               }
             }
         "#,
-        QueryPlanOptions::default(),
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2811,7 +2808,6 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
               }
             }
         "#,
-        QueryPlanOptions::default(),
         @r###"
           QueryPlan {
             Condition(if: $cond1) {

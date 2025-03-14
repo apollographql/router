@@ -1,7 +1,5 @@
 // Compare response shapes from a query plan and an input operation.
 
-use std::fmt;
-
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast;
@@ -19,7 +17,7 @@ use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Display)]
 pub struct ComparisonError {
     description: String,
 }
@@ -37,12 +35,6 @@ impl ComparisonError {
         ComparisonError {
             description: format!("{}\n{}", self.description, description),
         }
-    }
-}
-
-impl fmt::Display for ComparisonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.description)
     }
 }
 
@@ -385,11 +377,10 @@ fn extract_boolean_hypotheses(
         variable_groups.insert(vars);
     }
     // Generate groups of Boolean hypotheses.
-    let mut result = Vec::new();
-    for group in variable_groups {
-        result.push(generate_clauses(&group));
-    }
-    result
+    variable_groups
+        .into_iter()
+        .map(|group| generate_clauses(&group))
+        .collect()
 }
 
 /// Generate all possible clauses from the given variables.
@@ -398,16 +389,19 @@ fn generate_clauses(vars: &[Name]) -> Vec<Clause> {
     let mut state = Vec::new();
     let mut result = Vec::new();
     fn inner_generate(state: &mut Vec<Literal>, result: &mut Vec<Clause>, remaining_vars: &[Name]) {
-        if remaining_vars.is_empty() {
-            result.push(Clause::from_literals(state));
-            return;
+        match remaining_vars {
+            [] => {
+                result.push(Clause::from_literals(state));
+            }
+            [var, rest @ ..] => {
+                state.push(Literal::Pos(var.clone()));
+                inner_generate(state, result, rest);
+                state.pop();
+                state.push(Literal::Neg(var.clone()));
+                inner_generate(state, result, rest);
+                state.pop();
+            }
         }
-        let var = &remaining_vars[0];
-        state.push(Literal::Pos(var.clone()));
-        inner_generate(state, result, &remaining_vars[1..]);
-        state.pop();
-        state.push(Literal::Neg(var.clone()));
-        inner_generate(state, result, &remaining_vars[1..]);
     }
     inner_generate(&mut state, &mut result, vars);
     result
