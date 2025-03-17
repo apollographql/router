@@ -2,7 +2,7 @@
 
 This change introduces a [`persisted_queries.hot_reload` configuration option](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#hot_reload) to allow the router to hot reload local PQ manifest changes.
 
-When using the `local_manifests` option, you can use the `hot_reload` option to tell the router to watch the manifest files for changes and reload them automatically. This is useful if you'd prefer to make updates to the manifest without restarting the router.
+If you configure `local_manifests`, you can set `hot_reload` to `true` to automatically reload manifest files whenever they change. This lets you update local manifest files without restarting the router.
 
 ```yaml
 persisted_queries:
