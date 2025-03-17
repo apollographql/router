@@ -622,22 +622,16 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
         .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
         .ok()
         .flatten();
-    let ts_opt = claims.as_ref().and_then(|x: &serde_json::Value| {
-        let claims = match x.as_object() {
-            Ok(claims) => claims,
-            Err(_) => {
+    let ts_opt = claims
+        .as_ref()
+        .and_then(|x: &serde_json::Value| match x.as_object() {
+            Some(claims) => claims.get("exp")?.as_i64(),
+            None => {
                 tracing::error!("expected JWT claims to be an object");
-                return None;
-            }
-        };
-        match claims.get("exp")?.as_i64() {
-            Ok(exp) => exp,
-            Err(_) => {
-                tracing::error!("expected JWT 'exp' (expiry) claim to be an integer");
                 None
             }
-        }
-    });
+        });
+
     match ts_opt {
         Some(ts) => {
             let now = SystemTime::now()
@@ -650,7 +644,12 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
                 Duration::ZERO
             }
         }
-        None => Duration::MAX,
+        None => {
+            tracing::error!(
+                "expected JWT 'exp' (expiry) claim to be an integer, defaulting to maximum duration"
+            );
+            Duration::MAX
+        }
     }
 }
 
