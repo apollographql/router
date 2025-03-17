@@ -7,6 +7,7 @@ use apollo_compiler::ast::OperationType;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::parser::SourceSpan;
@@ -18,6 +19,7 @@ use itertools::Itertools;
 
 use self::keys::EntityKeyChecker;
 use self::keys::field_set_error;
+use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -27,7 +29,9 @@ use crate::sources::connect::Connector;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
+use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 mod keys;
 
 pub(super) fn validate(
@@ -35,7 +39,9 @@ pub(super) fn validate(
     file_name: &str,
     fields_seen_by_connectors: Vec<(Name, Name)>,
 ) -> Vec<Message> {
-    let messages: Vec<Message> = verify_no_abstract_types_are_defined(schema).collect();
+    let messages: Vec<Message> = verify_no_abstract_types_are_defined(schema)
+        .chain(check_conflicting_directives(schema))
+        .collect();
     if !messages.is_empty() {
         return messages;
     }
@@ -61,6 +67,50 @@ fn verify_no_abstract_types_are_defined(schema: &SchemaInfo) -> impl Iterator<It
             )),
             _ => None,
         })
+}
+
+/// Certain federation directives are not allowed when using connectors.
+/// We produce errors for any which were imported, even if not used.
+fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
+    let Some((fed_link, fed_link_directive)) =
+        Link::for_identity(schema, &Identity::federation_identity())
+    else {
+        return Vec::new();
+    };
+
+    // TODO: make the `Link` code retain locations directly instead of reparsing stuff for validation
+    let imports = fed_link_directive
+        .specified_argument_by_name(&name!("import"))
+        .and_then(|arg| arg.as_list())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
+        .collect_vec();
+
+    let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
+    fed_link
+        .imports
+        .into_iter()
+        .filter_map(|import| {
+            disallowed_imports
+                .contains(&import.element)
+                .then(|| Message {
+                    code: Code::ConnectorsUnsupportedFederationDirective,
+                    message: format!(
+                        "The directive `@{import}` is not supported when using connectors.",
+                        import = import.alias.as_ref().unwrap_or(&import.element)
+                    ),
+                    locations: imports
+                        .iter()
+                        .find_map(|(value, reparsed)| {
+                            (*reparsed == *import).then(|| value.line_column_range(&schema.sources))
+                        })
+                        .flatten()
+                        .into_iter()
+                        .collect(),
+                })
+        })
+        .collect()
 }
 
 fn abstract_type_error(node: Option<SourceSpan>, source_map: &SourceMap, keyword: &str) -> Message {
