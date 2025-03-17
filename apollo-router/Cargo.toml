@@ -93,7 +93,7 @@ dhat = { version = "0.3.3", optional = true }
 diff = "0.1.13"
 displaydoc = "0.2"
 flate2 = "1.0.30"
-fred = { version = "9.4.0", features = ["enable-rustls", "i-cluster"] }
+fred = { version = "9.4.0", features = ["enable-rustls", "mocks", "i-cluster"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.14.0"
 hex.workspace = true
@@ -278,7 +278,6 @@ tikv-jemallocator = "0.6.0"
 axum = { version = "0.8.1", features = ["http2", "ws"] }
 axum-server = "0.7.1"
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
-fred = { version = "9.4.0", features = ["enable-rustls", "mocks", "i-cluster"] }
 futures-test = "0.3.30"
 insta.workspace = true
 maplit = "1.0.2"

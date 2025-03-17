@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fred::interfaces::EventInterface;
-#[cfg(test)]
 use fred::mocks::Mocks;
 use fred::prelude::ClientLike;
 use fred::prelude::KeysInterface;
@@ -51,8 +50,9 @@ pub(crate) struct RedisValue<V>(pub(crate) V)
 where
     V: ValueType;
 
+/// `pub` for use in tests
 #[derive(Clone)]
-pub(crate) struct RedisCacheStorage {
+pub struct RedisCacheStorage {
     inner: Arc<RedisPool>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
@@ -184,8 +184,8 @@ impl RedisCacheStorage {
         .await
     }
 
-    #[cfg(test)]
-    pub(crate) async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
+    /// `pub` for tests
+    pub async fn from_mocks(mocks: Arc<dyn Mocks>) -> Result<Self, BoxError> {
         let client_config = RedisConfig {
             mocks: Some(mocks),
             ..Default::default()

@@ -963,7 +963,7 @@ impl Default for InMemoryCache {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
-pub(crate) struct RedisCache {
+pub struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<url::Url>,
 

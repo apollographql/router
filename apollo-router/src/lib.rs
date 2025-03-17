@@ -116,9 +116,12 @@ pub mod _private {
     pub use once_cell;
     pub use serde_json;
 
+    // For tests
+    pub use crate::cache::redis::RedisCacheStorage;
     pub use crate::plugin::PLUGINS;
     pub use crate::plugin::PluginFactory;
-    // For tests
+    pub use crate::plugins::cache::entity as entity_cache;
+    pub use crate::plugins::cache::tests::MockStore;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
     pub use crate::services::APOLLO_GRAPH_REF;
     pub use crate::services::APOLLO_KEY;

@@ -30,7 +30,8 @@ pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint"
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
-pub(crate) struct SubgraphInvalidationConfig {
+#[allow(missing_docs)] // `pub` for tests
+pub struct SubgraphInvalidationConfig {
     /// Enable the invalidation
     pub(crate) enabled: bool,
     /// Shared key needed to request the invalidation endpoint
@@ -260,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key() {
-        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::default()))
             .await
             .unwrap();
         let storage = Arc::new(Storage {
@@ -306,7 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalidation_service_bad_shared_key_subgraph() {
-        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::default()))
             .await
             .unwrap();
         let storage = Arc::new(Storage {

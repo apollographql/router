@@ -71,12 +71,13 @@ pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
 /// Context key to enable support of surrogate cache key
-pub(crate) const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
+pub const CONTEXT_CACHE_KEYS: &str = "apollo::entity_cache::cached_keys_status";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
+/// `pub` for tests
 #[derive(Clone)]
-pub(crate) struct EntityCache {
+pub struct EntityCache {
     storage: Arc<Storage>,
     endpoint_config: Option<Arc<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
@@ -91,9 +92,12 @@ pub(crate) struct EntityCache {
     subgraph_enums: Arc<HashMap<String, String>>,
 }
 
-pub(crate) struct Storage {
-    pub(crate) all: Option<RedisCacheStorage>,
-    pub(crate) subgraphs: HashMap<String, RedisCacheStorage>,
+/// `pub` for tests
+pub struct Storage {
+    /// `pub` for tests
+    pub all: Option<RedisCacheStorage>,
+    /// `pub` for tests
+    pub subgraphs: HashMap<String, RedisCacheStorage>,
 }
 
 impl Storage {
@@ -105,7 +109,7 @@ impl Storage {
 /// Configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) struct Config {
+pub struct Config {
     /// Enable or disable the entity caching feature
     #[serde(default)]
     pub(crate) enabled: bool,
@@ -128,21 +132,21 @@ pub(crate) struct Config {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
-pub(crate) struct Subgraph {
+pub struct Subgraph {
     /// Redis configuration
-    pub(crate) redis: Option<RedisCache>,
+    pub redis: Option<RedisCache>,
 
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
-    pub(crate) ttl: Option<Ttl>,
+    pub ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    pub(crate) enabled: bool,
+    pub enabled: bool,
 
     /// Context key used to separate cache sections per user
-    pub(crate) private_id: Option<String>,
+    pub private_id: Option<String>,
 
     /// Invalidation configuration
-    pub(crate) invalidation: Option<SubgraphInvalidationConfig>,
+    pub invalidation: Option<SubgraphInvalidationConfig>,
 }
 
 impl Default for Subgraph {
@@ -160,7 +164,7 @@ impl Default for Subgraph {
 /// Per subgraph configuration for entity caching
 #[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub(crate) struct Ttl(
+pub struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     pub(crate) Duration,
@@ -474,8 +478,8 @@ impl Plugin for EntityCache {
 }
 
 impl EntityCache {
-    #[cfg(test)]
-    pub(crate) async fn with_mocks(
+    /// `pub` for tests
+    pub async fn with_mocks(
         storage: RedisCacheStorage,
         subgraphs: HashMap<String, Subgraph>,
         supergraph_schema: Arc<Valid<Schema>>,
@@ -1727,18 +1731,18 @@ fn assemble_response_from_errors(
     (new_entities, new_errors)
 }
 
-pub(crate) type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContext>>;
+/// `pub` for tests
+pub type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContext>>;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
-pub(crate) struct CacheKeyContext {
+/// `pub` for tests
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CacheKeyContext {
     key: String,
     status: CacheKeyStatus,
     cache_control: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(PartialEq, Eq, Hash))]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum CacheKeyStatus {
     /// New cache key inserted in the cache
@@ -1747,14 +1751,12 @@ pub(crate) enum CacheKeyStatus {
     Cached,
 }
 
-#[cfg(test)]
 impl PartialOrd for CacheKeyStatus {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-#[cfg(test)]
 impl Ord for CacheKeyStatus {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         match (self, other) {
