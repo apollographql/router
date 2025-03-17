@@ -529,6 +529,12 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
     meter_provider_internal()
 }
 
+macro_rules! parse_attributes {
+    ($($attr_key:literal = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+]};
+    ($($($attr_key:ident).+ = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+]};
+    ($attrs:expr) => {$attrs};
+}
+
 /// Get or create a `u64` monotonic counter metric and add a value to it.
 ///
 /// Each metric needs a description.
@@ -571,24 +577,12 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
 /// ```
 #[allow(unused_macros)]
 macro_rules! u64_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, counter, add, $name, $description, $value, attributes);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -612,25 +606,14 @@ macro_rules! u64_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, counter, add, $name, $description, $value, attributes);
-    };
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
         metric!(f64, counter, add, $name, $description, $value, $attrs);
     };
@@ -652,24 +635,12 @@ macro_rules! f64_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(i64, up_down_counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(i64, up_down_counter, add, $name, $description, $value, attributes);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -693,24 +664,12 @@ macro_rules! i64_up_down_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, up_down_counter, add, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, up_down_counter, add, $name, $description, $value, attributes);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
@@ -734,28 +693,16 @@ macro_rules! f64_up_down_counter {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! f64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(f64, histogram, record, $name, $description, $value, attributes);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, $attrs);
+        metric!(f64, histogram, record, $name, $description, $value, parse_attributes!($attrs));
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -775,24 +722,12 @@ macro_rules! f64_histogram {
 /// New metrics should be added using these macros.
 #[allow(unused_macros)]
 macro_rules! u64_histogram {
-    ($($name:ident).+, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, attributes);
+    ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($($name:ident).+, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, histogram, record, stringify!($($name).+), $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($attr_key:literal = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
-        metric!(u64, histogram, record, $name, $description, $value, attributes);
-    };
-
-    ($name:literal, $description:literal, $value: expr, $($($attr_key:ident).+ = $attr_value:expr),+) => {
-        let attributes = [$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
-        metric!(u64, histogram, record, $name, $description, $value, attributes);
+    ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
     ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
