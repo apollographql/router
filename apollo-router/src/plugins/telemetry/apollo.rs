@@ -152,7 +152,7 @@ impl Default for ErrorConfiguration {
         Self {
             send: true,
             redact: true,
-            redaction_policy: ErrorRedactionPolicy::Strict,
+            redaction_policy: ErrorRedactionPolicy::default(),
         }
     }
 }
