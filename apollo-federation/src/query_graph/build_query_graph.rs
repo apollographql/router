@@ -1923,13 +1923,6 @@ impl FederatedQueryGraphBuilder {
                             stack.push((node, &inline_fragment_selection.selection_set));
                         }
                     }
-                    Selection::FragmentSpread(_) => {
-                        return Err(SingleFederationError::Internal {
-                            message: "Unexpectedly found named fragment in FieldSet scalar"
-                                .to_owned(),
-                        }
-                        .into());
-                    }
                 }
             }
         }

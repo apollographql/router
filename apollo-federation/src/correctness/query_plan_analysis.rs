@@ -1,12 +1,18 @@
 // Analyze a QueryPlan and compute its overall response shape
 
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Name;
 use itertools::Itertools;
 
 use super::response_shape::Clause;
+use super::response_shape::DefinitionVariant;
 use super::response_shape::Literal;
 use super::response_shape::NormalizedTypeCondition;
 use super::response_shape::PossibleDefinitions;
+use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_entity_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
@@ -355,17 +361,22 @@ fn interpret_fetch_node(
     conditions: &[Literal],
     fetch: &FetchNode,
 ) -> Result<ResponseShape, String> {
-    let mut result = if let Some(_requires) = &fetch.requires {
+    let operation_doc = fetch
+        .operation_document
+        .as_parsed()
+        .map_err(|e| e.to_string())?;
+    let mut result = if !fetch.requires.is_empty() {
         // TODO: check requires
         // Response shapes per entity selection
         let response_shapes =
-            compute_response_shape_for_entity_fetch_operation(&fetch.operation_document, schema)
-                .map_err(|e| {
+            compute_response_shape_for_entity_fetch_operation(operation_doc, schema).map_err(
+                |e| {
                     format!(
                         "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
                         format_federation_error(e),
                     )
-                })?;
+                },
+            )?;
 
         // Compute the merged result from the individual entity response shapes.
         merge_response_shapes(response_shapes.iter()).map_err(|e| {
@@ -375,7 +386,7 @@ fn interpret_fetch_node(
             )
         })
     } else {
-        compute_response_shape_for_operation(&fetch.operation_document, schema).map_err(|e| {
+        compute_response_shape_for_operation(operation_doc, schema).map_err(|e| {
             format!(
                 "Failed to compute the response shape from fetch node: {}\nnode: {fetch}",
                 format_federation_error(e),
@@ -385,6 +396,9 @@ fn interpret_fetch_node(
     .map(|rs| rs.add_boolean_conditions(conditions))?;
     for rewrite in &fetch.output_rewrites {
         result = apply_rewrites(schema, &result, rewrite)?;
+    }
+    if !fetch.context_rewrites.is_empty() {
+        result = remove_context_arguments(&fetch.context_rewrites, &result)?;
     }
     Ok(result)
 }
@@ -400,6 +414,87 @@ fn merge_response_shapes<'a>(
         result.merge_with(rs)?;
     }
     Ok(result)
+}
+
+/// Remove context arguments that are added to fetch operations.
+/// Returns a new response shape with all field arguments referencing a context variable removed.
+fn remove_context_arguments(
+    context_rewrites: &[Arc<FetchDataRewrite>],
+    response: &ResponseShape,
+) -> Result<ResponseShape, String> {
+    let context_variables: Result<HashSet<Name>, _> = context_rewrites
+        .iter()
+        .map(|rewrite| match rewrite.as_ref() {
+            FetchDataRewrite::KeyRenamer(renamer) => Ok(renamer.rename_key_to.clone()),
+            FetchDataRewrite::ValueSetter(_) => {
+                Err("unexpected value setter in context rewrites".to_string())
+            }
+        })
+        .collect();
+    Ok(remove_context_arguments_in_response_shape(
+        &context_variables?,
+        response,
+    ))
+}
+
+/// `context_variables`: the set of context variable names
+fn remove_context_arguments_in_response_shape(
+    context_variables: &HashSet<Name>,
+    response_shape: &ResponseShape,
+) -> ResponseShape {
+    let mut result = ResponseShape::new(response_shape.default_type_condition().clone());
+    for (key, defs) in response_shape.iter() {
+        let mut updated_defs = PossibleDefinitions::default();
+        for (type_cond, defs_per_type_cond) in defs.iter() {
+            let updated_selection_key = remove_context_arguments_in_field(
+                context_variables,
+                defs_per_type_cond.field_selection_key(),
+            );
+            let updated_variants =
+                defs_per_type_cond
+                    .conditional_variants()
+                    .iter()
+                    .map(|variant| {
+                        let updated_representative_field = remove_context_arguments_in_field(
+                            context_variables,
+                            variant.representative_field(),
+                        );
+                        let sub_rs = variant.sub_selection_response_shape().as_ref().map(|rs| {
+                            remove_context_arguments_in_response_shape(context_variables, rs)
+                        });
+                        DefinitionVariant::new(
+                            variant.boolean_clause().clone(),
+                            updated_representative_field,
+                            sub_rs,
+                        )
+                    });
+            let updated_variants: Vec<_> = updated_variants.collect();
+            let updated_defs_per_type_cond =
+                PossibleDefinitionsPerTypeCondition::new(updated_selection_key, updated_variants);
+            updated_defs.insert(type_cond.clone(), updated_defs_per_type_cond);
+        }
+        result.insert(key.clone(), updated_defs);
+    }
+    result
+}
+
+/// `context_variables`: the set of context variable names
+fn remove_context_arguments_in_field(context_variables: &HashSet<Name>, field: &Field) -> Field {
+    let arguments = field
+        .arguments
+        .iter()
+        .filter_map(|arg| {
+            // see if the argument value is one of the context variables
+            match arg.value.as_variable() {
+                Some(var) if context_variables.contains(var) => None,
+                _ => Some(arg.clone()),
+            }
+        })
+        .collect();
+    Field {
+        arguments,
+        ..field.clone()
+    }
 }
 
 /// Add a literal to the conditions
