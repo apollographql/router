@@ -85,7 +85,7 @@ where {
                 while let Some(data) = stream.next().await {
                     match data {
                         Err(e) => {
-                            if tx.send(Err(e.into())).await.is_err() {
+                            if (tx.send(Err(e.into())).await).is_err() {
                                 return;
                             }
                         }
@@ -132,7 +132,7 @@ where {
                                     let _ = partial_output.into_inner();
                                     buf.resize(len, 0);
 
-                                    if tx.send(Ok(buf.freeze())).await.is_err() {
+                                    if (tx.send(Ok(buf.freeze())).await).is_err() {
                                         return;
                                     }
                                     break;
@@ -156,7 +156,7 @@ where {
 
                             let mut buf = partial_output.into_inner();
                             buf.resize(len, 0);
-                            if tx.send(Ok(buf.freeze())).await.is_err() {
+                            if (tx.send(Ok(buf.freeze())).await).is_err() {
                                 return;
                             }
                             if is_flushed {
@@ -219,6 +219,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::*;
+    use crate::services::router;
     use crate::services::router::body::{self};
 
     #[tokio::test]
@@ -295,7 +296,7 @@ content-type: application/json
 "#;
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: RouterBody = body::from_result_stream(stream::iter(vec![
+        let body: RouterBody = router::body::from_result_stream(stream::iter(vec![
             Ok::<_, BoxError>(Bytes::from(primary_response)),
             Ok(Bytes::from(deferred_response)),
         ]));
