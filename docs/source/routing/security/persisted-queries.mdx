@@ -45,7 +45,11 @@ From version `1.25.0` to `1.32.0`, the `persisted_queries` configuration option 
 
 </Note>
 
+<MinVersion version="1.32.0">
+
 #### `persisted_queries`
+
+</MinVersion>
 
 This base configuration enables the feature. All other configuration options build off this one.
 
@@ -54,7 +58,11 @@ persisted_queries:
   enabled: true
 ```
 
+<MinVersion version="1.32.0">
+
 #### `log_unknown`
+
+</MinVersion>
 
 Adding `log_unknown: true` to `persisted_queries` configures the router to log any incoming operations not registered to the PQL.
 
@@ -66,7 +74,11 @@ persisted_queries:
 
 If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.require_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.require_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
 
+<MinVersion version="1.55.0">
+
 #### `experimental_prewarm_query_plan_cache`
+
+</MinVersion>
 
 <ExperimentalFeature />
 
@@ -80,7 +92,17 @@ persisted_queries:
     on_reload: false   # default: true
 ```
 
+<MinVersion version="1.55.0">
+
 #### `local_manifests`
+
+</MinVersion>
+
+<Note>
+
+From version `1.50.0` to `1.54`, the `local_manifests` configuration option was named `experimental_local_manifests`. Upgrade your router to version `1.55.0` or later to use the [generally available](/resources/product-launch-stages/#general-availability) version of the feature and the example configuration snippet below.
+
+</Note>
 
 Adding `local_manifests` to your `persisted-queries` configuration lets you use local persisted query manifests instead of the hosted Uplink version. This is helpful when you're using an offline Enterprise license and can't use Uplink. With `local_manifests`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
 
@@ -93,7 +115,11 @@ persisted_queries:
 
 You can download a version of your manifest to use locally from [GraphOS Studio](https://studio.apollographql.com/?referrer=docs-content). Open the PQL page for a graph by clicking the **Go to persisted query lists** to the left of the graph's name. Then, click the ••• menu under the **Actions** column to download a PQL's manifest as a JSON file. Save this file locally and update your `local_manifests` configuration with the path the file.
 
+<MinVersion version="1.32.0">
+
 #### `safelist`
+
+</MinVersion>
 
 Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
 
@@ -114,7 +140,11 @@ To enable safelisting, you _must_ turn off [automatic persisted queries](/router
 
 By default, the [`require_id`](#require_id) suboption is `false`, meaning the router accepts both operation IDs and operation strings as long as the operation is registered.
 
+<MinVersion version="1.32.0">
+
 #### `require_id`
+
+</MinVersion>
 
 Adding `require_id: true` to the `safelist` option causes the router to reject any operations that either:
 - haven't been registered to your PQL
