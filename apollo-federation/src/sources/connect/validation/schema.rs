@@ -38,7 +38,7 @@ pub(super) fn validate(
     file_name: &str,
     fields_seen_by_connectors: Vec<(Name, Name)>,
 ) -> Vec<Message> {
-    let messages: Vec<Message> = verify_no_abstract_types_are_defined(schema)
+    let messages: Vec<Message> = check_for_disallowed_type_definitions(schema)
         .chain(check_conflicting_directives(schema))
         .collect();
     if !messages.is_empty() {
@@ -49,11 +49,16 @@ pub(super) fn validate(
         .collect()
 }
 
-fn verify_no_abstract_types_are_defined(schema: &SchemaInfo) -> impl Iterator<Item = Message> {
+fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<Item = Message> {
+    let subscription_name = schema
+        .schema_definition
+        .subscription
+        .as_ref()
+        .map(|sub| &sub.name);
     schema
         .types
         .values()
-        .filter_map(|extended_type| match extended_type {
+        .filter_map(move |extended_type| match extended_type {
             ExtendedType::Union(union_type) => Some(abstract_type_error(
                 SourceSpan::recompose(union_type.location(), union_type.name.location()),
                 &schema.sources,
@@ -64,6 +69,16 @@ fn verify_no_abstract_types_are_defined(schema: &SchemaInfo) -> impl Iterator<It
                 &schema.sources,
                 "interface",
             )),
+            ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == &obj.name) => {
+                    Some(Message {
+                        code: Code::SubscriptionInConnectors,
+                        message: format!(
+                            "A subscription root type is not supported when using `@{connect_directive_name}`.",
+                            connect_directive_name = schema.connect_directive_name(),
+                        ),
+                        locations: obj.name.line_column_range(&schema.sources).into_iter().collect(),
+                    })
+            }
             _ => None,
         })
 }
