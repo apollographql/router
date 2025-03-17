@@ -585,10 +585,6 @@ macro_rules! u64_counter {
         metric!(u64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(u64, counter, add, $name, $description, $value, $attrs);
-    };
-
     ($name:literal, $description:literal, $value: expr) => {
         metric!(u64, counter, add, $name, $description, $value, []);
     }
@@ -612,10 +608,6 @@ macro_rules! f64_counter {
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(f64, counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, counter, add, $name, $description, $value, $attrs);
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -643,10 +635,6 @@ macro_rules! i64_up_down_counter {
         metric!(i64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(i64, up_down_counter, add, $name, $description, $value, $attrs);
-    };
-
     ($name:literal, $description:literal, $value: expr) => {
         metric!(i64, up_down_counter, add, $name, $description, $value, []);
     };
@@ -670,10 +658,6 @@ macro_rules! f64_up_down_counter {
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(f64, up_down_counter, add, $name, $description, $value, parse_attributes!($($attrs)*));
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, up_down_counter, add, $name, $description, $value, $attrs);
     };
 
     ($name:literal, $description:literal, $value: expr) => {
@@ -701,10 +685,6 @@ macro_rules! f64_histogram {
         metric!(f64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
     };
 
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(f64, histogram, record, $name, $description, $value, parse_attributes!($attrs));
-    };
-
     ($name:literal, $description:literal, $value: expr) => {
         metric!(f64, histogram, record, $name, $description, $value, []);
     };
@@ -728,10 +708,6 @@ macro_rules! u64_histogram {
 
     ($name:literal, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(u64, histogram, record, $name, $description, $value, parse_attributes!($($attrs)*));
-    };
-
-    ($name:literal, $description:literal, $value: expr, $attrs: expr) => {
-        metric!(u64, histogram, record, $name, $description, $value, $attrs);
     };
 
     ($name:literal, $description:literal, $value: expr) => {
