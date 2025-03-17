@@ -218,6 +218,11 @@ mod tests {
                 body: "}}}".to_string(),
                 client_name: None,
             },
+            ManifestOperation {
+                id: "multiple-ops".to_string(),
+                body: "query Op1 { a b } query Op2 { b a }".to_string(),
+                client_name: None,
+            },
         ]));
 
         let is_allowed = |body: &str| -> bool {
@@ -233,6 +238,9 @@ mod tests {
         assert!(is_allowed(
             "#comment\n  fragment, B on U  , { b    c }    query SomeOp {  ...A ...B }  fragment    \nA on T { a }"
         ));
+
+        // Reordering operation definitions matches
+        assert!(is_allowed("query Op2 { b a } query Op1 { a b }"));
 
         // Reordering fields does not match!
         assert!(!is_allowed(
