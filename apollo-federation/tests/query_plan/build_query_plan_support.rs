@@ -58,6 +58,9 @@ macro_rules! subgraph_name {
 /// formatted query plan string.
 /// Run `cargo insta review` to diff and accept changes to the generated query plan.
 macro_rules! assert_plan {
+    (validate_correctness = $validate_correctness: expr, $api_schema_and_planner: expr, $operation: expr, @$expected: literal) => {{
+        assert_plan!($api_schema_and_planner, $operation, Default::default(), $validate_correctness, @$expected)
+    }};
     ($planner: expr, $operation: expr, $options: expr, $validate_correctness: expr, @$expected: literal) => {{
         let api_schema = $planner.api_schema();
         let document = apollo_compiler::ExecutableDocument::parse_and_validate(
@@ -68,7 +71,7 @@ macro_rules! assert_plan {
         .expect("valid graphql document");
         let plan = $planner.build_query_plan(&document, None, $options).expect("query plan generated");
         insta::assert_snapshot!(plan, @$expected);
-        // temporary workaround for FED-508 and FED-509
+        // temporary workaround for correctness errors such as FED-515
         if $validate_correctness {
             apollo_federation::correctness::check_plan($planner.api_schema(), $planner.supergraph_schema(), $planner.subgraph_schemas(), &document, &plan).expect("generated correct plan");
         }
