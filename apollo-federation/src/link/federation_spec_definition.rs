@@ -21,6 +21,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -544,7 +545,18 @@ impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
     }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
 }
+
+pub(crate) static FED_1: LazyLock<FederationSpecDefinition> =
+    LazyLock::new(|| FederationSpecDefinition::new(Version { major: 1, minor: 0 }));
 
 pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDefinition>> =
     LazyLock::new(|| {
@@ -595,17 +607,18 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
 pub(crate) fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,
 ) -> Result<&'static FederationSpecDefinition, FederationError> {
-    let federation_link = schema
+    if let Some(federation_link) = schema
         .metadata()
         .as_ref()
         .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
-        .ok_or_else(|| SingleFederationError::Internal {
-            message: "Subgraph unexpectedly does not use federation spec".to_owned(),
-        })?;
-    Ok(FEDERATION_VERSIONS
-        .find(&federation_link.url.version)
-        .ok_or_else(|| SingleFederationError::Internal {
-            message: "Subgraph unexpectedly does not use a supported federation spec version"
-                .to_owned(),
-        })?)
+    {
+        Ok(FEDERATION_VERSIONS
+            .find(&federation_link.url.version)
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Subgraph unexpectedly does not use a supported federation spec version"
+                    .to_owned(),
+            })?)
+    } else {
+        Ok(&FED_1)
+    }
 }

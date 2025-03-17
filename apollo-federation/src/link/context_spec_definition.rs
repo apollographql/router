@@ -15,6 +15,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
 pub(crate) const CONTEXT_NAME_ARGUMENT_NAME: Name = name!("name");
@@ -59,6 +60,14 @@ impl ContextSpecDefinition {
 impl SpecDefinition for ContextSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
+    }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
     }
 }
 
