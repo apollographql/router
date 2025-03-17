@@ -13,6 +13,7 @@ mod lifecycle;
 mod operation_limits;
 mod operation_name;
 mod query_planner;
+mod subgraph_mocks_plugin;
 mod subgraph_response;
 mod supergraph;
 mod traffic_shaping;

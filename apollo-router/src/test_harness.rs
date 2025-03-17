@@ -165,21 +165,24 @@ impl<'a> TestHarness<'a> {
         Ok(self.configuration(Arc::new(configuration)))
     }
 
-    /// Adds an extra, already instanciated plugin.
-    ///
-    /// May be called multiple times.
-    /// These extra plugins are added after plugins specified in configuration.
-    pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
+    fn extra_plugin_name<P: 'static>(&self) -> String {
         let type_id = std::any::TypeId::of::<P>();
-        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+        match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
             Some(factory) => factory.name.clone(),
             None => format!(
                 "extra_plugins.{}.{}",
                 self.extra_plugins.len(),
                 std::any::type_name::<P>(),
             ),
-        };
+        }
+    }
 
+    /// Adds an extra, already instanciated plugin.
+    ///
+    /// May be called multiple times.
+    /// These extra plugins are added after plugins specified in configuration.
+    pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
+        let name = self.extra_plugin_name::<P>();
         self.extra_plugins.push((name, plugin.into()));
         self
     }
@@ -189,16 +192,7 @@ impl<'a> TestHarness<'a> {
     /// May be called multiple times.
     /// These extra plugins are added after plugins specified in configuration.
     pub fn extra_unstable_plugin<P: PluginUnstable>(mut self, plugin: P) -> Self {
-        let type_id = std::any::TypeId::of::<P>();
-        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
-            Some(factory) => factory.name.clone(),
-            None => format!(
-                "extra_plugins.{}.{}",
-                self.extra_plugins.len(),
-                std::any::type_name::<P>(),
-            ),
-        };
-
+        let name = self.extra_plugin_name::<P>();
         self.extra_plugins.push((name, Box::new(plugin)));
         self
     }
@@ -209,16 +203,7 @@ impl<'a> TestHarness<'a> {
     /// These extra plugins are added after plugins specified in configuration.
     #[allow(dead_code)]
     pub(crate) fn extra_private_plugin<P: PluginPrivate>(mut self, plugin: P) -> Self {
-        let type_id = std::any::TypeId::of::<P>();
-        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
-            Some(factory) => factory.name.clone(),
-            None => format!(
-                "extra_plugins.{}.{}",
-                self.extra_plugins.len(),
-                std::any::type_name::<P>(),
-            ),
-        };
-
+        let name = self.extra_plugin_name::<P>();
         self.extra_plugins.push((name, Box::new(plugin)));
         self
     }
@@ -279,24 +264,13 @@ impl<'a> TestHarness<'a> {
         } else {
             self
         };
-        let builder = if builder.subgraph_network_requests {
-            builder
-        } else {
-            builder.subgraph_hook(|name, _default| {
-                let my_name = name.to_string();
-                tower::service_fn(move |request: subgraph::Request| {
-                    let empty_response = subgraph::Response::builder()
-                        .extensions(crate::json_ext::Object::new())
-                        .context(request.context)
-                        .subgraph_name(my_name.clone())
-                        .id(request.id)
-                        .build();
-                    std::future::ready(Ok(empty_response))
-                })
-                .boxed()
-            })
-        };
-        let config = builder.configuration.unwrap_or_default();
+        let mut config = builder.configuration.unwrap_or_default();
+        if !builder.subgraph_network_requests {
+            Arc::make_mut(&mut config).apollo_plugins.plugins.insert(
+                "__internal_for_test_harness_prevent_all_subgraph_requests".into(),
+                true.into(),
+            );
+        }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
@@ -390,6 +364,9 @@ struct RouterServicePlugin<F>(F);
 struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
+struct PreventAllSubgraphRequestsPlugin {
+    enabled: bool,
+}
 
 #[async_trait::async_trait]
 impl<F> Plugin for RouterServicePlugin<F>
@@ -458,6 +435,45 @@ where
         (self.0)(subgraph_name, service)
     }
 }
+
+#[async_trait::async_trait]
+impl Plugin for PreventAllSubgraphRequestsPlugin {
+    type Config = bool;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(Self {
+            enabled: init.config,
+        })
+    }
+
+    fn subgraph_service(
+        &self,
+        subgraph_name: &str,
+        service: subgraph::BoxService,
+    ) -> subgraph::BoxService {
+        if self.enabled {
+            let name = subgraph_name.to_string();
+            tower::service_fn(move |request: subgraph::Request| {
+                let empty_response = subgraph::Response::builder()
+                    .extensions(crate::json_ext::Object::new())
+                    .context(request.context)
+                    .subgraph_name(name.clone())
+                    .id(request.id)
+                    .build();
+                std::future::ready(Ok(empty_response))
+            })
+            .boxed()
+        } else {
+            service
+        }
+    }
+}
+
+register_plugin!(
+    "apollo",
+    "__internal_for_test_harness_prevent_all_subgraph_requests",
+    PreventAllSubgraphRequestsPlugin
+);
 
 /// a list of subgraphs with pregenerated responses
 #[derive(Default)]

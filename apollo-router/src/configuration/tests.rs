@@ -661,7 +661,7 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
                             // Enum type does not get a description
-                            if k != "type" {
+                            if k != "type" && !k.starts_with("__") {
                                 errors.push(format!("{path} was missing a description"));
                             }
                         }

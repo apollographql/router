@@ -133,4 +133,27 @@ pub mod _private {
         pub use crate::plugins::telemetry::config::AttributeValue;
         pub use crate::plugins::telemetry::resource::ConfigResource;
     }
+
+    pub fn plugin_init_subgraph_schemas<T>(
+        init: &crate::plugin::PluginInit<T>,
+    ) -> &std::sync::Arc<
+        std::collections::HashMap<
+            String,
+            std::sync::Arc<apollo_compiler::validation::Valid<apollo_compiler::Schema>>,
+        >,
+    > {
+        &init.subgraph_schemas
+    }
+
+    pub fn new_subgraph_response(
+        request: crate::services::subgraph::Request,
+        response: http::Response<crate::graphql::Response>,
+    ) -> crate::services::subgraph::Response {
+        crate::services::subgraph::Response::new_from_response(
+            response,
+            request.context,
+            request.subgraph_name,
+            request.id,
+        )
+    }
 }

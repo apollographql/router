@@ -604,6 +604,7 @@ impl JsonSchema for ApolloPlugins {
                     factory.create_schema(generator),
                 )
             })
+            .filter(|(k, _v)| !k.starts_with("__"))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
     }
