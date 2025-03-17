@@ -4498,6 +4498,11 @@ expression: "&schema"
           "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
           "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
         },
+        "hot_reload": {
+          "default": false,
+          "description": "Enables hot reloading of the local persisted query manifests",
+          "type": "boolean"
+        },
         "local_manifests": {
           "default": null,
           "description": "Enables using a local copy of the persisted query manifest to safelist operations",

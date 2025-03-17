@@ -88,8 +88,8 @@ By default, the router [prewarms the query plan cache](/router/configuration/in-
 persisted_queries:
   enabled: true
   experimental_prewarm_query_plan_cache:
-    on_startup: true   # default: false
-    on_reload: false   # default: true
+    on_startup: true # default: false
+    on_reload: false # default: true
 ```
 
 <MinVersion version="1.55.0">
@@ -109,11 +109,33 @@ Adding `local_manifests` to your `persisted-queries` configuration lets you use 
 ```yaml title="router.yaml"
 persisted_queries:
   enabled: true
-  local_manifests: 
+  local_manifests:
     - ./path/to/persisted-query-manifest.json
 ```
 
 You can download a version of your manifest to use locally from [GraphOS Studio](https://studio.apollographql.com/?referrer=docs-content). Open the PQL page for a graph by clicking the **Go to persisted query lists** to the left of the graph's name. Then, click the ••• menu under the **Actions** column to download a PQL's manifest as a JSON file. Save this file locally and update your `local_manifests` configuration with the path the file.
+
+<MinVersion version="2.1.0">
+
+#### `hot_reload`
+
+</MinVersion>
+
+<Note>
+
+This option only works in tandem with the `local_manifests` option.
+
+</Note>
+
+If you configure `local_manifests`, you can set `hot_reload` to `true` to automatically reload manifest files whenever they change. This lets you update local manifest files without restarting the router.
+
+```yaml title="router.yaml"
+persisted_queries:
+  enabled: true
+  local_manifests:
+    - ./path/to/persisted-query-manifest.json
+  hot_reload: true
+```
 
 <MinVersion version="1.32.0">
 
@@ -147,6 +169,7 @@ By default, the [`require_id`](#require_id) suboption is `false`, meaning the ro
 </MinVersion>
 
 Adding `require_id: true` to the `safelist` option causes the router to reject any operations that either:
+
 - haven't been registered to your PQL
 - use a full operation string rather than the operation ID
 
@@ -192,4 +215,4 @@ This does not affect the behavior of the [`log_unknown` option](#log_unknown): u
 
 ## Limitations
 
-* **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](/router/enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
+- **Unsupported with offline license**. An GraphOS Router using an [offline Enterprise license](/router/enterprise-features/#offline-enterprise-license) cannot use safelisting with persisted queries. The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
