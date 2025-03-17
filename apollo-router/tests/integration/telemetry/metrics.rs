@@ -312,7 +312,7 @@ async fn test_multi_pipelines() {
     }
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_CONFIG)
-        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(5)))
+        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
         .build()
         .await;
 
