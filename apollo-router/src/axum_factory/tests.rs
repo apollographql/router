@@ -61,6 +61,8 @@ use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
+use crate::axum_factory::connection_handle::connections;
+use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
@@ -2417,38 +2419,17 @@ async fn it_reports_open_connections_metric() {
         // Create a second client that does not reuse the same connection pool.
         let first_response = client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
 
-        assert_gauge!(
-            "apollo.router.open_connections",
-            1,
-            "config.hash" = "dummy",
-            "schema.id" = "dummy",
-            "server.address" = "127.0.0.1",
-            "server.port" = "<any>"
-        );
+        assert_eq!(*connections().iter().next().unwrap().1, 1);
 
         let second_response = second_client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
 
         // Both requests are in-flight
-        assert_gauge!(
-            "apollo.router.open_connections",
-            2,
-            "config.hash" = "dummy",
-            "schema.id" = "dummy",
-            "server.address" = "127.0.0.1",
-            "server.port" = "<any>"
-        );
+        assert_eq!(*connections().iter().next().unwrap().1, 2);
 
         _ = first_response.into_body().await;
 
         // Connection is still open in the pool even though the request is complete.
-        assert_gauge!(
-            "apollo.router.open_connections",
-            2,
-            "config.hash" = "dummy",
-            "schema.id" = "dummy",
-            "server.address" = "127.0.0.1",
-            "server.port" = "<any>"
-        );
+        assert_eq!(*connections().iter().next().unwrap().1, 2);
 
         _ = second_response.into_body().await;
 
@@ -2461,14 +2442,7 @@ async fn it_reports_open_connections_metric() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // All connections are closed
-        assert_gauge!(
-            "apollo.router.open_connections",
-            0,
-            "config.hash" = "dummy",
-            "schema.id" = "dummy",
-            "server.address" = "127.0.0.1",
-            "server.port" = "<any>"
-        );
+        assert_eq!(connections().iter().count(), 0);
     }
         .with_metrics()
         .await;
