@@ -19,12 +19,13 @@ pub(crate) enum ConnectionState {
 pub(crate) struct ConnectionRef {
     pub(crate) pipeline_ref: PipelineRef,
     pub(crate) address: ListenAddr,
+    /// The state of this connection. When we are trying to shut it down, for instance on reload, it will switch to terminating.
     pub(crate) state: ConnectionState,
 }
 
 /// A connection handle does the actual tracking of connections
 /// Creating a new connection handle will insert a ConnectionRef into a static map.
-/// Dropping all pipeline handles associated with the internal ref will remove the ConnectionRef
+/// Dropping all connection handles associated with the internal ref will remove the ConnectionRef
 /// Clone MUST NOT be implemented for this type. Cloning will make extra copies that when dropped will throw off the global count.
 pub(crate) struct ConnectionHandle {
     pub(crate) connection_ref: ConnectionRef,

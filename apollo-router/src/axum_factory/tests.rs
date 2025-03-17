@@ -2436,7 +2436,7 @@ async fn it_reports_open_connections_metric() {
         drop(client);
         drop(second_client);
 
-        // XXX(@goto-bus-stop): Not ideal, but we would probably have to drop down to very
+        // XXX(@bryncooke): Not ideal, but we would probably have to drop down to very
         // low-level hyper primitives to control the shutdown of connections to the required
         // extent. 100ms is a long time so I hope it's not flaky.
         tokio::time::sleep(Duration::from_millis(100)).await;
