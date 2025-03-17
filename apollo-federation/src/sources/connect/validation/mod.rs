@@ -203,10 +203,6 @@ pub enum Code {
     SourceNameMismatch,
     /// Connectors currently don't support subscription operations.
     SubscriptionInConnectors,
-    /// A query field is missing the `@connect` directive.
-    QueryFieldMissingConnect,
-    /// A mutation field is missing the `@connect` directive.
-    MutationFieldMissingConnect,
     /// The `@connect` is using a `source`, but the URL is absolute. This is not allowed because
     /// the `@source` URL will be joined with the `@connect` URL, so the `@connect` URL should
     /// only be a path.
