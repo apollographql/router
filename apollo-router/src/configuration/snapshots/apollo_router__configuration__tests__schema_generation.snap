@@ -1222,8 +1222,8 @@ expression: "&schema"
       "description": "Authentication",
       "properties": {
         "connector": {
-          "$ref": "#/definitions/ConnectorConfiguration_for_AuthConfig",
-          "description": "#/definitions/ConnectorConfiguration_for_AuthConfig",
+          "$ref": "#/definitions/Config6",
+          "description": "#/definitions/Config6",
           "nullable": true
         },
         "router": {
@@ -1334,8 +1334,8 @@ expression: "&schema"
       "description": "Telemetry configuration",
       "properties": {
         "apollo": {
-          "$ref": "#/definitions/Config10",
-          "description": "#/definitions/Config10"
+          "$ref": "#/definitions/Config11",
+          "description": "#/definitions/Config11"
         },
         "exporters": {
           "$ref": "#/definitions/Exporters",
@@ -1374,6 +1374,10 @@ expression: "&schema"
       "type": "object"
     },
     "Config10": {
+      "description": "Configuration for the progressive override plugin",
+      "type": "object"
+    },
+    "Config11": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1449,7 +1453,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config11": {
+    "Config12": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1486,7 +1490,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config12": {
+    "Config13": {
       "additionalProperties": false,
       "description": "Prometheus configuration",
       "properties": {
@@ -1507,7 +1511,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config13": {
+    "Config14": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1528,7 +1532,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config14": {
+    "Config15": {
       "additionalProperties": false,
       "properties": {
         "batch_processor": {
@@ -1587,7 +1591,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config15": {
+    "Config16": {
       "additionalProperties": false,
       "description": "Configuration for the experimental traffic shaping plugin",
       "properties": {
@@ -1755,6 +1759,22 @@ expression: "&schema"
     },
     "Config6": {
       "additionalProperties": false,
+      "description": "Configure connector authentication",
+      "properties": {
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/AuthConfig",
+            "description": "#/definitions/AuthConfig"
+          },
+          "default": {},
+          "description": "Create a configuration that will apply only to a specific source.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "Config7": {
+      "additionalProperties": false,
       "description": "Configuration for header propagation",
       "properties": {
         "all": {
@@ -1773,7 +1793,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config7": {
+    "Config8": {
       "additionalProperties": false,
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
@@ -1793,7 +1813,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Config8": {
+    "Config9": {
       "additionalProperties": false,
       "description": "Configuration for entity caching",
       "properties": {
@@ -1826,10 +1846,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Config9": {
-      "description": "Configuration for the progressive override plugin",
-      "type": "object"
-    },
     "ConnectorAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -1856,12 +1872,16 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ConnectorConfiguration_for_AuthConfig": {
+    "ConnectorConfiguration_for_TlsClient": {
       "properties": {
+        "all": {
+          "$ref": "#/definitions/TlsClient",
+          "description": "#/definitions/TlsClient"
+        },
         "sources": {
           "additionalProperties": {
-            "$ref": "#/definitions/AuthConfig",
-            "description": "#/definitions/AuthConfig"
+            "$ref": "#/definitions/TlsClient",
+            "description": "#/definitions/TlsClient"
           },
           "default": {},
           "description": "Map of subgraph_name.connector_source_name to configuration",
@@ -4207,12 +4227,12 @@ expression: "&schema"
           "description": "#/definitions/MetricsCommon"
         },
         "otlp": {
-          "$ref": "#/definitions/Config11",
-          "description": "#/definitions/Config11"
-        },
-        "prometheus": {
           "$ref": "#/definitions/Config12",
           "description": "#/definitions/Config12"
+        },
+        "prometheus": {
+          "$ref": "#/definitions/Config13",
+          "description": "#/definitions/Config13"
         }
       },
       "type": "object"
@@ -7547,6 +7567,10 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "TLS related configuration options.",
       "properties": {
+        "connector": {
+          "$ref": "#/definitions/ConnectorConfiguration_for_TlsClient",
+          "description": "#/definitions/ConnectorConfiguration_for_TlsClient"
+        },
         "subgraph": {
           "$ref": "#/definitions/SubgraphConfiguration_for_TlsClient",
           "description": "#/definitions/SubgraphConfiguration_for_TlsClient"
@@ -7673,24 +7697,24 @@ expression: "&schema"
           "description": "#/definitions/TracingCommon"
         },
         "datadog": {
-          "$ref": "#/definitions/Config14",
-          "description": "#/definitions/Config14"
+          "$ref": "#/definitions/Config15",
+          "description": "#/definitions/Config15"
         },
         "experimental_response_trace_id": {
           "$ref": "#/definitions/ExposeTraceId",
           "description": "#/definitions/ExposeTraceId"
         },
         "otlp": {
-          "$ref": "#/definitions/Config11",
-          "description": "#/definitions/Config11"
+          "$ref": "#/definitions/Config12",
+          "description": "#/definitions/Config12"
         },
         "propagation": {
           "$ref": "#/definitions/Propagation",
           "description": "#/definitions/Propagation"
         },
         "zipkin": {
-          "$ref": "#/definitions/Config13",
-          "description": "#/definitions/Config13"
+          "$ref": "#/definitions/Config14",
+          "description": "#/definitions/Config14"
         }
       },
       "type": "object"
@@ -8849,8 +8873,8 @@ expression: "&schema"
       "description": "#/definitions/ForbidMutationsConfig"
     },
     "headers": {
-      "$ref": "#/definitions/Config6",
-      "description": "#/definitions/Config6"
+      "$ref": "#/definitions/Config7",
+      "description": "#/definitions/Config7"
     },
     "health_check": {
       "$ref": "#/definitions/Config",
@@ -8861,8 +8885,8 @@ expression: "&schema"
       "description": "#/definitions/Homepage"
     },
     "include_subgraph_errors": {
-      "$ref": "#/definitions/Config7",
-      "description": "#/definitions/Config7"
+      "$ref": "#/definitions/Config8",
+      "description": "#/definitions/Config8"
     },
     "license_enforcement": {
       "$ref": "#/definitions/LicenseEnforcementConfig",
@@ -8885,16 +8909,16 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_entity_cache": {
-      "$ref": "#/definitions/Config8",
-      "description": "#/definitions/Config8"
+      "$ref": "#/definitions/Config9",
+      "description": "#/definitions/Config9"
     },
     "preview_file_uploads": {
       "$ref": "#/definitions/FileUploadsConfig",
       "description": "#/definitions/FileUploadsConfig"
     },
     "progressive_override": {
-      "$ref": "#/definitions/Config9",
-      "description": "#/definitions/Config9"
+      "$ref": "#/definitions/Config10",
+      "description": "#/definitions/Config10"
     },
     "rhai": {
       "$ref": "#/definitions/Conf7",
@@ -8921,8 +8945,8 @@ expression: "&schema"
       "description": "#/definitions/Tls"
     },
     "traffic_shaping": {
-      "$ref": "#/definitions/Config15",
-      "description": "#/definitions/Config15"
+      "$ref": "#/definitions/Config16",
+      "description": "#/definitions/Config16"
     }
   },
   "title": "Configuration",

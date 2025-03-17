@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::ApiSchemaOptions;
+use apollo_federation::Supergraph;
 use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
@@ -13,17 +15,15 @@ use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
-use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
+use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::subgraph;
-use apollo_federation::ApiSchemaOptions;
-use apollo_federation::Supergraph;
 use clap::Parser;
 use tracing_subscriber::prelude::*;
 
 mod bench;
-use bench::run_bench;
 use bench::BenchOutput;
+use bench::run_bench;
 
 #[derive(Parser)]
 struct QueryPlannerArgs {
