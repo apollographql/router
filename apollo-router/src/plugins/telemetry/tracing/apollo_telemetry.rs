@@ -1055,7 +1055,7 @@ pub(crate) fn extract_ftv1_trace(
     None
 }
 
-fn perform_exteneded_redaction(error_json: &str) -> String {
+fn perform_extended_redaction(error_json: &str) -> String {
     serde_json::from_str::<JSONValue>(error_json)
         .ok()
         .and_then(|error_json_value| {
@@ -1090,7 +1090,7 @@ fn preprocess_errors(
                     error_config.redaction_policy,
                     ErrorRedactionPolicy::Extended
                 ) {
-                    perform_exteneded_redaction(&err.json)
+                    perform_extended_redaction(&err.json)
                 } else {
                     String::new()
                 }

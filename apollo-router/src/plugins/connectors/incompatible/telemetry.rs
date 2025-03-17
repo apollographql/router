@@ -37,13 +37,14 @@ impl IncompatiblePlugin for TelemetryIncompatPlugin {
                 .subgraphs
                 .iter()
                 .partition_map(|(name, sub)| {
-                   if sub.send
+                    if sub.send
                         && !matches!(
                             self.config.experimental_otlp_error_metrics,
                             apollo::OtlpErrorMetricsMode::Enabled
-                        ) {
+                        )
+                    {
                         Either::Left(name)
-                        } else {
+                    } else {
                         Either::Right(name)
                     }
                 });
