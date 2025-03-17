@@ -203,10 +203,10 @@ pub(super) fn get_freeform_graphql_behavior(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        configuration::{Apq, PersistedQueries, PersistedQueriesSafelist},
-        services::layers::persisted_queries::manifest::ManifestOperation,
-    };
+    use crate::configuration::Apq;
+    use crate::configuration::PersistedQueries;
+    use crate::configuration::PersistedQueriesSafelist;
+    use crate::services::layers::persisted_queries::manifest::ManifestOperation;
 
     #[test]
     fn safelist_body_normalization() {
