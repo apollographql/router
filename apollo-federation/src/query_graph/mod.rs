@@ -33,6 +33,7 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::utils::FallibleIterator;
 
+mod base_query_graph;
 pub mod build_query_graph;
 pub(crate) mod condition_resolver;
 pub(crate) mod graph_path;
