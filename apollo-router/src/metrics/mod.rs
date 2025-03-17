@@ -810,8 +810,7 @@ thread_local! {
     pub(crate) static CACHE_CALLSITE: std::sync::atomic::AtomicBool = const {std::sync::atomic::AtomicBool::new(false)};
 }
 macro_rules! metric {
-    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
-
+    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $unit:literal, $value:expr, $attrs:expr) => {
         // The way this works is that we have a static at each call site that holds a weak reference to the instrument.
         // We make a call we try to upgrade the weak reference. If it succeeds we use the instrument.
         // Otherwise we create a new instrument and update the static.
@@ -830,13 +829,24 @@ macro_rules! metric {
                 #[cfg(not(test))]
                 let cache_callsite = true;
 
+                let create_instrument_fn = |meter: opentelemetry::metrics::Meter| {
+                    let mut builder = meter.[<$ty _ $instrument>]($name);
+                    builder = builder.with_description($description);
+
+                    if !$unit.is_empty() {
+                        builder = builder.with_unit($unit);
+                    }
+
+                    builder.init()
+                };
+
                 if cache_callsite {
                     static INSTRUMENT_CACHE: std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
 
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
                             let meter_provider = crate::metrics::meter_provider_internal();
-                            let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
+                            let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter("apollo/router")));
                             parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
                         .lock();
@@ -847,7 +857,7 @@ macro_rules! metric {
                     } else {
                         // Slow path, we need to obtain the instrument again.
                         let meter_provider = crate::metrics::meter_provider_internal();
-                        let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
+                        let instrument_ref = meter_provider.create_registered_instrument(|p| create_instrument_fn(p.meter("apollo/router")));
                         *instrument_guard = std::sync::Arc::downgrade(&instrument_ref);
                         // We've updated the instrument and got a strong reference to it. We can drop the mutex guard now.
                         drop(instrument_guard);
@@ -858,12 +868,15 @@ macro_rules! metric {
                 else {
                     let meter_provider = crate::metrics::meter_provider();
                     let meter = opentelemetry::metrics::MeterProvider::meter(&meter_provider, "apollo/router");
-                    let instrument = meter.[<$ty _ $instrument>]($name).with_description($description).init();
-                    instrument.$mutation($value, &$attrs);
+                    create_instrument_fn(meter).$mutation($value, &$attrs);
                 }
             }
         }
     };
+
+    ($ty:ident, $instrument:ident, $mutation:ident, $name:expr, $description:literal, $value: expr, $attrs: expr) => {
+        metric!($ty, $instrument, $mutation, $name, $description, "", $value, $attrs);
+    }
 }
 
 #[cfg(test)]
