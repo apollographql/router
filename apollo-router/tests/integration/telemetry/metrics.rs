@@ -342,7 +342,8 @@ async fn test_multi_pipelines() {
     let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
     assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
 
-    // There should be at least two connections, one active and one terminating
+    // There should be at least two connections, one active and one terminating.
+    // There may be more than one in each category because reqwest does connection pooling.
     let active =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
     assert_eq!(active.captures_iter(&metrics).count(), 1);
