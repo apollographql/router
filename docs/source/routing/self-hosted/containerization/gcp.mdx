@@ -4,27 +4,28 @@ subtitle: ""
 description: Build and deploy Apollo GraphOS Router or Apollo Router Core to Google Cloud Platform (GCP) with Google Cloud Run.
 ---
 
-Learn how to deploy the router on Google Cloud Platform (GCP) with Cloud Run.
+Learn how to deploy the router for development on Google Cloud Platform (GCP) with Cloud Run.
+
+<Note>
+
+Not deploying on GCP? See our guides for deploying the router [locally in Docker](/graph)
+
+</Note>
 
 ## Prerequisites
 
-### Router
-
 1. Choose a version of the router to deploy (for example, `v1.61.0`).
-
-### Docker 
 
 1. Install [Docker](https://www.docker.com/get-started/) locally.
 
-### Google Cloud Platform (GCP)
 
 1. Create a new [Google Cloud account](https://cloud.google.com/) or go to an existing account.
 1. Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), if not already installed.
-1. Create a new GCP project.
+1. In GCP, create a new project.
     1. Choose a project name (for example, `my-project`). Keep this name handy, as you'll need it later to build and run a router image.
-1. Enable [Artifact Registry](https://cloud.google.com/artifact-registry/docs/enable-service) in your project.
+1. In GCP, enable [Artifact Registry](https://cloud.google.com/artifact-registry/docs/enable-service) in your project.
     1. Create a repository and choose a repository name (for example, `my-repo`). Keep this name handy, as you'll need it later to build and deploy a router image.
-1. (Recommended) In GCP Secret Manager, set `APOLLO_KEY` to your graph API key and `APOLLO_GRAPH_REF` to your graph ref. You'll need them later to deploy a router image. 
+1. In GCP Secret Manager, set `APOLLO_KEY` to your graph API key and `APOLLO_GRAPH_REF` to your graph ref. You'll need them later to deploy a router image. 
 
 ## Build and push router image
 
@@ -63,10 +64,10 @@ Learn how to deploy the router on Google Cloud Platform (GCP) with Cloud Run.
 
 1. Run the following `docker` commands to tag and push the local router image to Artifact Registry:
 
-```bash
-docker tag router-gcp:v1.61.0 us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
-docker push us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
-```
+    ```bash
+    docker tag router-gcp:v1.61.0 us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
+    docker push us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
+    ```
 
 1. In GCP console for your project, go to Artifact Registry and validate the router image has been successfully pushed.
 
@@ -91,14 +92,14 @@ You can use either Google Cloud console or gcloud CLI. In either case, you need 
     1. Set **Service name** to a name for your deployed router (for example, `my-router`).
     1. Set **Region** to your GCP region.
     1. Set **Authentication** to **Allow unauthenticated invocations**.
-    1. On the **Container(s)** > **Edit Container** tab, update the following configurations:
-        1. On the **Settings** tab:
-            1. Set **Container port** to `4000`.
-            1. Set **Container command** to `/dist/router`.
-            1. (Optional) if running router in dev mode, set **Container arguments** to `--dev`.
-        1. On the **Variables & Secrets** tab, add the following variables (either as environment variables or referenced secrets):
-            1. Add `APOLLO_KEY` and set it to your graph API key.
-            1. Add `APOLLO_GRAPH_REF` and set it to your graph ref.   
+1. On the **Container(s)** > **Edit Container** tab, update the following configurations:
+    1. On the **Settings** tab:
+        1. Set **Container port** to `4000`. This port must match your router's configuration for `supergraph.listen`.
+        1. Set **Container command** to `/dist/router`.
+        1. (Optional) if running router in dev mode, set **Container arguments** to `--dev`.
+    1. On the **Variables & Secrets** tab, add the following variables (either as environment variables or referenced secrets):
+        1. Add `APOLLO_KEY` and set it to your graph API key.
+        1. Add `APOLLO_GRAPH_REF` and set it to your graph ref.   
 
 1. Click **Deploy** on the bottom-left of the console.
 
