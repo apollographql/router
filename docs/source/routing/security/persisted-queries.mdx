@@ -93,7 +93,11 @@ persisted_queries:
 
 You can download a version of your manifest to use locally from [GraphOS Studio](https://studio.apollographql.com/?referrer=docs-content). Open the PQL page for a graph by clicking the **Go to persisted query lists** to the left of the graph's name. Then, click the ••• menu under the **Actions** column to download a PQL's manifest as a JSON file. Save this file locally and update your `local_manifests` configuration with the path the file.
 
+<MinVersion version="2.1.0">
+
 #### `hot_reload`
+
+</MinVersion>
 
 <Note>
 
@@ -101,7 +105,7 @@ This option only works in tandem with the `local_manifests` option.
 
 </Note>
 
-When using the `local_manifests` option, you can use the `hot_reload` option to tell the router to watch the manifest files for changes and reload them automatically. This is useful if you'd prefer to make updates to the manifest without restarting the router.
+If you configure `local_manifests`, you can set `hot_reload` to `true` to automatically reload manifest files whenever they change. This lets you update local manifest files without restarting the router.
 
 ```yaml title="router.yaml"
 persisted_queries:
