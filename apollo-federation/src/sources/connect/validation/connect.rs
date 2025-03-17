@@ -75,23 +75,6 @@ fn fields_seen_by_object_connectors(
     schema: &SchemaInfo,
     source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let source_map = &schema.sources;
-    let is_subscription = schema
-        .schema_definition
-        .subscription
-        .as_ref()
-        .is_some_and(|sub| sub.name == object.name);
-    if is_subscription {
-        return Err(vec![Message {
-            code: Code::SubscriptionInConnectors,
-            message: format!(
-                "A subscription root type is not supported when using `@{connect_directive_name}`.",
-                connect_directive_name = schema.connect_directive_name(),
-            ),
-            locations: object.line_column_range(source_map).into_iter().collect(),
-        }]);
-    }
-
     let object_category = if schema
         .schema_definition
         .query
