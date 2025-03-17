@@ -24,6 +24,7 @@ use crate::schema::FederationSchema;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 const COST_DIRECTIVE_NAME: Name = name!("cost");
 const COST_DIRECTIVE_WEIGHT_ARGUMENT_NAME: Name = name!("weight");
@@ -239,6 +240,14 @@ impl CostSpecDefinition {
 impl SpecDefinition for CostSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
+    }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
     }
 }
 
