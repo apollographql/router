@@ -206,7 +206,7 @@ mod tests {
             );
 
             assert_counter!(
-                "apollo.router.telemetry.batch_processor.cardinality_overflow",
+                "apollo.router.telemetry.metrics.cardinality_overflow",
                 1
             );
         }
