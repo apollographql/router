@@ -36,7 +36,7 @@ impl NamespaceResolver for ThisResolver<'_> {
 
         let fields = match self.object {
             ExtendedType::Object(node) => &node.fields,
-            _ => return Ok(()), // TODO
+            _ => return Ok(()), // TODO: interfaces
         };
 
         let field_type = fields

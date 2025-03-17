@@ -241,7 +241,7 @@ fn determine_entity_resolver(
     connect: &ConnectDirectiveArguments,
     schema: &Schema,
 ) -> Option<EntityResolver> {
-    let on_root_type = connect.position.on_query(schema) || connect.position.on_mutation(schema);
+    let on_root_type = connect.position.on_root_type(schema);
 
     match connect.position {
         ConnectorPosition::Field(_) => match (connect.entity, on_root_type) {
@@ -249,7 +249,7 @@ fn determine_entity_resolver(
             (_, false) => Some(EntityResolver::Implicit), // Foo.bar @connect
             _ => None,
         },
-        ConnectorPosition::Type(_) => None, // TODO
+        ConnectorPosition::Type(_) => None, // TODO: $batch
     }
 }
 

@@ -42,8 +42,7 @@ impl<'schema> Context<'schema> {
         source: &'schema GraphQLString,
         code: Code,
     ) -> Self {
-        let on_root_type = coordinate.element.on_mutation(schema.schema)
-            || coordinate.element.on_query(schema.schema);
+        let on_root_type = coordinate.element.on_root_type(schema.schema);
 
         match coordinate.element {
             ConnectedElement::Field {
@@ -71,7 +70,7 @@ impl<'schema> Context<'schema> {
             }
             ConnectedElement::Type { .. } => Self {
                 schema,
-                var_lookup: Default::default(), // TODO
+                var_lookup: Default::default(), // TODO: $batch
                 source,
                 code,
             },

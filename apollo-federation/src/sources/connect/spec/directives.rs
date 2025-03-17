@@ -110,10 +110,7 @@ pub(crate) fn extract_connect_directive_arguments(
             schema
                 .types
                 .iter()
-                .filter_map(|(_, ty)| match ty {
-                    apollo_compiler::schema::ExtendedType::Object(node) => Some(node),
-                    _ => None,
-                })
+                .filter_map(|(_, ty)| ty.as_object())
                 .flat_map(|ty| {
                     ty.directives
                         .iter()

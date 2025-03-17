@@ -25,7 +25,6 @@ pub(crate) struct ObjectTypeDefinitionDirectivePosition {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) enum ConnectorPosition {
     Field(ObjectOrInterfaceFieldDirectivePosition),
-    #[allow(unused)]
     Type(ObjectTypeDefinitionDirectivePosition),
 }
 
@@ -110,28 +109,23 @@ impl ConnectorPosition {
         }
     }
 
-    pub(super) fn on_query(&self, schema: &Schema) -> bool {
+    pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
         schema
             .schema_definition
             .query
             .as_ref()
-            .map(|query| match self {
+            .is_some_and(|query| match self {
                 ConnectorPosition::Field(pos) => *pos.field.type_name() == query.name,
                 ConnectorPosition::Type(_) => false,
             })
-            .unwrap_or_default()
-    }
-
-    pub(super) fn on_mutation(&self, schema: &Schema) -> bool {
-        schema
-            .schema_definition
-            .mutation
-            .as_ref()
-            .map(|mutation| match self {
-                ConnectorPosition::Field(pos) => *pos.field.type_name() == mutation.name,
-                ConnectorPosition::Type(_) => false,
-            })
-            .unwrap_or_default()
+            || schema
+                .schema_definition
+                .mutation
+                .as_ref()
+                .is_some_and(|mutation| match self {
+                    ConnectorPosition::Field(pos) => *pos.field.type_name() == mutation.name,
+                    ConnectorPosition::Type(_) => false,
+                })
     }
 }
 
@@ -160,27 +154,24 @@ impl Display for ConnectedElement<'_> {
 }
 
 impl ConnectedElement<'_> {
-    pub(super) fn on_query(&self, schema: &Schema) -> bool {
+    pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
         schema
             .schema_definition
             .query
             .as_ref()
-            .map(|query| match self {
+            .is_some_and(|query| match self {
                 ConnectedElement::Field { parent_type, .. } => *parent_type.name() == query.name,
                 ConnectedElement::Type { .. } => false,
             })
-            .unwrap_or_default()
-    }
-
-    pub(super) fn on_mutation(&self, schema: &Schema) -> bool {
-        schema
-            .schema_definition
-            .mutation
-            .as_ref()
-            .map(|mutation| match self {
-                ConnectedElement::Field { parent_type, .. } => *parent_type.name() == mutation.name,
-                ConnectedElement::Type { .. } => todo!(),
-            })
-            .unwrap_or_default()
+            || schema
+                .schema_definition
+                .mutation
+                .as_ref()
+                .is_some_and(|mutation| match self {
+                    ConnectedElement::Field { parent_type, .. } => {
+                        *parent_type.name() == mutation.name
+                    }
+                    ConnectedElement::Type { .. } => false,
+                })
     }
 }

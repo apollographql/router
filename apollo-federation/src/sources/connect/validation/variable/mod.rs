@@ -37,7 +37,7 @@ impl<'a> VariableResolver<'a> {
                 );
                 resolvers.insert(Namespace::Args, Box::new(ArgsResolver::new(field_def)));
             }
-            ConnectedElement::Type { .. } => {} // TODO
+            ConnectedElement::Type { .. } => {} // TODO: $batch
         }
 
         Self {
