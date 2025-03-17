@@ -87,7 +87,7 @@ fn fields_seen_by_object_connectors(
             code: Code::SubscriptionInConnectors,
             message: format!(
                 "A subscription root type is not supported when using `@{connect_directive_name}`.",
-                connect_directive_name = schema.connect_directive_name,
+                connect_directive_name = schema.connect_directive_name(),
             ),
             locations: object.line_column_range(source_map).into_iter().collect(),
         }]);
@@ -137,7 +137,7 @@ fn fields_seen_by_connector(
     let connect_directives = field
         .directives
         .iter()
-        .filter(|directive| directive.name == *schema.connect_directive_name)
+        .filter(|directive| directive.name == *schema.connect_directive_name())
         .collect_vec();
 
     if connect_directives.is_empty() {
@@ -147,14 +147,14 @@ fn fields_seen_by_connector(
                 field,
                 object,
                 source_map,
-                schema.connect_directive_name,
+                schema.connect_directive_name(),
             )),
             ObjectCategory::Mutation => errors.push(get_missing_connect_directive_message(
                 Code::MutationFieldMissingConnect,
                 field,
                 object,
                 source_map,
-                schema.connect_directive_name,
+                schema.connect_directive_name(),
             )),
             _ => (),
         }
@@ -272,7 +272,7 @@ fn fields_seen_by_connector(
                     message: format!(
                         "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
                         raw_value = coordinate.node,
-                        source_directive_name = schema.source_directive_name,
+                        source_directive_name = schema.source_directive_name(),
                     ),
                     locations: coordinate.node.line_column_range(source_map).into_iter().collect()
                 })
@@ -326,7 +326,7 @@ pub(super) fn validate_source_name_arg(
     if source_names.iter().all(|name| name != &source_name.value) {
         // TODO: Pick a suggestion that's not just the first defined source
         let qualified_directive = connect_directive_name_coordinate(
-            schema.connect_directive_name,
+            schema.connect_directive_name(),
             &source_name.value,
             object_name,
             field_name,
@@ -347,7 +347,7 @@ pub(super) fn validate_source_name_arg(
                 code: Code::NoSourcesDefined,
                 message: format!(
                     "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
-                    coordinate = source_name_value_coordinate(schema.source_directive_name, &source_name.value),
+                    coordinate = source_name_value_coordinate(schema.source_directive_name(), &source_name.value),
                 ),
                 locations: source_name.line_column_range(&schema.sources)
                     .into_iter()

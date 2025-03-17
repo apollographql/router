@@ -228,7 +228,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
                 message: format!(
                     "{coordinate} has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
                     coordinate = field_with_connect_directive_entity_true_coordinate(
-                        self.schema.connect_directive_name,
+                        self.schema.connect_directive_name(),
                         self.entity_arg_value.as_ref(),
                         self.object,
                         self.field,
@@ -276,7 +276,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                         message: format!(
                             "{coordinate} has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
                             coordinate = field_with_connect_directive_entity_true_coordinate(
-                                self.schema.connect_directive_name,
+                                self.schema.connect_directive_name(),
                                 self.entity_arg_value.as_ref(),
                                 self.object,
                                 &field.name
@@ -330,7 +330,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                     message: format!(
                         "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
                         coordinate = field_with_connect_directive_entity_true_coordinate(
-                            self.schema.connect_directive_name,
+                            self.schema.connect_directive_name(),
                             self.entity_arg_value.as_ref(),
                             self.object,
                             self.field,

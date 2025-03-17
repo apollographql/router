@@ -335,14 +335,13 @@ fn shape_name(shape: &Shape) -> &'static str {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use apollo_compiler::name;
     use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
-    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::JSONSelection;
     use crate::sources::connect::validation::coordinates::FieldCoordinate;
+    use crate::sources::connect::validation::link::ConnectLink;
 
     fn expression(selection: &str) -> Expression {
         Expression {
@@ -400,14 +399,8 @@ mod tests {
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
-        let source_directive = name!("source");
-        let schema_info = SchemaInfo::new(
-            &schema,
-            ConnectSpec::V0_1,
-            &schema_str,
-            &directive.name,
-            &source_directive,
-        );
+        let schema_info =
+            SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
         let expr_string = GraphQLString::new(
             &directive
                 .argument_by_name("http", &schema)

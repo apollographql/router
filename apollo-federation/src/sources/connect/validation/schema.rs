@@ -151,7 +151,7 @@ fn check_seen_fields(
             code: Code::ConnectorsUnresolvedField,
             message: format!(
                 "No connector resolves field `{parent_type}.{field_name}`. It must have a `@{connect_directive_name}` directive or appear in `@{connect_directive_name}(selection:)`.",
-                connect_directive_name = schema.connect_directive_name
+                connect_directive_name = schema.connect_directive_name()
             ),
             locations: field_def.line_column_range(&schema.sources).into_iter().collect(),
         }
@@ -237,7 +237,8 @@ fn resolvable_key_fields<'a>(
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
     let mut messages = Vec::new();
 
-    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_spec) else {
+    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec)
+    else {
         return messages;
     };
 
