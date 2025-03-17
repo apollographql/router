@@ -3,7 +3,6 @@
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
@@ -141,13 +140,6 @@ fn check_seen_fields(
         .values()
         .filter_map(|extended_type| {
             if extended_type.is_built_in() {
-                return None;
-            }
-            // ignore root fields, we have different validations for them
-            if schema.root_operation(OperationType::Query) == Some(extended_type.name())
-                || schema.root_operation(OperationType::Mutation) == Some(extended_type.name())
-                || schema.root_operation(OperationType::Subscription) == Some(extended_type.name())
-            {
                 return None;
             }
             let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
