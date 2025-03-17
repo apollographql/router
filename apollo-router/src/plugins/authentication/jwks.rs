@@ -29,7 +29,6 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
 use parking_lot::RwLock;
-use serde_json::Value;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
@@ -218,7 +217,7 @@ pub(crate) fn parse_jwks(data: &str) -> Option<JwkSet> {
     // jsonwebtoken and exclude them
     tracing::debug!(data, "parsing JWKS");
 
-    let mut raw_json: Value = serde_json::from_str(data)
+    let mut raw_json: serde_json::Value = serde_json::from_str(data)
         .map_err(|e| {
             tracing::error!(%e, "could not create JSON Value from url content, enable debug logs to see content");
             e
@@ -460,16 +459,16 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
         Source::Header { name, value_prefix } => {
             // The http_request is stored in a `Router::Request` context.
             // We are going to check the headers for the presence of the configured header
-            let jwt_value_result = match headers.get(name) {
-                Some(value) => value.to_str(),
-                None => return None,
-            };
+            let jwt_value_result = headers
+                .get(name)?
+                .to_str()
+                .map_err(|_err| AuthenticationError::CannotConvertToString);
 
             // If we find the header, but can't convert it to a string, let the client know
             let jwt_value_untrimmed = match jwt_value_result {
                 Ok(value) => value,
-                Err(_not_a_string_error) => {
-                    return Some(Err(AuthenticationError::CannotConvertToString));
+                Err(err) => {
+                    return Some(Err(err));
                 }
             };
 
@@ -479,7 +478,6 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
             // Make sure the format of our message matches our expectations
             // Technically, the spec is case-sensitive, but let's accept
             // case variations
-            //
             let prefix_len = value_prefix.len();
             if jwt_value.len() < prefix_len
                 || !&jwt_value[..prefix_len].eq_ignore_ascii_case(value_prefix)
@@ -625,17 +623,20 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
         .ok()
         .flatten();
     let ts_opt = claims.as_ref().and_then(|x: &serde_json::Value| {
-        if !x.is_object() {
-            tracing::error!("JWT claims should be an object");
-            return None;
+        let claims = match x.as_object() {
+            Ok(claims) => claims,
+            Err(_) => {
+                tracing::error!("expected JWT claims to be an object");
+                return None;
+            }
+        };
+        match claims.get("exp")?.as_i64() {
+            Ok(exp) => exp,
+            Err(_) => {
+                tracing::error!("expected JWT 'exp' (expiry) claim to be an integer");
+                None
+            }
         }
-        let claims = x.as_object().expect("claims should be an object");
-        let exp = claims.get("exp")?;
-        if !exp.is_number() {
-            tracing::error!("JWT 'exp' (expiry) claim should be a number");
-            return None;
-        }
-        exp.as_i64()
     });
     match ts_opt {
         Some(ts) => {
