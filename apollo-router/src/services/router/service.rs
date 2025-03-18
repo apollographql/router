@@ -845,7 +845,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
-    _pipeline_handle: Arc<PipelineHandle>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -872,7 +872,7 @@ impl RouterFactory for RouterCreator {
     }
 
     fn pipeline_ref(&self) -> &PipelineRef {
-        &self._pipeline_handle.pipeline_ref
+        &self.pipeline_handle.pipeline_ref
     }
 }
 
@@ -916,7 +916,7 @@ impl RouterCreator {
             query_analysis_layer,
             persisted_query_layer,
             batching: configuration.batching.clone(),
-            _pipeline_handle: Arc::new(pipeline_handle),
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 
