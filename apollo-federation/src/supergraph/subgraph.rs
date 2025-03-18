@@ -65,10 +65,6 @@ pub struct ValidFederationSubgraphs {
     pub subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
 }
 
-// pub(super) struct VersionCompatibleFederationSubgraphs {
-//     pub(super) subgraphs: BTreeMap<Arc<str>, ValidFederationSubgraph>,
-// }
-
 impl fmt::Debug for ValidFederationSubgraphs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("ValidFederationSubgraphs ")?;
@@ -108,19 +104,3 @@ impl IntoIterator for ValidFederationSubgraphs {
         self.subgraphs.into_iter()
     }
 }
-
-// impl fmt::Debug for VersionCompatibleFederationSubgraphs {
-//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//         f.write_str("VersionCompatibleFederationSubgraphs ")?;
-//         f.debug_map().entries(self.subgraphs.iter()).finish()
-//     }
-// }
-
-// impl IntoIterator for VersionCompatibleFederationSubgraphs {
-//     type Item = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::Item;
-//     type IntoIter = <BTreeMap<Arc<str>, ValidFederationSubgraph> as IntoIterator>::IntoIter;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         self.subgraphs.into_iter()
-//     }
-// }
