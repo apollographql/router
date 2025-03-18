@@ -62,7 +62,6 @@ use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
 use crate::axum_factory::connection_handle::connection_counts;
-use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
@@ -85,9 +84,6 @@ use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineRef;
-use crate::services::router::service::RouterCreator;
-use crate::services::supergraph;
-use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
@@ -2381,7 +2377,6 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
     );
 }
 
-
 /// This tests that the apollo.router.open_connections metric is keeps track of connections
 /// It's a replacement for the session count total metric that is more in line with otel conventions
 /// It also has pipeline information attached to it.
@@ -2395,15 +2390,16 @@ async fn it_reports_open_connections_metric() {
             Arc::new(configuration),
             MultiMap::new(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
-
-        let url = server
-            .graphql_listen_address()
-            .as_ref()
-            .unwrap()
-            .to_string();
+        let url = format!(
+            "{}/graphql",
+            server
+                .graphql_listen_address()
+                .as_ref()
+                .expect("listen address")
+        );
 
         let client = reqwest::Client::builder()
             .pool_max_idle_per_host(1)
@@ -2416,21 +2412,27 @@ async fn it_reports_open_connections_metric() {
             .unwrap();
 
         // Create a second client that does not reuse the same connection pool.
-        let first_response = client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
+        let _first_response = client
+            .post(url.clone())
+            .body(r#"{ "query": "{ me }" }"#)
+            .send()
+            .await
+            .unwrap();
 
         assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
 
-        let second_response = second_client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
+        let _second_response = second_client
+            .post(url.clone())
+            .body(r#"{ "query": "{ me }" }"#)
+            .send()
+            .await
+            .unwrap();
 
         // Both requests are in-flight
         assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
 
-        _ = first_response.into_body().await;
-
         // Connection is still open in the pool even though the request is complete.
         assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
-
-        _ = second_response.into_body().await;
 
         drop(client);
         drop(second_client);
@@ -2443,6 +2445,6 @@ async fn it_reports_open_connections_metric() {
         // All connections are closed
         assert_eq!(connection_counts().iter().count(), 0);
     }
-        .with_metrics()
-        .await;
+    .with_metrics()
+    .await;
 }

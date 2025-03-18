@@ -96,7 +96,6 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
-#[cfg(test)]
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
@@ -981,7 +980,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
-    _pipeline_handle: Arc<PipelineHandle>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -1086,7 +1085,7 @@ impl RouterCreator {
         Ok(Self {
             supergraph_creator,
             sb,
-            _pipeline_handle: Arc::new(pipeline_handle),
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 
