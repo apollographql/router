@@ -6,7 +6,6 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
-use super::ConnectSpec;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
@@ -18,6 +17,7 @@ use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
+use super::versions::VersionInfo;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -36,7 +36,7 @@ macro_rules! internal {
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
-    spec: &ConnectSpec,
+    spec: &VersionInfo,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
     schema
         .schema_definition
@@ -50,7 +50,7 @@ pub(crate) fn extract_source_directive_arguments(
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
-    spec: &ConnectSpec,
+    spec: &VersionInfo,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
     schema
         .types
@@ -108,7 +108,7 @@ type ObjectNode = [(Name, Node<Value>)];
 impl SourceDirectiveArguments {
     fn from_directive(
         value: &Component<Directive>,
-        spec: &ConnectSpec,
+        spec: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
@@ -146,7 +146,7 @@ impl SourceDirectiveArguments {
 }
 
 impl SourceHTTPArguments {
-    fn from_values(values: &ObjectNode, spec: &ConnectSpec) -> Result<Self, FederationError> {
+    fn from_values(values: &ObjectNode, spec: &VersionInfo) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
         for (name, value) in values {
@@ -164,7 +164,7 @@ impl SourceHTTPArguments {
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, spec)
+                    Header::from_headers_arg(value, &spec.allowed_headers)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -190,7 +190,7 @@ impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ObjectOrInterfaceFieldDirectivePosition,
         value: &Node<Directive>,
-        spec: &ConnectSpec,
+        spec: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
@@ -244,7 +244,7 @@ impl ConnectDirectiveArguments {
 }
 
 impl ConnectHTTPArguments {
-    fn from_values(values: &ObjectNode, spec: &ConnectSpec) -> Result<Self, FederationError> {
+    fn from_values(values: &ObjectNode, spec: &VersionInfo) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -262,7 +262,7 @@ impl ConnectHTTPArguments {
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, spec)
+                    Header::from_headers_arg(value, &spec.allowed_headers)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -422,7 +422,7 @@ mod tests {
             .directives
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1))
+            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1.version_info()))
             .collect();
 
         insta::assert_debug_snapshot!(
@@ -483,7 +483,7 @@ mod tests {
         let connects = super::extract_connect_directive_arguments(
             schema.schema(),
             &name!(connect),
-            &ConnectSpec::V0_1,
+            &ConnectSpec::V0_1.version_info(),
         );
 
         insta::assert_debug_snapshot!(

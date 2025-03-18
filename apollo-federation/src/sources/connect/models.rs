@@ -31,6 +31,7 @@ use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
+use super::spec::versions::AllowedHeaders;
 use super::string_template;
 use super::variable::Namespace;
 use super::variable::VariableReference;
@@ -45,7 +46,6 @@ use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
-use crate::sources::connect::spec::versions::SpecVersionConfig;
 
 // --- Connector ---------------------------------------------------------------
 
@@ -99,11 +99,14 @@ impl Connector {
             return Ok(Default::default());
         };
 
+        let version = &spec.version_info();
+
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name, &spec)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name, version)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name, &spec)?;
+        let connect_arguments =
+            extract_connect_directive_arguments(schema, &connect_name, version)?;
 
         connect_arguments
             .into_iter()
@@ -395,7 +398,7 @@ impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_headers_arg(
         node: &'a Node<ast::Value>,
-        spec: &ConnectSpec,
+        spec: &AllowedHeaders,
     ) -> Vec<Result<Self, HeaderParseError<'a>>> {
         if let Some(values) = node.as_list() {
             values.iter().map(|v| Self::from_single(v, spec)).collect()
@@ -412,7 +415,7 @@ impl<'a> Header<'a> {
     /// Build a single [`Self`] from a single entry in the `headers` arg.
     fn from_single(
         node: &'a Node<ast::Value>,
-        spec: &ConnectSpec,
+        spec: &AllowedHeaders,
     ) -> Result<Self, HeaderParseError<'a>> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
