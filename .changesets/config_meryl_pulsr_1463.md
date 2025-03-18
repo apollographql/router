@@ -1,5 +1,5 @@
-### Brief but complete sentence that stands on its own ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
+### Make experimental otlp error metrics feature flag non-experimental ([PR #7033](https://github.com/apollographql/router/pull/7033))
 
-Because the otlp metrics error metrics feature is being promoted to `preview` from `experimental`, this change updates its feature flag name from `experimental_otlp_error_metrics` to `preview_otlp_error_metrics`.
+Because the otlp error metrics feature is being promoted to `preview` from `experimental`, this change updates its feature flag name from `experimental_otlp_error_metrics` to `preview_otlp_error_metrics`.
 
-By [@merylc](https://github.com/merylc) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@merylc](https://github.com/merylc) in https://github.com/apollographql/router/pull/7033
