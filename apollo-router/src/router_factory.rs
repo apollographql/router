@@ -46,7 +46,6 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
@@ -110,8 +109,6 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-
-    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory

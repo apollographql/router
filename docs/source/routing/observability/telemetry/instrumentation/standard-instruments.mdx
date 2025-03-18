@@ -123,18 +123,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
   - `error`: One of `channel closed`, `channel full`.
 
 ### Internals
-
 - `apollo.router.pipelines` - The number of request pipelines active in the router
-  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
-  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
-  - `config.hash` - The hash of the configuration
-
-### Server
-
-- `apollo.router.open_connections` - The number of open connections to the Router.
-  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
-  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
-  - `config.hash` - The hash of the configuration.
-  - `server.address` - The address that the router is listening on.
-  - `server.port` - The port that the router is listening on if not a unix socket.
-  - `state` - Either `active` or `terminating`.
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration

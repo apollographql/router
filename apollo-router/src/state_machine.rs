@@ -642,7 +642,6 @@ mod tests {
     use crate::services::RouterRequest;
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
-    use crate::services::router::pipeline_handle::PipelineRef;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
@@ -1200,7 +1199,6 @@ mod tests {
             type RouterService = router::BoxService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-            fn pipeline_ref(&self) -> Arc<PipelineRef>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = router::BoxService;

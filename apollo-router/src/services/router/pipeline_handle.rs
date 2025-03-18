@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
 use parking_lot::Mutex;
@@ -20,22 +19,22 @@ pub(crate) struct PipelineRef {
 /// Dropping all pipeline handles associated with the internal ref will remove the PipelineRef
 /// Clone MUST NOT be implemented for this type. Cloning will make extra copies that when dropped will throw off the global count.
 pub(crate) struct PipelineHandle {
-    pub(crate) pipeline_ref: Arc<PipelineRef>,
+    pipeline_ref: PipelineRef,
 }
 
-static PIPELINE_COUNTS: OnceLock<Mutex<HashMap<Arc<PipelineRef>, u64>>> = OnceLock::new();
-pub(crate) fn pipeline_counts() -> MutexGuard<'static, HashMap<Arc<PipelineRef>, u64>> {
-    PIPELINE_COUNTS.get_or_init(Default::default).lock()
+static PIPELINES: OnceLock<Mutex<HashMap<PipelineRef, u64>>> = OnceLock::new();
+pub(crate) fn pipelines() -> MutexGuard<'static, HashMap<PipelineRef, u64>> {
+    PIPELINES.get_or_init(Default::default).lock()
 }
 
 impl PipelineHandle {
     pub(crate) fn new(schema_id: String, launch_id: Option<String>, config_hash: String) -> Self {
-        let pipeline_ref = Arc::new(PipelineRef {
+        let pipeline_ref = PipelineRef {
             schema_id,
             launch_id,
             config_hash,
-        });
-        pipeline_counts()
+        };
+        pipelines()
             .entry(pipeline_ref.clone())
             .and_modify(|p| *p += 1)
             .or_insert(1);
@@ -45,7 +44,7 @@ impl PipelineHandle {
 
 impl Drop for PipelineHandle {
     fn drop(&mut self) {
-        let mut pipelines = pipeline_counts();
+        let mut pipelines = pipelines();
         let value = pipelines
             .get_mut(&self.pipeline_ref)
             .expect("pipeline_ref MUST be greater than zero");
