@@ -102,7 +102,7 @@ type T implements I
 }
 "#;
 
-fn plan_response_shape(op_str: &str) -> ResponseShape {
+pub(crate) fn plan_response_shape_with_schema(schema_str: &str, op_str: &str) -> ResponseShape {
     // Initialization
     let config = query_planner::QueryPlannerConfig {
         generate_query_fragments: false,
@@ -112,7 +112,7 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
         },
         ..Default::default()
     };
-    let supergraph = crate::Supergraph::new(SCHEMA_STR).unwrap();
+    let supergraph = crate::Supergraph::new(schema_str).unwrap();
     let planner = query_planner::QueryPlanner::new(&supergraph, config).unwrap();
 
     // Parse the schema and operation
@@ -145,6 +145,10 @@ fn plan_response_shape(op_str: &str) -> ResponseShape {
     );
 
     plan_rs
+}
+
+fn plan_response_shape(op_str: &str) -> ResponseShape {
+    plan_response_shape_with_schema(SCHEMA_STR, op_str)
 }
 
 //=================================================================================================

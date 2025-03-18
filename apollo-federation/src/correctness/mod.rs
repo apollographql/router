@@ -2,6 +2,8 @@ pub mod query_plan_analysis;
 #[cfg(test)]
 pub mod query_plan_analysis_test;
 mod query_plan_soundness;
+#[cfg(test)]
+pub mod query_plan_soundness_test;
 pub mod response_shape;
 pub mod response_shape_compare;
 #[cfg(test)]
