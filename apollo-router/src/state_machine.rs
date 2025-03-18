@@ -7,6 +7,7 @@ use Event::NoMoreConfiguration;
 use Event::NoMoreLicense;
 use Event::NoMoreSchema;
 use Event::Reload;
+use Event::RhaiReload;
 use Event::Shutdown;
 use State::Errored;
 use State::Running;
@@ -123,6 +124,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         new_schema: Option<Arc<SchemaState>>,
         new_configuration: Option<Arc<Configuration>>,
         new_license: Option<LicenseState>,
+        force_reload: bool,
     ) -> Self
     where
         S: HttpServerFactory,
@@ -208,7 +210,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     "processing event"
                 );
 
-                let need_reload = schema_reload || license_reload || configuration_reload;
+                let need_reload =
+                    force_reload || schema_reload || license_reload || configuration_reload;
 
                 if need_reload {
                     // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
@@ -552,22 +555,27 @@ where
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
-                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None)
+                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None, false)
                         .await
                 }
                 NoMoreConfiguration => state.no_more_configuration().await,
                 UpdateSchema(schema) => {
                     state
-                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None)
+                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None, false)
                         .await
                 }
                 NoMoreSchema => state.no_more_schema().await,
                 UpdateLicense(license) => {
                     state
-                        .update_inputs(&mut self, None, None, Some(license))
+                        .update_inputs(&mut self, None, None, Some(license), false)
                         .await
                 }
-                Reload => state.update_inputs(&mut self, None, None, None).await,
+                Reload => {
+                    state
+                        .update_inputs(&mut self, None, None, None, false)
+                        .await
+                }
+                RhaiReload => state.update_inputs(&mut self, None, None, None, true).await,
                 NoMoreLicense => state.no_more_license().await,
                 Shutdown => state.shutdown().await,
             };
@@ -634,6 +642,7 @@ mod tests {
     use crate::services::RouterRequest;
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
+    use crate::services::router::pipeline_handle::PipelineRef;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
@@ -1191,6 +1200,7 @@ mod tests {
             type RouterService = router::BoxService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+            fn pipeline_ref(&self) -> Arc<PipelineRef>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = router::BoxService;

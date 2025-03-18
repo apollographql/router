@@ -21,6 +21,9 @@ pub struct PersistedQueries {
     /// Enables using a local copy of the persisted query manifest to safelist operations
     #[serde(alias = "experimental_local_manifests")]
     pub local_manifests: Option<Vec<String>>,
+
+    /// Enables hot reloading of the local persisted query manifests
+    pub hot_reload: bool,
 }
 
 #[cfg(test)]
@@ -32,6 +35,7 @@ impl PersistedQueries {
         log_unknown: Option<bool>,
         safelist: Option<PersistedQueriesSafelist>,
         local_manifests: Option<Vec<String>>,
+        hot_reload: Option<bool>,
         experimental_prewarm_query_plan_cache: Option<PersistedQueriesPrewarmQueryPlanCache>,
     ) -> Self {
         Self {
@@ -41,6 +45,7 @@ impl PersistedQueries {
             local_manifests,
             experimental_prewarm_query_plan_cache: experimental_prewarm_query_plan_cache
                 .unwrap_or_default(),
+            hot_reload: hot_reload.unwrap_or_default(),
         }
     }
 }
@@ -86,6 +91,7 @@ impl Default for PersistedQueries {
             safelist: PersistedQueriesSafelist::default(),
             log_unknown: default_log_unknown(),
             local_manifests: None,
+            hot_reload: false,
             experimental_prewarm_query_plan_cache: PersistedQueriesPrewarmQueryPlanCache::default(),
         }
     }

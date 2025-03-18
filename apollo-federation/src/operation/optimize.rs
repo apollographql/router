@@ -35,27 +35,31 @@
 //! ## `reuse_fragments` methods (putting everything together)
 //! Recursive optimization of selection and selection sets.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable;
+use apollo_compiler::executable::Fragment;
+use apollo_compiler::executable::FragmentMap;
+use apollo_compiler::validation::Valid;
 
 use super::FieldSelection;
-use super::Fragment;
-use super::FragmentSpreadSelection;
 use super::HasSelectionKey;
 use super::InlineFragmentSelection;
-use super::NamedFragments;
 use super::Operation;
 use super::Selection;
 use super::SelectionId;
 use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
+use crate::compat::coerce_executable_values;
 use crate::error::FederationError;
-use crate::operation::FragmentSpread;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 //=============================================================================
 // Selection/SelectionSet minus operation
 
@@ -124,12 +128,26 @@ impl From<SelectionOrSet> for SelectionMapperReturn {
 impl Operation {
     /// Optimize the parsed size of the operation by generating fragments from selection sets that
     /// occur multiple times in the operation.
-    pub(crate) fn generate_fragments(&mut self) -> Result<(), FederationError> {
+    pub(crate) fn generate_fragments(
+        self,
+    ) -> Result<Valid<executable::ExecutableDocument>, FederationError> {
         let mut generator = FragmentGenerator::new(&self.selection_set);
         let minified_selection = generator.minify(&self.selection_set)?;
-        self.named_fragments = generator.into_inner();
-        self.selection_set = minified_selection;
-        Ok(())
+        let fragments = generator.into_inner();
+
+        let operation_type: executable::OperationType = self.root_kind.into();
+        let operation = executable::Operation {
+            operation_type,
+            name: self.name.clone(),
+            variables: self.variables.deref().clone(),
+            directives: self.directives.iter().cloned().collect(),
+            selection_set: minified_selection,
+        };
+        let mut document = executable::ExecutableDocument::new();
+        document.operations.insert(operation);
+        document.fragments = fragments;
+        coerce_executable_values(self.schema.schema(), &mut document);
+        Ok(document.validate(self.schema.schema())?)
     }
 }
 
@@ -223,11 +241,6 @@ impl<'a> FragmentGenerator<'a> {
                     self.increment_selection_count(&frag.selection_set);
                     self.collect_selection_usages(&frag.selection_set);
                 }
-                Selection::FragmentSpread(_) => {
-                    // nothing to do here as it is already a fragment spread
-                    // NOTE: there shouldn't be any fragment spreads in selections at this time
-                    continue;
-                }
             }
         }
     }
@@ -235,41 +248,59 @@ impl<'a> FragmentGenerator<'a> {
     /// Recursively iterates over all selections to check if their selection sets are used multiple
     /// times within the operation. Every selection set that is used more than once will be extracted
     /// as a named fragment.
-    fn minify(&mut self, selection_set: &SelectionSet) -> Result<SelectionSet, FederationError> {
-        let mut new_selection_set = SelectionSet::empty(
-            selection_set.schema.clone(),
-            selection_set.type_position.clone(),
-        );
-
+    fn minify(
+        &mut self,
+        selection_set: &SelectionSet,
+    ) -> Result<executable::SelectionSet, FederationError> {
+        let mut new_selection_set =
+            executable::SelectionSet::new(selection_set.type_position.type_name().clone());
+        let mut new_selections = vec![];
         for selection in selection_set.selections.values() {
             match selection {
                 Selection::Field(field) => {
                     let minified_field_selection = self.minify_field_selection(field)?;
-                    let new_field = field.with_updated_selection_set(minified_field_selection);
-                    new_selection_set
-                        .add_local_selection(&Selection::Field(Arc::new(new_field)))?;
-                }
-                Selection::FragmentSpread(frag) => {
-                    // already a fragment spread so just copy it over
-                    new_selection_set
-                        .add_local_selection(&Selection::FragmentSpread(Arc::clone(frag)))?;
+                    if let executable::Selection::Field(field) = &minified_field_selection {
+                        if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME
+                            && field.directives.is_empty()
+                            && field.alias.is_none()
+                        {
+                            // Move the plain __typename to the start of the selection set.
+                            // This looks nicer, and matches existing tests.
+                            // Note: The plain-ness is also defined in `Field::is_plain_typename_field`.
+                            // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                            new_selections.insert(0, minified_field_selection);
+                            continue;
+                        }
+                    }
+                    new_selections.push(minified_field_selection);
                 }
                 Selection::InlineFragment(inline_fragment) => {
                     let minified_selection =
-                        self.minify_inline_fragment_selection(inline_fragment)?;
-                    new_selection_set.add_local_selection(&minified_selection)?;
+                        self.minify_inline_fragment_selection(&new_selection_set, inline_fragment)?;
+                    new_selections.push(minified_selection);
                 }
             }
         }
-
+        new_selection_set.extend(new_selections);
         Ok(new_selection_set)
     }
 
     fn minify_field_selection(
         &mut self,
-        field: &Arc<FieldSelection>,
-    ) -> Result<Option<SelectionSet>, FederationError> {
-        if let Some(field_selection_set) = &field.selection_set {
+        field_selection: &Arc<FieldSelection>,
+    ) -> Result<executable::Selection, FederationError> {
+        let field = &field_selection.field;
+        let definition = field
+            .field_position
+            .get(field.schema.schema())?
+            .node
+            .to_owned();
+        let mut minified_field = executable::Field::new(field.name().to_owned(), definition)
+            .with_opt_alias(field.alias.to_owned())
+            .with_arguments(field.arguments.deref().to_owned())
+            .with_directives(field.directives.iter().cloned());
+
+        if let Some(field_selection_set) = &field_selection.selection_set {
             let selection_key = SelectionCountKey {
                 type_position: &field_selection_set.type_position,
                 selection_set: field_selection_set,
@@ -282,31 +313,17 @@ impl<'a> FragmentGenerator<'a> {
                         if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
                             existing
                         } else {
-                            self.create_new_fragment(
-                                unique_fragment_id,
-                                field_selection_set,
-                                &field_selection_set.type_position,
-                            )?
+                            self.create_new_fragment(unique_fragment_id, field_selection_set)?
                         };
 
                     // create new field selection set with just a fragment spread
-                    let mut new_field_selection_set = SelectionSet::empty(
-                        field_selection_set.schema.clone(),
-                        field_selection_set.type_position.clone(),
+                    let fragment_spread = executable::FragmentSpread::new(fragment.name.clone());
+                    let mut new_field_selection_set = executable::SelectionSet::new(
+                        field_selection_set.type_position.type_name().clone(),
                     );
-                    new_field_selection_set.add_local_selection(&Selection::from(
-                        FragmentSpreadSelection {
-                            spread: FragmentSpread {
-                                schema: fragment.schema.clone(),
-                                fragment_name: fragment.name.clone(),
-                                type_condition_position: fragment.type_condition_position.clone(),
-                                directives: Default::default(),
-                                fragment_directives: fragment.directives.clone(),
-                                selection_id: SelectionId::new(),
-                            },
-                            selection_set: fragment.selection_set.clone(),
-                        },
-                    ))?;
+                    new_field_selection_set.push(executable::Selection::FragmentSpread(Node::new(
+                        fragment_spread,
+                    )));
                     new_field_selection_set
                 }
                 _ => {
@@ -314,16 +331,16 @@ impl<'a> FragmentGenerator<'a> {
                     self.minify(field_selection_set)?
                 }
             };
-            Ok(Some(minified_selection_set))
-        } else {
-            Ok(None)
+            minified_field = minified_field.with_selections(minified_selection_set.selections);
         }
+        Ok(executable::Selection::from(minified_field))
     }
 
     fn minify_inline_fragment_selection(
         &mut self,
+        parent_selection_set: &executable::SelectionSet,
         inline_fragment: &Arc<InlineFragmentSelection>,
-    ) -> Result<Selection, FederationError> {
+    ) -> Result<executable::Selection, FederationError> {
         let selection_key = SelectionCountKey {
             type_position: &inline_fragment.selection_set.type_position,
             selection_set: &inline_fragment.selection_set,
@@ -332,16 +349,13 @@ impl<'a> FragmentGenerator<'a> {
             Some(count_entry) if count_entry.count > 1 => {
                 // extract named fragment OR use one that already exists
                 let unique_fragment_id = count_entry.selection_id;
-                let fragment =
-                    if let Some(existing) = self.minimized_fragments.get(&unique_fragment_id) {
-                        existing
-                    } else {
-                        self.create_new_fragment(
-                            unique_fragment_id,
-                            &inline_fragment.selection_set,
-                            &inline_fragment.inline_fragment.casted_type(),
-                        )?
-                    };
+                let fragment = if let Some(existing) =
+                    self.minimized_fragments.get(&unique_fragment_id)
+                {
+                    existing
+                } else {
+                    self.create_new_fragment(unique_fragment_id, &inline_fragment.selection_set)?
+                };
 
                 let directives = &inline_fragment.inline_fragment.directives;
                 let skip_include_only = directives
@@ -350,49 +364,39 @@ impl<'a> FragmentGenerator<'a> {
 
                 if skip_include_only {
                     // convert inline fragment selection to a fragment spread
-                    Selection::from(FragmentSpreadSelection {
-                        spread: FragmentSpread {
-                            schema: fragment.schema.clone(),
-                            fragment_name: fragment.name.clone(),
-                            type_condition_position: fragment.type_condition_position.clone(),
-                            directives: directives.clone(),
-                            fragment_directives: fragment.directives.clone(),
-                            selection_id: SelectionId::new(),
-                        },
-                        selection_set: fragment.selection_set.clone(),
-                    })
+                    let spread = executable::FragmentSpread::new(fragment.name.clone())
+                        .with_directives(directives.iter().cloned());
+                    executable::Selection::from(spread)
                 } else {
                     // cannot lift out inline selection directly as it has directives
                     // extract named fragment from inline fragment selections
-                    let fragment_spread_selection = Selection::from(FragmentSpreadSelection {
-                        spread: FragmentSpread {
-                            schema: fragment.schema.clone(),
-                            fragment_name: fragment.name.clone(),
-                            type_condition_position: fragment.type_condition_position.clone(),
-                            directives: Default::default(),
-                            fragment_directives: fragment.directives.clone(),
-                            selection_id: SelectionId::new(),
-                        },
-                        selection_set: fragment.selection_set.clone(),
-                    });
-
-                    let mut new_inline_selection_set = SelectionSet::empty(
-                        fragment.schema.clone(),
-                        fragment.type_condition_position.clone(),
-                    );
-                    new_inline_selection_set.add_local_selection(&fragment_spread_selection)?;
-                    let new_inline_fragment =
-                        inline_fragment.with_updated_selection_set(new_inline_selection_set);
-                    Selection::from(new_inline_fragment)
+                    let fragment_spread = executable::FragmentSpread::new(fragment.name.clone());
+                    let type_condition = inline_fragment
+                        .inline_fragment
+                        .type_condition_position
+                        .clone()
+                        .map(|type_condition| type_condition.type_name().clone());
+                    let minified_inline_fragment = parent_selection_set
+                        .new_inline_fragment(type_condition)
+                        .with_selection(fragment_spread)
+                        .with_directives(directives.iter().cloned());
+                    executable::Selection::from(minified_inline_fragment)
                 }
             }
             _ => {
                 // inline fragment is only used once so we should keep it
                 // still need to minify its sub selections
                 let new_inline_selection_set = self.minify(&inline_fragment.selection_set)?;
-                let new_fragment_selection =
-                    inline_fragment.with_updated_selection_set(new_inline_selection_set);
-                Selection::from(new_fragment_selection)
+                let type_condition = inline_fragment
+                    .inline_fragment
+                    .type_condition_position
+                    .clone()
+                    .map(|type_condition| type_condition.type_name().clone());
+                let minified_inline_fragment = parent_selection_set
+                    .new_inline_fragment(type_condition)
+                    .with_selections(new_inline_selection_set.selections)
+                    .with_directives(inline_fragment.inline_fragment.directives.iter().cloned());
+                executable::Selection::from(minified_inline_fragment)
             }
         };
         Ok(minified_selection)
@@ -402,16 +406,13 @@ impl<'a> FragmentGenerator<'a> {
         &mut self,
         unique_fragment_id: SelectionId,
         selection_set: &SelectionSet,
-        type_condition_position: &CompositeTypeDefinitionPosition,
     ) -> Result<&Fragment, FederationError> {
         // minify current selection set and extract named fragment
         let minified_selection_set = self.minify(selection_set)?;
         let new_fragment = Fragment {
-            schema: minified_selection_set.schema.clone(),
             name: self.next_name(),
-            type_condition_position: type_condition_position.clone(),
-            directives: Default::default(),
             selection_set: minified_selection_set,
+            directives: Default::default(),
         };
 
         self.minimized_fragments
@@ -420,12 +421,12 @@ impl<'a> FragmentGenerator<'a> {
     }
 
     /// Consumes the generator and returns the fragments it generated.
-    fn into_inner(self) -> NamedFragments {
-        let mut named_fragments = NamedFragments::default();
+    fn into_inner(self) -> FragmentMap {
+        let mut fragments = FragmentMap::default();
         for (_, fragment) in &self.minimized_fragments {
-            named_fragments.insert(fragment.clone());
+            fragments.insert(fragment.name.clone(), Node::new(fragment.clone()));
         }
-        named_fragments
+        fragments
     }
 }
 
@@ -475,7 +476,6 @@ mod tests {
             operation
                 .selection_set
                 .without_empty_branches()
-                .unwrap()
                 .map(|s| s.to_string())
         }
 
@@ -657,7 +657,13 @@ mod tests {
     }
 
     mod fragment_generation {
+        use apollo_compiler::ExecutableDocument;
+        use apollo_compiler::validation::Valid;
+
+        use crate::correctness::compare_operations;
+        use crate::operation::tests::assert_equal_ops;
         use crate::operation::tests::parse_and_expand;
+        use crate::operation::tests::parse_operation;
         use crate::operation::tests::parse_schema;
 
         #[test]
@@ -675,7 +681,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -691,19 +697,14 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
-            fragment a on T {
-              a
-              b
-              c
-            }
-
+            insta::assert_snapshot!(minified, @r###"
             {
               t1 {
                 ...a
@@ -712,7 +713,15 @@ mod tests {
                 ...a
               }
             }
+
+            fragment a on T {
+              a
+              b
+              c
+            }
             "###);
+
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -730,7 +739,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -746,19 +755,14 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
-            fragment a on T {
-              a
-              b
-              c
-            }
-
+            insta::assert_snapshot!(minified, @r###"
             {
               t1 {
                 ...a
@@ -767,7 +771,15 @@ mod tests {
                 ...a
               }
             }
+
+            fragment a on T {
+              a
+              b
+              c
+            }
             "###);
+
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -785,7 +797,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -800,13 +812,14 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("no fragments were generated");
-            insta::assert_snapshot!(query, @r###"
+            insta::assert_snapshot!(minified, @r###"
             {
               t1 {
                 a
@@ -819,6 +832,8 @@ mod tests {
               }
             }
             "###);
+
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -842,7 +857,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -858,13 +873,14 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("no fragments were generated");
-            insta::assert_snapshot!(query, @r###"
+            insta::assert_snapshot!(minified, @r###"
             {
               t1 {
                 a
@@ -878,6 +894,8 @@ mod tests {
               }
             }
             "###);
+
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -899,7 +917,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -919,13 +937,23 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
+            insta::assert_snapshot!(minified, @r###"
+            {
+              i1 {
+                ...b
+              }
+              i2 {
+                ...b
+              }
+            }
+
             fragment a on T {
               a
               b
@@ -935,16 +963,8 @@ mod tests {
             fragment b on I {
               ...a
             }
-
-            {
-              i1 {
-                ...b
-              }
-              i2 {
-                ...b
-              }
-            }
             "###);
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -966,7 +986,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -984,19 +1004,14 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
-            fragment a on T {
-              a
-              b
-              c
-            }
-
+            insta::assert_snapshot!(minified, @r###"
             {
               i {
                 ...a
@@ -1005,7 +1020,14 @@ mod tests {
                 ...a
               }
             }
+
+            fragment a on T {
+              a
+              b
+              c
+            }
             "###);
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -1029,7 +1051,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_operation(
                 &schema,
                 r#"
                 query {
@@ -1052,18 +1074,14 @@ mod tests {
                   }
                 }
                 "#,
-            )
-            .expect("query is valid");
+            );
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
-            fragment a on V {
-              x
-              y
-            }
-
+            insta::assert_snapshot!(minified, @r###"
             {
               t1 {
                 a
@@ -1081,7 +1099,13 @@ mod tests {
                 }
               }
             }
+
+            fragment a on V {
+              x
+              y
+            }
             "###);
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -1105,7 +1129,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_and_expand(
                 &schema,
                 r#"
                 query {
@@ -1136,10 +1160,21 @@ mod tests {
             )
             .expect("query is valid");
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
+            insta::assert_snapshot!(minified, @r###"
+            {
+              t1 {
+                ...b
+              }
+              t2 {
+                ...b
+              }
+            }
+
             fragment a on V {
               x
               y
@@ -1153,16 +1188,8 @@ mod tests {
                 ...a
               }
             }
-
-            {
-              t1 {
-                ...b
-              }
-              t2 {
-                ...b
-              }
-            }
             "###);
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -1186,7 +1213,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_and_expand(
                 &schema,
                 r#"
                 query {
@@ -1217,15 +1244,12 @@ mod tests {
             )
             .expect("query is valid");
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
-            fragment a on V {
-              x
-              y
-            }
-
+            insta::assert_snapshot!(minified, @r###"
             {
               t1 {
                 a
@@ -1244,7 +1268,13 @@ mod tests {
                 }
               }
             }
+
+            fragment a on V {
+              x
+              y
+            }
             "###);
+            assert_equal_ops!(&schema, &original, &minified);
         }
 
         #[test]
@@ -1266,7 +1296,7 @@ mod tests {
               }
             "#;
             let schema = parse_schema(schema_doc);
-            let mut query = parse_and_expand(
+            let query = parse_and_expand(
                 &schema,
                 r#"
                 query {
@@ -1289,16 +1319,12 @@ mod tests {
             )
             .expect("query is valid");
 
-            query
+            let original: Valid<ExecutableDocument> =
+                query.clone().try_into().expect("valid document");
+            let minified = query
                 .generate_fragments()
                 .expect("successfully generated fragments");
-            insta::assert_snapshot!(query, @r###"
-            fragment a on T {
-              a
-              b
-              c
-            }
-
+            insta::assert_snapshot!(minified, @r###"
             {
               i1 {
                 ...a @skip(if: false)
@@ -1307,7 +1333,14 @@ mod tests {
                 ...a
               }
             }
+
+            fragment a on T {
+              a
+              b
+              c
+            }
             "###);
+            assert_equal_ops!(&schema, &original, &minified);
         }
     }
 }

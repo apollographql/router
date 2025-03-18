@@ -1,3 +1,6 @@
+//! Validations to make sure that all `@key` directives in the schema correspond to at least
+//! one connector.
+
 use std::fmt;
 use std::fmt::Formatter;
 
@@ -7,15 +10,15 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::executable::FieldSet;
+use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
-use super::VariableReference;
-use super::compare_keys::field_set_is_subset;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
+use crate::sources::connect::variable::VariableReference;
 
 /// Collects keys and entity connectors for comparison and validation.
 #[derive(Default)]
@@ -128,5 +131,108 @@ pub(crate) fn field_set_error(
             type_name
         ),
         locations: vec![],
+    }
+}
+
+fn selection_is_subset(x: &Selection, y: &Selection) -> bool {
+    match (x, y) {
+        (Selection::Field(x), Selection::Field(y)) => {
+            x.name == y.name
+                && x.alias == y.alias
+                && vec_includes_as_set(
+                    &x.selection_set.selections,
+                    &y.selection_set.selections,
+                    selection_is_subset,
+                )
+        }
+        (Selection::InlineFragment(x), Selection::InlineFragment(y)) => {
+            x.type_condition == y.type_condition
+                && vec_includes_as_set(
+                    &x.selection_set.selections,
+                    &y.selection_set.selections,
+                    selection_is_subset,
+                )
+        }
+        _ => false,
+    }
+}
+
+/// Returns true if `inner` is a subset of `outer`.
+///
+/// Note: apollo_federation::operation::SelectionSet has its own `contains`
+/// method I'd love to use, but it requires a ValidFederationSchema, which
+/// we don't have during validation. This code can be removed after we rewrite
+/// composition in rust and connector validations happen after schema validation
+/// and `@link` enrichment.
+pub(super) fn field_set_is_subset(inner: &FieldSet, outer: &FieldSet) -> bool {
+    inner.selection_set.ty == outer.selection_set.ty
+        && vec_includes_as_set(
+            &outer.selection_set.selections,
+            &inner.selection_set.selections,
+            selection_is_subset,
+        )
+}
+
+// `this` vector includes `other` vector as a set
+fn vec_includes_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
+    other.iter().all(|other_node| {
+        this.iter()
+            .any(|this_node| item_matches(this_node, other_node))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::Schema;
+    use apollo_compiler::executable::FieldSet;
+    use apollo_compiler::name;
+    use apollo_compiler::validation::Valid;
+    use rstest::rstest;
+
+    use super::field_set_is_subset;
+
+    fn schema() -> Valid<Schema> {
+        Schema::parse_and_validate(
+            r#"
+        type Query {
+            t: T
+        }
+
+        type T {
+            a: String
+            b: B
+            c: String
+        }
+
+        type B {
+            x: String
+            y: String
+        }
+        "#,
+            "",
+        )
+        .unwrap()
+    }
+
+    #[rstest]
+    #[case("a", "a")]
+    #[case("a b { x } c", "a b { x } c")]
+    #[case("a", "a c")]
+    #[case("b { x }", "b { x y }")]
+    fn test_field_set_is_subset(#[case] inner: &str, #[case] outer: &str) {
+        let schema = schema();
+        let inner = FieldSet::parse_and_validate(&schema, name!(T), inner, "inner").unwrap();
+        let outer = FieldSet::parse_and_validate(&schema, name!(T), outer, "outer").unwrap();
+        assert!(field_set_is_subset(&inner, &outer));
+    }
+
+    #[rstest]
+    #[case("a b { x } c", "a")]
+    #[case("b { x y }", "b { x }")]
+    fn test_field_set_is_not_subset(#[case] inner: &str, #[case] outer: &str) {
+        let schema = schema();
+        let inner = FieldSet::parse_and_validate(&schema, name!(T), inner, "inner").unwrap();
+        let outer = FieldSet::parse_and_validate(&schema, name!(T), outer, "outer").unwrap();
+        assert!(!field_set_is_subset(&inner, &outer));
     }
 }

@@ -430,16 +430,12 @@ async fn persisted_queries() {
         "name": "Ada Lovelace"
       }
     });
-    let map = [(
-        FullPersistedQueryOperationId {
-            operation_id: PERSISTED_QUERY_ID.to_string(),
-            client_name: None,
-        },
-        PERSISTED_QUERY_BODY.to_string(),
-    )]
-    .into_iter()
-    .collect();
-    let (_mock_guard, uplink_config) = mock_pq_uplink(&map).await;
+    let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
+        id: PERSISTED_QUERY_ID.to_string(),
+        body: PERSISTED_QUERY_BODY.to_string(),
+        client_name: None,
+    }]);
+    let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
     let config = serde_json::json!({
         "persisted_queries": {

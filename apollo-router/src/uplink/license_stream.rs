@@ -533,7 +533,7 @@ mod test {
                 }
                 Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,
                 Event::NoMoreLicense => SimpleEvent::NoMoreLicense,
-                Event::Reload => SimpleEvent::ForcedHotReload,
+                Event::Reload | Event::RhaiReload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }

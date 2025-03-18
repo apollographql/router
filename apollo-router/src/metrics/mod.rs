@@ -33,6 +33,7 @@ pub(crate) mod test_utils {
     use num_traits::ToPrimitive;
     use opentelemetry::Array;
     use opentelemetry::KeyValue;
+    use opentelemetry::StringValue;
     use opentelemetry::Value;
     use opentelemetry_sdk::metrics::Aggregation;
     use opentelemetry_sdk::metrics::AttributeSet;
@@ -313,10 +314,10 @@ pub(crate) mod test_utils {
         }
 
         fn equal_attributes(attrs1: &AttributeSet, attrs2: &[KeyValue]) -> bool {
-            attrs1
-                .iter()
-                .zip(attrs2.iter())
-                .all(|((k, v), kv)| kv.key == *k && kv.value == *v)
+            attrs1.iter().zip(attrs2.iter()).all(|((k, v), kv)| {
+                kv.key == *k
+                    && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>")))
+            })
         }
     }
 
@@ -903,6 +904,43 @@ macro_rules! assert_metric {
     };
 }
 
+#[cfg(test)]
+macro_rules! assert_no_metric {
+    ($result:expr, $name:expr, $value:expr, $sum:expr, $count:expr, $attrs:expr) => {
+        if $result {
+            let metric = crate::metrics::test_utils::SerdeMetric {
+                name: $name.to_string(),
+                description: "".to_string(),
+                unit: "".to_string(),
+                data: crate::metrics::test_utils::SerdeMetricData {
+                    datapoints: [crate::metrics::test_utils::SerdeMetricDataPoint {
+                        value: $value,
+                        sum: $sum,
+                        count: $count,
+                        attributes: $attrs
+                            .iter()
+                            .map(|kv: &opentelemetry::KeyValue| {
+                                (
+                                    kv.key.to_string(),
+                                    crate::metrics::test_utils::SerdeMetricDataPoint::convert(
+                                        &kv.value,
+                                    ),
+                                )
+                            })
+                            .collect::<std::collections::BTreeMap<_, _>>(),
+                    }]
+                    .to_vec(),
+                },
+            };
+            panic!(
+                "unexpected metric found:\n{}\nmetrics present:\n{}",
+                serde_yaml::to_string(&metric).unwrap(),
+                serde_yaml::to_string(&crate::metrics::collect_metrics().all()).unwrap()
+            )
+        }
+    };
+}
+
 /// Assert the value of a counter metric that has the given name and attributes.
 ///
 /// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
@@ -943,6 +981,49 @@ macro_rules! assert_counter {
     ($name:literal, $value: expr) => {
         let result = crate::metrics::collect_metrics().assert($name, crate::metrics::test_utils::MetricType::Counter, $value, false, &[]);
         assert_metric!(result, $name, Some($value.into()), None, None, &[]);
+    };
+}
+
+/// Assert that a counter metric does not exist with the given name and attributes.
+///
+/// In asynchronous tests, you must use [`FutureMetricsExt::with_metrics`]. See dev-docs/metrics.md
+/// for details: <https://github.com/apollographql/router/blob/4fc63d55104c81c77e6e0a3cca615eac28e39dc3/dev-docs/metrics.md#testing>
+#[cfg(test)]
+macro_rules! assert_counter_not_exists {
+
+    ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+    ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+    ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+    ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
+        let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
+    };
+
+
+    ($name:literal, $value: ty, $attributes: expr) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, $attributes);
+        assert_no_metric!(result, $name, None, None, None, &$attributes);
+    };
+
+    ($name:literal, $value: ty) => {
+        let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Counter, &[]);
+        assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
 
@@ -1137,30 +1218,30 @@ macro_rules! assert_histogram_not_exists {
     ($($name:ident).+, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($($name:ident).+, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>(stringify!($($name).+), crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($attr_key:literal = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty, $($($attr_key:ident).+ = $attr_value:expr),+) => {
         let attributes = &[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+];
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, attributes);
-        assert_metric!(!result, $name, None, None, None, attributes);
+        assert_no_metric!(result, $name, None, None, None, attributes);
     };
 
     ($name:literal, $value: ty) => {
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
-        assert_metric!(!result, $name, None, None, None, &[]);
+        assert_no_metric!(result, $name, None, None, None, &[]);
     };
 }
 
@@ -1282,6 +1363,13 @@ mod test {
             .u64_observable_gauge("test")
             .with_callback(|m| m.observe(5, &[]))
             .init();
+        assert_gauge!("test", 5);
+    }
+
+    #[test]
+    fn test_gauge_record() {
+        let gauge = meter_provider().meter("test").u64_gauge("test").init();
+        gauge.record(5, &[]);
         assert_gauge!("test", 5);
     }
 

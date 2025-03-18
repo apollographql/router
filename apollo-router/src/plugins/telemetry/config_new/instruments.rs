@@ -7,6 +7,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
@@ -32,7 +33,10 @@ use super::graphql::GraphQLInstruments;
 use super::graphql::selectors::ListLength;
 use super::selectors::CacheKind;
 use crate::Context;
+use crate::axum_factory::connection_handle::ConnectionState;
+use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
+use crate::metrics::meter_provider;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
@@ -59,6 +63,8 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PIPELINE_METRIC;
+use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -335,8 +341,8 @@ impl InstrumentsConfig {
                                     )
                                     .as_histogram()
                                     .cloned().expect(
-                                "cannot convert instrument to histogram for router; this should not happen",
-                            )
+                                    "cannot convert instrument to histogram for router; this should not happen",
+                                )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::RequestHeader {
@@ -379,7 +385,7 @@ impl InstrumentsConfig {
                                     .as_histogram()
                                     .cloned()
                                     .expect(
-                                    "cannot convert instrument to histogram for router; this should not happen",
+                                        "cannot convert instrument to histogram for router; this should not happen",
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
@@ -830,16 +836,16 @@ impl InstrumentsConfig {
                         increment: Increment::FieldCustom(None),
                         condition: Condition::True,
                         histogram: Some(static_instruments
-                                .get(FIELD_LENGTH)
-                                .expect(
-                                    "cannot get static instrument for graphql; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to counter for graphql; this should not happen",
-                                )
-                            ),
+                            .get(FIELD_LENGTH)
+                            .expect(
+                                "cannot get static instrument for graphql; this should not happen",
+                            )
+                            .as_histogram()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to counter for graphql; this should not happen",
+                            )
+                        ),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: Some(Arc::new(GraphQLSelector::ListLength {
                             list_length: ListLength::Value,
@@ -932,16 +938,16 @@ impl InstrumentsConfig {
                         increment: Increment::Custom(None),
                         condition: Condition::True,
                         counter: Some(static_instruments
-                                .get(CACHE_METRIC)
-                                .expect(
-                                    "cannot get static instrument for cache; this should not happen",
-                                )
-                                .as_counter_f64()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to counter for cache; this should not happen",
-                                )
-                            ),
+                            .get(CACHE_METRIC)
+                            .expect(
+                                "cannot get static instrument for cache; this should not happen",
+                            )
+                            .as_counter_f64()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to counter for cache; this should not happen",
+                            )
+                        ),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: Some(Arc::new(SubgraphSelector::Cache {
                             cache: CacheKind::Hit,
@@ -955,6 +961,79 @@ impl InstrumentsConfig {
             }),
         }
     }
+
+    pub(crate) fn new_pipeline_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = meter_provider().meter("apollo/router");
+        let mut instruments = HashMap::new();
+        instruments.insert(
+            PIPELINE_METRIC.to_string(),
+            StaticInstrument::GaugeU64(
+                meter
+                    .u64_observable_gauge(PIPELINE_METRIC)
+                    .with_description("The number of request pipelines active in the router")
+                    .with_callback(|i| {
+                        for (pipeline, count) in &*pipeline_counts() {
+                            let mut attributes = Vec::with_capacity(3);
+                            attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
+                            if let Some(launch_id) = &pipeline.launch_id {
+                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
+                            }
+                            attributes
+                                .push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
+
+                            i.observe(*count, &attributes);
+                        }
+                    })
+                    .init(),
+            ),
+        );
+        instruments.insert(
+            OPEN_CONNECTIONS_METRIC.to_string(),
+            StaticInstrument::GaugeU64(
+                meter
+                    .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
+                    .with_description("Number of currently connected clients")
+                    .with_callback(move |gauge| {
+                        let connections =
+                            crate::axum_factory::connection_handle::connection_counts();
+                        for (connection, count) in connections.iter() {
+                            let mut attributes = Vec::with_capacity(6);
+                            if let Some((ip, port)) = connection.address.ip_and_port() {
+                                attributes.push(KeyValue::new("server.address", ip.to_string()));
+                                attributes.push(KeyValue::new("server.port", port.to_string()));
+                            } else {
+                                // Unix socket
+                                attributes.push(KeyValue::new(
+                                    "server.address",
+                                    connection.address.to_string(),
+                                ));
+                            }
+                            attributes.push(KeyValue::new(
+                                "schema.id",
+                                connection.pipeline_ref.schema_id.clone(),
+                            ));
+                            if let Some(launch_id) = &connection.pipeline_ref.launch_id {
+                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
+                            }
+                            attributes.push(KeyValue::new(
+                                "config.hash",
+                                connection.pipeline_ref.config_hash.clone(),
+                            ));
+                            attributes.push(KeyValue::new(
+                                "state",
+                                match connection.state {
+                                    ConnectionState::Active => "active",
+                                    ConnectionState::Terminating => "terminating",
+                                },
+                            ));
+                            gauge.observe(*count, &attributes);
+                        }
+                    })
+                    .init(),
+            ),
+        );
+        instruments
+    }
 }
 
 #[derive(Debug)]
@@ -962,6 +1041,9 @@ pub(crate) enum StaticInstrument {
     CounterF64(Counter<f64>),
     UpDownCounterI64(UpDownCounter<i64>),
     Histogram(Histogram<f64>),
+    // Gauges are never read
+    #[allow(dead_code)]
+    GaugeU64(ObservableGauge<u64>),
 }
 
 impl StaticInstrument {
