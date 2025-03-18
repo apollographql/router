@@ -123,7 +123,7 @@ pub(crate) struct ErrorsConfiguration {
     pub(crate) subgraph: SubgraphErrorConfig,
 
     /// Send error metrics via OTLP with additional dimensions [`extensions.service`, `extensions.code`]
-    pub(crate) preview_otlp_error_metrics: OtlpErrorMetricsMode,
+    pub(crate) preview_extended_error_metrics: OtlpErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]

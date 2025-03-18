@@ -2752,7 +2752,7 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "preview_otlp_error_metrics": {
+        "preview_extended_error_metrics": {
           "$ref": "#/definitions/OtlpErrorMetricsMode",
           "description": "#/definitions/OtlpErrorMetricsMode"
         },

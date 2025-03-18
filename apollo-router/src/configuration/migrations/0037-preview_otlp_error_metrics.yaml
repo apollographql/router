@@ -3,4 +3,4 @@ actions:
 
   - type: move
     from: telemetry.apollo.experimental_otlp_error_metrics
-    to: telemetry.apollo.preview_otlp_error_metrics
+    to: telemetry.apollo.preview_extended_error_metrics
