@@ -167,9 +167,8 @@ impl RouterFactory for TestRouterFactory {
         MultiMap::new()
     }
 
-    fn pipeline_ref(&self) -> &PipelineRef {
-        static DUMMY_PIPELINE: OnceLock<PipelineRef> = OnceLock::new();
-        DUMMY_PIPELINE.get_or_init(|| PipelineRef {
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        Arc::new(PipelineRef {
             schema_id: "dummy".to_string(),
             launch_id: None,
             config_hash: "dummy".to_string(),

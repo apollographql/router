@@ -218,7 +218,7 @@ pub(super) async fn get_extra_listeners(
 }
 
 pub(super) fn serve_router_on_listen_addr(
-    pipeline_ref: PipelineRef,
+    pipeline_ref: Arc<PipelineRef>,
     mut listener: Listener,
     address: ListenAddr,
     router: axum::Router,

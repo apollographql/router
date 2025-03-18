@@ -251,7 +251,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         let live = self.live.clone();
         let ready = self.ready.clone();
         Box::pin(async move {
-            let pipeline_ref = service_factory.pipeline_ref().clone();
+            let pipeline_ref = service_factory.pipeline_ref();
             let all_routers = make_axum_router(
                 live.clone(),
                 ready.clone(),

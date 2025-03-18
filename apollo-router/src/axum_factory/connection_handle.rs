@@ -38,9 +38,9 @@ pub(crate) fn connection_counts() -> MutexGuard<'static, HashMap<ConnectionRef, 
 }
 
 impl ConnectionHandle {
-    pub(crate) fn new(pipeline_ref: PipelineRef, address: ListenAddr) -> Self {
+    pub(crate) fn new(pipeline_ref: Arc<PipelineRef>, address: ListenAddr) -> Self {
         let connection_ref = ConnectionRef {
-            pipeline_ref: Arc::new(pipeline_ref),
+            pipeline_ref,
             address,
             state: ConnectionState::Active,
         };
