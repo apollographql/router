@@ -21,10 +21,10 @@ impl TelemetryIncompatPlugin {
 impl IncompatiblePlugin for TelemetryIncompatPlugin {
     fn is_applied_to_all(&self) -> bool {
         self.config.subgraph.all.send
-            // When OtlpErrorMetricsMode is enabled, this plugin supports reporting connector errors
+            // When ExtendedErrorMetricsMode is enabled, this plugin supports reporting connector errors
             && !matches!(
                 self.config.preview_extended_error_metrics,
-                apollo::OtlpErrorMetricsMode::Enabled
+                apollo::ExtendedErrorMetricsMode::Enabled
             )
     }
 
@@ -40,7 +40,7 @@ impl IncompatiblePlugin for TelemetryIncompatPlugin {
                     if sub.send
                         && !matches!(
                             self.config.preview_extended_error_metrics,
-                            apollo::OtlpErrorMetricsMode::Enabled
+                            apollo::ExtendedErrorMetricsMode::Enabled
                         )
                     {
                         Either::Left(name)
