@@ -900,14 +900,14 @@ impl RouterService {
 
             let send_otlp_errors = if service.is_empty() {
                 matches!(
-                    errors_config.experimental_otlp_error_metrics,
+                    errors_config.preview_otlp_error_metrics,
                     OtlpErrorMetricsMode::Enabled
                 )
             } else {
                 let subgraph_error_config = errors_config.subgraph.get_error_config(&service);
                 subgraph_error_config.send
                     && matches!(
-                        errors_config.experimental_otlp_error_metrics,
+                        errors_config.preview_otlp_error_metrics,
                         OtlpErrorMetricsMode::Enabled
                     )
             };

@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -2753,7 +2752,7 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "experimental_otlp_error_metrics": {
+        "preview_otlp_error_metrics": {
           "$ref": "#/definitions/OtlpErrorMetricsMode",
           "description": "#/definitions/OtlpErrorMetricsMode"
         },

@@ -23,7 +23,7 @@ impl IncompatiblePlugin for TelemetryIncompatPlugin {
         self.config.subgraph.all.send
             // When OtlpErrorMetricsMode is enabled, this plugin supports reporting connector errors
             && !matches!(
-                self.config.experimental_otlp_error_metrics,
+                self.config.preview_otlp_error_metrics,
                 apollo::OtlpErrorMetricsMode::Enabled
             )
     }
@@ -39,7 +39,7 @@ impl IncompatiblePlugin for TelemetryIncompatPlugin {
                 .partition_map(|(name, sub)| {
                     if sub.send
                         && !matches!(
-                            self.config.experimental_otlp_error_metrics,
+                            self.config.preview_otlp_error_metrics,
                             apollo::OtlpErrorMetricsMode::Enabled
                         )
                     {
@@ -61,13 +61,13 @@ impl IncompatiblePlugin for TelemetryIncompatPlugin {
             if self.config.subgraph.subgraphs.contains_key(subgraph) {
                 tracing::warn!(
                     subgraph = subgraph,
-                    message = "plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `experimental_otlp_error_metrics` is enabled",
+                    message = "plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `preview_otlp_error_metrics` is enabled",
                     see = "https://go.apollo.dev/connectors/incompat",
                 );
             } else {
                 tracing::info!(
                     subgraph = subgraph,
-                    message = "plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `experimental_otlp_error_metrics` is enabled",
+                    message = "plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `preview_otlp_error_metrics` is enabled",
                     see = "https://go.apollo.dev/connectors/incompat",
                 );
             }
