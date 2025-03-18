@@ -267,7 +267,7 @@ async fn process_error(io_error: std::io::Error) {
 }
 
 pub(super) fn serve_router_on_listen_addr(
-    pipeline_ref: PipelineRef,
+    pipeline_ref: Arc<PipelineRef>,
     mut listener: Listener,
     router: axum::Router,
     opt_max_headers: Option<usize>,

@@ -111,7 +111,7 @@ pub(crate) trait RouterFactory:
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
-    fn pipeline_ref(&self) -> &PipelineRef;
+    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory

@@ -1007,8 +1007,8 @@ impl RouterFactory for RouterCreator {
         mm
     }
 
-    fn pipeline_ref(&self) -> &PipelineRef {
-        &self.pipeline_handle.pipeline_ref
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        self.pipeline_handle.pipeline_ref.clone()
     }
 }
 
