@@ -130,7 +130,8 @@ impl Config {
             ),
         )?;
         let reader = PeriodicReader::builder(exporter, runtime::Tokio)
-            .with_interval(Duration::from_secs(60))
+            .with_interval(batch_processor.scheduled_delay)
+            .with_timeout(batch_processor.max_export_timeout)
             .build();
 
         builder.apollo_meter_provider_builder = builder
