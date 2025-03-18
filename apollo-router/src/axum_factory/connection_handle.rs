@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 use parking_lot::MutexGuard;
@@ -17,7 +17,7 @@ pub(crate) enum ConnectionState {
 /// Pipeline ref represents a unique pipeline
 #[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub(crate) struct ConnectionRef {
-    pub(crate) pipeline_ref: PipelineRef,
+    pub(crate) pipeline_ref: Arc<PipelineRef>,
     pub(crate) address: ListenAddr,
     /// The state of this connection. When we are trying to shut it down, for instance on reload, it will switch to terminating.
     pub(crate) state: ConnectionState,
@@ -39,7 +39,7 @@ pub(crate) fn connection_counts() -> MutexGuard<'static, HashMap<ConnectionRef, 
 impl ConnectionHandle {
     pub(crate) fn new(pipeline_ref: PipelineRef, address: ListenAddr) -> Self {
         let connection_ref = ConnectionRef {
-            pipeline_ref,
+            pipeline_ref: Arc::new(pipeline_ref),
             address,
             state: ConnectionState::Active,
         };
