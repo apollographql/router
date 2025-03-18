@@ -17,8 +17,6 @@ pub enum Selection {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Field {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub alias: Option<Name>,
     pub name: Name,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]

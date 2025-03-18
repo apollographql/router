@@ -2666,7 +2666,6 @@ impl FetchDependencyGraphNode {
                 .filter_map(|s| match s {
                     executable::Selection::Field(field) => Some(
                         requires_selection::Selection::Field(requires_selection::Field {
-                            alias: None,
                             name: field.name.clone(),
                             selections: trim_requires_selection_set(&field.selection_set),
                         }),

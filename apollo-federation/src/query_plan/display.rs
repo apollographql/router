@@ -383,15 +383,7 @@ fn write_requires_selection(
     selection: &requires_selection::Selection,
 ) -> fmt::Result {
     match selection {
-        requires_selection::Selection::Field(requires_selection::Field {
-            alias,
-            name,
-            selections,
-        }) => {
-            if let Some(alias) = alias {
-                state.write(alias)?;
-                state.write(": ")?;
-            }
+        requires_selection::Selection::Field(requires_selection::Field { name, selections }) => {
             state.write(name)?;
             if !selections.is_empty() {
                 state.write(" ")?;
