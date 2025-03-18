@@ -1,7 +1,6 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
