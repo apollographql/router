@@ -347,11 +347,12 @@ pub(crate) fn externalize_header_map(
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use crate::assert_snapshot_subscriber;
     use http::Response;
     use tower::service_fn;
     use tracing_futures::WithSubscriber;
+
+    use super::*;
+    use crate::assert_snapshot_subscriber;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
