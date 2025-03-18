@@ -160,6 +160,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: RouterFactory,
     {
         Box::pin(async move {
+            let pipeline_ref = service_factory.pipeline_ref().clone();
             let all_routers =
                 make_axum_router(service_factory, &configuration, extra_endpoints, license)?;
 
@@ -218,6 +219,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                pipeline_ref.clone(),
+                actual_main_listen_address.clone(),
                 main_listener,
                 all_routers.main.1,
                 configuration.limits.http1_max_request_headers,
@@ -257,6 +260,8 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
+                            pipeline_ref.clone(),
+                            listen_addr.clone(),
                             listener,
                             router,
                             configuration.limits.http1_max_request_headers,

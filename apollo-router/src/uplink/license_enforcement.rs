@@ -33,7 +33,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::Configuration;
-use crate::plugins::authentication::convert_key_algorithm;
+use crate::plugins::authentication::jwks::convert_key_algorithm;
 use crate::spec::LINK_AS_ARGUMENT;
 use crate::spec::LINK_DIRECTIVE_NAME;
 use crate::spec::LINK_URL_ARGUMENT;
