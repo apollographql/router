@@ -94,7 +94,7 @@ impl<'a> SchemaUpgrader<'a> {
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
         Ok(SchemaUpgrader {
-            schema: (&*original_subgraph.schema).clone(),
+            schema: (*original_subgraph.schema).clone(),
             original_subgraph,
             subgraphs,
             object_type_map,
@@ -311,7 +311,7 @@ impl<'a> SchemaUpgrader<'a> {
                                                         .schema
                                                         .tag_directive_applications()?;
                                                     return other_applications.iter().fallible_any(
-                                                        |other_app_result| {
+                                                        |other_app_result| -> Result<bool, FederationError> {
                                                             if let Ok(other_tag_directive) =
                                                                 (*other_app_result).as_ref()
                                                             {
@@ -322,7 +322,7 @@ impl<'a> SchemaUpgrader<'a> {
                                                                             .arguments
                                                                             .fields
                                                                 {
-                                                                    Ok(true)
+                                                                    return Ok(true);
                                                                 }
                                                             }
                                                             Ok(false)
