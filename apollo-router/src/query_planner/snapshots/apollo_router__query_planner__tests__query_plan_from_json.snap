@@ -57,14 +57,12 @@ Sequence {
                                                     selections: [
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "__typename",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "isbn",
                                                                 selections: [],
                                                             },
@@ -120,28 +118,24 @@ Sequence {
                                                     selections: [
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "__typename",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "isbn",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "title",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "year",
                                                                 selections: [],
                                                             },
@@ -196,14 +190,12 @@ Sequence {
                                                     selections: [
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "__typename",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "isbn",
                                                                 selections: [],
                                                             },
@@ -254,28 +246,24 @@ Sequence {
                                                     selections: [
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "__typename",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "isbn",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "title",
                                                                 selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
-                                                                alias: None,
                                                                 name: "year",
                                                                 selections: [],
                                                             },

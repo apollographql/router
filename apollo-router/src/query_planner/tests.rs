@@ -321,14 +321,12 @@ async fn defer() {
                                     selections: vec![
                                         requires_selection::Selection::Field(
                                             requires_selection::Field {
-                                                alias: None,
                                                 name: name!("id"),
                                                 selections: Vec::new(),
                                             },
                                         ),
                                         requires_selection::Selection::Field(
                                             requires_selection::Field {
-                                                alias: None,
                                                 name: name!("__typename"),
                                                 selections: Vec::new(),
                                             },

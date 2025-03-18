@@ -30,12 +30,8 @@ pub(crate) fn execute_selection_set<'a>(
     let mut output = Object::with_capacity(selections.len());
     for selection in selections {
         match selection {
-            Selection::Field(Field {
-                alias,
-                name,
-                selections,
-            }) => {
-                let selection_name = alias.as_ref().map(|a| a.as_str()).unwrap_or(name.as_str());
+            Selection::Field(Field { name, selections }) => {
+                let selection_name = name.as_str();
                 let field_type = current_type.and_then(|t| {
                     schema
                         .supergraph_schema()
@@ -43,10 +39,10 @@ pub(crate) fn execute_selection_set<'a>(
                         .get(t)
                         .and_then(|ty| match ty {
                             apollo_compiler::schema::ExtendedType::Object(o) => {
-                                o.fields.get(name.as_str()).map(|f| &f.ty)
+                                o.fields.get(name).map(|f| &f.ty)
                             }
                             apollo_compiler::schema::ExtendedType::Interface(i) => {
-                                i.fields.get(name.as_str()).map(|f| &f.ty)
+                                i.fields.get(name).map(|f| &f.ty)
                             }
                             _ => None,
                         })
