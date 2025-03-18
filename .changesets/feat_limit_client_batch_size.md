@@ -15,7 +15,7 @@ If the number of queries provided exceeds the maximum batch size, the entire bat
       "message": "Invalid GraphQL request",
       "extensions": {
         "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
-        "code": "CONTENT_TOO_LARGE"
+        "code": "BATCH_LIMIT_EXCEEDED"
       }
     }
   ]

@@ -686,7 +686,7 @@ impl RouterService {
         if is_batch && self.batching.exceeds_batch_size(&result) {
             return Err(TranslateError {
                 status: StatusCode::UNPROCESSABLE_ENTITY,
-                extension_code: "CONTENT_TOO_LARGE".to_string(),
+                extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
                 extension_details: format!(
                     "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
                     result.len(),
