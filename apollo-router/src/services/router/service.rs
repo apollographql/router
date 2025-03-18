@@ -40,6 +40,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
+use crate::apollo_studio_interop::UsageReporting;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
@@ -73,6 +74,7 @@ use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::query_planner::InMemoryCachePlanner;
+use crate::query_planner::stats_report_key_hash;
 use crate::router_factory::RouterFactory;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
@@ -872,11 +874,22 @@ impl RouterService {
                 .unwrap_or_default()
         };
 
-        let operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
+        let mut operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
         let operation_name = unwrap_context_string(OPERATION_NAME);
         let operation_kind = unwrap_context_string(OPERATION_KIND);
         let client_name = unwrap_context_string(CLIENT_NAME);
         let client_version = unwrap_context_string(CLIENT_VERSION);
+
+        // Try to get operation ID from the stats report key if it's not in context (e.g. on parse/validation error)
+        if operation_id.is_empty() {
+            let maybe_stats_report_key = context.extensions().with_lock(|lock| {
+                lock.get::<Arc<UsageReporting>>()
+                    .map(|u| u.stats_report_key.clone())
+            });
+            if let Some(stats_report_key) = maybe_stats_report_key {
+                operation_id = stats_report_key_hash(stats_report_key.as_str());
+            }
+        }
 
         let mut map = HashMap::new();
         for error in errors {
@@ -954,6 +967,7 @@ impl RouterService {
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
+
             Self::count_errors(&errors, context, oltp_error_metrics_mode);
         }
     }

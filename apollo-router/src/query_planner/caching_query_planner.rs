@@ -636,9 +636,17 @@ where
     }
 }
 
-fn stats_report_key_hash(stats_report_key: &str) -> String {
+pub(crate) fn stats_report_key_hash(stats_report_key: &str) -> String {
+    // To match the logic of Apollo's error key handling, we need to change the "##"" prefix on errors to "# #".
+    // So for example, "## GraphQLParseFailure\n" changes to "# # GraphQLParseFailure\n"
+    let modified_stats_report_key = if let Some(stripped) = stats_report_key.strip_prefix("##") {
+        format!("# #{}", stripped)
+    } else {
+        stats_report_key.to_string()
+    };
+
     let mut hasher = sha1::Sha1::new();
-    hasher.update(stats_report_key.as_bytes());
+    hasher.update(modified_stats_report_key.as_bytes());
     let result = hasher.finalize();
     hex::encode(result)
 }
