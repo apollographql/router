@@ -1,21 +1,21 @@
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
+use super::FederationSchema;
+use super::TypeDefinitionPosition;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
-use super::FederationSchema;
-use super::TypeDefinitionPosition;
+use crate::ValidFederationSubgraph;
+use crate::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::schema::SubgraphMetadata;
 use crate::utils::FallibleIterator;
-use crate::ValidFederationSubgraph;
-use crate::ValidFederationSubgraphs;
 
 #[derive(Clone, Debug)]
 struct SchemaUpgrader<'a> {
@@ -147,10 +147,13 @@ impl<'a> SchemaUpgrader<'a> {
         let Some(metadata) = &schema.subgraph_metadata else {
             return Ok(());
         };
-        let Ok(external_directive) = metadata.federation_spec_definition().external_directive_definition(schema) else {
+        let Ok(external_directive) = metadata
+            .federation_spec_definition()
+            .external_directive_definition(schema)
+        else {
             return Ok(());
         };
-        let mut to_delete: Vec<(InterfaceFieldDefinitionPosition, Node<Directive>)> = vec!();
+        let mut to_delete: Vec<(InterfaceFieldDefinitionPosition, Node<Directive>)> = vec![];
         for (itf_name, ty) in schema.schema().types.iter() {
             let ExtendedType::Interface(itf) = ty else {
                 continue;
@@ -158,7 +161,11 @@ impl<'a> SchemaUpgrader<'a> {
             let interface_pos = InterfaceTypeDefinitionPosition::new(itf_name.clone());
             for (field_name, field) in &itf.fields {
                 let pos = interface_pos.field(field_name.clone());
-                let external_directive = field.node.directives.iter().find(|d| d.name == external_directive.name);
+                let external_directive = field
+                    .node
+                    .directives
+                    .iter()
+                    .find(|d| d.name == external_directive.name);
                 if let Some(external_directive) = external_directive {
                     to_delete.push((pos, external_directive.clone()));
                 }
@@ -175,10 +182,13 @@ impl<'a> SchemaUpgrader<'a> {
         let Some(metadata) = &schema.subgraph_metadata else {
             return Ok(());
         };
-        let Ok(external_directive) = metadata.federation_spec_definition().external_directive_definition(schema) else {
+        let Ok(external_directive) = metadata
+            .federation_spec_definition()
+            .external_directive_definition(schema)
+        else {
             return Ok(());
         };
-        let mut to_delete: Vec<(ObjectFieldDefinitionPosition, Node<Directive>)> = vec!();
+        let mut to_delete: Vec<(ObjectFieldDefinitionPosition, Node<Directive>)> = vec![];
         for (obj_name, ty) in schema.schema().types.iter() {
             let ExtendedType::Object(obj) = ty else {
                 continue;
@@ -186,7 +196,11 @@ impl<'a> SchemaUpgrader<'a> {
             let object_pos = ObjectTypeDefinitionPosition::new(obj_name.clone());
             for (field_name, field) in &obj.fields {
                 let pos = object_pos.field(field_name.clone());
-                let external_directive = field.node.directives.iter().find(|d| d.name == external_directive.name);
+                let external_directive = field
+                    .node
+                    .directives
+                    .iter()
+                    .find(|d| d.name == external_directive.name);
                 if let Some(external_directive) = external_directive {
                     to_delete.push((pos, external_directive.clone()));
                 }
@@ -270,41 +284,68 @@ impl<'a> SchemaUpgrader<'a> {
     fn remove_tag_on_external(&mut self) -> Result<(), FederationError> {
         let schema = &mut self.schema;
         let applications = schema.tag_directive_applications()?;
-        let mut to_delete: Vec<(FieldDefinitionPosition, Node<Directive>)> = vec!();
+        let mut to_delete: Vec<(FieldDefinitionPosition, Node<Directive>)> = vec![];
         if let Some(metadata) = &schema.subgraph_metadata {
-            applications.iter().try_for_each(|application| -> Result<(), FederationError> {
-                if let Some(application) = (*application).as_ref().ok() {
-                    if metadata.external_metadata().is_external(&application.target) {
-                        let used_in_other_definitions = self.subgraphs.subgraphs.iter().fallible_any(|(name, subgraph)| -> Result<bool, FederationError> {
-                            if self.original_subgraph.name.as_str() != name.as_ref() {
-                                // check to see if the field is external in the other subgraphs
-                                if let Some(other_metadata) = &subgraph.schema.subgraph_metadata {
-                                    if !other_metadata.external_metadata().is_external(&application.target) {
-                                        // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
-                                        let other_applications = subgraph.schema.tag_directive_applications()?;
-                                        return other_applications.iter().fallible_any(|other_app_result| {
-                                            if let Some(other_tag_directive) = (*other_app_result).as_ref().ok() {
-                                                if application.target == other_tag_directive.target && application.arguments.fields == other_tag_directive.arguments.fields {
-                                                    return Ok(true);
+            applications
+                .iter()
+                .try_for_each(|application| -> Result<(), FederationError> {
+                    if let Some(application) = (*application).as_ref().ok() {
+                        if metadata
+                            .external_metadata()
+                            .is_external(&application.target)
+                        {
+                            let used_in_other_definitions =
+                                self.subgraphs.subgraphs.iter().fallible_any(
+                                    |(name, subgraph)| -> Result<bool, FederationError> {
+                                        if self.original_subgraph.name.as_str() != name.as_ref() {
+                                            // check to see if the field is external in the other subgraphs
+                                            if let Some(other_metadata) =
+                                                &subgraph.schema.subgraph_metadata
+                                            {
+                                                if !other_metadata
+                                                    .external_metadata()
+                                                    .is_external(&application.target)
+                                                {
+                                                    // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
+                                                    let other_applications = subgraph
+                                                        .schema
+                                                        .tag_directive_applications()?;
+                                                    return other_applications.iter().fallible_any(
+                                                        |other_app_result| {
+                                                            if let Some(other_tag_directive) =
+                                                                (*other_app_result).as_ref().ok()
+                                                            {
+                                                                if application.target
+                                                                    == other_tag_directive.target
+                                                                    && application.arguments.fields
+                                                                        == other_tag_directive
+                                                                            .arguments
+                                                                            .fields
+                                                                {
+                                                                    return Ok(true);
+                                                                }
+                                                            }
+                                                            return Ok(false);
+                                                        },
+                                                    );
                                                 }
                                             }
-                                            return Ok(false);
-                                        });
-                                        
-                                    }
-                                }
-                            } 
-                            Ok(false)
-                        });
-                        if used_in_other_definitions? {
-                            // remove @tag
-                            to_delete.push((application.target.clone(), application.directive.clone()));
+                                        }
+                                        Ok(false)
+                                    },
+                                );
+                            if used_in_other_definitions? {
+                                // remove @tag
+                                to_delete.push((
+                                    application.target.clone(),
+                                    application.directive.clone(),
+                                ));
+                            }
                         }
                     }
-                }
-                    
-            Ok(())
-            })?;
+
+                    Ok(())
+                })?;
         }
         for (pos, directive) in to_delete {
             match pos {
@@ -320,6 +361,5 @@ impl<'a> SchemaUpgrader<'a> {
             }
         }
         Ok(())
- 
     }
 }

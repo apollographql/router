@@ -3,14 +3,14 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use apollo_compiler::ast::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use position::ObjectFieldDefinitionPosition;
 use position::FieldDefinitionPosition;
+use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
 
@@ -451,9 +451,7 @@ impl FederationSchema {
         Ok(applications)
     }
 
-    pub(crate) fn tag_directive_applications(
-        &self,
-    ) -> FallibleDirectiveIterator<TagDirective> {
+    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
         let tag_directive_referencers = self
@@ -468,11 +466,13 @@ impl FederationSchema {
                     for tag_directive_application in
                         directives.get_all(&tag_directive_definition.name)
                     {
-                        let arguments = federation_spec
-                            .tag_directive_arguments(tag_directive_application);
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
                         applications.push(arguments.map(|args| TagDirective {
                             arguments: args,
-                            target: FieldDefinitionPosition::Object(field_definition_position.clone()),
+                            target: FieldDefinitionPosition::Object(
+                                field_definition_position.clone(),
+                            ),
                             directive: tag_directive_application,
                         }));
                     }
@@ -482,7 +482,6 @@ impl FederationSchema {
         }
         Ok(applications)
     }
-
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;

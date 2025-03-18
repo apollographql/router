@@ -315,7 +315,7 @@ impl FederationSpecDefinition {
                 }.into()
             })
     }
-    
+
     pub(crate) fn tag_directive_arguments<'doc>(
         &self,
         application: &'doc Node<Directive>,
