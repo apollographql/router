@@ -1,4 +1,4 @@
-description: The otlp error metrics option is now in the preview release stage
+description: The OTLP error metrics option is now in the preview release stage
 actions:
 
   - type: move
