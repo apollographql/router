@@ -30,7 +30,7 @@ pub(crate) fn validate_arg<'a>(
 
     #[allow(clippy::mutable_key_type)]
     let mut names = HashMap::new();
-    for header in Header::from_headers_arg(headers_arg) {
+    for header in Header::from_headers_arg(headers_arg, &schema.connect_spec) {
         let Header {
             name,
             name_node,

@@ -18,7 +18,6 @@ use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
 use either::Either;
 use http::HeaderName;
-use http::header;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 use url::Url;
@@ -46,6 +45,7 @@ use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use crate::sources::connect::spec::versions::SpecVersionConfig;
 
 // --- Connector ---------------------------------------------------------------
 
@@ -100,10 +100,10 @@ impl Connector {
         };
 
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name, &spec)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
+        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name, &spec)?;
 
         connect_arguments
             .into_iter()
@@ -395,11 +395,12 @@ impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_headers_arg(
         node: &'a Node<ast::Value>,
+        spec: &ConnectSpec,
     ) -> Vec<Result<Self, HeaderParseError<'a>>> {
         if let Some(values) = node.as_list() {
-            values.iter().map(Self::from_single).collect()
+            values.iter().map(|v| Self::from_single(v, spec)).collect()
         } else if node.as_object().is_some() {
-            vec![Self::from_single(node)]
+            vec![Self::from_single(node, spec)]
         } else {
             vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
@@ -409,7 +410,10 @@ impl<'a> Header<'a> {
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError<'a>> {
+    fn from_single(
+        node: &'a Node<ast::Value>,
+        spec: &ConnectSpec,
+    ) -> Result<Self, HeaderParseError<'a>> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
             node,
@@ -435,7 +439,7 @@ impl<'a> Header<'a> {
                 node: name_node,
             })?;
 
-        if Self::is_reserved(&name) {
+        if spec.header_name_is_reserved(&name) {
             return Err(HeaderParseError::Other {
                 message: format!("header '{name}' is reserved and cannot be set by a connector"),
                 node: name_node,
@@ -450,7 +454,7 @@ impl<'a> Header<'a> {
             .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
 
         match (from, value) {
-            (Some(_), None) if Self::is_static(&name) => {
+            (Some(_), None) if spec.header_name_allowed_static(&name) => {
                 Err(HeaderParseError::Other{ message: format!(
                     "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
                 ), node: name_node})
@@ -501,37 +505,6 @@ impl<'a> Header<'a> {
                 })
             }
         }
-    }
-
-    /// These headers are not allowed to be defined by connect directives at all.
-    /// Copied from Router's plugins::headers
-    /// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
-    /// These are not propagated by default using a regex match as they will not make sense for the
-    /// second hop.
-    /// In addition, because our requests are not regular proxy requests content-type, content-length
-    /// and host are also in the exclude list.
-    fn is_reserved(header_name: &HeaderName) -> bool {
-        static KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
-        matches!(
-            *header_name,
-            header::CONNECTION
-                | header::PROXY_AUTHENTICATE
-                | header::PROXY_AUTHORIZATION
-                | header::TE
-                | header::TRAILER
-                | header::TRANSFER_ENCODING
-                | header::UPGRADE
-                | header::CONTENT_LENGTH
-                | header::CONTENT_ENCODING
-                | header::HOST
-                | header::ACCEPT_ENCODING
-        ) || header_name == KEEP_ALIVE
-    }
-
-    /// These headers can be defined as static values in connect directives, but can't be
-    /// forwarded by the user.
-    fn is_static(header_name: &HeaderName) -> bool {
-        matches!(*header_name, header::CONTENT_TYPE | header::ACCEPT,)
     }
 }
 
