@@ -418,9 +418,10 @@ fn default_timeout() -> Duration {
 }
 
 fn record_coprocessor_duration(stage: PipelineStep, duration: Duration) {
-    f64_histogram!(
+    f64_histogram_with_unit!(
         "apollo.router.operations.coprocessor.duration",
-        "Time spent waiting for the coprocessor to answer, in seconds",
+        "Time spent waiting for the coprocessor to answer",
+        "s",
         duration.as_secs_f64(),
         coprocessor.stage = stage.to_string()
     );
