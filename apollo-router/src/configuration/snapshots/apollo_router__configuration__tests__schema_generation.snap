@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -4012,6 +4013,10 @@ expression: "&schema"
           },
           "type": "array"
         },
+        "on_error": {
+          "$ref": "#/definitions/OnError",
+          "description": "#/definitions/OnError"
+        },
         "sources": {
           "description": "Alternative sources to extract the JWT",
           "items": {
@@ -4416,6 +4421,13 @@ expression: "&schema"
           "type": "object"
         }
       ]
+    },
+    "OnError": {
+      "enum": [
+        "Continue",
+        "Error"
+      ],
+      "type": "string"
     },
     "Operation": {
       "oneOf": [

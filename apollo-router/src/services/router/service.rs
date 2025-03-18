@@ -97,6 +97,7 @@ use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
@@ -991,7 +992,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
-    _pipeline_handle: Arc<PipelineHandle>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -1015,6 +1016,10 @@ impl RouterFactory for RouterCreator {
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        self.pipeline_handle.pipeline_ref.clone()
     }
 }
 
@@ -1081,7 +1086,7 @@ impl RouterCreator {
         Ok(Self {
             supergraph_creator,
             sb,
-            _pipeline_handle: Arc::new(pipeline_handle),
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 
