@@ -61,7 +61,7 @@ use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::ListenAddr;
 use crate::TestHarness;
-use crate::axum_factory::connection_handle::connections;
+use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -2419,17 +2419,17 @@ async fn it_reports_open_connections_metric() {
         // Create a second client that does not reuse the same connection pool.
         let first_response = client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
 
-        assert_eq!(*connections().iter().next().unwrap().1, 1);
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
 
         let second_response = second_client.post(server.graphql_listen_address().as_ref().expect("listen address")).body(r#"{ "query": "{ me }" }"#).await.unwrap();
 
         // Both requests are in-flight
-        assert_eq!(*connections().iter().next().unwrap().1, 2);
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
 
         _ = first_response.into_body().await;
 
         // Connection is still open in the pool even though the request is complete.
-        assert_eq!(*connections().iter().next().unwrap().1, 2);
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
 
         _ = second_response.into_body().await;
 
@@ -2442,7 +2442,7 @@ async fn it_reports_open_connections_metric() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // All connections are closed
-        assert_eq!(connections().iter().count(), 0);
+        assert_eq!(connection_counts().iter().count(), 0);
     }
         .with_metrics()
         .await;

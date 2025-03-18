@@ -31,9 +31,9 @@ pub(crate) struct ConnectionHandle {
     pub(crate) connection_ref: ConnectionRef,
 }
 
-static CONNECTIONS: OnceLock<Mutex<HashMap<ConnectionRef, u64>>> = OnceLock::new();
-pub(crate) fn connections() -> MutexGuard<'static, HashMap<ConnectionRef, u64>> {
-    CONNECTIONS.get_or_init(Default::default).lock()
+static CONNECTION_COUNTS: OnceLock<Mutex<HashMap<ConnectionRef, u64>>> = OnceLock::new();
+pub(crate) fn connection_counts() -> MutexGuard<'static, HashMap<ConnectionRef, u64>> {
+    CONNECTION_COUNTS.get_or_init(Default::default).lock()
 }
 
 impl ConnectionHandle {
@@ -43,13 +43,13 @@ impl ConnectionHandle {
             address,
             state: ConnectionState::Active,
         };
-        Self::increment(&mut connections(), &connection_ref);
+        Self::increment(&mut connection_counts(), &connection_ref);
         ConnectionHandle { connection_ref }
     }
 
     pub(crate) fn shutdown(&mut self) {
         // We obtain the guard across decrement and increment so that telemetry sees this as atomic
-        let mut connections = connections();
+        let mut connections = connection_counts();
         Self::decrement(&mut connections, &self.connection_ref);
         self.connection_ref.state = ConnectionState::Terminating;
         Self::increment(&mut connections, &self.connection_ref);
@@ -81,7 +81,7 @@ impl ConnectionHandle {
 
 impl Drop for ConnectionHandle {
     fn drop(&mut self) {
-        Self::decrement(&mut connections(), &self.connection_ref);
+        Self::decrement(&mut connection_counts(), &self.connection_ref);
     }
 }
 
