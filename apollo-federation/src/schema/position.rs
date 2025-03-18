@@ -5237,110 +5237,132 @@ impl FederationSchema {
     ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
-    pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
-        let metadata = links_metadata(&schema)?;
-        let mut referencers: Referencers = Default::default();
+    pub(crate) fn new(schema: Schema) -> Result<Self, FederationError> {
+        let mut schema = Self::new_uninitialized(schema)?;
+        schema.collect_links_metadata()?;
+        schema.collect_shallow_references();
+        schema.collect_deep_references()?;
+        Ok(schema)
+    }
 
-        // Shallow pass to populate referencers for types/directives.
-        for (type_name, type_) in schema.types.iter() {
+    pub(crate) fn new_uninitialized(schema: Schema) -> Result<FederationSchema, FederationError> {
+        Ok(Self {
+            schema,
+            referencers: Default::default(),
+            links_metadata: None,
+            subgraph_metadata: None,
+        })
+    }
+
+    pub(crate) fn collect_links_metadata(&mut self) -> Result<(), FederationError> {
+        self.links_metadata = links_metadata(self.schema())?.map(Box::new);
+        Ok(())
+    }
+
+    pub(crate) fn collect_shallow_references(&mut self) {
+        for (type_name, type_) in self.schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(_) => {
-                    referencers
+                    self.referencers
                         .scalar_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Object(_) => {
-                    referencers
+                    self.referencers
                         .object_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Interface(_) => {
-                    referencers
+                    self.referencers
                         .interface_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Union(_) => {
-                    referencers
+                    self.referencers
                         .union_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Enum(_) => {
-                    referencers
+                    self.referencers
                         .enum_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::InputObject(_) => {
-                    referencers
+                    self.referencers
                         .input_object_types
                         .insert(type_name.clone(), Default::default());
                 }
             }
         }
-        for directive_name in schema.directive_definitions.keys() {
-            referencers
+
+        for directive_name in self.schema.directive_definitions.keys() {
+            self.referencers
                 .directives
                 .insert(directive_name.clone(), Default::default());
         }
+    }
 
-        // Deep pass to find references.
+    pub(crate) fn collect_deep_references(&mut self) -> Result<(), FederationError> {
         SchemaDefinitionPosition.insert_references(
-            &schema.schema_definition,
-            &schema,
-            &mut referencers,
+            &self.schema.schema_definition,
+            &self.schema,
+            &mut self.referencers,
         )?;
-        for (type_name, type_) in schema.types.iter() {
+        for (type_name, type_) in self.schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(type_) => {
                     ScalarTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::Object(type_) => {
                     ObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
                 ExtendedType::Interface(type_) => {
                     InterfaceTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
                 ExtendedType::Union(type_) => {
                     UnionTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::Enum(type_) => {
                     EnumTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::InputObject(type_) => {
                     InputObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
             }
         }
-        for (directive_name, directive) in schema.directive_definitions.iter() {
+        for (directive_name, directive) in self.schema.directive_definitions.iter() {
             DirectiveDefinitionPosition {
                 directive_name: directive_name.clone(),
             }
-            .insert_references(directive, &mut referencers)?;
+            .insert_references(directive, &mut self.referencers)?;
         }
-
-        Ok(FederationSchema {
-            schema,
-            referencers,
-            links_metadata: metadata.map(Box::new),
-            subgraph_metadata: None,
-        })
+        Ok(())
     }
 }
 

@@ -26,8 +26,10 @@ use url::Url;
 
 use crate::LicenseSource;
 use crate::configuration::Discussed;
+use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
+use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
@@ -145,6 +147,12 @@ enum ConfigSubcommand {
         /// Print a diff.
         #[clap(action = ArgAction::SetTrue, long)]
         diff: bool,
+    },
+    /// Validate existing Router configuration file
+    Validate {
+        /// The location of the config to validate.
+        #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
+        config_path: PathBuf,
     },
     /// List all the available experimental configurations with related GitHub discussion
     Experimental,
@@ -430,6 +438,16 @@ impl Executable {
             })) => {
                 let schema = generate_config_schema();
                 println!("{}", serde_json::to_string_pretty(&schema)?);
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Validate { config_path },
+            })) => {
+                let config_string = std::fs::read_to_string(config_path)?;
+                validate_yaml_configuration(&config_string, Expansion::default()?)?.validate()?;
+
+                println!("Configuration at path {:?} is valid!", config_path);
+
                 Ok(())
             }
             Some(Commands::Config(ConfigSubcommandArgs {

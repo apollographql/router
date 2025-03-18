@@ -2683,6 +2683,10 @@ expression: "&schema"
           "description": "Redact subgraph errors to Apollo Studio",
           "type": "boolean"
         },
+        "redaction_policy": {
+          "$ref": "#/definitions/ErrorRedactionPolicy",
+          "description": "#/definitions/ErrorRedactionPolicy"
+        },
         "send": {
           "default": true,
           "description": "Send subgraph errors to Apollo Studio",
@@ -2711,6 +2715,25 @@ expression: "&schema"
           "description": "do not add the authorization errors to the GraphQL response",
           "enum": [
             "disabled"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ErrorRedactionPolicy": {
+      "description": "Allow some error fields to be send to Apollo Studio even when `redact` is true.",
+      "oneOf": [
+        {
+          "description": "Applies redaction to all error details.",
+          "enum": [
+            "strict"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Modifies the `redact` setting by excluding the `extensions.code` field in errors from redaction.",
+          "enum": [
+            "extended"
           ],
           "type": "string"
         }
@@ -4479,17 +4502,17 @@ expression: "&schema"
       ]
     },
     "OtlpErrorMetricsMode": {
-      "description": "Open Telemetry error metrics mode",
+      "description": "Extended Open Telemetry error metrics mode",
       "oneOf": [
         {
-          "description": "Do not store OTLP error metrics",
+          "description": "Do not send extended OTLP error metrics",
           "enum": [
             "disabled"
           ],
           "type": "string"
         },
         {
-          "description": "Send OTLP error metrics to Apollo Studio",
+          "description": "Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`]. If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.",
           "enum": [
             "enabled"
           ],
@@ -4509,6 +4532,11 @@ expression: "&schema"
         "experimental_prewarm_query_plan_cache": {
           "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
           "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
+        },
+        "hot_reload": {
+          "default": false,
+          "description": "Enables hot reloading of the local persisted query manifests",
+          "type": "boolean"
         },
         "local_manifests": {
           "default": null,
