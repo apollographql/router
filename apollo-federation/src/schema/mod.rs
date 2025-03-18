@@ -4,6 +4,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
@@ -37,7 +38,6 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
-use apollo_compiler::Node;
 
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
