@@ -305,6 +305,7 @@ where
                 0
             }
         });
+        let otel_name = format!("POST {}", schema_uri);
 
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
@@ -312,6 +313,8 @@ where
             "server.address" = %host,
             "server.port" = %port,
             "url.full" = %schema_uri,
+            "otel.name" = %otel_name,
+            "otel.original_name" = "http_request",
         );
 
         get_text_map_propagator(|propagator| {
@@ -345,6 +348,10 @@ pub(crate) fn externalize_header_map(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::assert_snapshot_subscriber;
+    use http::Response;
+    use tower::service_fn;
+    use tracing_futures::WithSubscriber;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
@@ -407,5 +414,34 @@ mod test {
             .stage(PipelineStep::RouterResponse)
             .id(String::default())
             .build();
+    }
+
+    #[tokio::test]
+    async fn it_will_create_an_http_request_span() {
+        async {
+            // Create a mock service that returns a simple response
+            let service = service_fn(|_req: http::Request<RouterBody>| async {
+                tracing::info!("got request");
+                Ok::<_, BoxError>(
+                    Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(vec![]))
+                        .unwrap(),
+                )
+            });
+
+            // Create an externalizable request
+            let externalizable = Externalizable::<String>::router_builder()
+                .stage(PipelineStep::RouterRequest)
+                .id("test-id".to_string())
+                .build();
+
+            // Make the call which should create the HTTP request span
+            let _ = externalizable
+                .call(service, "http://example.com/test")
+                .await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
     }
 }
