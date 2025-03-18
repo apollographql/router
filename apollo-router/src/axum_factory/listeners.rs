@@ -276,7 +276,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 MAX_FILE_HANDLES_WARN.store(false, Ordering::SeqCst);
                             }
 
-                            // The session count and open_connections instrument must be kept alive as long as any
+                            // The session count instrument must be kept alive as long as any
                             // request is in flight. So its lifetime is not related to the server
                             // itself. The simplest way to do this is to hold onto a reference for
                             // the duration of every request.
