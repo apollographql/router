@@ -154,9 +154,8 @@ fn convert_requires_selections(
         match selection {
             requires_selection::Selection::Field(field) => {
                 let field_def = get_field_definition(schema, ty, &field.name)?;
-                // Note: `field` has no arguments nor directive applications.
-                let converted = executable::Field::new(field.name.clone(), field_def)
-                    .with_opt_alias(field.alias.clone());
+                // Note: `field` has no alias, arguments nor directive applications.
+                let converted = executable::Field::new(field.name.clone(), field_def);
                 let converted = if field.selections.is_empty() {
                     converted
                 } else {
