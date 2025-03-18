@@ -23,8 +23,8 @@ use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::query_plan::requires_selection;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
-use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
 
@@ -189,9 +189,9 @@ fn get_field_definition(
     parent_type: &Name,
     field_name: &Name,
 ) -> Result<Node<ast::FieldDefinition>, FederationError> {
-    let parent_type_pos: ObjectOrInterfaceTypeDefinitionPosition =
+    let parent_type_pos: CompositeTypeDefinitionPosition =
         schema.get_type(parent_type.clone())?.try_into()?;
-    let field_def_pos = parent_type_pos.field(field_name.clone());
+    let field_def_pos = parent_type_pos.field(field_name.clone())?;
     field_def_pos
         .get(schema.schema())
         .map(|component| component.node.clone())
