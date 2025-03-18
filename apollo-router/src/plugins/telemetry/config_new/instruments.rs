@@ -941,7 +941,7 @@ impl InstrumentsConfig {
                         let connections =
                             crate::axum_factory::connection_handle::connection_counts();
                         for (connection, count) in connections.iter() {
-                            let mut attributes = Vec::with_capacity(5);
+                            let mut attributes = Vec::with_capacity(6);
                             if let Some((ip, port)) = connection.address.ip_and_port() {
                                 attributes.push(KeyValue::new("server.address", ip.to_string()));
                                 attributes.push(KeyValue::new("server.port", port.to_string()));
