@@ -59,7 +59,7 @@ impl From<LinkError> for FederationError {
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Purpose {
     SECURITY,
     EXECUTION,
@@ -255,7 +255,7 @@ impl fmt::Display for Import {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Link {
     pub url: Url,
     pub spec_alias: Option<Name>,
