@@ -1008,7 +1008,7 @@ impl RouterFactory for RouterCreator {
     }
 
     fn pipeline_ref(&self) -> &PipelineRef {
-        &self._pipeline_handle.pipeline_ref
+        &self.pipeline_handle.pipeline_ref
     }
 }
 
