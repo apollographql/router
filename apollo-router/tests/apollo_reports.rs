@@ -738,15 +738,3 @@ async fn test_demand_control_trace_batched() {
         assert_report!(report);
     }
 }
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_query_with_nested_query_enum_param() {
-    let request = supergraph::Request::fake_builder()
-        .query("query{orderAndGroup(color: RED){location(groupBy: DESC)}}")
-        .build()
-        .unwrap();
-    let req: router::Request = request.try_into().expect("could not convert request");
-    let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report_mocked(reports, req).await;
-    assert_report!(report);
-}

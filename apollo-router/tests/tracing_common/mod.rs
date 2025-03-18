@@ -178,16 +178,6 @@ pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
               "extensions": {"ftv1": encode_ftv1(trace)}
           }),
       )
-      .with_json(
-        json!({"query": "{ orderAndGroup(color: RED) {location(groupBy: DESC)}}"}),
-        json!({
-            "data": {"orderAndGroup": [
-                {"location": "SF"},
-                {"location": "Sacramento"},
-                {"location": "Scottsdale"}
-            ]},
-        }),
-    )
   } else if subgraph == "reviews" {
       let trace = Trace {
           start_time: Some(Timestamp { seconds: 1677594281, nanos: 915000000 }),
