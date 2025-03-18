@@ -987,9 +987,6 @@ impl InstrumentsConfig {
                     .init(),
             ),
         );
-
-        // This new metric will also have the pipeline information.
-        // The reason that this instrument has a different name to the one above is that we wish to also implement this in router 2.0
         instruments.insert(
             OPEN_CONNECTIONS_METRIC.to_string(),
             StaticInstrument::GaugeU64(
