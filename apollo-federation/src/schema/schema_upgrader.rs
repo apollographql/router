@@ -254,6 +254,8 @@ impl<'a> SchemaUpgrader<'a> {
         let provides_directive = metadata
             .federation_spec_definition()
             .provides_directive_definition(schema)?;
+
+        #[allow(clippy::iter_overeager_cloned)] // TODO: remove this
         let references_to_remove: Vec<_> = schema
             .referencers()
             .get_directive(provides_directive.name.as_str())?
