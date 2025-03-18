@@ -161,6 +161,35 @@ This setting controls the behavior of the router when an error occurs during JWT
 - `Error`: The router responds with an error when an error occurs during JWT validation.
 - `Continue`: The router continues processing the request when an error occurs during JWT validation. Requests with invalid JWTs will be treated as unauthenticated.
 
+Regardless of whether JWT authentication succeeds, the status of JWT processing is inserted into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes.
+
+```js
+// On failure
+{
+    // Whether the JWT came from a header or cookie source
+    type: string,
+    // The name of the source's field
+    name: string,
+    // Error details
+    error: {
+        // A user-friendly error message
+        message: string,
+        // A machine-readable error code
+        code: string,
+        // The underlying reason for the error, if any
+        reason: string?
+    }
+}
+
+// On success
+{
+    // Whether the JWT came from a header or cookie source
+    type: string,
+    // The name of the source's field
+    name: string
+}
+```
+
 ##### `sources`
 
 </td>
