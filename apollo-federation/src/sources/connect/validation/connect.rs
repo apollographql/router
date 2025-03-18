@@ -21,7 +21,6 @@ use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::http::headers;
-use super::http::method;
 use super::source::SourceName;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -29,6 +28,7 @@ use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 mod entity;
+mod method;
 mod selection;
 
 pub(super) fn fields_seen_by_all_connects(
@@ -175,19 +175,6 @@ fn fields_seen_by_connector(
             return Err(errors);
         };
 
-        let url_template = match method::validate(
-            http_arg,
-            ConnectHTTPCoordinate::from(connect_coordinate),
-            http_arg_node,
-            schema,
-        ) {
-            Ok(method) => Some(method),
-            Err(errs) => {
-                errors.extend(errs);
-                None
-            }
-        };
-
         if let Some((_, body)) = http_arg
             .iter()
             .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
@@ -226,35 +213,17 @@ fn fields_seen_by_connector(
             }
         };
 
-        if source_name.is_some() {
-            if let Some((template, coordinate)) = url_template {
-                if template.base.is_some() {
-                    errors.push(Message {
-                        code: Code::AbsoluteConnectUrlWithSource,
-                        message: format!(
-                            "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                            raw_value = coordinate.node
-                        ),
-                        locations: coordinate.node.line_column_range(source_map)
-                            .into_iter()
-                            .collect(),
-                    })
-                }
-            }
-        } else if let Some((template, coordinate)) = url_template {
-            if template.base.is_none() {
-                errors.push(Message {
-                    code: Code::RelativeConnectUrlWithoutSource,
-                    message: format!(
-                        "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
-                        raw_value = coordinate.node,
-                        source_directive_name = schema.source_directive_name(),
-                    ),
-                    locations: coordinate.node.line_column_range(source_map).into_iter().collect()
-                })
-            }
+        if let Err(errs) = method::validate(
+            http_arg,
+            ConnectHTTPCoordinate::from(connect_coordinate),
+            http_arg_node,
+            source_name,
+            schema,
+        ) {
+            errors.extend(errs);
         }
     }
+
     if errors.is_empty() {
         Ok(seen_fields)
     } else {
