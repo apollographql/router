@@ -1,5 +1,15 @@
 //! APIs for integrating with the router's metrics.
 //!
+//! The macros contained here are a replacement for the telemetry crate's `MetricsLayer`. We will
+//! eventually convert all metrics to use these macros and deprecate the `MetricsLayer`.
+//! The reason for this is that the `MetricsLayer` has:
+//!
+//! * No support for dynamic attributes
+//! * No support dynamic metrics.
+//! * Imperfect mapping to metrics API that can only be checked at runtime.
+//!
+//! New metrics should be added using these macros.
+//!
 //! ## Compatibility
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
 //! API-stable, we may update it in a minor version, which may require code changes to plugins.
@@ -529,6 +539,8 @@ pub fn meter_provider() -> impl opentelemetry::metrics::MeterProvider {
     meter_provider_internal()
 }
 
+/// Parse key/value attributes into `opentelemetry::KeyValue` structs. Should only be used within
+/// this module, as a helper for the various metric macros (ie `u64_counter!`).
 macro_rules! parse_attributes {
     ($($attr_key:literal = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new($attr_key, $attr_value)),+]};
     ($($($attr_key:ident).+ = $attr_value:expr),+) => {[$(opentelemetry::KeyValue::new(stringify!($($attr_key).+), $attr_value)),+]};
@@ -687,6 +699,45 @@ macro_rules! f64_histogram {
 
     ($name:literal, $description:literal, $value: expr) => {
         metric!(f64, histogram, record, $name, $description, $value, []);
+    };
+}
+
+/// Get or create an f64 histogram metric and add a value to it. The metric must contain
+/// both a description and a unit.
+///
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// ## Examples
+///
+/// ```ignore
+/// f64_histogram_with_unit!("metric.duration", "Duration for test to run", "s", 1.0, test.name = "hello_world");
+/// f64_histogram_with_unit!("errors", "Errors observed by function", "{error}", 1.0, "fn_name" = "example");
+/// ```
+///
+/// ## Caveat
+///
+/// Two metrics with the same name but different descriptions and/or units _will_ be created as
+/// separate metrics.
+///
+/// ```ignore
+/// f64_histogram_with_unit!("test", "test description", "s", 1.0, "attr" = "val");
+/// assert_histogram_sum!("test", 1, "attr" = "val");
+///
+/// f64_histogram_with_unit!("test", "test description", "Hz", 1.0, "attr" = "val");
+/// assert_histogram_sum!("test", 1, "attr" = "val");
+/// ```
+#[allow(unused_macros)]
+macro_rules! f64_histogram_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, histogram, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(f64, histogram, record, $name, $description, $unit, $value, []);
     };
 }
 
@@ -1351,6 +1402,20 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_f64_histogram_with_unit() {
+        async {
+            f64_histogram_with_unit!("test", "test description", "Hz", 1.0, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
+
+            let collected_metrics = crate::metrics::collect_metrics();
+            let metric = collected_metrics.find("test").unwrap();
+            assert_eq!(metric.unit, "Hz");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     #[should_panic]
     async fn test_type_histogram() {
         async {
@@ -1396,6 +1461,21 @@ mod test {
         }
         .with_metrics()
         .await;
+    }
+
+    #[test]
+    fn parse_attributes_should_handle_multiple_input_types() {
+        let variable = 123;
+        let parsed_idents = parse_attributes!(hello = "world", my.variable = variable);
+        let parsed_literals = parse_attributes!("hello" = "world", "my.variable" = variable);
+        let parsed_provided = parse_attributes!(vec![
+            KeyValue::new("hello", "world"),
+            KeyValue::new("my.variable", variable)
+        ]);
+
+        assert_eq!(parsed_idents, parsed_literals);
+        assert_eq!(parsed_idents.as_slice(), parsed_provided.as_slice());
+        assert_eq!(parsed_literals.as_slice(), parsed_provided.as_slice());
     }
 
     #[test]
