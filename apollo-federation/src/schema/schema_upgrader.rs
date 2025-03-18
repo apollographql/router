@@ -289,7 +289,7 @@ impl<'a> SchemaUpgrader<'a> {
             applications
                 .iter()
                 .try_for_each(|application| -> Result<(), FederationError> {
-                    if let Some(application) = (*application).as_ref().ok() {
+                    if let Ok(application) = (*application).as_ref() {
                         if metadata
                             .external_metadata()
                             .is_external(&application.target)
@@ -312,8 +312,8 @@ impl<'a> SchemaUpgrader<'a> {
                                                         .tag_directive_applications()?;
                                                     return other_applications.iter().fallible_any(
                                                         |other_app_result| {
-                                                            if let Some(other_tag_directive) =
-                                                                (*other_app_result).as_ref().ok()
+                                                            if let Ok(other_tag_directive) =
+                                                                (*other_app_result).as_ref()
                                                             {
                                                                 if application.target
                                                                     == other_tag_directive.target
@@ -322,10 +322,10 @@ impl<'a> SchemaUpgrader<'a> {
                                                                             .arguments
                                                                             .fields
                                                                 {
-                                                                    return Ok(true);
+                                                                    Ok(true)
                                                                 }
                                                             }
-                                                            return Ok(false);
+                                                            Ok(false)
                                                         },
                                                     );
                                                 }

@@ -290,11 +290,10 @@ impl FederationSpecDefinition {
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
-        let mut arguments = Vec::new();
-        arguments.push(Node::new(Argument {
+        let mut arguments = vec![Node::new(Argument {
             name: FEDERATION_NAME_ARGUMENT_NAME,
             value: Node::new(Value::String(name)),
-        }));
+        })];
         Ok(Directive {
             name: name_in_schema,
             arguments,
