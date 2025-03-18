@@ -29,36 +29,6 @@ async fn insert() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
-    let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
-                    "__typename": "Organization",
-                    "id": "1"
-                } }}}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
-            "variables": {
-                "representations": [
-                    {
-                        "id": "1",
-                        "__typename": "Organization",
-                    }
-                ]
-            }}},
-            serde_json::json!{{"data": {
-                "_entities": [{
-                    "creatorUser": {
-                        "__typename": "User",
-                        "id": 2
-                    }
-                }]
-            }}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
-    ].into_iter().collect());
-
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::default()))
         .await
         .unwrap();
@@ -90,12 +60,40 @@ async fn insert() {
         .await
         .unwrap();
 
+    let mocks = serde_json::json!({
+        "user": {
+            "headers": {CACHE_CONTROL.as_str(): "public"},
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
+                        "__typename": "Organization",
+                        "id": "1",
+                    }
+                }
+            }
+        },
+        "orga": {
+            "headers": {CACHE_CONTROL.as_str(): "public"},
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }
+            ]
+        },
+    });
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "subgraph_mocks": mocks,
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
-        .extra_plugin(subgraphs)
         .build_supergraph()
         .await
         .unwrap();
