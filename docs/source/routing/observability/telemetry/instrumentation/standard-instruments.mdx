@@ -122,6 +122,8 @@ The initial call to Uplink during router startup is not reflected in metrics.
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
   - `error`: One of `channel closed`, `channel full`.
 
+- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit otel's hard cardinality limit.
+
 ### Internals
 
 - `apollo.router.pipelines` - The number of request pipelines active in the router
