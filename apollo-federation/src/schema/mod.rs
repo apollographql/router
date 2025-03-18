@@ -3,12 +3,14 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use position::ObjectFieldDefinitionPosition;
+use position::FieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
 
@@ -21,11 +23,10 @@ use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
+use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
-use crate::link::LinksMetadata;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -36,6 +37,7 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use apollo_compiler::Node;
 
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
@@ -448,6 +450,39 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    pub(crate) fn tag_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<TagDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
+        let tag_directive_referencers = self
+            .referencers()
+            .get_directive(&tag_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in &tag_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: FieldDefinitionPosition::Object(field_definition_position.clone()),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
@@ -468,7 +503,7 @@ pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
+    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
@@ -487,6 +522,15 @@ pub(crate) struct RequiresDirective<'schema> {
     arguments: RequiresDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
     target: &'schema ObjectFieldDefinitionPosition,
+}
+
+pub(crate) struct TagDirective<'schema> {
+    /// The parsed arguments of this `@tag` application
+    arguments: TagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: FieldDefinitionPosition, // TODO: Make this a reference
+    /// Reference to the directive in the schema
+    directive: &'schema Node<Directive>,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.

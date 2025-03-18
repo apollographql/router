@@ -53,6 +53,10 @@ pub(crate) struct RequiresDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
 }
 
+pub(crate) struct TagDirectiveArguments<'doc> {
+    pub(crate) fields: &'doc str,
+}
+
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
 }
@@ -275,6 +279,7 @@ impl FederationSpecDefinition {
             })
     }
 
+    #[allow(unused)]
     pub(crate) fn tag_directive(
         &self,
         schema: &FederationSchema,
@@ -309,6 +314,18 @@ impl FederationSpecDefinition {
                     ),
                 }.into()
             })
+    }
+    
+    pub(crate) fn tag_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<TagDirectiveArguments<'doc>, FederationError> {
+        Ok(TagDirectiveArguments {
+            fields: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELDS_ARGUMENT_NAME,
+            )?,
+        })
     }
 
     pub(crate) fn requires_directive(

@@ -1,12 +1,14 @@
-use std::borrow::BorrowMut;
-
+use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 
+use super::position::FieldDefinitionPosition;
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
 use crate::error::FederationError;
 use crate::schema::SubgraphMetadata;
+use crate::utils::FallibleIterator;
 use crate::ValidFederationSubgraph;
 use crate::ValidFederationSubgraphs;
 
@@ -15,15 +17,18 @@ struct SchemaUpgrader<'a> {
     schema: FederationSchema,
     original_subgraph: &'a ValidFederationSubgraph,
     subgraphs: &'a ValidFederationSubgraphs,
+    #[allow(unused)]
     object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
 
 #[derive(Clone, Debug)]
+#[allow(unused)]
 struct TypeInfo {
     pos: TypeDefinitionPosition,
     metadata: SubgraphMetadata,
 }
 
+#[allow(unused)]
 pub(crate) fn upgrade_subgraphs_if_necessary(
     subgraphs: ValidFederationSubgraphs,
 ) -> Result<(), FederationError> {
@@ -77,6 +82,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
 }
 
 impl<'a> SchemaUpgrader<'a> {
+    #[allow(unused)]
     fn new(
         original_subgraph: &'a ValidFederationSubgraph,
         subgraphs: &'a ValidFederationSubgraphs,
@@ -90,6 +96,7 @@ impl<'a> SchemaUpgrader<'a> {
         })
     }
 
+    #[allow(unused)]
     fn upgrade(&mut self) -> Result<ValidFederationSubgraph, FederationError> {
         self.pre_upgrade_validations();
 
@@ -156,19 +163,18 @@ impl<'a> SchemaUpgrader<'a> {
             return Ok(());
         };
 
-        let provides_directive = metadata
+        let _provides_directive = metadata
             .federation_spec_definition()
             .provides_directive_definition(schema)?;
 
-        let requires_directive = metadata
+        let _requires_directive = metadata
             .federation_spec_definition()
             .requires_directive_definition(schema)?;
 
-        let key_directive = metadata
+        let _key_directive = metadata
             .federation_spec_definition()
             .key_directive_definition(schema)?;
-        
-        
+
         todo!();
     }
 
@@ -181,8 +187,8 @@ impl<'a> SchemaUpgrader<'a> {
         let provides_directive = metadata
             .federation_spec_definition()
             .provides_directive_definition(schema)?;
-        let references_to_remove: Vec<_> = schema.
-            referencers()
+        let references_to_remove: Vec<_> = schema
+            .referencers()
             .get_directive(provides_directive.name.as_str())?
             .object_fields
             .iter()
@@ -208,7 +214,59 @@ impl<'a> SchemaUpgrader<'a> {
         todo!();
     }
 
-    fn remove_tag_on_external(&self) -> Result<(), FederationError> {
-        todo!();
+    fn remove_tag_on_external(&mut self) -> Result<(), FederationError> {
+        let schema = &mut self.schema;
+        let applications = schema.tag_directive_applications()?;
+        let mut to_delete: Vec<(FieldDefinitionPosition, Node<Directive>)> = vec!();
+        if let Some(metadata) = &schema.subgraph_metadata {
+            applications.iter().try_for_each(|application| -> Result<(), FederationError> {
+                if let Some(application) = (*application).as_ref().ok() {
+                    if metadata.external_metadata().is_external(&application.target) {
+                        let used_in_other_definitions = self.subgraphs.subgraphs.iter().fallible_any(|(name, subgraph)| -> Result<bool, FederationError> {
+                            if self.original_subgraph.name.as_str() != name.as_ref() {
+                                // check to see if the field is external in the other subgraphs
+                                if let Some(other_metadata) = &subgraph.schema.subgraph_metadata {
+                                    if !other_metadata.external_metadata().is_external(&application.target) {
+                                        // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
+                                        let other_applications = subgraph.schema.tag_directive_applications()?;
+                                        return other_applications.iter().fallible_any(|other_app_result| {
+                                            if let Some(other_tag_directive) = (*other_app_result).as_ref().ok() {
+                                                if application.target == other_tag_directive.target && application.arguments.fields == other_tag_directive.arguments.fields {
+                                                    return Ok(true);
+                                                }
+                                            }
+                                            return Ok(false);
+                                        });
+                                        
+                                    }
+                                }
+                            } 
+                            Ok(false)
+                        });
+                        if used_in_other_definitions? {
+                            // remove @tag
+                            to_delete.push((application.target.clone(), application.directive.clone()));
+                        }
+                    }
+                }
+                    
+            Ok(())
+            })?;
+        }
+        for (pos, directive) in to_delete {
+            match pos {
+                FieldDefinitionPosition::Object(target) => {
+                    target.remove_directive(schema, &directive);
+                }
+                FieldDefinitionPosition::Interface(target) => {
+                    target.remove_directive(schema, &directive);
+                }
+                FieldDefinitionPosition::Union(_target) => {
+                    todo!();
+                }
+            }
+        }
+        Ok(())
+ 
     }
 }
