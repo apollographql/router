@@ -2350,6 +2350,10 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 impl InterfaceTypeDefinitionPosition {
     const EXPECTED: &'static str = "an interface type";
 
+    pub(crate) fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
+    
     pub(crate) fn field(&self, field_name: Name) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
             type_name: self.type_name.clone(),

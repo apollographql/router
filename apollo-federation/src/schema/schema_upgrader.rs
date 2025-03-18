@@ -1,9 +1,14 @@
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::position::FieldDefinitionPosition;
+use super::position::InterfaceFieldDefinitionPosition;
+use super::position::InterfaceTypeDefinitionPosition;
+use super::position::ObjectFieldDefinitionPosition;
+use super::position::ObjectTypeDefinitionPosition;
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
 use crate::error::FederationError;
@@ -137,12 +142,60 @@ impl<'a> SchemaUpgrader<'a> {
         todo!();
     }
 
-    fn remove_external_on_interface(&self) {
-        todo!();
+    fn remove_external_on_interface(&mut self) -> Result<(), FederationError> {
+        let schema = &mut self.schema;
+        let Some(metadata) = &schema.subgraph_metadata else {
+            return Ok(());
+        };
+        let Ok(external_directive) = metadata.federation_spec_definition().external_directive_definition(schema) else {
+            return Ok(());
+        };
+        let mut to_delete: Vec<(InterfaceFieldDefinitionPosition, Node<Directive>)> = vec!();
+        for (itf_name, ty) in schema.schema().types.iter() {
+            let ExtendedType::Interface(itf) = ty else {
+                continue;
+            };
+            let interface_pos = InterfaceTypeDefinitionPosition::new(itf_name.clone());
+            for (field_name, field) in &itf.fields {
+                let pos = interface_pos.field(field_name.clone());
+                let external_directive = field.node.directives.iter().find(|d| d.name == external_directive.name);
+                if let Some(external_directive) = external_directive {
+                    to_delete.push((pos, external_directive.clone()));
+                }
+            }
+        }
+        for (pos, directive) in to_delete {
+            pos.remove_directive(schema, &directive);
+        }
+        Ok(())
     }
 
-    fn remove_external_on_object_types(&self) {
-        todo!();
+    fn remove_external_on_object_types(&mut self) -> Result<(), FederationError> {
+        let schema = &mut self.schema;
+        let Some(metadata) = &schema.subgraph_metadata else {
+            return Ok(());
+        };
+        let Ok(external_directive) = metadata.federation_spec_definition().external_directive_definition(schema) else {
+            return Ok(());
+        };
+        let mut to_delete: Vec<(ObjectFieldDefinitionPosition, Node<Directive>)> = vec!();
+        for (obj_name, ty) in schema.schema().types.iter() {
+            let ExtendedType::Object(obj) = ty else {
+                continue;
+            };
+            let object_pos = ObjectTypeDefinitionPosition::new(obj_name.clone());
+            for (field_name, field) in &obj.fields {
+                let pos = object_pos.field(field_name.clone());
+                let external_directive = field.node.directives.iter().find(|d| d.name == external_directive.name);
+                if let Some(external_directive) = external_directive {
+                    to_delete.push((pos, external_directive.clone()));
+                }
+            }
+        }
+        for (pos, directive) in to_delete {
+            pos.remove_directive(schema, &directive);
+        }
+        Ok(())
     }
 
     fn remove_external_on_type_extensions(&self) {
