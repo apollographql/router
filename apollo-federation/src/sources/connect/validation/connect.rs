@@ -4,7 +4,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -141,26 +140,8 @@ fn fields_seen_by_connector(
         .collect_vec();
 
     if connect_directives.is_empty() {
-        match category {
-            ObjectCategory::Query => errors.push(get_missing_connect_directive_message(
-                Code::QueryFieldMissingConnect,
-                field,
-                object,
-                source_map,
-                schema.connect_directive_name(),
-            )),
-            ObjectCategory::Mutation => errors.push(get_missing_connect_directive_message(
-                Code::MutationFieldMissingConnect,
-                field,
-                object,
-                source_map,
-                schema.connect_directive_name(),
-            )),
-            _ => (),
-        }
-
-        return Err(errors);
-    };
+        return Ok(Vec::new());
+    }
 
     // mark the field with a @connect directive as seen
     let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
@@ -293,24 +274,6 @@ fn fields_seen_by_connector(
         Ok(seen_fields)
     } else {
         Err(errors)
-    }
-}
-
-fn get_missing_connect_directive_message(
-    code: Code,
-    field: &Component<FieldDefinition>,
-    object: &Node<ObjectType>,
-    source_map: &SourceMap,
-    connect_directive_name: &Name,
-) -> Message {
-    Message {
-        code,
-        message: format!(
-            "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
-            field = field.name,
-            object_name = object.name,
-        ),
-        locations: field.line_column_range(source_map).into_iter().collect(),
     }
 }
 
