@@ -33,6 +33,7 @@ pub(crate) mod test_utils {
     use num_traits::ToPrimitive;
     use opentelemetry::Array;
     use opentelemetry::KeyValue;
+    use opentelemetry::StringValue;
     use opentelemetry::Value;
     use opentelemetry_sdk::metrics::Aggregation;
     use opentelemetry_sdk::metrics::AttributeSet;
@@ -313,10 +314,10 @@ pub(crate) mod test_utils {
         }
 
         fn equal_attributes(attrs1: &AttributeSet, attrs2: &[KeyValue]) -> bool {
-            attrs1
-                .iter()
-                .zip(attrs2.iter())
-                .all(|((k, v), kv)| kv.key == *k && kv.value == *v)
+            attrs1.iter().zip(attrs2.iter()).all(|((k, v), kv)| {
+                kv.key == *k
+                    && (kv.value == *v || kv.value == Value::String(StringValue::from("<any>")))
+            })
         }
     }
 
