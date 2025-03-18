@@ -22,9 +22,9 @@ pub(crate) struct PipelineHandle {
     pub(crate) pipeline_ref: PipelineRef,
 }
 
-static PIPELINES: OnceLock<Mutex<HashMap<PipelineRef, u64>>> = OnceLock::new();
-pub(crate) fn pipelines() -> MutexGuard<'static, HashMap<PipelineRef, u64>> {
-    PIPELINES.get_or_init(Default::default).lock()
+static PIPELINE_COUNTS: OnceLock<Mutex<HashMap<PipelineRef, u64>>> = OnceLock::new();
+pub(crate) fn pipeline_counts() -> MutexGuard<'static, HashMap<PipelineRef, u64>> {
+    PIPELINE_COUNTS.get_or_init(Default::default).lock()
 }
 
 impl PipelineHandle {
@@ -34,7 +34,7 @@ impl PipelineHandle {
             launch_id,
             config_hash,
         };
-        pipelines()
+        pipeline_counts()
             .entry(pipeline_ref.clone())
             .and_modify(|p| *p += 1)
             .or_insert(1);
@@ -44,7 +44,7 @@ impl PipelineHandle {
 
 impl Drop for PipelineHandle {
     fn drop(&mut self) {
-        let mut pipelines = pipelines();
+        let mut pipelines = pipeline_counts();
         let value = pipelines
             .get_mut(&self.pipeline_ref)
             .expect("pipeline_ref MUST be greater than zero");

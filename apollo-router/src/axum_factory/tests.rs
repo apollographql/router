@@ -57,7 +57,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::ListenAddr;
 use crate::TestHarness;
-use crate::axum_factory::connection_handle::connections;
+use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -2502,17 +2502,17 @@ async fn it_reports_open_connections_metric() {
 
         let first_response = client.request(make_request()).await.unwrap();
 
-        assert_eq!(*connections().iter().next().unwrap().1, 1);
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
 
         let second_response = second_client.request(make_request()).await.unwrap();
 
         // Both requests are in-flight
-        assert_eq!(*connections().iter().next().unwrap().1, 2);
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
 
         _ = hyper::body::to_bytes(first_response.into_body()).await;
 
         // Connection is still open in the pool even though the request is complete.
-        assert_eq!(*connections().iter().next().unwrap().1, 2);
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
 
         _ = hyper::body::to_bytes(second_response.into_body()).await;
 
@@ -2525,7 +2525,7 @@ async fn it_reports_open_connections_metric() {
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         // All connections are closed
-        assert_eq!(connections().iter().count(), 0);
+        assert_eq!(connection_counts().iter().count(), 0);
     }
     .with_metrics()
     .await;

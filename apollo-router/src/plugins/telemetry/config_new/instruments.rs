@@ -60,7 +60,7 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PIPELINE_METRIC;
-use crate::services::router::pipeline_handle::pipelines;
+use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -913,7 +913,7 @@ impl InstrumentsConfig {
                     .u64_observable_gauge(PIPELINE_METRIC)
                     .with_description("The number of request pipelines active in the router")
                     .with_callback(|i| {
-                        for (pipeline, count) in &*pipelines() {
+                        for (pipeline, count) in &*pipeline_counts() {
                             let mut attributes = Vec::with_capacity(3);
                             attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
                             if let Some(launch_id) = &pipeline.launch_id {
@@ -938,7 +938,8 @@ impl InstrumentsConfig {
                     .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
                     .with_description("Number of currently connected clients")
                     .with_callback(move |gauge| {
-                        let connections = crate::axum_factory::connection_handle::connections();
+                        let connections =
+                            crate::axum_factory::connection_handle::connection_counts();
                         for (connection, count) in connections.iter() {
                             let mut attributes = Vec::with_capacity(5);
                             if let Some((ip, port)) = connection.address.ip_and_port() {
