@@ -78,6 +78,7 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
 #[cfg(test)]
 use crate::services::supergraph;
 
@@ -844,7 +845,7 @@ pub(crate) struct RouterCreator {
     pub(crate) persisted_query_layer: Arc<PersistedQueryLayer>,
     query_analysis_layer: QueryAnalysisLayer,
     batching: Batching,
-    _pipeline_handle: Arc<PipelineHandle>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -868,6 +869,10 @@ impl RouterFactory for RouterCreator {
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        self.pipeline_handle.pipeline_ref.clone()
     }
 }
 
@@ -911,7 +916,7 @@ impl RouterCreator {
             query_analysis_layer,
             persisted_query_layer,
             batching: configuration.batching.clone(),
-            _pipeline_handle: Arc::new(pipeline_handle),
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 

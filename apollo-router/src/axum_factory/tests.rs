@@ -57,6 +57,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::ListenAddr;
 use crate::TestHarness;
+use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
@@ -86,6 +87,7 @@ use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
 use crate::services::supergraph;
 use crate::spec::Schema;
@@ -163,6 +165,14 @@ impl RouterFactory for TestRouterFactory {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
+    }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        Arc::new(PipelineRef {
+            schema_id: "dummy".to_string(),
+            launch_id: None,
+            config_hash: "dummy".to_string(),
+        })
     }
 }
 
@@ -2451,6 +2461,70 @@ async fn it_reports_session_count_metric() {
             0,
             "listener" = url.clone()
         );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// This tests that the apollo.router.open_connections metric is keeps track of connections
+/// It's a replacement for the session count total metric that is more in line with otel conventions
+/// It also has pipeline information attached to it.
+#[tokio::test]
+async fn it_reports_open_connections_metric() {
+    let configuration = Configuration::fake_builder().build().unwrap();
+
+    async {
+        let (server, _client) = init_with_config(
+            router::service::empty().await,
+            Arc::new(configuration),
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
+
+        let url = server
+            .graphql_listen_address()
+            .as_ref()
+            .unwrap()
+            .to_string();
+
+        let make_request = || {
+            http::Request::builder()
+                .uri(&url)
+                .body(hyper::Body::from(r#"{ "query": "{ me }" }"#))
+                .unwrap()
+        };
+
+        let client = hyper::Client::new();
+        // Create a second client that does not reuse the same connection pool.
+        let second_client = hyper::Client::new();
+
+        let first_response = client.request(make_request()).await.unwrap();
+
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
+
+        let second_response = second_client.request(make_request()).await.unwrap();
+
+        // Both requests are in-flight
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
+
+        _ = hyper::body::to_bytes(first_response.into_body()).await;
+
+        // Connection is still open in the pool even though the request is complete.
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
+
+        _ = hyper::body::to_bytes(second_response.into_body()).await;
+
+        drop(client);
+        drop(second_client);
+
+        // XXX(@bryncooke): Not ideal, but we would probably have to drop down to very
+        // low-level hyper primitives to control the shutdown of connections to the required
+        // extent. 100ms is a long time so I hope it's not flaky.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // All connections are closed
+        assert_eq!(connection_counts().iter().count(), 0);
     }
     .with_metrics()
     .await;

@@ -24,6 +24,7 @@ use tower_service::Service;
 
 use crate::ListenAddr;
 use crate::axum_factory::ENDPOINT_CALLBACK;
+use crate::axum_factory::connection_handle::ConnectionHandle;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::axum_factory::utils::InjectConnectionInfo;
 use crate::configuration::Configuration;
@@ -32,6 +33,7 @@ use crate::http_server_factory::NetworkStream;
 use crate::metrics::meter_provider;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
+use crate::services::router::pipeline_handle::PipelineRef;
 
 static TOTAL_SESSION_COUNT: AtomicU64 = AtomicU64::new(0);
 static MAX_FILE_HANDLES_WARN: AtomicBool = AtomicBool::new(false);
@@ -216,6 +218,7 @@ pub(super) async fn get_extra_listeners(
 }
 
 pub(super) fn serve_router_on_listen_addr(
+    pipeline_ref: Arc<PipelineRef>,
     mut listener: Listener,
     address: ListenAddr,
     router: axum::Router,
@@ -226,13 +229,20 @@ pub(super) fn serve_router_on_listen_addr(
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
 
     let meter = meter_provider().meter("apollo/router");
+    let total_session_count_instrument_address = address.to_string();
+
+    // This instrument is WRONG.
+    // The listen address is not associated with the session count, so when displayed it just says what's configured.
     let total_session_count_instrument = meter
         .u64_observable_gauge("apollo_router_session_count_total")
         .with_description("Number of currently connected clients")
         .with_callback(move |gauge| {
             gauge.observe(
                 TOTAL_SESSION_COUNT.load(Ordering::Relaxed),
-                &[KeyValue::new("listener", address.to_string())],
+                &[KeyValue::new(
+                    "listener",
+                    total_session_count_instrument_address.clone(),
+                )],
             );
         })
         .init();
@@ -256,6 +266,8 @@ pub(super) fn serve_router_on_listen_addr(
                     let app = router.clone();
                     let connection_shutdown = connection_shutdown.clone();
                     let connection_stop_signal = all_connections_stopped_sender.clone();
+                    let address = address.clone();
+                    let pipeline_ref = pipeline_ref.clone();
 
                     match res {
                         Ok(res) => {
@@ -272,12 +284,14 @@ pub(super) fn serve_router_on_listen_addr(
                             // We only want to count sessions if we are the main graphql port.
                             let session_count_guard = main_graphql_port.then(TotalSessionCountGuard::start);
 
+
                             let mut http_config = http_config.clone();
                             tokio::task::spawn(async move {
                                 // this sender must be moved into the session to track that it is still running
                                 let _connection_stop_signal = connection_stop_signal;
                                 let _session_count_instrument = session_count_instrument;
                                 let _session_count_guard = session_count_guard;
+                                let mut connection_handle = ConnectionHandle::new(pipeline_ref, address);
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
@@ -305,6 +319,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
+                                                connection_handle.shutdown();
                                                 c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
@@ -332,8 +347,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
+                                                connection_handle.shutdown();
                                                 c.graceful_shutdown();
-
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
@@ -370,8 +385,8 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
+                                                connection_handle.shutdown();
                                                 c.graceful_shutdown();
-
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away

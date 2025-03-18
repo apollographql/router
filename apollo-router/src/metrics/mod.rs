@@ -50,6 +50,7 @@ pub(crate) mod test_utils {
     use opentelemetry::sdk::metrics::reader::MetricReader;
     use opentelemetry::sdk::metrics::reader::TemporalitySelector;
     use opentelemetry_api::Context;
+    use opentelemetry_api::StringValue;
     use serde::Serialize;
     use tokio::task_local;
 
@@ -214,26 +215,66 @@ pub(crate) mod test_utils {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
                         return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            Self::value_and_attributes_match(&value, attributes, datapoint)
                         });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
                         return sum.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            Self::value_and_attributes_match(&value, attributes, datapoint)
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
                     if matches!(ty, MetricType::Histogram) {
                         return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.sum == value
+                            Self::histogram_value_and_attributes_match(
+                                &value, attributes, datapoint,
+                            )
                         });
                     }
                 }
             }
             false
+        }
+
+        fn value_and_attributes_match<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
+            value: &T,
+            attributes: &AttributeSet,
+            datapoint: &DataPoint<T>,
+        ) -> bool {
+            for (key, value) in attributes.iter() {
+                if !datapoint.attributes.iter().any(|(k, v)| {
+                    k == key && (v == value || *value == Value::String(StringValue::from("<any>")))
+                }) {
+                    return false;
+                }
+            }
+            if datapoint.value != *value {
+                return false;
+            }
+            true
+        }
+
+        fn histogram_value_and_attributes_match<
+            T: Debug + PartialEq + Display + ToPrimitive + 'static,
+        >(
+            value: &T,
+            attributes: &AttributeSet,
+            datapoint: &HistogramDataPoint<T>,
+        ) -> bool {
+            for (key, value) in attributes.iter() {
+                if !datapoint.attributes.iter().any(|(k, v)| {
+                    k == key && (v == value || *value == Value::String(StringValue::from("<any>")))
+                }) {
+                    return false;
+                }
+            }
+            if datapoint.sum != *value {
+                return false;
+            }
+            true
         }
 
         pub(crate) fn metric_exists<T: Debug + PartialEq + Display + ToPrimitive + 'static>(

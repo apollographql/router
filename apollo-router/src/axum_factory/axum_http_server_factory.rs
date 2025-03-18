@@ -251,6 +251,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         let live = self.live.clone();
         let ready = self.ready.clone();
         Box::pin(async move {
+            let pipeline_ref = service_factory.pipeline_ref();
             let all_routers = make_axum_router(
                 live.clone(),
                 ready.clone(),
@@ -327,6 +328,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             }
 
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                pipeline_ref.clone(),
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
@@ -367,6 +369,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
+                            pipeline_ref.clone(),
                             listener,
                             listen_addr.clone(),
                             router,
