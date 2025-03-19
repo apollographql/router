@@ -84,27 +84,25 @@ impl FeatureGateEnforcementReport {
                     feature_gate_configuration_path,
                     expected_value,
                     to_enable,
+                    warning,
                 } => {
                     if let Some(link_spec) = link_specs_in_join_directive.get(spec_url) {
-                        if version_req.matches(&link_spec.version) {
-                            if let Some(config_value) = selector(feature_gate_configuration_path)
-                                .expect("path on restriction was not valid")
-                                .first()
-                            {
-                                if *config_value != expected_value {
-                                    schema_violations.push(FeatureGateViolation::Spec {
-                                        url: link_spec.url.to_string(),
-                                        name: name.to_string(),
-                                        to_enable: to_enable.to_string(),
-                                    });
-                                }
-                            } else {
-                                schema_violations.push(FeatureGateViolation::Spec {
-                                    url: link_spec.url.to_string(),
-                                    name: name.to_string(),
-                                    to_enable: to_enable.to_string(),
-                                });
-                            }
+                        let relevant = version_req.matches(&link_spec.version);
+                        let enabled = selector(feature_gate_configuration_path)
+                            .expect("path on restriction was not valid")
+                            .first()
+                            .is_some_and(|config_value| *config_value == expected_value);
+
+                        if relevant && enabled && warning.is_some() {
+                            tracing::warn!("{}", warning.as_ref().unwrap_or(&"".to_string()));
+                        }
+
+                        if relevant && !enabled {
+                            schema_violations.push(FeatureGateViolation::Spec {
+                                url: link_spec.url.to_string(),
+                                name: name.to_string(),
+                                to_enable: to_enable.to_string(),
+                            });
                         }
                     }
                 }
@@ -135,6 +133,7 @@ impl FeatureGateEnforcementReport {
             to_enable: "  connectors:
     preview_connect_v0_2: true"
                 .to_string(),
+            warning: Some("Support for @link(url: \"https://specs.apollo.dev/connect/v0.2\") is in preview. See https://go.apollo.dev/connectors/preview-v0.2 for more information.".to_string())
         }]
     }
 }
@@ -165,6 +164,7 @@ pub(crate) enum FeatureRestriction {
         feature_gate_configuration_path: String,
         expected_value: Value,
         to_enable: String,
+        warning: Option<String>,
     },
 }
 
