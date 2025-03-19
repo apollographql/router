@@ -36,21 +36,21 @@ macro_rules! internal {
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
-    spec: &VersionInfo,
+    version_info: &VersionInfo,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
     schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
-        .map(|d| SourceDirectiveArguments::from_directive(d, spec))
+        .map(|d| SourceDirectiveArguments::from_directive(d, version_info))
         .collect()
 }
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
-    spec: &VersionInfo,
+    version_info: &VersionInfo,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
     schema
         .types
@@ -94,7 +94,9 @@ pub(crate) fn extract_connect_directive_arguments(
                             directive_index: i,
                         };
                         ConnectDirectiveArguments::from_position_and_directive(
-                            position, directive, spec,
+                            position,
+                            directive,
+                            version_info,
                         )
                     })
             })
@@ -108,7 +110,7 @@ type ObjectNode = [(Name, Node<Value>)];
 impl SourceDirectiveArguments {
     fn from_directive(
         value: &Component<Directive>,
-        spec: &VersionInfo,
+        version_info: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
@@ -126,7 +128,7 @@ impl SourceDirectiveArguments {
                 let http_value = arg.value.as_object().ok_or(internal!(
                     "`http` field in `@source` directive is not an object"
                 ))?;
-                let http_value = SourceHTTPArguments::from_values(http_value, spec)?;
+                let http_value = SourceHTTPArguments::from_values(http_value, version_info)?;
 
                 http = Some(http_value);
             } else {
@@ -146,7 +148,10 @@ impl SourceDirectiveArguments {
 }
 
 impl SourceHTTPArguments {
-    fn from_values(values: &ObjectNode, spec: &VersionInfo) -> Result<Self, FederationError> {
+    fn from_values(
+        values: &ObjectNode,
+        version_info: &VersionInfo,
+    ) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
         for (name, value) in values {
@@ -164,7 +169,7 @@ impl SourceHTTPArguments {
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, &spec.allowed_headers)
+                    Header::from_headers_arg(value, &version_info.allowed_headers)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -190,7 +195,7 @@ impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ObjectOrInterfaceFieldDirectivePosition,
         value: &Node<Directive>,
-        spec: &VersionInfo,
+        version_info: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
@@ -213,7 +218,7 @@ impl ConnectDirectiveArguments {
                     "`http` field in `@connect` directive is not an object"
                 ))?;
 
-                http = Some(ConnectHTTPArguments::from_values(http_value, spec)?);
+                http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or(internal!(
                     "`selection` field in `@connect` directive is not a string"
@@ -244,7 +249,10 @@ impl ConnectDirectiveArguments {
 }
 
 impl ConnectHTTPArguments {
-    fn from_values(values: &ObjectNode, spec: &VersionInfo) -> Result<Self, FederationError> {
+    fn from_values(
+        values: &ObjectNode,
+        version_info: &VersionInfo,
+    ) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -262,7 +270,7 @@ impl ConnectHTTPArguments {
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value, &spec.allowed_headers)
+                    Header::from_headers_arg(value, &version_info.allowed_headers)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -422,7 +430,7 @@ mod tests {
             .directives
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1.version_info()))
+            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1.into()))
             .collect();
 
         insta::assert_debug_snapshot!(
@@ -483,7 +491,7 @@ mod tests {
         let connects = super::extract_connect_directive_arguments(
             schema.schema(),
             &name!(connect),
-            &ConnectSpec::V0_1.version_info(),
+            &ConnectSpec::V0_1.into(),
         );
 
         insta::assert_debug_snapshot!(

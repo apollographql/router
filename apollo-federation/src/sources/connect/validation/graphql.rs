@@ -30,7 +30,7 @@ impl<'schema> SchemaInfo<'schema> {
         src: &'schema str,
         connect_link: ConnectLink<'schema>,
     ) -> Self {
-        let version_info = connect_link.spec.version_info();
+        let version_info = connect_link.spec.into();
         Self {
             schema,
             len: src.len(),

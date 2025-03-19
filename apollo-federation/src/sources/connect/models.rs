@@ -32,6 +32,7 @@ use super::spec::SourceHTTPArguments;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
 use super::spec::versions::AllowedHeaders;
+use super::spec::versions::VersionInfo;
 use super::string_template;
 use super::variable::Namespace;
 use super::variable::VariableReference;
@@ -99,14 +100,14 @@ impl Connector {
             return Ok(Default::default());
         };
 
-        let version = &spec.version_info();
+        let version: VersionInfo = spec.into();
 
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name, version)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name, &version)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
         let connect_arguments =
-            extract_connect_directive_arguments(schema, &connect_name, version)?;
+            extract_connect_directive_arguments(schema, &connect_name, &version)?;
 
         connect_arguments
             .into_iter()
@@ -398,12 +399,15 @@ impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_headers_arg(
         node: &'a Node<ast::Value>,
-        spec: &AllowedHeaders,
+        allowed_headers: &AllowedHeaders,
     ) -> Vec<Result<Self, HeaderParseError<'a>>> {
         if let Some(values) = node.as_list() {
-            values.iter().map(|v| Self::from_single(v, spec)).collect()
+            values
+                .iter()
+                .map(|v| Self::from_single(v, allowed_headers))
+                .collect()
         } else if node.as_object().is_some() {
-            vec![Self::from_single(node, spec)]
+            vec![Self::from_single(node, allowed_headers)]
         } else {
             vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
@@ -415,7 +419,7 @@ impl<'a> Header<'a> {
     /// Build a single [`Self`] from a single entry in the `headers` arg.
     fn from_single(
         node: &'a Node<ast::Value>,
-        spec: &AllowedHeaders,
+        allowed_headers: &AllowedHeaders,
     ) -> Result<Self, HeaderParseError<'a>> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
@@ -442,7 +446,7 @@ impl<'a> Header<'a> {
                 node: name_node,
             })?;
 
-        if spec.header_name_is_reserved(&name) {
+        if allowed_headers.header_name_is_reserved(&name) {
             return Err(HeaderParseError::Other {
                 message: format!("header '{name}' is reserved and cannot be set by a connector"),
                 node: name_node,
@@ -457,7 +461,7 @@ impl<'a> Header<'a> {
             .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
 
         match (from, value) {
-            (Some(_), None) if spec.header_name_allowed_static(&name) => {
+            (Some(_), None) if allowed_headers.header_name_allowed_static(&name) => {
                 Err(HeaderParseError::Other{ message: format!(
                     "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
                 ), node: name_node})

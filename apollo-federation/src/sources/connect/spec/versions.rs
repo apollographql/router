@@ -3,12 +3,6 @@ use http::header;
 
 use super::ConnectSpec;
 
-impl ConnectSpec {
-    pub(crate) fn version_info(&self) -> VersionInfo {
-        VersionInfo::new(self)
-    }
-}
-
 /// Container for version-specific information
 pub(crate) struct VersionInfo {
     pub(crate) allowed_headers: AllowedHeaders,
@@ -19,6 +13,12 @@ impl VersionInfo {
         Self {
             allowed_headers: AllowedHeaders::new(version),
         }
+    }
+}
+
+impl From<ConnectSpec> for VersionInfo {
+    fn from(version: ConnectSpec) -> Self {
+        Self::new(&version)
     }
 }
 
