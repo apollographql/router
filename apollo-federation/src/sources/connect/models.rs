@@ -177,10 +177,7 @@ impl Connector {
     }
 
     /// Create a field set for a `@key` using $args and $this variables.
-    pub(crate) fn resolvable_key(
-        &self,
-        schema: &Schema,
-    ) -> Result<Option<Valid<FieldSet>>, String> {
+    pub fn resolvable_key(&self, schema: &Schema) -> Result<Option<Valid<FieldSet>>, String> {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
@@ -21,6 +22,7 @@ pub(crate) struct Request {
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
+    pub(crate) keys: Option<Arc<Valid<FieldSet>>>,
 }
 
 assert_impl_all!(Response: Send);
@@ -42,6 +44,7 @@ impl Request {
         operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
+        keys: Option<Arc<Valid<FieldSet>>>,
     ) -> Self {
         Self {
             service_name,
@@ -49,6 +52,7 @@ impl Request {
             operation,
             supergraph_request,
             variables,
+            keys,
         }
     }
 }

@@ -706,6 +706,7 @@ mod tests {
                 operation: Arc::from(doc),
                 supergraph_request: Arc::from(http::Request::default()),
                 variables: Default::default(),
+                keys: Default::default(),
             },
             &None,
         )
@@ -764,6 +765,7 @@ mod tests {
                 operation: Arc::from(doc),
                 supergraph_request: Arc::from(http::Request::default()),
                 variables: Default::default(),
+                keys: Default::default(),
             },
             &None,
         )

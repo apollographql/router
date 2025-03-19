@@ -135,6 +135,20 @@ impl FetchService {
         let operation = fetch_node.operation.as_parsed().cloned();
 
         Box::pin(async move {
+            let connector = match schema
+                .connectors
+                .as_ref()
+                .and_then(|c| c.by_service_name.get(&fetch_node.service_name))
+            {
+                Some(c) => c,
+                None => return Err("no connector found for service".into()),
+            };
+
+            let keys = match connector.resolvable_key(schema.supergraph_schema()) {
+                Ok(k) => k.map(Arc::new),
+                Err(e) => return Err(e.into()),
+            };
+
             let (_parts, response) = match connector_service_factory
                 .create()
                 .oneshot(
@@ -144,6 +158,7 @@ impl FetchService {
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
+                        .and_keys(keys)
                         .build(),
                 )
                 .await
