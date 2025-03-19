@@ -12,6 +12,7 @@ use crate::services::router::pipeline_handle::PipelineRef;
 pub(crate) enum ConnectionState {
     Active,
     Terminating,
+    Idle,
 }
 
 /// A ConnectionRef is used to keep track of how many connections we have active. It's associated with an instance of RouterCreator
@@ -53,6 +54,15 @@ impl ConnectionHandle {
         let mut connections = connection_counts();
         Self::decrement(&mut connections, &self.connection_ref);
         self.connection_ref.state = ConnectionState::Terminating;
+        Self::increment(&mut connections, &self.connection_ref);
+    }
+
+    pub(crate) fn shutdown_idle(&mut self) {
+        // We obtain the guard across decrement and increment so that telemetry sees this as atomic
+        // To note to telemetry that the connection was idle, never received the first request and needs to be shutdown.
+        let mut connections = connection_counts();
+        Self::decrement(&mut connections, &self.connection_ref);
+        self.connection_ref.state = ConnectionState::Idle;
         Self::increment(&mut connections, &self.connection_ref);
     }
 
