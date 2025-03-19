@@ -269,7 +269,7 @@ pub(super) fn validate_source_name<'schema>(
     source_names: &'schema [SourceName],
     schema: &SchemaInfo,
 ) -> Result<Option<&'schema SourceName<'schema>>, Message> {
-    let Some(source_name) = directive
+    let Some(source_name_arg) = directive
         .arguments
         .iter()
         .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
@@ -277,36 +277,47 @@ pub(super) fn validate_source_name<'schema>(
         return Ok(None);
     };
 
-    source_names.iter().find(|name| **name == source_name.value).map(Some).ok_or_else(|| {
-        // TODO: Pick a suggestion that's not just the first defined source
-        let qualified_directive = connect_directive_name_coordinate(
-            schema.connect_directive_name(),
-            &source_name.value,
-            object_name,
-            field_name,
-        );
-        if let Some(first_source_name) = source_names.first() {
-            Message {
-                code: Code::SourceNameMismatch,
-                message: format!(
-                    "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
-                    first_source_name = first_source_name.as_str(),
+    let resolved_source_name = source_names
+        .iter()
+        .find(|name| **name == source_name_arg.value);
+
+    if let Some(source_name) = resolved_source_name {
+        return Ok(Some(source_name));
+    }
+    // A source name was set but doesn't match a defined source
+    // TODO: Pick a suggestion that's not just the first defined source
+    let qualified_directive = connect_directive_name_coordinate(
+        schema.connect_directive_name(),
+        &source_name_arg.value,
+        object_name,
+        field_name,
+    );
+    if let Some(first_source_name) = source_names.first() {
+        Err(Message {
+            code: Code::SourceNameMismatch,
+            message: format!(
+                "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
+                first_source_name = first_source_name.as_str(),
+            ),
+            locations: source_name_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+    } else {
+        Err(Message {
+            code: Code::NoSourcesDefined,
+            message: format!(
+                "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
+                coordinate = source_name_value_coordinate(
+                    schema.source_directive_name(),
+                    &source_name_arg.value
                 ),
-                locations: source_name.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }
-        } else {
-            Message {
-                code: Code::NoSourcesDefined,
-                message: format!(
-                    "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
-                    coordinate = source_name_value_coordinate(schema.source_directive_name(), &source_name.value),
-                ),
-                locations: source_name.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }
-        }
-    })
+            ),
+            locations: source_name_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+    }
 }
