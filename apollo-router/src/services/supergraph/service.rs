@@ -559,7 +559,7 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
-    let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
+    let expires_in = crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
 
     let mut timeout = Box::pin(tokio::time::sleep(expires_in));
 

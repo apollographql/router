@@ -43,6 +43,7 @@ use self::expansion::Expansion;
 pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
+pub(crate) use self::schema::validate_yaml_configuration;
 use self::subgraph::SubgraphConfiguration;
 use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
@@ -1409,6 +1410,10 @@ pub(crate) struct Batching {
 
     /// Subgraph options for batching
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+
+    /// Maximum size for a batch
+    #[serde(default)]
+    pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
@@ -1441,6 +1446,13 @@ impl Batching {
                         .is_some_and(|x| x.enabled)
                 }
             }
+            None => false,
+        }
+    }
+
+    pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
+        match self.maximum_size {
+            Some(maximum_size) => batch.len() > maximum_size,
             None => false,
         }
     }

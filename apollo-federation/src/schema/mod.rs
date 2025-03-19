@@ -42,7 +42,7 @@ pub(crate) mod referencer;
 pub(crate) mod subgraph_metadata;
 
 fn compute_subgraph_metadata(
-    schema: &Valid<FederationSchema>,
+    schema: &FederationSchema,
 ) -> Result<Option<SubgraphMetadata>, FederationError> {
     Ok(
         if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
