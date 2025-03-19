@@ -3,11 +3,18 @@ use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
 
+use crate::JOIN_VERSIONS;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Purpose;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -50,7 +57,12 @@ impl FederationBlueprint {
     fn on_directive_definition_and_schema_parsed(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        todo!()
+        let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
+        if federation_spec.is_fed1() {
+            Self::remove_federation_definitions_broken_in_known_ways(schema)?;
+        }
+        federation_spec.add_elements_to_schema(schema)?;
+        Self::expand_known_features(schema)
     }
 
     fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
@@ -92,6 +104,48 @@ impl FederationBlueprint {
 
     fn apply_directives_after_parsing() -> bool {
         todo!()
+    }
+
+    fn remove_federation_definitions_broken_in_known_ways(
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        for directive_name in &[
+            FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
+            FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
+            FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
+        ] {
+            if let Some(pos) = schema.get_directive_definition(directive_name) {
+                let directive = pos.get(schema.schema())?;
+                if directive.arguments.len() == 0
+                    || (directive.arguments.len() == 1
+                        && directive
+                            .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME)
+                            .is_some_and(|fields| {
+                                fields.ty.inner_named_type() == "String"
+                                    || fields.ty.inner_named_type() == "_FieldSet"
+                                    || fields.ty.inner_named_type() == "FieldSet"
+                            }))
+                {
+                    pos.remove(schema)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn expand_known_features(schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let Some(links_metadata) = schema.metadata() else {
+            return Ok(());
+        };
+
+        for link in links_metadata.links.clone() {
+            if link.url.identity == Identity::join_identity() {
+                let spec = JOIN_VERSIONS.find(&link.url.version).unwrap(); // TODO: Handle error
+                spec.add_elements_to_schema(schema)?;
+            }
+            // TODO: Remaining known features
+        }
+        Ok(())
     }
 }
 
@@ -228,10 +282,10 @@ mod tests {
                 );
         }
 
-        FederationBlueprint::on_directive_definition_and_schema_parsed(&mut federation_schema)?;
-
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
         federation_schema.collect_links_metadata()?;
+
+        FederationBlueprint::on_directive_definition_and_schema_parsed(&mut federation_schema)?;
 
         // Also, the backfilled definitions mean we can collect deep references.
         federation_schema.collect_deep_references()?;

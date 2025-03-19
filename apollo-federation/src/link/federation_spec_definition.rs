@@ -3,12 +3,15 @@ use std::sync::LazyLock;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::ast::Type;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::schema::Value;
+use apollo_compiler::ty;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -21,7 +24,12 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::ArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
+use crate::schema::type_and_directive_specification::DirectiveSpecification;
+use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
+use crate::subgraph::spec::FIELDSET_SCALAR_NAME;
 
 pub(crate) const FEDERATION_ENTITY_TYPE_NAME_IN_SPEC: Name = name!("_Entity");
 pub(crate) const FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC: Name = name!("key");
@@ -82,6 +90,10 @@ impl FederationSpecDefinition {
                 version,
             },
         }
+    }
+
+    pub(crate) fn is_fed1(&self) -> bool {
+        self.version().satisfies(&Version { major: 1, minor: 0 })
     }
 
     pub(crate) fn entity_type_definition<'schema>(
@@ -547,11 +559,37 @@ impl SpecDefinition for FederationSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        vec![Box::new(DirectiveSpecification::new(
+            FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
+            &vec![
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_FIELDS_ARGUMENT_NAME,
+                        get_type: |_| Ok(Type::Named(FIELDSET_SCALAR_NAME)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
+                        get_type: |_| Ok(ty!(Boolean)),
+                        default_value: Some(Value::Boolean(true)),
+                    },
+                    composition_strategy: None,
+                },
+            ],
+            true,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface],
+            false,
+            None,
+        ))]
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        todo!()
+        vec![Box::new(ScalarTypeSpecification {
+            name: FIELDSET_SCALAR_NAME,
+        })]
     }
 }
 
