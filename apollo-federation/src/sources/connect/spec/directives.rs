@@ -17,6 +17,7 @@ use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
+use super::versions::VersionInfo;
 use crate::error::FederationError;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -35,19 +36,21 @@ macro_rules! internal {
 pub(crate) fn extract_source_directive_arguments(
     schema: &Schema,
     name: &Name,
+    version_info: &VersionInfo,
 ) -> Result<Vec<SourceDirectiveArguments>, FederationError> {
     schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == *name)
-        .map(SourceDirectiveArguments::try_from)
+        .map(|d| SourceDirectiveArguments::from_directive(d, version_info))
         .collect()
 }
 
 pub(crate) fn extract_connect_directive_arguments(
     schema: &Schema,
     name: &Name,
+    version_info: &VersionInfo,
 ) -> Result<Vec<ConnectDirectiveArguments>, FederationError> {
     schema
         .types
@@ -90,7 +93,11 @@ pub(crate) fn extract_connect_directive_arguments(
                             directive_name: directive.name.clone(),
                             directive_index: i,
                         };
-                        ConnectDirectiveArguments::from_position_and_directive(position, directive)
+                        ConnectDirectiveArguments::from_position_and_directive(
+                            position,
+                            directive,
+                            version_info,
+                        )
                     })
             })
         })
@@ -100,10 +107,11 @@ pub(crate) fn extract_connect_directive_arguments(
 /// Internal representation of the object type pairs
 type ObjectNode = [(Name, Node<Value>)];
 
-impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
-    type Error = FederationError;
-
-    fn try_from(value: &Component<Directive>) -> Result<Self, Self::Error> {
+impl SourceDirectiveArguments {
+    fn from_directive(
+        value: &Component<Directive>,
+        version_info: &VersionInfo,
+    ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
         // We'll have to iterate over the arg list and keep the properties by their name
@@ -120,7 +128,7 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
                 let http_value = arg.value.as_object().ok_or(internal!(
                     "`http` field in `@source` directive is not an object"
                 ))?;
-                let http_value = SourceHTTPArguments::try_from(http_value)?;
+                let http_value = SourceHTTPArguments::from_values(http_value, version_info)?;
 
                 http = Some(http_value);
             } else {
@@ -139,10 +147,11 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
     }
 }
 
-impl TryFrom<&ObjectNode> for SourceHTTPArguments {
-    type Error = FederationError;
-
-    fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
+impl SourceHTTPArguments {
+    fn from_values(
+        values: &ObjectNode,
+        version_info: &VersionInfo,
+    ) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
         for (name, value) in values {
@@ -160,7 +169,7 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                 );
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value)
+                    Header::from_headers_arg(value, &version_info.allowed_headers)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -186,6 +195,7 @@ impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ObjectOrInterfaceFieldDirectivePosition,
         value: &Node<Directive>,
+        version_info: &VersionInfo,
     ) -> Result<Self, FederationError> {
         let args = &value.arguments;
 
@@ -208,7 +218,7 @@ impl ConnectDirectiveArguments {
                     "`http` field in `@connect` directive is not an object"
                 ))?;
 
-                http = Some(ConnectHTTPArguments::try_from(http_value)?);
+                http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or(internal!(
                     "`selection` field in `@connect` directive is not a string"
@@ -238,10 +248,11 @@ impl ConnectDirectiveArguments {
     }
 }
 
-impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
-    type Error = FederationError;
-
-    fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
+impl ConnectHTTPArguments {
+    fn from_values(
+        values: &ObjectNode,
+        version_info: &VersionInfo,
+    ) -> Result<Self, FederationError> {
         let mut get = None;
         let mut post = None;
         let mut patch = None;
@@ -259,7 +270,7 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                 body = Some(JSONSelection::parse(body_value).map_err(|e| internal!(e.message))?);
             } else if name == HEADERS_ARGUMENT_NAME.as_str() {
                 headers = Some(
-                    Header::from_headers_arg(value)
+                    Header::from_headers_arg(value, &version_info.allowed_headers)
                         .into_iter()
                         .map_ok(|Header { name, source, .. }| (name, source))
                         .try_collect()
@@ -307,6 +318,7 @@ mod tests {
 
     use crate::ValidFederationSubgraphs;
     use crate::schema::FederationSchema;
+    use crate::sources::connect::ConnectSpec;
     use crate::sources::connect::spec::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
     use crate::sources::connect::spec::schema::SourceDirectiveArguments;
@@ -418,7 +430,7 @@ mod tests {
             .directives
             .iter()
             .filter(|directive| directive.name == SOURCE_DIRECTIVE_NAME_IN_SPEC)
-            .map(SourceDirectiveArguments::try_from)
+            .map(|d| SourceDirectiveArguments::from_directive(d, &ConnectSpec::V0_1.into()))
             .collect();
 
         insta::assert_debug_snapshot!(
@@ -476,7 +488,11 @@ mod tests {
         let schema = &subgraph.schema;
 
         // Extract the connects from the schema definition and map them to their `Connect` equivalent
-        let connects = super::extract_connect_directive_arguments(schema.schema(), &name!(connect));
+        let connects = super::extract_connect_directive_arguments(
+            schema.schema(),
+            &name!(connect),
+            &ConnectSpec::V0_1.into(),
+        );
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),

@@ -1,4 +1,3 @@
-use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 fn config_with_defer() -> QueryPlannerConfig {
@@ -2330,8 +2329,6 @@ fn defer_test_defer_with_conditions_and_labels() {
             }
           }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2413,8 +2410,6 @@ fn defer_test_defer_with_conditions_and_labels() {
             }
           }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2517,8 +2512,6 @@ fn defer_test_defer_with_condition_on_single_subgraph() {
               }
             }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond) {
@@ -2623,8 +2616,6 @@ fn defer_test_defer_with_mutliple_conditions_and_labels() {
               }
             }
         "#,
-        QueryPlanOptions::default(),
-        /* verify_correctness FED-509 */ false,
         @r###"
     QueryPlan {
       Condition(if: $cond1) {

@@ -4,6 +4,8 @@ pub mod query_plan_analysis_test;
 pub mod response_shape;
 pub mod response_shape_compare;
 #[cfg(test)]
+pub mod response_shape_compare_test;
+#[cfg(test)]
 pub mod response_shape_test;
 mod subgraph_constraint;
 
@@ -78,6 +80,7 @@ pub fn check_plan(
     );
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
-    compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs)?;
+    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs)?;
     Ok(())
 }
