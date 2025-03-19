@@ -551,6 +551,93 @@ impl FederationSpecDefinition {
             )?,
         })
     }
+
+    fn key_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
+            &vec![
+                Self::fields_argument_specification(),
+                Self::resolvable_argument_specification(),
+            ],
+            true,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface],
+            false,
+            None,
+        )
+    }
+
+    fn fields_argument_specification() -> DirectiveArgumentSpecification {
+        DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_FIELDS_ARGUMENT_NAME,
+                get_type: |_| Ok(Type::Named(FIELDSET_SCALAR_NAME)),
+                default_value: None,
+            },
+            composition_strategy: None,
+        }
+    }
+
+    fn resolvable_argument_specification() -> DirectiveArgumentSpecification {
+        DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
+                get_type: |_| Ok(ty!(Boolean)),
+                default_value: Some(Value::Boolean(true)),
+            },
+            composition_strategy: None,
+        }
+    }
+
+    fn requires_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
+            &vec![Self::fields_argument_specification()],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+        )
+    }
+
+    fn provides_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
+            &vec![Self::fields_argument_specification()],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+        )
+    }
+
+    fn external_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC,
+            &vec![DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_REASON_ARGUMENT_NAME,
+                    get_type: |_| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+        )
+    }
+
+    fn extends_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            false,
+            &[DirectiveLocation::Object, DirectiveLocation::Interface],
+            false,
+            None,
+        )
+    }
 }
 
 impl SpecDefinition for FederationSpecDefinition {
@@ -559,31 +646,16 @@ impl SpecDefinition for FederationSpecDefinition {
     }
 
     fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
-        vec![Box::new(DirectiveSpecification::new(
-            FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
-            &vec![
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                        get_type: |_| Ok(Type::Named(FIELDSET_SCALAR_NAME)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
-                        get_type: |_| Ok(ty!(Boolean)),
-                        default_value: Some(Value::Boolean(true)),
-                    },
-                    composition_strategy: None,
-                },
-            ],
-            true,
-            &[DirectiveLocation::Object, DirectiveLocation::Interface],
-            false,
-            None,
-        ))]
+        let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = vec![
+            Box::new(Self::key_directive_specification()),
+            Box::new(Self::requires_directive_specification()),
+            Box::new(Self::provides_directive_specification()),
+            Box::new(Self::external_directive_specification()),
+        ];
+        if self.is_fed1() {
+            specs.push(Box::new(Self::extends_directive_specification()));
+        }
+        specs
     }
 
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {

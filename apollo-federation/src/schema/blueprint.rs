@@ -207,7 +207,28 @@ mod tests {
         .expect("valid schema");
         let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
 
-        assert!(subgraph.get_directive_definition(&name!("key")).is_some());
+        let mut defined_directive_names = subgraph
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("extends"),
+                name!("external"),
+                name!("include"),
+                name!("key"),
+                name!("provides"),
+                name!("requires"),
+                name!("skip"),
+                name!("specifiedBy")
+            ]
+        );
     }
 
     #[test]
@@ -224,8 +245,28 @@ mod tests {
         .expect("valid schema");
         let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
 
-        assert!(subgraph.get_directive_definition(&name!("link")).is_some());
-        assert!(subgraph.get_directive_definition(&name!("key")).is_some());
+        let mut defined_directive_names = subgraph
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("external"),
+                name!("include"),
+                name!("key"),
+                name!("link"),
+                name!("provides"),
+                name!("requires"),
+                name!("skip"),
+                name!("specifiedBy"),
+            ]
+        );
     }
 
     fn build_subgraph(
