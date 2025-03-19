@@ -966,6 +966,7 @@ impl RouterService {
                 }
             })
             .collect();
+
         Self::count_errors(&errors, context, errors_config);
     }
 
