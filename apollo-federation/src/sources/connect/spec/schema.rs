@@ -4,7 +4,7 @@ use apollo_compiler::name;
 use http::HeaderName;
 use url::Url;
 
-use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::HeaderSource;
 use crate::sources::connect::json_selection::JSONSelection;
 
@@ -65,7 +65,7 @@ pub(crate) struct SourceHTTPArguments {
 /// Refer to [ConnectSpecDefinition] for more info.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct ConnectDirectiveArguments {
-    pub(crate) position: ObjectOrInterfaceFieldDirectivePosition,
+    pub(crate) position: ConnectorPosition,
 
     /// The upstream source for shared connector configuration.
     ///

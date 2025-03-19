@@ -4,7 +4,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
@@ -17,13 +16,14 @@ use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
-use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::http::headers;
 use super::http::method;
 use super::source::SourceName;
+use crate::sources::connect::ConnectSpec;
+use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -39,23 +39,24 @@ pub(super) fn fields_seen_by_all_connects(
     let mut messages = Vec::new();
     let mut seen_fields = Vec::new();
 
-    for object in schema
+    schema
         .types
         .values()
-        .filter_map(|extended_type| {
+        .filter(|ty| !ty.is_built_in())
+        .for_each(|extended_type| {
             if let ExtendedType::Object(node) = extended_type {
-                Some(node)
-            } else {
-                None
+                match fields_seen_by_object_connectors(
+                    extended_type,
+                    node,
+                    schema,
+                    all_source_names,
+                ) {
+                    Ok(fields) => seen_fields.extend(fields),
+                    Err(errs) => messages.extend(errs),
+                }
             }
-        })
-        .filter(|object| !object.is_built_in())
-    {
-        match fields_seen_by_object_connectors(object, schema, all_source_names) {
-            Ok(fields) => seen_fields.extend(fields),
-            Err(errs) => messages.extend(errs),
-        }
-    }
+        });
+
     if messages.is_empty() {
         Ok(seen_fields)
     } else {
@@ -72,24 +73,29 @@ pub(crate) enum ObjectCategory {
 
 /// Make sure that any `@connect` directives on object fields are valid
 fn fields_seen_by_object_connectors(
+    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let source_map = &schema.sources;
-    let is_subscription = schema
-        .schema_definition
-        .subscription
-        .as_ref()
-        .is_some_and(|sub| sub.name == object.name);
-    if is_subscription {
+    // TODO: find a better place for feature gates like this
+    if schema.connect_link.spec == ConnectSpec::V0_1
+        && object
+            .directives
+            .iter()
+            .any(|d| d.name == *schema.connect_directive_name())
+    {
         return Err(vec![Message {
-            code: Code::SubscriptionInConnectors,
+            code: Code::FeatureUnavailable,
             message: format!(
-                "A subscription root type is not supported when using `@{connect_directive_name}`.",
-                connect_directive_name = schema.connect_directive_name,
+                "Using `@{connect_directive_name}` on `type {object_name}` requires connectors v0.2. Learn more at https://go.apollo.dev/connectors/changelog.",
+                object_name = object.name,
+                connect_directive_name = schema.connect_directive_name(),
             ),
-            locations: object.line_column_range(source_map).into_iter().collect(),
+            locations: object
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
         }]);
     }
 
@@ -113,7 +119,14 @@ fn fields_seen_by_object_connectors(
     let mut seen_fields = Vec::new();
     let mut messages = Vec::new();
     for field in object.fields.values() {
-        match fields_seen_by_connector(field, object_category, source_names, object, schema) {
+        match fields_seen_by_connector(
+            field,
+            object_category,
+            source_names,
+            extended_type,
+            object,
+            schema,
+        ) {
             Ok(fields) => seen_fields.extend(fields),
             Err(errs) => messages.extend(errs),
         }
@@ -129,6 +142,7 @@ fn fields_seen_by_connector(
     field: &Component<FieldDefinition>,
     category: ObjectCategory,
     source_names: &[SourceName],
+    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
@@ -137,30 +151,12 @@ fn fields_seen_by_connector(
     let connect_directives = field
         .directives
         .iter()
-        .filter(|directive| directive.name == *schema.connect_directive_name)
+        .filter(|directive| directive.name == *schema.connect_directive_name())
         .collect_vec();
 
     if connect_directives.is_empty() {
-        match category {
-            ObjectCategory::Query => errors.push(get_missing_connect_directive_message(
-                Code::QueryFieldMissingConnect,
-                field,
-                object,
-                source_map,
-                schema.connect_directive_name,
-            )),
-            ObjectCategory::Mutation => errors.push(get_missing_connect_directive_message(
-                Code::MutationFieldMissingConnect,
-                field,
-                object,
-                source_map,
-                schema.connect_directive_name,
-            )),
-            _ => (),
-        }
-
-        return Err(errors);
-    };
+        return Ok(Vec::new());
+    }
 
     // mark the field with a @connect directive as seen
     let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
@@ -180,10 +176,12 @@ fn fields_seen_by_connector(
     }
 
     for connect_directive in connect_directives {
-        let field_coordinate = FieldCoordinate { object, field };
         let connect_coordinate = ConnectDirectiveCoordinate {
             directive: connect_directive,
-            field_coordinate,
+            element: ConnectedElement::Field {
+                parent_type: extended_type,
+                field_def: field,
+            },
         };
 
         match get_seen_fields_from_selection(connect_coordinate, schema) {
@@ -272,7 +270,7 @@ fn fields_seen_by_connector(
                     message: format!(
                         "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
                         raw_value = coordinate.node,
-                        source_directive_name = schema.source_directive_name,
+                        source_directive_name = schema.source_directive_name(),
                     ),
                     locations: coordinate.node.line_column_range(source_map).into_iter().collect()
                 })
@@ -296,24 +294,6 @@ fn fields_seen_by_connector(
     }
 }
 
-fn get_missing_connect_directive_message(
-    code: Code,
-    field: &Component<FieldDefinition>,
-    object: &Node<ObjectType>,
-    source_map: &SourceMap,
-    connect_directive_name: &Name,
-) -> Message {
-    Message {
-        code,
-        message: format!(
-            "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
-            field = field.name,
-            object_name = object.name,
-        ),
-        locations: field.line_column_range(source_map).into_iter().collect(),
-    }
-}
-
 pub(super) fn validate_source_name_arg(
     field_name: &Name,
     object_name: &Name,
@@ -326,7 +306,7 @@ pub(super) fn validate_source_name_arg(
     if source_names.iter().all(|name| name != &source_name.value) {
         // TODO: Pick a suggestion that's not just the first defined source
         let qualified_directive = connect_directive_name_coordinate(
-            schema.connect_directive_name,
+            schema.connect_directive_name(),
             &source_name.value,
             object_name,
             field_name,
@@ -347,7 +327,7 @@ pub(super) fn validate_source_name_arg(
                 code: Code::NoSourcesDefined,
                 message: format!(
                     "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
-                    coordinate = source_name_value_coordinate(schema.source_directive_name, &source_name.value),
+                    coordinate = source_name_value_coordinate(schema.source_directive_name(), &source_name.value),
                 ),
                 locations: source_name.line_column_range(&schema.sources)
                     .into_iter()

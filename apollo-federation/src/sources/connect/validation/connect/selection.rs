@@ -23,6 +23,7 @@ use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
+use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
@@ -46,12 +47,7 @@ pub(super) fn get_seen_fields_from_selection(
 ) -> Result<Vec<(Name, Name)>, Message> {
     let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
 
-    let context = VariableContext::new(
-        coordinate.field_coordinate.object,
-        coordinate.field_coordinate.field,
-        Phase::Response,
-        Target::Body,
-    );
+    let context = VariableContext::new(&coordinate.element, Phase::Response, Target::Body);
     validate_selection_variables(
         &VariableResolver::new(context.clone(), schema),
         selection_arg.coordinate,
@@ -61,30 +57,55 @@ pub(super) fn get_seen_fields_from_selection(
         json_selection.external_var_paths(),
     )?;
 
-    let field = coordinate.field_coordinate.field;
+    match coordinate.element {
+        ConnectedElement::Field {
+            parent_type,
+            field_def,
+        } => {
+            let parent_type = match parent_type {
+                ExtendedType::Object(node) => node,
+                _ => {
+                    return Err(Message {
+                        code: Code::GraphQLError,
+                        message: format!("{coordinate} is valid only on object types"),
+                        locations: coordinate
+                            .directive
+                            .line_column_range(&schema.sources)
+                            .into_iter()
+                            .collect(),
+                    });
+                }
+            };
 
-    let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
-        // TODO: Validate scalar return types
-        return Ok(Vec::new());
-    };
-    let Some(sub_selection) = json_selection.next_subselection() else {
-        // TODO: Validate scalar selections
-        return Ok(Vec::new());
-    };
+            let Some(return_type) = schema.get_object(field_def.ty.inner_named_type()) else {
+                // TODO: Validate scalar return types
+                return Ok(Vec::new());
+            };
+            let Some(sub_selection) = json_selection.next_subselection() else {
+                // TODO: Validate scalar selections
+                return Ok(Vec::new());
+            };
 
-    let group = Group {
-        selection: sub_selection,
-        ty: return_type,
-        definition: field,
-    };
+            let group = Group {
+                selection: sub_selection,
+                ty: return_type,
+                definition: field_def,
+            };
 
-    SelectionValidator::new(
-        schema,
-        PathPart::Root(coordinate.field_coordinate.object),
-        selection_arg,
-    )
-    .walk(group)
-    .map(|validator| validator.seen_fields)
+            SelectionValidator::new(schema, PathPart::Root(parent_type), selection_arg)
+                .walk(group)
+                .map(|validator| validator.seen_fields)
+        }
+        ConnectedElement::Type { .. } => Err(Message {
+            code: Code::FeatureUnavailable,
+            message: format!("{coordinate} requires connect v0.2 or later"),
+            locations: coordinate
+                .directive
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        }),
+    }
 }
 
 pub(super) fn validate_body_selection(

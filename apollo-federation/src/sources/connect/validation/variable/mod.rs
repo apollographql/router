@@ -8,6 +8,7 @@ use resolver::NamespaceResolver;
 use resolver::args::ArgsResolver;
 use resolver::this::ThisResolver;
 
+use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -24,11 +25,21 @@ pub(crate) struct VariableResolver<'a> {
 impl<'a> VariableResolver<'a> {
     pub(super) fn new(context: VariableContext<'a>, schema: &'a SchemaInfo<'a>) -> Self {
         let mut resolvers = HashMap::<Namespace, Box<dyn NamespaceResolver + 'a>>::new();
-        resolvers.insert(
-            Namespace::This,
-            Box::new(ThisResolver::new(context.object, context.field)),
-        );
-        resolvers.insert(Namespace::Args, Box::new(ArgsResolver::new(context.field)));
+
+        match context.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+            } => {
+                resolvers.insert(
+                    Namespace::This,
+                    Box::new(ThisResolver::new(parent_type, field_def)),
+                );
+                resolvers.insert(Namespace::Args, Box::new(ArgsResolver::new(field_def)));
+            }
+            ConnectedElement::Type { .. } => {} // TODO: $batch
+        }
+
         Self {
             context,
             schema,

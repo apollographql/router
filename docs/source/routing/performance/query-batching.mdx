@@ -62,6 +62,7 @@ batching:
 | :-- | :-- | :-- | :-- |
 | `enabled` | Flag to enable reception of client query batches | boolean | `false` |
 | `mode` | Supported client batching mode | `batch_http_link`:  the client uses Apollo Link and its [`BatchHttpLink`](/react/api/link/apollo-link-batch-http) link. | No Default |
+| `maximum_size` | Maximum number of queries in a client batch (optional) | integer | `null` (no limit on number of queries) |
 
 #### Subgraph query batching
 
@@ -325,6 +326,53 @@ As a result, the router returns an invalid batch error:
 {"errors":
   [
     {"message":"Invalid GraphQL request","extensions":{"details":"failed to deserialize the request body into JSON: expected value at line 1 column 54","code":"INVALID_GRAPHQL_REQUEST"}}
+  ]
+}
+```
+
+### Excessive queries batch error
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails.
+
+For example, this configuration sets a batch size limit of 2, but three queries are provided:
+```yaml
+batching:
+  enabled: true
+  mode: batch_http_link
+  maximum_size: 2
+```
+
+```graphql
+[
+  query MyFirstQuery {
+    me {
+      id
+    }
+  },
+  query MySecondQuery {
+    me {
+      name
+    }
+  },
+  query MyThirdQuery {
+    me {
+      name
+    }
+  }
+]
+```
+
+As a result, the router returns an error:
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
   ]
 }
 ```
