@@ -968,6 +968,7 @@ impl InstrumentsConfig {
                                 match connection.state {
                                     ConnectionState::Active => "active",
                                     ConnectionState::Terminating => "terminating",
+                                    ConnectionState::Idle => "idle",
                                 },
                             ));
                             gauge.observe(*count, &attributes);
