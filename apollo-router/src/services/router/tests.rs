@@ -627,7 +627,7 @@ async fn it_stores_operation_error_when_config_is_enabled() {
             serde_json::json!({
                 "apollo": {
                     "errors": {
-                        "preview_extended_error_metrics": "enabled",
+                        "experimental_otlp_error_metrics": "enabled",
                         "subgraph": {
                             "subgraphs": {
                                 "myIgnoredSubgraph": {
