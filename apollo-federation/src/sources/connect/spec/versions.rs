@@ -56,7 +56,23 @@ impl AllowedHeaders {
                 ],
                 static_headers: vec![header::CONTENT_TYPE, header::ACCEPT],
             },
-            // TODO V0_2: remove host from reserved and add to static
+            // moves Host to allow setting it via `value:`
+            ConnectSpec::V0_2 => Self {
+                reserved_headers: vec![
+                    header::CONNECTION,
+                    header::PROXY_AUTHENTICATE,
+                    header::PROXY_AUTHORIZATION,
+                    header::TE,
+                    header::TRAILER,
+                    header::TRANSFER_ENCODING,
+                    header::UPGRADE,
+                    header::CONTENT_LENGTH,
+                    header::CONTENT_ENCODING,
+                    header::ACCEPT_ENCODING,
+                    KEEP_ALIVE.clone(),
+                ],
+                static_headers: vec![header::CONTENT_TYPE, header::ACCEPT, header::HOST],
+            },
         }
     }
 }
