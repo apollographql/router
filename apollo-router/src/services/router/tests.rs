@@ -20,7 +20,6 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::process_vary_header;
