@@ -301,7 +301,6 @@ If set, the router prints its version number, then exits.
 </tbody>
 </table>
 
-
 ### Dev mode defaults
 
 <Caution>
@@ -348,7 +347,7 @@ After you generate the schema, configure your text editor. Here are the instruct
 
 New releases of the router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
 
-**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.** 
+**If you run a new version of your router with a configuration file that it no longer supports, it emits a warning on startup and terminates.**
 
 If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
 
@@ -361,6 +360,22 @@ You can also view a diff of exactly which changes are necessary to upgrade your 
 ```bash
 ./router config upgrade --diff <path_to_config.yaml>
 ```
+
+## Validating your Router configuration
+
+The Router can be used to validate an existing configuration file. This can be useful if you want to have a validate step as part of your CI pipeline.
+
+```
+./router config validate <path-to-config-file.yaml>
+```
+
+This command takes a config file and validates it against the router's full supported configuration format.
+
+<Note>
+
+This is a static validation that checks if it is syntactically correct using the JSON schema. The router does additional logical checks on startup against the config that this command does not capture.
+
+</Note>
 
 ## YAML config file
 

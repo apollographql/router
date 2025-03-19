@@ -29,7 +29,7 @@ pub(super) struct SourceDirective<'schema> {
 
 impl<'schema> SourceDirective<'schema> {
     pub(super) fn find(schema: &'schema SchemaInfo) -> (Vec<Self>, Vec<Message>) {
-        let source_directive_name = schema.source_directive_name;
+        let source_directive_name = schema.source_directive_name();
         let mut directives = Vec::new();
         let mut messages = Vec::new();
         for directive in &schema.schema_definition.directives {

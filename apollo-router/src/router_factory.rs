@@ -46,6 +46,7 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
@@ -109,6 +110,8 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory
@@ -792,9 +795,16 @@ pub(crate) async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
+        let errors_list = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+            .join("\n");
+
         Err(BoxError::from(format!(
-            "there were {} configuration errors",
-            errors.len()
+            "there were {} configuration errors\n{}",
+            errors.len(),
+            errors_list
         )))
     } else {
         Ok(plugin_instances)

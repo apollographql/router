@@ -1,12 +1,12 @@
 ---
 source: apollo-federation/src/sources/connect/validation/mod.rs
-expression: "format!(\"{:#?}\", errors)"
+expression: "format!(\"{:#?}\", result.errors)"
 input_file: apollo-federation/src/sources/connect/validation/test_data/renamed_connect_directive.graphql
 ---
 [
     Message {
-        code: QueryFieldMissingConnect,
-        message: "The field `Query.resources` has no `@data` directive.",
+        code: ConnectorsUnresolvedField,
+        message: "No connector resolves field `Query.resources`. It must have a `@data` directive or appear in `@data(selection:)`.",
         locations: [
             9:5..9:26,
         ],
