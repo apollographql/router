@@ -123,7 +123,7 @@ pub(crate) struct ErrorsConfiguration {
     pub(crate) subgraph: SubgraphErrorConfig,
 
     /// Send error metrics via OTLP with additional dimensions [`extensions.service`, `extensions.code`]
-    pub(crate) preview_extended_error_metrics: ExtendedErrorMetricsMode,
+    pub(crate) experimental_otlp_error_metrics: OtlpErrorMetricsMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -170,7 +170,7 @@ impl SubgraphErrorConfig {
 /// Extended Open Telemetry error metrics mode
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
 #[serde(deny_unknown_fields, rename_all = "lowercase")]
-pub(crate) enum ExtendedErrorMetricsMode {
+pub(crate) enum OtlpErrorMetricsMode {
     /// Do not send extended OTLP error metrics
     #[default]
     Disabled,

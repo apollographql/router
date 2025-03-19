@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -2752,9 +2753,9 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "preview_extended_error_metrics": {
-          "$ref": "#/definitions/ExtendedErrorMetricsMode",
-          "description": "#/definitions/ExtendedErrorMetricsMode"
+        "experimental_otlp_error_metrics": {
+          "$ref": "#/definitions/OtlpErrorMetricsMode",
+          "description": "#/definitions/OtlpErrorMetricsMode"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphErrorConfig",
@@ -3106,25 +3107,6 @@ expression: "&schema"
         }
       },
       "type": "object"
-    },
-    "ExtendedErrorMetricsMode": {
-      "description": "Extended Open Telemetry error metrics mode",
-      "oneOf": [
-        {
-          "description": "Do not send extended OTLP error metrics",
-          "enum": [
-            "disabled"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`]. If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.",
-          "enum": [
-            "enabled"
-          ],
-          "type": "string"
-        }
-      ]
     },
     "FieldName": {
       "oneOf": [
@@ -4514,6 +4496,25 @@ expression: "&schema"
           "description": "A hash of the operation name.",
           "enum": [
             "hash"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "OtlpErrorMetricsMode": {
+      "description": "Extended Open Telemetry error metrics mode",
+      "oneOf": [
+        {
+          "description": "Do not send extended OTLP error metrics",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`]. If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.",
+          "enum": [
+            "enabled"
           ],
           "type": "string"
         }
