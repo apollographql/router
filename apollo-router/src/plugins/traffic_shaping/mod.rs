@@ -32,8 +32,10 @@ use self::deduplication::QueryDeduplicationLayer;
 use crate::configuration::shared::DnsResolutionStrategy;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
+use crate::metrics::count_operation_error_codes;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -246,6 +248,7 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
     rate_limit_sources: Mutex<HashMap<String, RateLimitLayer>>,
+    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 #[async_trait::async_trait]
@@ -257,20 +260,29 @@ impl PluginPrivate for TrafficShaping {
             config: init.config,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
             rate_limit_sources: Mutex::new(HashMap::new()),
+            apollo_telemetry_config: ApolloTelemetryConfig::default(),
         })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        let telemetry_config_clone_1 = self.apollo_telemetry_config.clone();
+        let telemetry_config_clone_2 = self.apollo_telemetry_config.clone();
+        let telemetry_config_clone_3 = self.apollo_telemetry_config.clone();
         ServiceBuilder::new()
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| {
-                    async {
+                    let error_config = telemetry_config_clone_1.errors.clone();
+                    async move {
                         let response: Result<RouterResponse, BoxError> = future.await;
                         match response {
                             Ok(ok) => Ok(ok),
                             Err(err) if err.is::<Elapsed>() => {
-                                // TODO add metrics
+                                count_operation_error_codes(
+                                    vec!["GATEWAY_TIMEOUT"],
+                                    &ctx,
+                                    &error_config,
+                                );
                                 let error = graphql::Error::builder()
                                     .message("Your request has been timed out")
                                     .extension_code("GATEWAY_TIMEOUT")
@@ -298,12 +310,17 @@ impl PluginPrivate for TrafficShaping {
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| {
-                    async {
+                    let error_config = telemetry_config_clone_2.errors.clone();
+                    async move {
                         let response: Result<RouterResponse, BoxError> = future.await;
                         match response {
                             Ok(ok) => Ok(ok),
                             Err(err) if err.is::<Overloaded>() => {
-                                // TODO add metrics
+                                count_operation_error_codes(
+                                    vec!["REQUEST_CONCURRENCY_LIMITED"],
+                                    &ctx,
+                                    &error_config,
+                                );
                                 let error = graphql::Error::builder()
                                     .message("Your request has been concurrency limited")
                                     .extension_code("REQUEST_CONCURRENCY_LIMITED")
@@ -330,12 +347,17 @@ impl PluginPrivate for TrafficShaping {
             .map_future_with_request_data(
                 |req: &router::Request| req.context.clone(),
                 move |ctx, future| {
-                    async {
+                    let error_config = telemetry_config_clone_3.errors.clone();
+                    async move {
                         let response: Result<RouterResponse, BoxError> = future.await;
                         match response {
                             Ok(ok) => Ok(ok),
                             Err(err) if err.is::<Overloaded>() => {
-                                // TODO add metrics
+                                count_operation_error_codes(
+                                    vec!["REQUEST_RATE_LIMITED"],
+                                    &ctx,
+                                    &error_config,
+                                );
                                 let error = graphql::Error::builder()
                                     .message("Your request has been rate limited")
                                     .extension_code("REQUEST_RATE_LIMITED")
@@ -387,16 +409,22 @@ impl PluginPrivate for TrafficShaping {
                         .clone()
                 });
 
+            let telemetry_config_clone = self.apollo_telemetry_config.clone();
             ServiceBuilder::new()
                 .map_future_with_request_data(
                     |req: &subgraph::Request| (req.context.clone(), req.subgraph_name.clone()),
                     move |(ctx, subgraph_name), future| {
-                        async {
+                        let error_config = telemetry_config_clone.errors.clone();
+                        async move {
                             let response: Result<SubgraphResponse, BoxError> = future.await;
                             match response {
                                 Ok(ok) => Ok(ok),
                                 Err(err) if err.is::<Elapsed>() => {
-                                    // TODO add metrics
+                                    count_operation_error_codes(
+                                        vec!["GATEWAY_TIMEOUT"],
+                                        &ctx,
+                                        &error_config,
+                                    );
                                     let error = graphql::Error::builder()
                                         .message("Your request has been timed out")
                                         .extension_code("GATEWAY_TIMEOUT")
@@ -409,7 +437,11 @@ impl PluginPrivate for TrafficShaping {
                                         .build())
                                 }
                                 Err(err) if err.is::<Overloaded>() => {
-                                    // TODO add metrics
+                                    count_operation_error_codes(
+                                        vec!["REQUEST_RATE_LIMITED"],
+                                        &ctx,
+                                        &error_config,
+                                    );
                                     let error = graphql::Error::builder()
                                         .message("Your request has been rate limited")
                                         .extension_code("REQUEST_RATE_LIMITED")
