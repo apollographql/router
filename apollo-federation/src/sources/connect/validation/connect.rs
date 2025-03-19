@@ -2,9 +2,9 @@
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
@@ -236,19 +236,31 @@ fn fields_seen_by_connector(
             ));
         }
 
-        if let Some(source_name) = connect_directive
-            .arguments
-            .iter()
-            .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
-        {
-            errors.extend(validate_source_name_arg(
-                &field.name,
-                &object.name,
-                source_name,
-                source_names,
-                schema,
-            ));
+        errors.extend(headers::validate_arg(
+            http_arg,
+            HttpHeadersCoordinate::Connect {
+                connect: connect_coordinate,
+                object: &object.name,
+                field: &field.name,
+            },
+            schema,
+        ));
 
+        let source_name = match validate_source_name(
+            connect_directive,
+            &field.name,
+            &object.name,
+            source_names,
+            schema,
+        ) {
+            Ok(source_name) => source_name,
+            Err(err) => {
+                errors.push(err);
+                continue;
+            }
+        };
+
+        if source_name.is_some() {
             if let Some((template, coordinate)) = url_template {
                 if template.base.is_some() {
                     errors.push(Message {
@@ -276,16 +288,6 @@ fn fields_seen_by_connector(
                 })
             }
         }
-
-        errors.extend(headers::validate_arg(
-            http_arg,
-            HttpHeadersCoordinate::Connect {
-                connect: connect_coordinate,
-                object: &object.name,
-                field: &field.name,
-            },
-            schema,
-        ));
     }
     if errors.is_empty() {
         Ok(seen_fields)
@@ -294,47 +296,62 @@ fn fields_seen_by_connector(
     }
 }
 
-pub(super) fn validate_source_name_arg(
+pub(super) fn validate_source_name<'schema>(
+    directive: &Node<Directive>,
     field_name: &Name,
     object_name: &Name,
-    source_name: &Node<Argument>,
-    source_names: &[SourceName],
+    source_names: &'schema [SourceName],
     schema: &SchemaInfo,
-) -> Vec<Message> {
-    let mut messages = vec![];
+) -> Result<Option<&'schema SourceName<'schema>>, Message> {
+    let Some(source_name_arg) = directive
+        .arguments
+        .iter()
+        .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
+    else {
+        return Ok(None);
+    };
 
-    if source_names.iter().all(|name| name != &source_name.value) {
-        // TODO: Pick a suggestion that's not just the first defined source
-        let qualified_directive = connect_directive_name_coordinate(
-            schema.connect_directive_name(),
-            &source_name.value,
-            object_name,
-            field_name,
-        );
-        if let Some(first_source_name) = source_names.first() {
-            messages.push(Message {
-                code: Code::SourceNameMismatch,
-                message: format!(
-                    "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
-                    first_source_name = first_source_name.as_str(),
-                ),
-                locations: source_name.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        } else {
-            messages.push(Message {
-                code: Code::NoSourcesDefined,
-                message: format!(
-                    "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
-                    coordinate = source_name_value_coordinate(schema.source_directive_name(), &source_name.value),
-                ),
-                locations: source_name.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+    let resolved_source_name = source_names
+        .iter()
+        .find(|name| **name == source_name_arg.value);
+
+    if let Some(source_name) = resolved_source_name {
+        return Ok(Some(source_name));
     }
-
-    messages
+    // A source name was set but doesn't match a defined source
+    // TODO: Pick a suggestion that's not just the first defined source
+    let qualified_directive = connect_directive_name_coordinate(
+        schema.connect_directive_name(),
+        &source_name_arg.value,
+        object_name,
+        field_name,
+    );
+    if let Some(first_source_name) = source_names.first() {
+        Err(Message {
+            code: Code::SourceNameMismatch,
+            message: format!(
+                "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
+                first_source_name = first_source_name.as_str(),
+            ),
+            locations: source_name_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+    } else {
+        Err(Message {
+            code: Code::NoSourcesDefined,
+            message: format!(
+                "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
+                coordinate = source_name_value_coordinate(
+                    schema.source_directive_name(),
+                    &source_name_arg.value
+                ),
+            ),
+            locations: source_name_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+    }
 }
