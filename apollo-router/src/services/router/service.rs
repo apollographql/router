@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -40,29 +39,23 @@ use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
 use crate::ListenAddr;
-use crate::apollo_studio_interop::UsageReporting;
 use crate::axum_factory::CanceledRequest;
 use crate::batching::Batch;
 use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_graphql_error;
+use crate::metrics::count_operation_error_codes;
+use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
-use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -74,9 +67,7 @@ use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionTy
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::query_planner::InMemoryCachePlanner;
-use crate::query_planner::stats_report_key_hash;
 use crate::router_factory::RouterFactory;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
@@ -350,7 +341,7 @@ impl RouterService {
                     && (accepts_json || accepts_wildcard)
                 {
                     if !response.errors.is_empty() {
-                        Self::count_errors(
+                        count_operation_errors(
                             &response.errors,
                             &context,
                             &self.apollo_telemetry_config.errors,
@@ -400,7 +391,7 @@ impl RouterService {
                     }
 
                     if !response.errors.is_empty() {
-                        Self::count_errors(
+                        count_operation_errors(
                             &response.errors,
                             &context,
                             &self.apollo_telemetry_config.errors,
@@ -431,7 +422,7 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    Self::count_error_codes(
+                    count_operation_error_codes(
                         vec!["INVALID_ACCEPT_HEADER"],
                         &context,
                         &self.apollo_telemetry_config.errors,
@@ -865,111 +856,6 @@ impl RouterService {
         Ok(graphql_requests)
     }
 
-    fn count_errors(
-        errors: &Vec<graphql::Error>,
-        context: &Context,
-        errors_config: &ErrorsConfiguration,
-    ) {
-        let unwrap_context_string = |context_key: &str| -> String {
-            context
-                .get::<_, String>(context_key)
-                .unwrap_or_default()
-                .unwrap_or_default()
-        };
-
-        let mut operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
-        let operation_name = unwrap_context_string(OPERATION_NAME);
-        let operation_kind = unwrap_context_string(OPERATION_KIND);
-        let client_name = unwrap_context_string(CLIENT_NAME);
-        let client_version = unwrap_context_string(CLIENT_VERSION);
-
-        // Try to get operation ID from the stats report key if it's not in context (e.g. on parse/validation error)
-        if operation_id.is_empty() {
-            let maybe_stats_report_key = context.extensions().with_lock(|lock| {
-                lock.get::<Arc<UsageReporting>>()
-                    .map(|u| u.stats_report_key.clone())
-            });
-            if let Some(stats_report_key) = maybe_stats_report_key {
-                operation_id = stats_report_key_hash(stats_report_key.as_str());
-            }
-        }
-
-        let mut map = HashMap::new();
-        for error in errors {
-            let code = error.extensions.get("code").and_then(|c| c.as_str());
-            let service = error
-                .extensions
-                .get("service")
-                .and_then(|s| s.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let severity = error.extensions.get("severity").and_then(|s| s.as_str());
-            let path = match &error.path {
-                None => "".into(),
-                Some(path) => path.to_string(),
-            };
-            let entry = map.entry(code).or_insert(0u64);
-            *entry += 1;
-
-            let send_otlp_errors = if service.is_empty() {
-                matches!(
-                    errors_config.preview_extended_error_metrics,
-                    ExtendedErrorMetricsMode::Enabled
-                )
-            } else {
-                let subgraph_error_config = errors_config.subgraph.get_error_config(&service);
-                subgraph_error_config.send
-                    && matches!(
-                        errors_config.preview_extended_error_metrics,
-                        ExtendedErrorMetricsMode::Enabled
-                    )
-            };
-
-            if send_otlp_errors {
-                let code_str = code.unwrap_or_default().to_string();
-                let severity_str = severity
-                    .unwrap_or(tracing::Level::ERROR.as_str())
-                    .to_string();
-                u64_counter!(
-                    "apollo.router.operations.error",
-                    "Number of errors returned by operation",
-                    1,
-                    "apollo.operation.id" = operation_id.clone(),
-                    "graphql.operation.name" = operation_name.clone(),
-                    "graphql.operation.type" = operation_kind.clone(),
-                    "apollo.client.name" = client_name.clone(),
-                    "apollo.client.version" = client_version.clone(),
-                    "graphql.error.extensions.code" = code_str,
-                    "graphql.error.extensions.severity" = severity_str,
-                    "graphql.error.path" = path,
-                    "apollo.router.error.service" = service
-                );
-            }
-        }
-
-        for (code, count) in map {
-            count_graphql_error(count, code);
-        }
-    }
-
-    fn count_error_codes(codes: Vec<&str>, context: &Context, errors_config: &ErrorsConfiguration) {
-        let errors = codes
-            .iter()
-            .map(|c| {
-                let mut extensions = Object::new();
-                extensions.insert("code", Value::String((*c).into()));
-                graphql::Error {
-                    message: "".into(),
-                    locations: vec![],
-                    path: None,
-                    extensions,
-                }
-            })
-            .collect();
-
-        Self::count_errors(&errors, context, errors_config);
-    }
-
     fn count_value_completion_errors(
         value_completion: &Value,
         context: &Context,
@@ -980,7 +866,7 @@ impl RouterService {
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
-            Self::count_errors(&errors, context, errors_config);
+            count_operation_errors(&errors, context, errors_config);
         }
     }
 }

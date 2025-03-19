@@ -13,7 +13,23 @@ use std::sync::OnceLock;
 #[cfg(test)]
 use futures::FutureExt;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::Context;
+use crate::apollo_studio_interop::UsageReporting;
+use crate::context::OPERATION_KIND;
+use crate::context::OPERATION_NAME;
+use crate::graphql;
+use crate::json_ext::Object;
+use crate::json_ext::Value;
 use crate::metrics::aggregation::AggregateMeterProvider;
+use crate::plugins::telemetry::CLIENT_NAME;
+use crate::plugins::telemetry::CLIENT_VERSION;
+use crate::plugins::telemetry::apollo::ErrorsConfiguration;
+use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
+use crate::query_planner::APOLLO_OPERATION_ID;
+use crate::query_planner::stats_report_key_hash;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
@@ -1243,6 +1259,115 @@ macro_rules! assert_histogram_not_exists {
         let result = crate::metrics::collect_metrics().metric_exists::<$value>($name, crate::metrics::test_utils::MetricType::Histogram, &[]);
         assert_no_metric!(result, $name, None, None, None, &[]);
     };
+}
+
+pub(crate) fn count_operation_error_codes(
+    codes: Vec<&str>,
+    context: &Context,
+    errors_config: &ErrorsConfiguration,
+) {
+    let errors = codes
+        .iter()
+        .map(|c| {
+            let mut extensions = Object::new();
+            extensions.insert("code", Value::String((*c).into()));
+            graphql::Error {
+                message: "".into(),
+                locations: vec![],
+                path: None,
+                extensions,
+            }
+        })
+        .collect();
+
+    count_operation_errors(&errors, context, errors_config);
+}
+
+pub(crate) fn count_operation_errors(
+    errors: &Vec<graphql::Error>,
+    context: &Context,
+    errors_config: &ErrorsConfiguration,
+) {
+    let unwrap_context_string = |context_key: &str| -> String {
+        context
+            .get::<_, String>(context_key)
+            .unwrap_or_default()
+            .unwrap_or_default()
+    };
+
+    let mut operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
+    let operation_name = unwrap_context_string(OPERATION_NAME);
+    let operation_kind = unwrap_context_string(OPERATION_KIND);
+    let client_name = unwrap_context_string(CLIENT_NAME);
+    let client_version = unwrap_context_string(CLIENT_VERSION);
+
+    // Try to get operation ID from the stats report key if it's not in context (e.g. on parse/validation error)
+    if operation_id.is_empty() {
+        let maybe_stats_report_key = context.extensions().with_lock(|lock| {
+            lock.get::<Arc<UsageReporting>>()
+                .map(|u| u.stats_report_key.clone())
+        });
+        if let Some(stats_report_key) = maybe_stats_report_key {
+            operation_id = stats_report_key_hash(stats_report_key.as_str());
+        }
+    }
+
+    let mut map = HashMap::new();
+    for error in errors {
+        let code = error.extensions.get("code").and_then(|c| c.as_str());
+        let service = error
+            .extensions
+            .get("service")
+            .and_then(|s| s.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let severity = error.extensions.get("severity").and_then(|s| s.as_str());
+        let path = match &error.path {
+            None => "".into(),
+            Some(path) => path.to_string(),
+        };
+        let entry = map.entry(code).or_insert(0u64);
+        *entry += 1;
+
+        let send_otlp_errors = if service.is_empty() {
+            matches!(
+                errors_config.preview_extended_error_metrics,
+                ExtendedErrorMetricsMode::Enabled
+            )
+        } else {
+            let subgraph_error_config = errors_config.subgraph.get_error_config(&service);
+            subgraph_error_config.send
+                && matches!(
+                    errors_config.preview_extended_error_metrics,
+                    ExtendedErrorMetricsMode::Enabled
+                )
+        };
+
+        if send_otlp_errors {
+            let code_str = code.unwrap_or_default().to_string();
+            let severity_str = severity
+                .unwrap_or(tracing::Level::ERROR.as_str())
+                .to_string();
+            u64_counter!(
+                "apollo.router.operations.error",
+                "Number of errors returned by operation",
+                1,
+                "apollo.operation.id" = operation_id.clone(),
+                "graphql.operation.name" = operation_name.clone(),
+                "graphql.operation.type" = operation_kind.clone(),
+                "apollo.client.name" = client_name.clone(),
+                "apollo.client.version" = client_version.clone(),
+                "graphql.error.extensions.code" = code_str,
+                "graphql.error.extensions.severity" = severity_str,
+                "graphql.error.path" = path,
+                "apollo.router.error.service" = service
+            );
+        }
+    }
+
+    for (code, count) in map {
+        count_graphql_error(count, code);
+    }
 }
 
 /// Shared counter for `apollo.router.graphql_error` for consistency
