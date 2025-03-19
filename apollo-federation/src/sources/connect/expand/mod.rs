@@ -198,6 +198,7 @@ mod helpers {
     use apollo_compiler::schema::ExtendedType;
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::ScalarType;
+    use apollo_compiler::ty;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
 
@@ -437,6 +438,52 @@ mod helpers {
                     connector,
                     parent_object.name.clone(),
                     field_def.ty.inner_named_type().clone(),
+                )?;
+            } else {
+                // TODO — replace this with real expansion
+                let query_object = ObjectTypeDefinitionPosition {
+                    type_name: query_alias.clone(),
+                };
+
+                query_object.pre_insert(&mut schema)?;
+                query_object.insert(
+                    &mut schema,
+                    Node::new(ObjectType {
+                        description: None,
+                        name: query_alias.clone(),
+                        implements_interfaces: IndexSet::with_hasher(Default::default()),
+                        directives: DirectiveList::new(),
+                        fields: IndexMap::default(),
+                    }),
+                )?;
+
+                let field_def = FieldDefinition {
+                    description: None,
+                    name: name!("_"),
+                    arguments: Vec::new(),
+                    ty: ty!(ID),
+                    directives: ast::DirectiveList(vec![Node::new(Directive {
+                        name: name!("federation__inaccessible"),
+                        arguments: Vec::new(),
+                    })]),
+                };
+
+                let field_pos = ObjectFieldDefinitionPosition {
+                    type_name: query_alias.clone(),
+                    field_name: field_def.name.clone(),
+                };
+
+                field_pos.insert(&mut schema, field_def.into())?;
+
+                let query_root = SchemaRootDefinitionPosition {
+                    root_kind: SchemaRootDefinitionKind::Query,
+                };
+                query_root.insert(
+                    &mut schema,
+                    ComponentName {
+                        origin: ComponentOrigin::Definition,
+                        name: query_alias,
+                    },
                 )?;
             }
 

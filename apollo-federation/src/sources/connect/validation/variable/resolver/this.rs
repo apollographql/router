@@ -1,7 +1,6 @@
-use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ExtendedType;
 
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -14,12 +13,12 @@ use crate::sources::connect::variable::VariableReference;
 
 /// Resolves variables in the `$this` namespace
 pub(crate) struct ThisResolver<'a> {
-    object: &'a Node<ObjectType>,
+    object: &'a ExtendedType,
     field: &'a Component<FieldDefinition>,
 }
 
 impl<'a> ThisResolver<'a> {
-    pub(crate) fn new(object: &'a Node<ObjectType>, field: &'a Component<FieldDefinition>) -> Self {
+    pub(crate) fn new(object: &'a ExtendedType, field: &'a Component<FieldDefinition>) -> Self {
         Self { object, field }
     }
 }
@@ -34,15 +33,19 @@ impl NamespaceResolver for ThisResolver<'_> {
         let Some(root) = resolver::get_root(reference) else {
             return Ok(()); // Not something we can type check this way
         };
-        let field_type = self
-            .object
-            .fields
+
+        let fields = match self.object {
+            ExtendedType::Object(node) => &node.fields,
+            _ => return Ok(()), // TODO: interfaces
+        };
+
+        let field_type = fields
             .get(root.as_str())
             .ok_or_else(|| Message {
                 code: Code::UndefinedField,
                 message: format!(
                     "`{object}` does not have a field named `{root}`",
-                    object = self.object.name,
+                    object = self.object.name(),
                     root = root.as_str(),
                 ),
                 locations: expression

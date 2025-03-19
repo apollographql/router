@@ -16,7 +16,6 @@ use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
 use super::coordinates::ConnectHTTPCoordinate;
-use super::coordinates::FieldCoordinate;
 use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
@@ -24,6 +23,7 @@ use super::http::headers;
 use super::http::method;
 use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
+use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -39,23 +39,24 @@ pub(super) fn fields_seen_by_all_connects(
     let mut messages = Vec::new();
     let mut seen_fields = Vec::new();
 
-    for object in schema
+    schema
         .types
         .values()
-        .filter_map(|extended_type| {
+        .filter(|ty| !ty.is_built_in())
+        .for_each(|extended_type| {
             if let ExtendedType::Object(node) = extended_type {
-                Some(node)
-            } else {
-                None
+                match fields_seen_by_object_connectors(
+                    extended_type,
+                    node,
+                    schema,
+                    all_source_names,
+                ) {
+                    Ok(fields) => seen_fields.extend(fields),
+                    Err(errs) => messages.extend(errs),
+                }
             }
-        })
-        .filter(|object| !object.is_built_in())
-    {
-        match fields_seen_by_object_connectors(object, schema, all_source_names) {
-            Ok(fields) => seen_fields.extend(fields),
-            Err(errs) => messages.extend(errs),
-        }
-    }
+        });
+
     if messages.is_empty() {
         Ok(seen_fields)
     } else {
@@ -72,6 +73,7 @@ pub(crate) enum ObjectCategory {
 
 /// Make sure that any `@connect` directives on object fields are valid
 fn fields_seen_by_object_connectors(
+    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
@@ -117,7 +119,14 @@ fn fields_seen_by_object_connectors(
     let mut seen_fields = Vec::new();
     let mut messages = Vec::new();
     for field in object.fields.values() {
-        match fields_seen_by_connector(field, object_category, source_names, object, schema) {
+        match fields_seen_by_connector(
+            field,
+            object_category,
+            source_names,
+            extended_type,
+            object,
+            schema,
+        ) {
             Ok(fields) => seen_fields.extend(fields),
             Err(errs) => messages.extend(errs),
         }
@@ -133,6 +142,7 @@ fn fields_seen_by_connector(
     field: &Component<FieldDefinition>,
     category: ObjectCategory,
     source_names: &[SourceName],
+    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
@@ -166,10 +176,12 @@ fn fields_seen_by_connector(
     }
 
     for connect_directive in connect_directives {
-        let field_coordinate = FieldCoordinate { object, field };
         let connect_coordinate = ConnectDirectiveCoordinate {
             directive: connect_directive,
-            field_coordinate,
+            element: ConnectedElement::Field {
+                parent_type: extended_type,
+                field_def: field,
+            },
         };
 
         match get_seen_fields_from_selection(connect_coordinate, schema) {

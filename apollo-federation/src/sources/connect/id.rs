@@ -1,3 +1,6 @@
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::hash::Hash;
 
 use apollo_compiler::Name;
@@ -12,9 +15,9 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct ObjectTypeDefinitionDirectivePosition {
-    type_name: Name,
-    directive_name: Name,
-    directive_index: usize,
+    pub(super) type_name: Name,
+    pub(super) directive_name: Name,
+    pub(super) directive_index: usize,
 }
 
 /// Stores information about the position of the @connect directive, either
@@ -22,21 +25,7 @@ pub(crate) struct ObjectTypeDefinitionDirectivePosition {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) enum ConnectorPosition {
     Field(ObjectOrInterfaceFieldDirectivePosition),
-    #[allow(unused)]
     Type(ObjectTypeDefinitionDirectivePosition),
-}
-
-/// Reifies the connector position into schema definitions
-#[derive(Debug)]
-pub(crate) enum ConnectedElement<'schema> {
-    Field {
-        parent_type: &'schema ExtendedType,
-        field_def: &'schema Component<FieldDefinition>,
-    },
-    Type {
-        #[allow(unused)]
-        type_def: &'schema ExtendedType,
-    },
 }
 
 impl ConnectorPosition {
@@ -118,5 +107,71 @@ impl ConnectorPosition {
             ),
             ConnectorPosition::Type(pos) => format!("{}_{}", pos.type_name, pos.directive_index),
         }
+    }
+
+    pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .query
+            .as_ref()
+            .is_some_and(|query| match self {
+                ConnectorPosition::Field(pos) => *pos.field.type_name() == query.name,
+                ConnectorPosition::Type(_) => false,
+            })
+            || schema
+                .schema_definition
+                .mutation
+                .as_ref()
+                .is_some_and(|mutation| match self {
+                    ConnectorPosition::Field(pos) => *pos.field.type_name() == mutation.name,
+                    ConnectorPosition::Type(_) => false,
+                })
+    }
+}
+
+/// Reifies the connector position into schema definitions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConnectedElement<'schema> {
+    Field {
+        parent_type: &'schema ExtendedType,
+        field_def: &'schema Component<FieldDefinition>,
+    },
+    Type {
+        type_def: &'schema ExtendedType,
+    },
+}
+
+impl Display for ConnectedElement<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Field {
+                parent_type,
+                field_def,
+            } => write!(f, "{}.{}", parent_type.name(), field_def.name),
+            Self::Type { type_def } => write!(f, "{}", type_def.name()),
+        }
+    }
+}
+
+impl ConnectedElement<'_> {
+    pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .query
+            .as_ref()
+            .is_some_and(|query| match self {
+                ConnectedElement::Field { parent_type, .. } => *parent_type.name() == query.name,
+                ConnectedElement::Type { .. } => false,
+            })
+            || schema
+                .schema_definition
+                .mutation
+                .as_ref()
+                .is_some_and(|mutation| match self {
+                    ConnectedElement::Field { parent_type, .. } => {
+                        *parent_type.name() == mutation.name
+                    }
+                    ConnectedElement::Type { .. } => false,
+                })
     }
 }
