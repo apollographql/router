@@ -326,8 +326,8 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
                                                     connection_handle.shutdown_idle();
+                                                    let _= connection.await;
                                                 }
                                             }
                                         }
@@ -354,8 +354,8 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
                                                     connection_handle.shutdown_idle();
+                                                    let _= connection.await;
                                                 }
                                             }
                                         }
@@ -393,8 +393,8 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
                                                     connection_handle.shutdown_idle();
+                                                    let _= connection.await;
                                                 }
                                             }
                                         }
