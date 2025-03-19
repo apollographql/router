@@ -954,6 +954,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn apollo_error_operation_id_hash() {
+        assert_eq!(
+            "ea4f152696abedca148b016d72df48842b713697",
+            stats_report_key_hash("## GraphQLValidationFailure\n")
+        );
+        assert_eq!(
+            "3f410834f13153f401ffe73f7e454aa500d10bf7",
+            stats_report_key_hash("## GraphQLParseFailure\n")
+        );
+        assert_eq!(
+            "7486043da2085fed407d942508a572ef88dc8120",
+            stats_report_key_hash("## GraphQLUnknownOperationName\n")
+        );
+    }
+
     #[test(tokio::test)]
     async fn test_introspection_cache() {
         let mut delegate = MockMyQueryPlanner::new();
