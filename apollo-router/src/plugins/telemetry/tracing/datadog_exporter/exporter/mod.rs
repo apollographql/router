@@ -250,7 +250,10 @@ impl DatadogPipelineBuilder {
         service_name: String,
     ) -> Result<DatadogExporter, TraceError> {
         if let Some(client) = self.client {
-            let model_config = ModelConfig { service_name };
+            let model_config = ModelConfig {
+                service_name,
+                tags: Vec::new(),
+            };
 
             let exporter = DatadogExporter::new(
                 model_config,
@@ -374,6 +377,12 @@ impl DatadogPipelineBuilder {
         self.mapping.service_name = Some(Arc::new(f));
         self
     }
+
+    /// Add custom tags to be sent as part of the host metadata
+    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+        self.unified_tags.add_custom_tags(tags);
+        self
+    }
 }
 
 fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
@@ -431,6 +440,8 @@ impl SpanExporter for DatadogExporter {
 #[non_exhaustive]
 pub struct ModelConfig {
     pub service_name: String,
+    /// Custom host tags to be sent as part of the host metadata
+    pub tags: Vec<String>,
 }
 
 fn mapping_debug(f: &Option<FieldMapping>) -> String {
@@ -451,10 +462,9 @@ mod tests {
     #[test]
     fn test_out_of_order_group() {
         let mut batch = vec![get_span(1, 1, 1), get_span(2, 2, 2), get_span(1, 1, 3)];
-        let expected = vec![
-            vec![get_span(1, 1, 1), get_span(1, 1, 3)],
-            vec![get_span(2, 2, 2)],
-        ];
+        let expected = vec![vec![get_span(1, 1, 1), get_span(1, 1, 3)], vec![get_span(
+            2, 2, 2,
+        )]];
 
         let mut traces = group_into_traces(&mut batch);
         // We need to sort the output in order to compare, but this is not required by the Datadog agent

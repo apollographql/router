@@ -4,6 +4,7 @@ pub struct UnifiedTags {
     pub service: UnifiedTagField,
     pub env: UnifiedTagField,
     pub version: UnifiedTagField,
+    pub custom_tags: Vec<(String, String)>,
 }
 
 impl UnifiedTags {
@@ -12,6 +13,7 @@ impl UnifiedTags {
             service: UnifiedTagField::new(UnifiedTagEnum::Service),
             env: UnifiedTagField::new(UnifiedTagEnum::Env),
             version: UnifiedTagField::new(UnifiedTagEnum::Version),
+            custom_tags: Vec::new(),
         }
     }
     pub fn set_service(&mut self, service: Option<String>) {
@@ -27,7 +29,19 @@ impl UnifiedTags {
         self.service.value.clone()
     }
     pub fn compute_attribute_size(&self) -> u32 {
-        self.service.len() + self.env.len() + self.version.len()
+        self.service.len() + self.env.len() + self.version.len() + self.custom_tags.len() as u32
+    }
+
+    /// Add custom tags as the Second Primary tag(custom unified tags)
+    pub fn add_custom_tags(&mut self, tags: Vec<String>) {
+        for tag in tags {
+            if let Some(idx) = tag.find(':') {
+                let (key, value) = tag.split_at(idx);
+                // Skip the ':' character
+                let value = &value[1..];
+                self.custom_tags.push((key.to_string(), value.to_string()));
+            }
+        }
     }
 }
 

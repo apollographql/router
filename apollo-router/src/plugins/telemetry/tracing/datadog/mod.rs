@@ -84,6 +84,10 @@ pub(crate) struct Config {
     #[serde(default = "default_true")]
     enable_span_mapping: bool,
 
+    /// Custom host tags to be sent as part of the host metadata
+    #[serde(default)]
+    tags: Vec<String>,
+
     /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
     #[serde(default = "default_true")]
     fixed_span_names: bool,
@@ -214,6 +218,7 @@ impl TracingConfigurator for Config {
                     .pool_idle_timeout(Duration::from_millis(1))
                     .build()?,
             )
+            .with_tags(self.tags.clone())
             .with_trace_config(common)
             .build_exporter()?;
 

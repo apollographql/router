@@ -118,6 +118,12 @@ fn write_unified_tags<'a>(
     write_unified_tag(encoded, interner, &unified_tags.service)?;
     write_unified_tag(encoded, interner, &unified_tags.env)?;
     write_unified_tag(encoded, interner, &unified_tags.version)?;
+
+    for (key, value) in &unified_tags.custom_tags {
+        rmp::encode::write_u32(encoded, interner.intern(key))?;
+        rmp::encode::write_u32(encoded, interner.intern(value))?;
+    }
+
     Ok(())
 }
 
@@ -230,13 +236,10 @@ where
             )?;
             rmp::encode::write_i64(&mut encoded, start)?;
             rmp::encode::write_i64(&mut encoded, duration)?;
-            rmp::encode::write_i32(
-                &mut encoded,
-                match span.status {
-                    Status::Error { .. } => 1,
-                    _ => 0,
-                },
-            )?;
+            rmp::encode::write_i32(&mut encoded, match span.status {
+                Status::Error { .. } => 1,
+                _ => 0,
+            })?;
 
             rmp::encode::write_map_len(
                 &mut encoded,
