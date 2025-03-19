@@ -1,3 +1,5 @@
-###  Deprecating the external extensibility (PR #6791)
+###  Clarify tracing error messages in coprocessor's stages (PR #6791)
 
- We have now deprecated the external extensibility and now have updated error log statements to support coprocessor. By [@briannafugate408](https://github.com/briannafugate408)
+Trace messages in coprocessors used `external extensibility` namespace. They now use `coprocessor` in the message instead for clarity.
+
+By [@briannafugate408](https://github.com/briannafugate408)
