@@ -368,14 +368,14 @@ fn rename_at_path(
     }
 }
 
-fn apply_rewrites(
+fn apply_output_rewrite(
     schema: &ValidFederationSchema,
     response: &ResponseShape,
     rewrite: &FetchDataRewrite,
 ) -> Result<ResponseShape, String> {
     match rewrite {
         FetchDataRewrite::ValueSetter(_) => {
-            Err("apply_rewrites: unexpected value setter".to_string())
+            Err("apply_output_rewrite: unexpected value setter".to_string())
         }
         FetchDataRewrite::KeyRenamer(renamer) => rename_at_path(
             schema,
@@ -384,6 +384,20 @@ fn apply_rewrites(
             &renamer.path,
             renamer.rename_key_to.clone(),
         ),
+    }
+}
+
+fn check_input_rewrite(rewrite: &FetchDataRewrite) -> Result<(), String> {
+    match rewrite {
+        FetchDataRewrite::KeyRenamer(rename) => Err(format!(
+            "check_input_rewrite: unexpected key renamer: {rename:?}"
+        )),
+        FetchDataRewrite::ValueSetter(_) => {
+            // This case is only created in `compute_input_rewrites_on_key_fetch`. It overwrites
+            // the existing `__typename` response value. But, it won't affect the response shape
+            // anyways. So, we can ignore it here.
+            Ok(())
+        }
     }
 }
 
@@ -444,8 +458,11 @@ fn interpret_fetch_node(
         })
     }
     .map(|rs| rs.add_boolean_conditions(&boolean_clause))?;
+    for rewrite in fetch.input_rewrites.iter() {
+        check_input_rewrite(rewrite)?;
+    }
     for rewrite in &fetch.output_rewrites {
-        result = apply_rewrites(schema, &result, rewrite)?;
+        result = apply_output_rewrite(schema, &result, rewrite)?;
     }
     if !fetch.context_rewrites.is_empty() {
         result = remove_context_arguments(&fetch.context_rewrites, &result)?;
