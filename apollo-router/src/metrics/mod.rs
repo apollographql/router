@@ -4,17 +4,16 @@
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
 //! API-stable, we may update it in a minor version, which may require code changes to plugins.
 
+use std::collections::HashMap;
 #[cfg(test)]
 use std::future::Future;
 #[cfg(test)]
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 #[cfg(test)]
 use futures::FutureExt;
-
-use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
