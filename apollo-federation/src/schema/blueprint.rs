@@ -22,94 +22,6 @@ struct CoreFeature {
     imports: Vec<Import>,
     purpose: Option<Purpose>,
 }
-
-#[allow(dead_code)]
-trait SchemaBlueprint {
-    fn on_missing_directive_definition(
-        &self,
-        _schema: &mut FederationSchema,
-        _directive: &Directive,
-    ) -> Result<Option<DirectiveDefinitionPosition>, FederationError>;
-
-    fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError>;
-
-    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool;
-
-    fn on_constructed(&self, _schema: &mut FederationSchema) -> Result<(), FederationError>;
-
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature);
-
-    fn on_invalidation(_: &Schema);
-
-    fn on_validation(_schema: &Schema) -> Result<(), FederationError>;
-
-    fn on_apollo_rs_validation_error(
-        _error: apollo_compiler::validation::WithErrors<Schema>,
-    ) -> FederationError;
-
-    fn on_unknown_directive_validation_error(
-        _schema: &Schema,
-        _unknown_directive_name: &str,
-        _error: FederationError,
-    ) -> FederationError;
-
-    fn apply_directives_after_parsing() -> bool;
-}
-
-#[allow(dead_code)]
-struct DefaultBlueprint {}
-
-impl SchemaBlueprint for DefaultBlueprint {
-    fn on_missing_directive_definition(
-        &self,
-        _schema: &mut FederationSchema,
-        _directive: &Directive,
-    ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
-        Ok(None)
-    }
-
-    fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError> {
-        Ok(())
-    }
-
-    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
-        false
-    }
-
-    fn on_constructed(&self, _schema: &mut FederationSchema) -> Result<(), FederationError> {
-        // No-op by default, but used for federation.
-        Ok(())
-    }
-
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {}
-
-    fn on_invalidation(_: &Schema) {
-        todo!()
-    }
-
-    fn on_validation(_schema: &Schema) -> Result<(), FederationError> {
-        Ok(())
-    }
-
-    fn on_apollo_rs_validation_error(
-        _error: apollo_compiler::validation::WithErrors<Schema>,
-    ) -> FederationError {
-        todo!()
-    }
-
-    fn on_unknown_directive_validation_error(
-        _schema: &Schema,
-        _unknown_directive_name: &str,
-        error: FederationError,
-    ) -> FederationError {
-        error
-    }
-
-    fn apply_directives_after_parsing() -> bool {
-        false
-    }
-}
-
 #[allow(dead_code)]
 struct FederationBlueprint {
     with_root_type_renaming: bool,
@@ -122,11 +34,8 @@ impl FederationBlueprint {
             with_root_type_renaming,
         }
     }
-}
 
-impl SchemaBlueprint for FederationBlueprint {
     fn on_missing_directive_definition(
-        &self,
         schema: &mut FederationSchema,
         directive: &Directive,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
@@ -138,7 +47,9 @@ impl SchemaBlueprint for FederationBlueprint {
         Ok(schema.get_directive_definition(&DEFAULT_LINK_NAME))
     }
 
-    fn on_directive_definition_and_schema_parsed(_: &mut Schema) -> Result<(), FederationError> {
+    fn on_directive_definition_and_schema_parsed(
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
         todo!()
     }
 
@@ -146,7 +57,7 @@ impl SchemaBlueprint for FederationBlueprint {
         todo!()
     }
 
-    fn on_constructed(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn on_constructed(schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.subgraph_metadata.is_none() {
             schema.subgraph_metadata = compute_subgraph_metadata(schema)?.map(Box::new);
         }
@@ -230,6 +141,39 @@ mod tests {
         assert!(metadata.is_fed_2_schema());
     }
 
+    #[test]
+    fn injects_missing_directive_definitions_fed_1_0() {
+        let schema = Schema::parse(
+            r#"
+                type Query {
+                    s: String
+                }"#,
+            "empty-fed1-schema.graphqls",
+        )
+        .expect("valid schema");
+        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+
+        assert!(subgraph.get_directive_definition(&name!("key")).is_some());
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_2_0() {
+        let schema = Schema::parse(
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+                type Query {
+                    s: String
+                }"#,
+            "empty-fed2-schema.graphqls",
+        )
+        .expect("valid schema");
+        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+
+        assert!(subgraph.get_directive_definition(&name!("link")).is_some());
+        assert!(subgraph.get_directive_definition(&name!("key")).is_some());
+    }
+
     fn build_subgraph(
         source: &Schema,
         with_root_type_renaming: bool,
@@ -239,9 +183,9 @@ mod tests {
         subgraph.validate_or_return_self().map_err(|(_, err)| err)
     }
 
-    fn build_schema<B: SchemaBlueprint>(
+    fn build_schema(
         schema: &Schema,
-        blueprint: &B,
+        _blueprint: &FederationBlueprint,
     ) -> Result<FederationSchema, FederationError> {
         let mut federation_schema = FederationSchema::new_uninitialized(schema.clone())?;
 
@@ -254,7 +198,10 @@ mod tests {
                 .get_directive_definition(&directive.name)
                 .is_none()
             {
-                blueprint.on_missing_directive_definition(&mut federation_schema, directive)?;
+                FederationBlueprint::on_missing_directive_definition(
+                    &mut federation_schema,
+                    directive,
+                )?;
             }
         }
 
@@ -281,6 +228,8 @@ mod tests {
                 );
         }
 
+        FederationBlueprint::on_directive_definition_and_schema_parsed(&mut federation_schema)?;
+
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
         federation_schema.collect_links_metadata()?;
 
@@ -291,7 +240,7 @@ mod tests {
         // Right now, this is down here because it eagerly evaluates directive usages for SubgraphMetadata, whereas the JS
         // code was lazy and we could call this hook to lazily use federation directives before actually adding their
         // definitions.
-        blueprint.on_constructed(&mut federation_schema)?;
+        FederationBlueprint::on_constructed(&mut federation_schema)?;
 
         Ok(federation_schema)
     }
