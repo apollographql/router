@@ -284,7 +284,7 @@ impl<'a> TestHarness<'a> {
             Arc::make_mut(&mut config)
                 .apollo_plugins
                 .plugins
-                .entry("mock_subgraphs")
+                .entry("experimental_mock_subgraphs")
                 .or_insert(serde_json::json!({}));
         }
         let canned_schema = include_str!("../testing_schema.graphql");

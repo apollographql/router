@@ -94,7 +94,7 @@ let subgraphs = serde_json::json!({
 let service = TestHarness::builder()
     .configuration_json(serde_json::json!({
         "include_subgraph_errors": { "all": true },
-        "mock_subgraphs": subgraphs,
+        "experimental_mock_subgraphs": subgraphs,
     }))
     .unwrap()
     .schema(SOME_TESTING_SCHEMA)
@@ -124,8 +124,7 @@ struct ConfigForOneSubgraph {
 ```
 
 As of this writing, this plugin is only intended for the Router’s own tests but is always available.
-So as to make it less discoverable by users
-it is excluded from the JSON Schema for Router configuration (see `HIDDEN_FROM_CONFIG_JSON_SCHEMA`)
-but nothing else prevents its use.
+It is excluded from the JSON Schema for Router configuration (see `HIDDEN_FROM_CONFIG_JSON_SCHEMA`)
+and prefixed `experimental_`, but nothing actually prevents its use externally.
 
 The plugin implementation lives at `apollo-router/src/plugins/mock_subgraphs/mod.rs`.

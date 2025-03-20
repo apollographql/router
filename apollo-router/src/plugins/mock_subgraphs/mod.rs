@@ -20,7 +20,7 @@ use crate::services::subgraph;
 
 mod execution;
 
-register_private_plugin!("apollo", "mock_subgraphs", MockSubgraphsPlugin);
+register_private_plugin!("apollo", "experimental_mock_subgraphs", MockSubgraphsPlugin);
 
 /// Configuration for the `mock_subgraphs` plugin
 ///
@@ -28,7 +28,7 @@ register_private_plugin!("apollo", "mock_subgraphs", MockSubgraphsPlugin);
 /// Example `router.yaml`:
 ///
 /// ```yaml
-/// mock_subgraphs:
+/// experimental_mock_subgraphs:
 ///   subgraph1_name:
 ///     headers:
 ///       cache-control: public
