@@ -279,24 +279,14 @@ impl<'a> TestHarness<'a> {
         } else {
             self
         };
-        let builder = if builder.subgraph_network_requests {
-            builder
-        } else {
-            builder.subgraph_hook(|name, _default| {
-                let my_name = name.to_string();
-                tower::service_fn(move |request: subgraph::Request| {
-                    let empty_response = subgraph::Response::builder()
-                        .extensions(crate::json_ext::Object::new())
-                        .context(request.context)
-                        .subgraph_name(my_name.clone())
-                        .id(request.id)
-                        .build();
-                    std::future::ready(Ok(empty_response))
-                })
-                .boxed()
-            })
-        };
-        let config = builder.configuration.unwrap_or_default();
+        let mut config = builder.configuration.unwrap_or_default();
+        if !builder.subgraph_network_requests {
+            Arc::make_mut(&mut config)
+                .apollo_plugins
+                .plugins
+                .entry("mock_subgraphs")
+                .or_insert(serde_json::json!({}));
+        }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
@@ -557,6 +547,12 @@ async fn test_intercept_subgraph_network_requests() {
         .unwrap();
     let response = TestHarness::builder()
         .schema(include_str!("../testing_schema.graphql"))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
         .build_router()
         .await
         .unwrap()
@@ -573,7 +569,17 @@ async fn test_intercept_subgraph_network_requests() {
     {
       "data": {
         "topProducts": null
-      }
+      },
+      "errors": [
+        {
+          "message": "subgraph mock not configured",
+          "path": [],
+          "extensions": {
+            "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+            "service": "products"
+          }
+        }
+      ]
     }
     "###);
 }

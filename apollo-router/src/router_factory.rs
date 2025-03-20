@@ -768,6 +768,11 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("coprocessor");
     add_user_plugins!();
 
+    // Because this plugin intercepts subgraph requests
+    // and does not forward them to the next service in the chain,
+    // it needs to intervene after user plugins for users plugins to run at all.
+    add_optional_apollo_plugin!("mock_subgraphs");
+
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end
     // indicates a missing macro call.
     let unused_apollo_plugin_names = apollo_plugin_factories.keys().copied().collect::<Vec<_>>();
