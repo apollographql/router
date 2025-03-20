@@ -1081,6 +1081,31 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
     assert!(config.batch_include("accounts"));
 }
 
+#[test]
+fn it_processes_unspecified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, None);
+}
+
+#[test]
+fn it_processes_specified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "maximum_size": 10
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, Some(10));
+}
+
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
     let serde_field_default = Regex::new(
         r#"^\s*#[\s\n]*\[serde\s*\((.*,)?\s*default\s*=\s*"[a-zA-Z0-9_:]+"\s*(,.*)?\)\s*\]\s*$"#,

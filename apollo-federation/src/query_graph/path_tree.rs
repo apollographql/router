@@ -718,7 +718,7 @@ mod tests {
 
         let normalized_operation = normalize_operation(
             operation,
-            Default::default(),
+            &Default::default(),
             &schema,
             &Default::default(),
             &never_cancel,

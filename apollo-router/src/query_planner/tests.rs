@@ -4,6 +4,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use apollo_compiler::name;
+use apollo_federation::query_plan::requires_selection;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use futures::StreamExt;
 use http::Method;
 use serde_json_bytes::json;
@@ -29,7 +31,6 @@ use crate::plugin;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::SubgraphOperation;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::services::connector_service::ConnectorServiceFactory;
@@ -292,7 +293,7 @@ async fn defer() {
                         service_name: "X".into(),
                         requires: vec![],
                         variable_usages: vec![],
-                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
+                        operation: SerializableDocument::from_string("{ t { id __typename x } }"),
                         operation_name: Some("t".into()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".into()),
@@ -314,29 +315,29 @@ async fn defer() {
                         path: Path(vec![PathElement::Key("t".to_string(), None)]),
                         node: Box::new(PlanNode::Fetch(FetchNode {
                             service_name: "Y".into(),
-                            requires: vec![query_planner::selection::Selection::InlineFragment(
-                                query_planner::selection::InlineFragment {
+                            requires: vec![requires_selection::Selection::InlineFragment(
+                                requires_selection::InlineFragment {
                                     type_condition: Some(name!("T")),
                                     selections: vec![
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
                                                 alias: None,
                                                 name: name!("id"),
-                                                selections: None,
+                                                selections: Vec::new(),
                                             },
                                         ),
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
+                                        requires_selection::Selection::Field(
+                                            requires_selection::Field {
                                                 alias: None,
                                                 name: name!("__typename"),
-                                                selections: None,
+                                                selections: Vec::new(),
                                             },
                                         ),
                                     ],
                                 },
                             )],
                             variable_usages: vec![],
-                            operation: SubgraphOperation::from_string(
+                            operation: SerializableDocument::from_string(
                                 "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
                             ),
                             operation_name: None,
@@ -1866,7 +1867,7 @@ fn broken_plan_does_not_panic() {
             service_name: "X".into(),
             requires: vec![],
             variable_usages: vec![],
-            operation: SubgraphOperation::from_string(operation),
+            operation: SerializableDocument::from_string(operation),
             operation_name: Some("t".into()),
             operation_kind: OperationKind::Query,
             id: Some("fetch1".into()),

@@ -412,7 +412,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         selection: &Selection,
         options: &mut Vec<SimultaneousPathsWithLazyIndirectPaths>,
     ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
-        let operation_element = selection.element()?;
+        let operation_element = selection.element();
         let mut new_options = vec![];
         let mut no_followups: bool = false;
 
@@ -636,16 +636,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 let check_result = selection.any_element(&mut |element| match element {
                     OpPathElement::InlineFragment(inline_fragment) => {
                         match &inline_fragment.type_condition_position {
-                            Some(type_condition) => Ok(self
+                            Some(type_condition) => self
                                 .parameters
                                 .abstract_types_with_inconsistent_runtime_types
                                 .iter()
-                                .any(|ty| ty.type_name() == type_condition.type_name())),
-                            None => Ok(false),
+                                .any(|ty| ty.type_name() == type_condition.type_name()),
+                            None => false,
                         }
                     }
-                    _ => Ok(false),
-                })?;
+                    _ => false,
+                });
                 has_inconsistent_abstract_types = Some(check_result);
                 Ok(check_result)
             }

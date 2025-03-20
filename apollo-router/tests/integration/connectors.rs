@@ -843,7 +843,7 @@ mod telemetry {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is not supported"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
         .await;
 
         Ok(())
@@ -869,7 +869,6 @@ mod telemetry {
                       subgraph:
                         all:
                           send: false
-                          redact: false
                         subgraphs:
                           connectors:
                             send: true
@@ -886,7 +885,7 @@ mod telemetry {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is not supported"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
         .await;
 
         Ok(())
@@ -915,7 +914,49 @@ mod telemetry {
                         subgraphs:
                           connectors:
                             send: false
-                            redact: false
+        "#,
+            )
+            .supergraph(PathBuf::from_iter([
+                "tests",
+                "fixtures",
+                "connectors",
+                "quickstart.graphql",
+            ]))
+            .build()
+            .await;
+
+        router.start().await;
+        router
+            .assert_log_not_contains(r#""subgraph":"connectors","message":"plugin `telemetry`"#)
+            .await;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_incompatible_warnings_with_flag_enabled() -> Result<(), BoxError> {
+        // Ensure that we have the test keys before running
+        // Note: The [IntegrationTest] ensures that these test credentials get
+        // set before running the router.
+        if std::env::var("TEST_APOLLO_KEY").is_err()
+            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
+        {
+            return Ok(());
+        };
+
+        let mut router = IntegrationTest::builder()
+            .config(
+                r#"
+                telemetry:
+                  apollo:
+                    errors:
+                      preview_extended_error_metrics: enabled
+                      subgraph:
+                        all:
+                          send: true
+                        subgraphs:
+                          connectors:
+                            send: true
         "#,
             )
             .supergraph(PathBuf::from_iter([
@@ -942,43 +983,6 @@ mod tls {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
-        // Ensure that we have the test keys before running
-        // Note: The [IntegrationTest] ensures that these test credentials get
-        // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
-            return Ok(());
-        };
-
-        let mut router = IntegrationTest::builder()
-            .config(
-                r#"
-                tls:
-                  subgraph:
-                    all:
-                      certificate_authorities: "${file./path/to/ca.crt}"
-        "#,
-            )
-            .supergraph(PathBuf::from_iter([
-                "tests",
-                "fixtures",
-                "connectors",
-                "quickstart.graphql",
-            ]))
-            .build()
-            .await;
-
-        router.start().await;
-        router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `tls` indirectly targets a connector-enabled subgraph"#)
-        .await;
-
-        Ok(())
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
@@ -1012,7 +1016,7 @@ mod tls {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `tls` is explicitly configured for connector-enabled subgraph"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"The `tls` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `tls.connector.sources.<subgraph_name>.<source_name>`."#)
         .await;
 
         Ok(())
@@ -1025,42 +1029,6 @@ mod traffic_shaping {
     use tower::BoxError;
 
     use crate::integration::IntegrationTest;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn incompatible_warnings_on_all() -> Result<(), BoxError> {
-        // Ensure that we have the test keys before running
-        // Note: The [IntegrationTest] ensures that these test credentials get
-        // set before running the router.
-        if std::env::var("TEST_APOLLO_KEY").is_err()
-            || std::env::var("TEST_APOLLO_GRAPH_REF").is_err()
-        {
-            return Ok(());
-        };
-
-        let mut router = IntegrationTest::builder()
-            .config(
-                r#"
-                traffic_shaping:
-                  all:
-                    deduplicate_query: true
-        "#,
-            )
-            .supergraph(PathBuf::from_iter([
-                "tests",
-                "fixtures",
-                "connectors",
-                "quickstart.graphql",
-            ]))
-            .build()
-            .await;
-
-        router.start().await;
-        router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `traffic_shaping` indirectly targets a connector-enabled subgraph"#)
-        .await;
-
-        Ok(())
-    }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn incompatible_warnings_on_subgraph() -> Result<(), BoxError> {
@@ -1093,7 +1061,7 @@ mod traffic_shaping {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `traffic_shaping` is explicitly configured for connector-enabled subgraph"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"The `traffic_shaping` plugin is explicitly configured for a subgraph containing connectors, which is not supported. Instead, configure the connector sources directly using `traffic_shaping.connector.sources.<subgraph_name>.<source_name>`."#)
         .await;
 
         Ok(())
