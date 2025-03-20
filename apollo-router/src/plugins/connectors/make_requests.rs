@@ -314,11 +314,11 @@ fn root_fields(
 
                 let response_key = ResponseKey::RootField {
                     name: response_name,
-                    selection: Arc::new(
-                        connector
-                            .selection
-                            .apply_selection_set(&request.operation, &field.selection_set),
-                    ),
+                    selection: Arc::new(connector.selection.apply_selection_set(
+                        &request.operation,
+                        &field.selection_set,
+                        None,
+                    )),
                     inputs: request_inputs,
                 };
 
@@ -373,11 +373,11 @@ fn entities_from_request(
 
     let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
 
-    let selection = Arc::new(
-        connector
-            .selection
-            .apply_selection_set(&request.operation, &entities_field.selection_set),
-    );
+    let selection = Arc::new(connector.selection.apply_selection_set(
+        &request.operation,
+        &entities_field.selection_set,
+        None,
+    ));
 
     representations
         .as_array()
@@ -528,11 +528,11 @@ fn entities_with_fields_from_request(
         .into_iter()
         .flatten()
         .flat_map(|(typename, field)| {
-            let selection = Arc::new(
-                connector
-                    .selection
-                    .apply_selection_set(&request.operation, &field.selection_set),
-            );
+            let selection = Arc::new(connector.selection.apply_selection_set(
+                &request.operation,
+                &field.selection_set,
+                None,
+            ));
 
             representations.iter().map(move |(i, representation)| {
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
