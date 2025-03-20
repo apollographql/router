@@ -20,6 +20,7 @@ use opentelemetry::metrics::MeterProvider;
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
 use tokio::sync::mpsc;
+use tokio_util::time::FutureExt;
 use tower_service::Service;
 
 use crate::ListenAddr;
@@ -217,6 +218,9 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
+// For now hard code this to 60 seconds. If graceful shutdown does not terminal the connection we give up.
+const CONNECTION_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub(super) fn serve_router_on_listen_addr(
     pipeline_ref: Arc<PipelineRef>,
     mut listener: Listener,
@@ -326,7 +330,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
+                                                    let _= connection.timeout(CONNECTION_SHUTDOWN_TIMEOUT).await;
                                                 }
                                             }
                                         }
@@ -353,7 +357,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
+                                                    let _= connection.timeout(CONNECTION_SHUTDOWN_TIMEOUT).await;
                                                 }
                                             }
                                         }
@@ -391,7 +395,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.await;
+                                                    let _= connection.timeout(CONNECTION_SHUTDOWN_TIMEOUT).await;
                                                 }
                                             }
                                         }
