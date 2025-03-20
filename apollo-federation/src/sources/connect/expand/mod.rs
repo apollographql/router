@@ -427,29 +427,25 @@ mod helpers {
                     )?;
                 }
                 ConnectedElement::Type { type_def } => {
-                    match type_def {
-                        ExtendedType::Object(object) => {
-                            SchemaVisitor::new(
-                                self.original_schema,
-                                &mut schema,
-                                &self.directive_deny_list,
-                            )
-                            .walk((
-                                ObjectTypeDefinitionPosition {
-                                    type_name: object.name.clone(),
-                                },
-                                connector.selection.next_subselection().cloned().ok_or(
-                                    FederationError::internal("empty selections are not allowed"),
-                                )?,
-                            ))?;
-                        }
-
-                        _ => {
-                            return Err(FederationError::internal(
-                                "connect directives on interfaces, unions, enums, scalars, or input objects is not supported",
-                            ));
-                        }
+                    let ExtendedType::Object(object) = type_def else {
+                        return Err(FederationError::internal(
+                            "connect directives on interfaces, unions, enums, scalars, or input objects are not supported",
+                        ));
                     };
+
+                    SchemaVisitor::new(
+                        self.original_schema,
+                        &mut schema,
+                        &self.directive_deny_list,
+                    )
+                    .walk((
+                        ObjectTypeDefinitionPosition {
+                            type_name: object.name.clone(),
+                        },
+                        connector.selection.next_subselection().cloned().ok_or(
+                            FederationError::internal("empty selections are not allowed"),
+                        )?,
+                    ))?;
 
                     // we need a Query root field to be valid
                     self.ensure_query_root_type(&mut schema, &query_alias, None)?;
