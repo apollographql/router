@@ -38,6 +38,7 @@ use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
+mod batch;
 mod mock_api;
 mod quickstart;
 #[allow(dead_code)]

@@ -25,6 +25,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
 use multimap::MultiMap;
 
+use super::JSONSelectionParseError;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::Ranged;
@@ -36,6 +37,34 @@ use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
+
+/// Extension trait for [`SelectionSet`] to add a method for merging a field set into a selection set.
+trait SelectionSetExt {
+    /// Create a new selection set that includes the fields in the given field set
+    fn merge_field_set(&self, field_set: &FieldSet) -> Self;
+}
+
+impl SelectionSetExt for SelectionSet {
+    fn merge_field_set(&self, field_set: &FieldSet) -> Self {
+        let mut new_set = self.clone();
+        for selection in field_set.selection_set.selections.iter() {
+            new_set.push(selection.clone());
+        }
+        new_set
+    }
+}
+
+/// Extension trait for [`FieldSet`] to add a method for converting it to a [`JSONSelection`].
+pub trait FieldSetExt {
+    /// Convert the field set to a [`JSONSelection`]
+    fn to_mapping(&self) -> Result<JSONSelection, JSONSelectionParseError>;
+}
+
+impl FieldSetExt for FieldSet {
+    fn to_mapping(&self) -> Result<JSONSelection, JSONSelectionParseError> {
+        JSONSelection::parse(&self.serialize().no_indent().to_string())
+    }
+}
 
 impl JSONSelection {
     /// Apply a selection set to create a new [`JSONSelection`]
@@ -52,13 +81,7 @@ impl JSONSelection {
         required_keys: Option<&FieldSet>,
     ) -> Self {
         let selection_set = match required_keys {
-            Some(keys) => {
-                let mut selection_set = selection_set.clone();
-                for selection in keys.selection_set.selections.iter() {
-                    selection_set.push(selection.clone());
-                }
-                selection_set
-            }
+            Some(keys) => selection_set.merge_field_set(keys),
             None => selection_set.clone(),
         };
 

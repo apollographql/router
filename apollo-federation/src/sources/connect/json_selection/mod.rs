@@ -17,5 +17,6 @@ pub(crate) use location::Ranged;
 pub use parser::*;
 #[cfg(test)]
 pub(crate) use pretty::*;
+pub use selection_set::FieldSetExt;
 #[cfg(test)]
 mod fixtures;

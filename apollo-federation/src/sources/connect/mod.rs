@@ -17,7 +17,9 @@ pub(crate) mod variable;
 
 use apollo_compiler::name;
 use id::ConnectorPosition;
+use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
+pub use json_selection::FieldSetExt;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
@@ -86,7 +88,7 @@ impl Display for ConnectId {
 }
 
 impl ConnectId {
-    /// Mostly intended for tests in apollo-router
+    /// Intended for tests in apollo-router
     pub fn new(
         subgraph_name: String,
         source_name: Option<String>,
@@ -106,6 +108,26 @@ impl ConnectId {
                         field_name,
                     },
                 ),
+                directive_name: name!(connect),
+                directive_index: index,
+            }),
+        }
+    }
+
+    /// Intended for tests in apollo-router
+    pub fn new_on_object(
+        subgraph_name: String,
+        source_name: Option<String>,
+        type_name: Name,
+        index: usize,
+        label: &str,
+    ) -> Self {
+        Self {
+            label: label.to_string(),
+            subgraph_name,
+            source_name,
+            directive: ConnectorPosition::Type(ObjectTypeDefinitionDirectivePosition {
+                type_name,
                 directive_name: name!(connect),
                 directive_index: index,
             }),
