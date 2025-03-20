@@ -117,7 +117,7 @@ impl FederationBlueprint {
         ] {
             if let Some(pos) = schema.get_directive_definition(directive_name) {
                 let directive = pos.get(schema.schema())?;
-                if directive.arguments.len() == 0
+                if directive.arguments.is_empty()
                     || (directive.arguments.len() == 1
                         && directive
                             .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME)

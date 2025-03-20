@@ -557,7 +557,7 @@ impl FederationSpecDefinition {
     fn key_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
-            &vec![
+            &[
                 Self::fields_argument_specification(),
                 Self::resolvable_argument_specification(),
             ],
@@ -593,7 +593,7 @@ impl FederationSpecDefinition {
     fn requires_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC,
-            &vec![Self::fields_argument_specification()],
+            &[Self::fields_argument_specification()],
             false,
             &[DirectiveLocation::FieldDefinition],
             false,
@@ -604,7 +604,7 @@ impl FederationSpecDefinition {
     fn provides_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
-            &vec![Self::fields_argument_specification()],
+            &[Self::fields_argument_specification()],
             false,
             &[DirectiveLocation::FieldDefinition],
             false,
@@ -615,7 +615,7 @@ impl FederationSpecDefinition {
     fn external_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC,
-            &vec![DirectiveArgumentSpecification {
+            &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_REASON_ARGUMENT_NAME,
                     get_type: |_| Ok(ty!(String)),
@@ -655,7 +655,7 @@ impl FederationSpecDefinition {
     fn override_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
-            &vec![
+            &[
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: FEDERATION_FROM_ARGUMENT_NAME,
@@ -683,7 +683,7 @@ impl FederationSpecDefinition {
     fn progressive_override_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
-            &vec![
+            &[
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: FEDERATION_FROM_ARGUMENT_NAME,
@@ -711,7 +711,7 @@ impl FederationSpecDefinition {
     fn compose_directive_directive_specification() -> DirectiveSpecification {
         DirectiveSpecification::new(
             FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
-            &vec![DirectiveArgumentSpecification {
+            &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_NAME_ARGUMENT_NAME,
                     get_type: |_| Ok(ty!(String!)),
