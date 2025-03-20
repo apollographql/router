@@ -293,6 +293,7 @@ impl MappedResponse {
                         }
                     };
                 }
+                ResponseKey::BatchEntity { .. } => {} // TODO $batch
             },
         }
 
