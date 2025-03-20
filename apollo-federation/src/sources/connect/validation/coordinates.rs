@@ -127,13 +127,12 @@ impl Display for BaseUrlCoordinate<'_> {
 }
 
 pub(super) fn connect_directive_http_body_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
+    connect: &ConnectDirectiveCoordinate,
 ) -> String {
     format!(
-        "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{object_name}.{field}`",
-        object_name = object.name
+        "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{element}`",
+        connect_directive_name = connect.directive.name,
+        element = connect.element
     )
 }
 
@@ -171,8 +170,6 @@ pub(super) enum HttpHeadersCoordinate<'a> {
     },
     Connect {
         connect: ConnectDirectiveCoordinate<'a>,
-        object: &'a Name,
-        field: &'a Name,
     },
 }
 
@@ -180,19 +177,11 @@ impl Display for HttpHeadersCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             Self::Connect {
-                connect:
-                    ConnectDirectiveCoordinate {
-                        directive,
-                        element: _,
-                    },
-                object,
-                field,
+                connect: ConnectDirectiveCoordinate { directive, element },
             } => {
                 write!(
                     f,
-                    "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)` on `{}.{}`",
-                    object,
-                    field,
+                    "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}.{HEADERS_ARGUMENT_NAME}:)` on `{element}`",
                     connect_directive_name = directive.name
                 )
             }

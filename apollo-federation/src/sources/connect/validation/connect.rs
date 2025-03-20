@@ -11,25 +11,19 @@ use itertools::Itertools;
 
 use self::entity::validate_entity_arg;
 use self::selection::get_seen_fields_from_selection;
-use self::selection::validate_body_selection;
 use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
-use super::coordinates::ConnectHTTPCoordinate;
-use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
-use super::http::headers;
 use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::id::ConnectedElement;
-use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 mod entity;
-mod method;
+mod http;
 mod selection;
 
 pub(super) fn fields_seen_by_all_connects(
@@ -176,7 +170,7 @@ fn fields_seen_by_connector(
     }
 
     for connect_directive in connect_directives {
-        let connect_coordinate = ConnectDirectiveCoordinate {
+        let coordinate = ConnectDirectiveCoordinate {
             directive: connect_directive,
             element: ConnectedElement::Field {
                 parent_type: extended_type,
@@ -184,54 +178,13 @@ fn fields_seen_by_connector(
             },
         };
 
-        match get_seen_fields_from_selection(connect_coordinate, schema) {
+        match get_seen_fields_from_selection(coordinate, schema) {
             Ok(seen) => seen_fields.extend(seen),
             Err(error) => errors.push(error),
         }
 
         errors
             .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
-
-        let Some((http_arg, http_arg_node)) = connect_directive
-            .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
-            .and_then(|arg| Some((arg.as_object()?, arg)))
-        else {
-            errors.push(Message {
-                code: Code::GraphQLError,
-                message: format!(
-                    "{connect_coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."
-                ),
-                locations: connect_directive
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
-            return Err(errors);
-        };
-
-        if let Some((_, body)) = http_arg
-            .iter()
-            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-        {
-            errors.extend(validate_body_selection(
-                connect_directive,
-                connect_coordinate,
-                object,
-                field,
-                schema,
-                body,
-            ));
-        }
-
-        errors.extend(headers::validate_arg(
-            http_arg,
-            HttpHeadersCoordinate::Connect {
-                connect: connect_coordinate,
-                object: &object.name,
-                field: &field.name,
-            },
-            schema,
-        ));
 
         let source_name = match validate_source_name(
             connect_directive,
@@ -247,15 +200,7 @@ fn fields_seen_by_connector(
             }
         };
 
-        if let Err(errs) = method::validate(
-            http_arg,
-            ConnectHTTPCoordinate::from(connect_coordinate),
-            http_arg_node,
-            source_name,
-            schema,
-        ) {
-            errors.extend(errs);
-        }
+        errors.extend(http::validate(coordinate, source_name, schema));
     }
 
     if errors.is_empty() {
