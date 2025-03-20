@@ -226,7 +226,7 @@ mod tests {
                 name!("provides"),
                 name!("requires"),
                 name!("skip"),
-                name!("specifiedBy")
+                name!("specifiedBy"),
             ]
         );
     }
@@ -261,8 +261,51 @@ mod tests {
                 name!("include"),
                 name!("key"),
                 name!("link"),
+                name!("override"),
                 name!("provides"),
                 name!("requires"),
+                name!("shareable"),
+                name!("skip"),
+                name!("specifiedBy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_2_1() {
+        let schema = Schema::parse(
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.1")
+
+                type Query {
+                    s: String
+                }"#,
+            "empty-fed2-schema.graphqls",
+        )
+        .expect("valid schema");
+        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+
+        let mut defined_directive_names = subgraph
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("composeDirective"),
+                name!("deprecated"),
+                name!("external"),
+                name!("include"),
+                name!("key"),
+                name!("link"),
+                name!("override"),
+                name!("provides"),
+                name!("requires"),
+                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]

@@ -42,6 +42,8 @@ pub(crate) const FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("shar
 pub(crate) const FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC: Name = name!("override");
 pub(crate) const FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
 pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("fromContext");
+pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
+    name!("composeDirective");
 
 pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
@@ -638,6 +640,91 @@ impl FederationSpecDefinition {
             None,
         )
     }
+
+    fn shareable_directive_specification(&self) -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
+            &[],
+            self.version().gt(&Version { major: 2, minor: 1 }), // repeatable in Fed 2.2 or later
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+        )
+    }
+
+    fn override_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
+            &vec![
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_FROM_ARGUMENT_NAME,
+                        get_type: |_| Ok(ty!(String!)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                        get_type: |_| Ok(ty!(String!)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+            ],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+        )
+    }
+
+    fn progressive_override_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
+            &vec![
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_FROM_ARGUMENT_NAME,
+                        get_type: |_| Ok(ty!(String!)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+                DirectiveArgumentSpecification {
+                    base_spec: ArgumentSpecification {
+                        name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                        get_type: |_| Ok(ty!(String!)),
+                        default_value: None,
+                    },
+                    composition_strategy: None,
+                },
+            ],
+            false,
+            &[DirectiveLocation::FieldDefinition],
+            false,
+            None,
+        )
+    }
+
+    fn compose_directive_directive_specification() -> DirectiveSpecification {
+        DirectiveSpecification::new(
+            FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC,
+            &vec![DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_NAME_ARGUMENT_NAME,
+                    get_type: |_| Ok(ty!(String!)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            }],
+            true,
+            &[DirectiveLocation::Schema],
+            false,
+            None,
+        )
+    }
 }
 
 impl SpecDefinition for FederationSpecDefinition {
@@ -654,7 +741,25 @@ impl SpecDefinition for FederationSpecDefinition {
         ];
         if self.is_fed1() {
             specs.push(Box::new(Self::extends_directive_specification()));
+            return specs;
         }
+
+        specs.push(Box::new(self.shareable_directive_specification()));
+        if self.version().satisfies(&Version { major: 2, minor: 7 }) {
+            specs.push(Box::new(
+                Self::progressive_override_directive_specification(),
+            ));
+        } else {
+            specs.push(Box::new(Self::override_directive_specification()));
+        }
+
+        if self.version().satisfies(&Version { major: 2, minor: 1 }) {
+            specs.push(Box::new(Self::compose_directive_directive_specification()));
+        }
+
+        // TODO: The remaining directives added in later versions are implemented in separate specs,
+        // which still need to be ported over
+
         specs
     }
 
