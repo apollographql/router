@@ -1,22 +1,23 @@
-use crate::ast::Type;
-use crate::ast::Value;
-use crate::collections::HashMap;
-use crate::executable::Field;
-use crate::executable::Operation;
-use crate::execution::engine::LinkedPath;
-use crate::execution::engine::PropagateNull;
-use crate::parser::SourceMap;
-use crate::parser::SourceSpan;
-use crate::response::GraphQLError;
-use crate::response::JsonMap;
-use crate::response::JsonValue;
-use crate::schema::ExtendedType;
-use crate::schema::FieldDefinition;
-use crate::validation::SuspectedValidationBug;
-use crate::validation::Valid;
-use crate::ExecutableDocument;
-use crate::Node;
-use crate::Schema;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
+use apollo_compiler::ast::Type;
+use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashMap;
+use apollo_compiler::executable::Field;
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan;
+use apollo_compiler::response::GraphQLError;
+use apollo_compiler::response::JsonMap;
+use apollo_compiler::response::JsonValue;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::validation::Valid;
+
+use super::engine::LinkedPath;
+use super::engine::PropagateNull;
+use super::engine::field_error;
+use super::validation::SuspectedValidationBug;
 
 #[derive(Debug, Clone)]
 pub(crate) enum InputCoercionError {
@@ -26,188 +27,6 @@ pub(crate) enum InputCoercionError {
         message: String,
         location: Option<SourceSpan>,
     },
-}
-
-// Documented in `src/request.rs`
-pub(crate) fn coerce_variable_values(
-    schema: &Valid<Schema>,
-    operation: &Operation,
-    values: &JsonMap,
-) -> Result<Valid<JsonMap>, InputCoercionError> {
-    let mut coerced_values = JsonMap::new();
-    for variable_def in &operation.variables {
-        let name = variable_def.name.as_str();
-        if let Some((key, value)) = values.get_key_value(name) {
-            let value =
-                coerce_variable_value(schema, "variable", "", "", name, &variable_def.ty, value)?;
-            coerced_values.insert(key.clone(), value);
-        } else if let Some(default) = &variable_def.default_value {
-            let value = graphql_value_to_json("variable default value", "", "", name, default)?;
-            coerced_values.insert(name, value);
-        } else if variable_def.ty.is_non_null() {
-            return Err(InputCoercionError::ValueError {
-                message: format!("missing value for non-null variable '{name}'"),
-                location: variable_def.location(),
-            });
-        } else {
-            // Nullable variable with no provided value nor explicit default.
-            // Spec says nothing for this case, but for the similar case in input objects:
-            //
-            // > there is a semantic difference between the explicitly provided value null
-            // > versus having not provided a value
-        }
-    }
-    Ok(Valid(coerced_values))
-}
-
-#[allow(clippy::too_many_arguments)] // yes it’s not a nice API but it’s internal
-fn coerce_variable_value(
-    schema: &Valid<Schema>,
-    kind: &str,
-    parent: &str,
-    sep: &str,
-    name: &str,
-    ty: &Type,
-    value: &JsonValue,
-) -> Result<JsonValue, InputCoercionError> {
-    if value.is_null() {
-        if ty.is_non_null() {
-            return Err(InputCoercionError::ValueError {
-                message: format!("null value for {kind} {parent}{sep}{name} of non-null type {ty}"),
-                location: None,
-            });
-        } else {
-            return Ok(JsonValue::Null);
-        }
-    }
-    let ty_name = match ty {
-        Type::List(inner) | Type::NonNullList(inner) => {
-            // https://spec.graphql.org/October2021/#sec-List.Input-Coercion
-            return value
-                .as_array()
-                .map(Vec::as_slice)
-                // If not an array, treat the value as an array of size one:
-                .unwrap_or(std::slice::from_ref(value))
-                .iter()
-                .map(|item| coerce_variable_value(schema, kind, parent, sep, name, inner, item))
-                .collect();
-        }
-        Type::Named(ty_name) | Type::NonNullNamed(ty_name) => ty_name,
-    };
-    let Some(ty_def) = schema.types.get(ty_name) else {
-        Err(SuspectedValidationBug {
-            message: format!("Undefined type {ty_name} for {kind} {parent}{sep}{name}"),
-            location: ty_name.location(),
-        })?
-    };
-    match ty_def {
-        ExtendedType::Object(_) | ExtendedType::Interface(_) | ExtendedType::Union(_) => {
-            Err(SuspectedValidationBug {
-                message: format!("Non-input type {ty_name} for {kind} {parent}{sep}{name}."),
-                location: ty_name.location(),
-            })?
-        }
-        ExtendedType::Scalar(_) => match ty_name.as_str() {
-            "Int" => {
-                // https://spec.graphql.org/October2021/#sec-Int.Input-Coercion
-                if value
-                    .as_i64()
-                    .is_some_and(|value| i32::try_from(value).is_ok())
-                {
-                    return Ok(value.clone());
-                }
-            }
-            "Float" => {
-                // https://spec.graphql.org/October2021/#sec-Float.Input-Coercion
-                if value.is_f64() {
-                    return Ok(value.clone());
-                }
-            }
-            "String" => {
-                // https://spec.graphql.org/October2021/#sec-String.Input-Coercion
-                if value.is_string() {
-                    return Ok(value.clone());
-                }
-            }
-            "Boolean" => {
-                // https://spec.graphql.org/October2021/#sec-Boolean.Input-Coercion
-                if value.is_boolean() {
-                    return Ok(value.clone());
-                }
-            }
-            "ID" => {
-                // https://spec.graphql.org/October2021/#sec-ID.Input-Coercion
-                if value.is_string() || value.is_i64() {
-                    return Ok(value.clone());
-                }
-            }
-            _ => {
-                // Custom scalar
-                // TODO: have a hook for coercion of custom scalars?
-                return Ok(value.clone());
-            }
-        },
-        ExtendedType::Enum(ty_def) => {
-            // https://spec.graphql.org/October2021/#sec-Enums.Input-Coercion
-            if let Some(str) = value.as_str() {
-                if ty_def.values.keys().any(|value_name| value_name == str) {
-                    return Ok(value.clone());
-                }
-            }
-        }
-        ExtendedType::InputObject(ty_def) => {
-            // https://spec.graphql.org/October2021/#sec-Input-Objects.Input-Coercion
-            if let Some(object) = value.as_object() {
-                if let Some(key) = object
-                    .keys()
-                    .find(|key| !ty_def.fields.contains_key(key.as_str()))
-                {
-                    return Err(InputCoercionError::ValueError {
-                        message: format!(
-                            "Input object has key {} not in type {ty_name}",
-                            key.as_str()
-                        ),
-                        location: None,
-                    });
-                }
-                let mut object = object.clone();
-                for (field_name, field_def) in &ty_def.fields {
-                    if let Some(field_value) = object.get_mut(field_name.as_str()) {
-                        *field_value = coerce_variable_value(
-                            schema,
-                            "input field",
-                            ty_name,
-                            ".",
-                            field_name,
-                            &field_def.ty,
-                            field_value,
-                        )?
-                    } else if let Some(default) = &field_def.default_value {
-                        let default = graphql_value_to_json(
-                            "input field",
-                            ty_name,
-                            ".",
-                            field_name,
-                            default,
-                        )?;
-                        object.insert(field_name.as_str(), default);
-                    } else if field_def.ty.is_non_null() {
-                        return Err(InputCoercionError::ValueError {
-                            message: format!("Missing value for non-null input object field {ty_name}.{field_name}"),
-                            location: None,
-                        });
-                    } else {
-                        // Field not required
-                    }
-                }
-                return Ok(object.into());
-            }
-        }
-    }
-    Err(InputCoercionError::ValueError {
-        message: format!("Could not coerce {kind} {parent}{sep}{name}: {value} to type {ty_name}"),
-        location: None,
-    })
 }
 
 fn graphql_value_to_json(
@@ -277,7 +96,7 @@ pub(crate) fn coerce_argument_values(
             if let Value::Variable(var_name) = arg.value.as_ref() {
                 if let Some(var_value) = variable_values.get(var_name.as_str()) {
                     if var_value.is_null() && arg_def.ty.is_non_null() {
-                        errors.push(GraphQLError::field_error(
+                        errors.push(field_error(
                             format!("null value for non-nullable argument {arg_name}"),
                             path,
                             arg_def.location(),
@@ -290,7 +109,7 @@ pub(crate) fn coerce_argument_values(
                     }
                 }
             } else if arg.value.is_null() && arg_def.ty.is_non_null() {
-                errors.push(GraphQLError::field_error(
+                errors.push(field_error(
                     format!("null value for non-nullable argument {arg_name}"),
                     path,
                     arg_def.location(),
@@ -325,7 +144,7 @@ pub(crate) fn coerce_argument_values(
             continue;
         }
         if arg_def.ty.is_non_null() {
-            errors.push(GraphQLError::field_error(
+            errors.push(field_error(
                 format!("missing value for required argument {arg_name}"),
                 path,
                 arg_def.location(),
@@ -353,7 +172,7 @@ fn coerce_argument_value(
 ) -> Result<JsonValue, PropagateNull> {
     if value.is_null() {
         if ty.is_non_null() {
-            errors.push(GraphQLError::field_error(
+            errors.push(field_error(
                 format!("null value for non-null {kind} {parent}{sep}{name}"),
                 path,
                 value.location(),
@@ -367,7 +186,7 @@ fn coerce_argument_value(
     if let Some(var_name) = value.as_variable() {
         if let Some(var_value) = variable_values.get(var_name.as_str()) {
             if var_value.is_null() && ty.is_non_null() {
-                errors.push(GraphQLError::field_error(
+                errors.push(field_error(
                     format!("null variable value for non-null {kind} {parent}{sep}{name}"),
                     path,
                     value.location(),
@@ -378,7 +197,7 @@ fn coerce_argument_value(
                 return Ok(var_value.clone());
             }
         } else if ty.is_non_null() {
-            errors.push(GraphQLError::field_error(
+            errors.push(field_error(
                 format!("missing variable for non-null {kind} {parent}{sep}{name}"),
                 path,
                 value.location(),
@@ -434,7 +253,7 @@ fn coerce_argument_value(
                     .iter()
                     .find(|(key, _value)| !ty_def.fields.contains_key(key))
                 {
-                    errors.push(GraphQLError::field_error(
+                    errors.push(field_error(
                         format!("Input object has key {key} not in type {ty_name}",),
                         path,
                         value.location(),
@@ -470,7 +289,7 @@ fn coerce_argument_value(
                                 })?;
                         coerced_object.insert(field_name.as_str(), default);
                     } else if field_def.ty.is_non_null() {
-                        errors.push(GraphQLError::field_error(
+                        errors.push(field_error(
                             format!(
                                 "Missing value for non-null input object field {ty_name}.{field_name}"
                             ),
@@ -494,7 +313,7 @@ fn coerce_argument_value(
             });
         }
     }
-    errors.push(GraphQLError::field_error(
+    errors.push(field_error(
         format!("Could not coerce {kind} {parent}{sep}{name}: {value} to type {ty_name}"),
         path,
         value.location(),
@@ -517,9 +336,7 @@ impl InputCoercionError {
     ) -> GraphQLError {
         match self {
             Self::SuspectedValidationBug(s) => s.into_field_error(sources, path),
-            Self::ValueError { message, location } => {
-                GraphQLError::field_error(message, path, location, sources)
-            }
+            Self::ValueError { message, location } => field_error(message, path, location, sources),
         }
     }
 }

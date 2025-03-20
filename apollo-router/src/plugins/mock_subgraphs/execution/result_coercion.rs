@@ -1,21 +1,23 @@
-use crate::executable::Field;
-use crate::execution::engine::execute_selection_set;
-use crate::execution::engine::try_nullify;
-use crate::execution::engine::ExecutionMode;
-use crate::execution::engine::LinkedPath;
-use crate::execution::engine::LinkedPathElement;
-use crate::execution::engine::PropagateNull;
-use crate::execution::resolver::ResolvedValue;
-use crate::response::GraphQLError;
-use crate::response::JsonMap;
-use crate::response::JsonValue;
-use crate::response::ResponseDataPathSegment;
-use crate::schema::ExtendedType;
-use crate::schema::Type;
-use crate::validation::SuspectedValidationBug;
-use crate::validation::Valid;
-use crate::ExecutableDocument;
-use crate::Schema;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Schema;
+use apollo_compiler::executable::Field;
+use apollo_compiler::response::GraphQLError;
+use apollo_compiler::response::JsonMap;
+use apollo_compiler::response::JsonValue;
+use apollo_compiler::response::ResponseDataPathSegment;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Type;
+use apollo_compiler::validation::Valid;
+
+use super::engine::ExecutionMode;
+use super::engine::LinkedPath;
+use super::engine::LinkedPathElement;
+use super::engine::PropagateNull;
+use super::engine::execute_selection_set;
+use super::engine::field_error;
+use super::engine::try_nullify;
+use super::resolver::ResolvedValue;
+use super::validation::SuspectedValidationBug;
 
 /// <https://spec.graphql.org/October2021/#CompleteValue()>
 ///
@@ -36,7 +38,7 @@ pub(crate) fn complete_value<'a, 'b>(
     macro_rules! field_error {
         ($($arg: tt)+) => {
             {
-                errors.push(GraphQLError::field_error(
+                errors.push(field_error(
                     format!($($arg)+),
                     path,
                     location,
@@ -60,7 +62,16 @@ pub(crate) fn complete_value<'a, 'b>(
             }
             Type::List(inner_ty) | Type::NonNullList(inner_ty) => {
                 let mut completed_list = Vec::with_capacity(iter.size_hint().0);
-                for (index, inner_resolved) in iter.enumerate() {
+                for (index, inner_result) in iter.enumerate() {
+                    let inner_resolved = inner_result.map_err(|message| {
+                        errors.push(field_error(
+                            format!("resolver error: {message}"),
+                            path,
+                            fields[0].name.location(),
+                            &document.sources,
+                        ));
+                        PropagateNull
+                    })?;
                     let inner_path = LinkedPathElement {
                         element: ResponseDataPathSegment::ListIndex(index),
                         next: path,
@@ -185,10 +196,7 @@ pub(crate) fn complete_value<'a, 'b>(
     let object_type = match ty_def {
         ExtendedType::InputObject(_) => unreachable!(), // early return above
         ExtendedType::Enum(_) | ExtendedType::Scalar(_) => {
-            field_error!(
-                "Resolver returned a an object of type {}, expected {ty_name}",
-                resolved_obj.type_name()
-            )
+            field_error!("Resolver returned a an object, expected {ty_name}",)
         }
         ExtendedType::Interface(_) | ExtendedType::Union(_) => {
             let object_type_name = resolved_obj.type_name();
@@ -202,7 +210,7 @@ pub(crate) fn complete_value<'a, 'b>(
             }
         }
         ExtendedType::Object(def) => {
-            debug_assert_eq!(ty_name, resolved_obj.type_name());
+            // debug_assert_eq!(ty_name, resolved_obj.type_name());
             def
         }
     };

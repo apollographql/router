@@ -1,27 +1,27 @@
-use crate::ast::Value;
-use crate::collections::HashSet;
-use crate::collections::IndexMap;
-use crate::executable::Field;
-use crate::executable::Selection;
-use crate::execution::input_coercion::coerce_argument_values;
-use crate::execution::resolver::ObjectValue;
-use crate::execution::resolver::ResolverError;
-use crate::execution::result_coercion::complete_value;
-use crate::parser::SourceMap;
-use crate::parser::SourceSpan;
-use crate::response::GraphQLError;
-use crate::response::JsonMap;
-use crate::response::JsonValue;
-use crate::response::ResponseDataPathSegment;
-use crate::schema::ExtendedType;
-use crate::schema::FieldDefinition;
-use crate::schema::ObjectType;
-use crate::schema::Type;
-use crate::validation::SuspectedValidationBug;
-use crate::validation::Valid;
-use crate::ExecutableDocument;
-use crate::Name;
-use crate::Schema;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
+use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::Selection;
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan;
+use apollo_compiler::response::GraphQLError;
+use apollo_compiler::response::JsonMap;
+use apollo_compiler::response::JsonValue;
+use apollo_compiler::response::ResponseDataPathSegment;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::FieldDefinition;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::Type;
+use apollo_compiler::validation::Valid;
+
+use super::input_coercion::coerce_argument_values;
+use super::resolver::ObjectValue;
+use super::result_coercion::complete_value;
+use super::validation::SuspectedValidationBug;
 
 /// <https://spec.graphql.org/October2021/#sec-Normal-and-Serial-Execution>
 #[derive(Debug, Copy, Clone)]
@@ -256,8 +256,8 @@ fn execute_field(
             resolved,
             fields,
         ),
-        Err(ResolverError { message }) => {
-            errors.push(GraphQLError::field_error(
+        Err(message) => {
+            errors.push(field_error(
                 format!("resolver error: {message}"),
                 path,
                 field.name.location(),
@@ -298,17 +298,15 @@ pub(crate) fn path_to_vec(mut link: LinkedPath<'_>) -> Vec<ResponseDataPathSegme
     path
 }
 
-impl GraphQLError {
-    pub(crate) fn field_error(
-        message: impl Into<String>,
-        path: LinkedPath<'_>,
-        location: Option<SourceSpan>,
-        sources: &SourceMap,
-    ) -> Self {
-        let mut err = Self::new(message, location, sources);
-        err.path = path_to_vec(path);
-        err
-    }
+pub(crate) fn field_error(
+    message: impl Into<String>,
+    path: LinkedPath<'_>,
+    location: Option<SourceSpan>,
+    sources: &SourceMap,
+) -> GraphQLError {
+    let mut err = GraphQLError::new(message, location, sources);
+    err.path = path_to_vec(path);
+    err
 }
 
 impl SuspectedValidationBug {
@@ -318,7 +316,7 @@ impl SuspectedValidationBug {
         path: LinkedPath<'_>,
     ) -> GraphQLError {
         let Self { message, location } = self;
-        let mut err = GraphQLError::field_error(message, path, location, sources);
+        let mut err = field_error(message, path, location, sources);
         err.extensions
             .insert("APOLLO_SUSPECTED_VALIDATION_BUG", true.into());
         err
