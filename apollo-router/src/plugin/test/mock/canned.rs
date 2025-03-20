@@ -185,7 +185,21 @@ pub(crate) fn products_subgraph() -> MockSubgraph {
                         ]
                     }
                 }}
-        )
+        ),
+        (
+            json!{{ "query": "{ topProducts(first: 5) { upc } }" }},
+            json!{{
+                "data": {
+                    "topProducts": [
+                        { "upc": "1" },
+                        { "upc": "2" },
+                        { "upc": "3" },
+                        { "upc": "4" },
+                        { "upc": "5" },
+                    ],
+                },
+            }}
+        ),
     ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     MockSubgraph::new(product_mocks)
 }

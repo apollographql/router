@@ -917,7 +917,14 @@ async fn it_can_externally_control_query_planning_progress() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn it_propagates_cancellation_to_query_planning() {
-    let service = crate::TestHarness::builder().build_router().await.unwrap();
+    let service = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
 
     let (control, signal) = BlockQueryPlanningSignal::pair();
 
@@ -957,7 +964,10 @@ async fn it_propagates_cancellation_to_query_planning() {
         "the request should still be processing"
     );
     task.abort();
+    task.await.expect_err("should be cancelled");
 
+    // Query plan cancellation happens asynchronously, so we should wait a bit
+    // for everything to propagate.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     assert!(
@@ -971,5 +981,249 @@ async fn it_propagates_cancellation_to_query_planning() {
     assert!(
         control.send(()).is_err(),
         "query planning should not be waiting for the signal anymore"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_cancels_query_planning_with_cache_deduping_and_both_clients_leaving() {
+    let service = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    // We will send two identical requests, which should result in *one* planning operation.
+    // This operation should only be cancelled if *both* requests are cancelled.
+    let (control, signal) = BlockQueryPlanningSignal::pair();
+
+    let context = Context::new();
+    context
+        .extensions()
+        .with_lock(|context| context.insert(signal));
+
+    let query = "{ topProducts(first: 5) { upc } }";
+
+    let request_a: router::Request = supergraph::Request::builder()
+        .query(query)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::POST)
+        .context(context.clone())
+        .build()
+        .unwrap()
+        .try_into()
+        .expect("should turn into a router request");
+    let request_b: router::Request = supergraph::Request::builder()
+        .query(query)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::POST)
+        .context(context.clone())
+        .build()
+        .unwrap()
+        .try_into()
+        .expect("should turn into a router request");
+
+    // We should not keep the receiving end of the signal alive
+    drop(context);
+
+    let is_in_flight_a = Arc::new(AtomicBool::new(false));
+    let task_a = tokio::spawn({
+        let is_in_flight = is_in_flight_a.clone();
+        let service = service.clone();
+        async move {
+            is_in_flight.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = scopeguard::guard(is_in_flight, |is_in_flight| {
+                is_in_flight.store(false, std::sync::atomic::Ordering::Release);
+            });
+
+            service.oneshot(request_a).await
+        }
+    });
+    let is_in_flight_b = Arc::new(AtomicBool::new(false));
+    let task_b = tokio::spawn({
+        let is_in_flight = is_in_flight_b.clone();
+        let service = service.clone();
+        async move {
+            is_in_flight.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = scopeguard::guard(is_in_flight, |is_in_flight| {
+                is_in_flight.store(false, std::sync::atomic::Ordering::Release);
+            });
+
+            service.oneshot(request_b).await
+        }
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(
+        is_in_flight_a.load(std::sync::atomic::Ordering::Acquire),
+        "client A should still be processing"
+    );
+    assert!(
+        is_in_flight_b.load(std::sync::atomic::Ordering::Acquire),
+        "client B should still be processing"
+    );
+
+    task_a.abort();
+    task_b.abort();
+    // Wait for the tasks to be dropped
+    task_a.await.expect_err("should be cancelled");
+    task_b.await.expect_err("should be cancelled");
+
+    assert!(
+        !is_in_flight_a.load(std::sync::atomic::Ordering::Acquire),
+        "client A should be aborted"
+    );
+    assert!(
+        !is_in_flight_b.load(std::sync::atomic::Ordering::Acquire),
+        "client B should be aborted"
+    );
+
+    // Query plan cancellation happens asynchronously, so we should wait a bit
+    // for everything to propagate.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Asserts query planning was aborted
+    // FIXME(@goto-bus-stop): is this a reliable expectation, or will it be easily broken by a
+    // refactor? Ideally, I would assert a metric here.
+    assert!(
+        control.send(()).is_err(),
+        "query planning should not be waiting for the signal anymore"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn it_continues_query_planning_with_cache_deduping_and_one_client_leaving() {
+    let service = crate::TestHarness::builder()
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap();
+
+    // We will send two identical requests, which should result in *one* planning operation.
+    // This operation should only be cancelled if *both* requests are cancelled.
+    let (control, signal) = BlockQueryPlanningSignal::pair();
+
+    let context = Context::new();
+    context
+        .extensions()
+        .with_lock(|context| context.insert(signal));
+
+    let query = "{ topProducts(first: 5) { upc } }";
+
+    let request_a: router::Request = supergraph::Request::builder()
+        .query(query)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::POST)
+        .context(context.clone())
+        .build()
+        .unwrap()
+        .try_into()
+        .expect("should turn into a router request");
+    let request_b: router::Request = supergraph::Request::builder()
+        .query(query)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::POST)
+        .context(context.clone())
+        .build()
+        .unwrap()
+        .try_into()
+        .expect("should turn into a router request");
+
+    // We should not keep the receiving end of the signal alive
+    drop(context);
+
+    let is_in_flight_a = Arc::new(AtomicBool::new(false));
+    let task_a = tokio::spawn({
+        let is_in_flight = is_in_flight_a.clone();
+        let service = service.clone();
+        async move {
+            is_in_flight.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = scopeguard::guard(is_in_flight, |is_in_flight| {
+                is_in_flight.store(false, std::sync::atomic::Ordering::Release);
+            });
+
+            service.oneshot(request_a).await
+        }
+    });
+    let is_in_flight_b = Arc::new(AtomicBool::new(false));
+    let task_b = tokio::spawn({
+        let is_in_flight = is_in_flight_b.clone();
+        let service = service.clone();
+        async move {
+            is_in_flight.store(true, std::sync::atomic::Ordering::Release);
+            let _guard = scopeguard::guard(is_in_flight, |is_in_flight| {
+                is_in_flight.store(false, std::sync::atomic::Ordering::Release);
+            });
+
+            service.oneshot(request_b).await
+        }
+    });
+
+    // Query plan cancellation happens asynchronously, so we should wait a bit
+    // for everything to propagate.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert!(
+        is_in_flight_a.load(std::sync::atomic::Ordering::Acquire),
+        "client A should still be processing"
+    );
+    assert!(
+        is_in_flight_b.load(std::sync::atomic::Ordering::Acquire),
+        "client B should still be processing"
+    );
+
+    task_a.abort();
+    // Wait for the task to be dropped
+    task_a.await.expect_err("should be cancelled");
+
+    assert!(
+        !is_in_flight_a.load(std::sync::atomic::Ordering::Acquire),
+        "client A should be aborted"
+    );
+    assert!(
+        is_in_flight_b.load(std::sync::atomic::Ordering::Acquire),
+        "client B should still be processing"
+    );
+
+    // Query plan cancellation happens asynchronously, so if there is a bug
+    // and query planning is cancelled while client B is still waiting, we
+    // should give some time for everything to propagate.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Now continue query planning
+    control
+        .send(())
+        .expect("query planner should still be waiting for signal");
+
+    let response = task_b.await.expect("task should complete");
+    let response = response
+        .expect("service should have produced a response")
+        .response;
+
+    assert_eq!(response.status(), http::StatusCode::OK);
+    let data: serde_json::Value = serde_json::from_slice(
+        &router::body::into_bytes(response.into_body())
+            .await
+            .unwrap(),
+    )
+    .expect("json body");
+
+    assert_eq!(
+        data["data"]["topProducts"]
+            .as_array()
+            .expect("should be array")
+            .len(),
+        5,
+        "data is returned"
     );
 }
