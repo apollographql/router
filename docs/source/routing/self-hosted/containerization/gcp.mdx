@@ -4,18 +4,15 @@ subtitle: ""
 description: Build and deploy Apollo GraphOS Router or Apollo Router Core to Google Cloud Platform (GCP) with Google Cloud Run.
 ---
 
-Learn how to deploy the router for development on Google Cloud Platform (GCP) with Cloud Run.
+Learn how to deploy the router on Google Cloud Platform (GCP) with Cloud Run.
 
 > Not deploying to GCP? Try our guides for deploying to AWS or Azure.
 
-
 ## Prerequisites
 
-1. Choose a version of the router to deploy (for example, `v1.61.0`).
+Before you begin, set up the tools you need to deploy the router on Cloud Run:
 
 1. Install [Docker](https://www.docker.com/get-started/) locally.
-
-
 1. Create a new [Google Cloud account](https://cloud.google.com/) or go to an existing account.
 1. Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), if not already installed.
 1. In GCP, create a new project.
@@ -23,10 +20,13 @@ Learn how to deploy the router for development on Google Cloud Platform (GCP) wi
 1. In GCP, enable [Artifact Registry](https://cloud.google.com/artifact-registry/docs/enable-service) in your project.
     * Create a repository and choose a repository name (for example, `my-repo`). Keep this name handy, as you'll need it later to build and deploy a router image.
 1. In GCP Secret Manager, set `APOLLO_KEY` to your graph API key and `APOLLO_GRAPH_REF` to your graph ref. You'll need them later to deploy a router image. 
+1. Choose a version of the router to deploy (for example, `v1.61.0`). You'll need it when specifying the router image to deploy.
 
 ## Build and push router image
 
-1. In a local directory, create a `router.yaml` file and copy-paste the following into the file: 
+After setting up Docker and GCP, build a router image with custom router configuration and push the image to GCP:
+
+1. In a local directory, create a `router.yaml` file and copy-paste the following configuration into the file: 
     
     ```yaml title="router.yaml"
     supergraph:
@@ -37,7 +37,7 @@ Learn how to deploy the router for development on Google Cloud Platform (GCP) wi
 
     Because the router's default HTTP and health check endpoint addresses are localhost and wouldn't be reachable when deployed, edit your `router.yaml` to configure these endpoints to listen to all addresses:  
 
-1. Create a `Dockerfile` file and copy-paste the following into the file:
+1. Create a `Dockerfile` file and copy-paste the following into the file, where the container image of your chosen version of router is downloaded, and your customized `router.yaml` configuration file replaces the default router configuration file:
 
     ```text showLineNumbers=false
     # Use the official Apollo Router Core image as the base.
