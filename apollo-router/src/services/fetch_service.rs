@@ -145,7 +145,7 @@ impl FetchService {
             };
 
             let keys = match connector.resolvable_key(schema.supergraph_schema()) {
-                Ok(k) => k.map(Arc::new),
+                Ok(k) => k,
                 Err(e) => return Err(e.into()),
             };
 

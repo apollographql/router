@@ -144,7 +144,7 @@ pub(crate) enum ResponseKey {
     BatchEntity {
         selection: Arc<JSONSelection>,
         #[allow(unused)]
-        keys: Arc<Valid<FieldSet>>,
+        keys: Valid<FieldSet>,
         inputs: RequestInputs,
     },
 }
@@ -660,7 +660,8 @@ fn entities_with_fields_from_request(
 ///
 /// The key (pun intended) to batching is that we have to return entities in an
 /// order than matches the `representations` variable. We use the "key" fields
-/// to determine
+/// to construct a HashMap key for each representation and response object,
+/// which allows us to match them up and return them in the correct order.
 fn batch_entities_from_request(
     connector: Arc<Connector>,
     request: &connect::Request,
@@ -672,7 +673,9 @@ fn batch_entities_from_request(
     };
 
     let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
-        unreachable!("batch_entities_from_request called without representations");
+        return Err(InvalidRepresentations(
+            "batch_entities_from_request called without representations".into(),
+        ));
     };
 
     let op = request
@@ -1859,7 +1862,7 @@ mod tests {
                     .body(graphql::Request::builder().build())
                     .unwrap(),
             ))
-            .and_keys(Some(Arc::new(keys)))
+            .and_keys(Some(keys))
             .build();
 
         let connector = Connector {
