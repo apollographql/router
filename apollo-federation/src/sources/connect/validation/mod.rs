@@ -22,7 +22,6 @@ mod http;
 mod link;
 mod schema;
 mod source;
-mod variable;
 
 use std::fmt::Display;
 use std::ops::Range;
