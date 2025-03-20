@@ -15,6 +15,7 @@ use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 use shape::Shape;
 
+use self::variables::VariableResolver;
 use super::Code;
 use super::Message;
 use super::Name;
@@ -36,10 +37,11 @@ use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
+
+mod variables;
 
 pub(super) fn get_seen_fields_from_selection(
     coordinate: ConnectDirectiveCoordinate,
