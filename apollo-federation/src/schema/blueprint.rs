@@ -5,6 +5,7 @@ use apollo_compiler::ast::NamedType;
 
 use crate::JOIN_VERSIONS;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Purpose;
@@ -140,7 +141,11 @@ impl FederationBlueprint {
 
         for link in links_metadata.links.clone() {
             if link.url.identity == Identity::join_identity() {
-                let spec = JOIN_VERSIONS.find(&link.url.version).unwrap(); // TODO: Handle error
+                let spec = JOIN_VERSIONS.find(&link.url.version).ok_or_else(|| {
+                    SingleFederationError::UnknownLinkVersion {
+                        message: format!("Unknown join spec version {}", link.url.version),
+                    }
+                })?;
                 spec.add_elements_to_schema(schema)?;
             }
             // TODO: Remaining known features
@@ -309,6 +314,76 @@ mod tests {
                 name!("skip"),
                 name!("specifiedBy"),
             ]
+        );
+    }
+
+    #[test]
+    fn replaces_known_bad_definitions_from_fed1() {
+        let schema = Schema::parse(
+            r#"
+                directive @key(fields: String) repeatable on OBJECT | INTERFACE
+                directive @provides(fields: _FieldSet) repeatable on FIELD_DEFINITION
+                directive @requires(fields: FieldSet) repeatable on FIELD_DEFINITION
+
+                scalar _FieldSet
+                scalar FieldSet
+
+                type Query {
+                    s: String
+                }"#,
+            "empty-fed1-schema.graphqls",
+        )
+        .expect("valid schema");
+        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+
+        let key_definition = subgraph
+            .schema()
+            .directive_definitions
+            .get(&name!("key"))
+            .unwrap();
+        assert_eq!(key_definition.arguments.len(), 2);
+        assert_eq!(
+            key_definition
+                .argument_by_name(&name!("fields"))
+                .unwrap()
+                .ty
+                .inner_named_type(),
+            "FieldSet"
+        );
+        assert!(
+            key_definition
+                .argument_by_name(&name!("resolvable"))
+                .is_some()
+        );
+
+        let provides_definition = subgraph
+            .schema()
+            .directive_definitions
+            .get(&name!("provides"))
+            .unwrap();
+        assert_eq!(provides_definition.arguments.len(), 1);
+        assert_eq!(
+            provides_definition
+                .argument_by_name(&name!("fields"))
+                .unwrap()
+                .ty
+                .inner_named_type(),
+            "FieldSet"
+        );
+
+        let requires_definition = subgraph
+            .schema()
+            .directive_definitions
+            .get(&name!("requires"))
+            .unwrap();
+        assert_eq!(requires_definition.arguments.len(), 1);
+        assert_eq!(
+            requires_definition
+                .argument_by_name(&name!("fields"))
+                .unwrap()
+                .ty
+                .inner_named_type(),
+            "FieldSet"
         );
     }
 
