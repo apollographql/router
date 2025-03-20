@@ -21,7 +21,7 @@ use crate::Supergraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::NamedFragments;
+use crate::internal_error;
 use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
@@ -379,7 +379,7 @@ impl QueryPlanner {
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&document.fragments, &self.api_schema),
+            &document.fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
             &|| {
@@ -836,14 +836,23 @@ pub(crate) enum SubgraphOperationCompression {
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
         match self {
-            Self::GenerateFragments => {
-                let mut operation = operation;
-                operation.generate_fragments()?;
-                Ok(operation)
+            Self::GenerateFragments => Ok(operation.generate_fragments()?),
+            Self::Disabled => {
+                let operation_document = operation.try_into().map_err(|err| match err {
+                    FederationError::SingleFederationError(
+                        SingleFederationError::InvalidGraphQL { diagnostics },
+                    ) => internal_error!(
+                        "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+                    ),
+                    _ => err,
+                })?;
+                Ok(operation_document)
             }
-            Self::Disabled => Ok(operation),
         }
     }
 }

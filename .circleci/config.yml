@@ -374,7 +374,7 @@ commands:
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall -y --version 0.14.21 cargo-deny
+              cargo binstall -y --version 0.18.2 cargo-deny
               cargo binstall -y --version 0.12.2 cargo-edit
               cargo binstall -y --version 0.12.0 cargo-fuzz
               cargo binstall -y --version 0.6.6 cargo-about

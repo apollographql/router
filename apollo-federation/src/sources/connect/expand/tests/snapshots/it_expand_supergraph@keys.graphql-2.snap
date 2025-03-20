@@ -9,11 +9,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: GET http://localhost/ts/{$args.id}",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.t),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.t),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -161,11 +163,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: GET http://localhost/ts/{$args.id}?id2={$args.id2}",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.t2),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.t2),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -373,11 +377,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: GET http://localhost/ts/{$args.unselected}",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(Query.unselected),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(Query.unselected),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -525,11 +531,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(T.r1),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(T.r1),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -665,11 +673,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: GET http://localhost/rs/{$this.id}?id2={$this.id2}",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(T.r2),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(T.r2),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -865,11 +875,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: GET http://localhost/rs/{$this.id}",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(T.r3),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(T.r3),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -1049,11 +1061,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(T.r4),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(T.r4),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,
@@ -1206,11 +1220,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             label: "one. http: POST http://localhost/rs",
             subgraph_name: "one",
             source_name: None,
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: Object(T.r5),
-                directive_name: "connect",
-                directive_index: 0,
-            },
+            directive: Field(
+                ObjectOrInterfaceFieldDirectivePosition {
+                    field: Object(T.r5),
+                    directive_name: "connect",
+                    directive_index: 0,
+                },
+            ),
         },
         transport: HttpJsonTransport {
             source_url: None,

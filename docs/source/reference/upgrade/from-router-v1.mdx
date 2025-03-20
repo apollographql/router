@@ -227,6 +227,53 @@ telemetry:
 
 - Ensure that you have enabled OTLP support in your Jaeger instance using `COLLECTOR_OTLP_ENABLED=true` and exposing ports `4317` and `4318` for gRPC and HTTP, respectively.
 
+### Adding custom metrics attributes
+
+Previously in router v1, you can add custom attributes to metrics via the `telemetry.exporters.metrics.common.attributes` section. In router v2, this has been moved to the `telemetry.exporters.metrics.common.resource` section for static values and to the `telemetry.instrumentation.instruments` section for dynamic values that can select on different request stages.
+
+**Upgrade step**: move custom attributes from `telemetry.exporters.metrics.common.attributes` to either `telemetry.exporters.metrics.common.resource` for static values or `telemetry.instrumentation.instruments` for dynamic values. Use the examples below as reference:
+
+
+```yaml
+# Router v1
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: "name"
+        attributes:
+          router:
+            static:
+              - name: "env_full_name"
+                value: "deployment_env"
+            request:
+              header:
+                - named: "content-type"
+                  rename: "custom_content_name_attribute"
+                  default: "application/json"
+```
+
+```yaml
+# Router v2
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        # Add to each instrument
+        http.server.request.duration:
+          attributes:
+            custom_content_name_attribute:
+              request_header: "content-type"
+              default: "application/json"
+
+  exporters:
+    metrics:
+      common:
+        service_name: "name"
+        resource:
+          env_full_name: "deployment_env"
+```
+
 ### Emitting custom metrics
 
 Rust plugins can no longer use the router's internal metrics system via `tracing` macros. Consequently, `tracing` field names that start with the following strings aren't interpreted as macros for router metrics:
