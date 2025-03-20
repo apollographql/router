@@ -47,6 +47,11 @@ pub(crate) struct ConnectorsConfig {
     /// ```
     #[serde(default)]
     pub(crate) expose_sources_in_context: bool,
+
+    /// Feature gate for connect spec v0.2. Set to `true` to enable the using
+    /// the v0.2 spec during the preview phase.
+    #[serde(default)]
+    pub(crate) preview_connect_v0_2: Option<bool>,
 }
 
 // TODO: remove this after deprecation period

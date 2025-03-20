@@ -1,8 +1,9 @@
+//! Parsing and validation for `@connect(http.<METHOD>)`
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 
-use super::url::validate_template;
 use crate::sources::connect::URLTemplate;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
@@ -11,16 +12,20 @@ use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAM
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
+use crate::sources::connect::validation::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::sources::connect::validation::http::url::validate_template;
+use crate::sources::connect::validation::source::SourceName;
 
-pub(crate) fn validate<'schema>(
+pub(super) fn validate<'schema>(
     http_arg: &'schema [(Name, Node<Value>)],
     coordinate: ConnectHTTPCoordinate<'schema>,
     http_arg_node: &Node<Value>,
+    source_name: Option<&SourceName<'schema>>,
     schema: &SchemaInfo<'schema>,
-) -> Result<(URLTemplate, HttpMethodCoordinate<'schema>), Vec<Message>> {
+) -> Result<URLTemplate, Vec<Message>> {
     let source_map = &schema.sources;
     let mut methods = http_arg
         .iter()
@@ -66,5 +71,36 @@ pub(crate) fn validate<'schema>(
         node: method_value,
     };
 
-    validate_template(coordinate, schema).map(|template| (template, coordinate))
+    let template = validate_template(coordinate, schema)?;
+
+    if source_name.is_some() && template.base.is_some() {
+        return Err(vec![Message {
+            code: Code::AbsoluteConnectUrlWithSource,
+            message: format!(
+                "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                raw_value = coordinate.node
+            ),
+            locations: coordinate
+                .node
+                .line_column_range(source_map)
+                .into_iter()
+                .collect(),
+        }]);
+    }
+    if source_name.is_none() && template.base.is_none() {
+        return Err(vec![Message {
+            code: Code::RelativeConnectUrlWithoutSource,
+            message: format!(
+                "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
+                raw_value = coordinate.node,
+                source_directive_name = schema.source_directive_name(),
+            ),
+            locations: coordinate
+                .node
+                .line_column_range(source_map)
+                .into_iter()
+                .collect(),
+        }]);
+    }
+    Ok(template)
 }
