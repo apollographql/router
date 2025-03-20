@@ -40,11 +40,14 @@ register_private_plugin!("apollo", "mock_subgraphs", MockSubgraphsPlugin);
 ///         id: 4
 ///         field: [42, 7]
 /// ```
+//
+// If changing this, also update `dev-docs/mock_subgraphs_plugin.md`
 type Config = HashMap<String, Arc<SubgraphConfig>>;
 
 /// Configuration for one subgraph for the `mock_subgraphs` plugin
 #[derive(serde::Deserialize, schemars::JsonSchema)]
 struct SubgraphConfig {
+    // If changing this struct, also update `dev-docs/mock_subgraphs_plugin.md`
     #[serde(default)]
     #[schemars(with = "HashMap<String, String>")]
     headers: HeaderMap,
