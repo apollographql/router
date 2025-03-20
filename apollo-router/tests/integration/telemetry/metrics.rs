@@ -330,7 +330,6 @@ async fn test_multi_pipelines() {
     // Long running request 2
     let query = router.execute_default_query();
     let _h2 = tokio::task::spawn(query);
-    let metrics = router
         .get_metrics_response()
         .await
         .expect("metrics")
@@ -338,6 +337,7 @@ async fn test_multi_pipelines() {
         .await
         .expect("metrics");
 
+    dbg!("{}", &metrics);
     // There should be two instances of the pipeline metrics
     let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
     assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
@@ -345,12 +345,9 @@ async fn test_multi_pipelines() {
     // There should be at least three connections, one active, one idle, and one terminating.
     // There may be more than one in each category because reqwest does connection pooling.
     let active =
-        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
-    assert_eq!(active.captures_iter(&metrics).count(), 1);
-    let terminating =
         Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
-    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
-    // let idle =
-    //     Regex::new(r#"(?m)^apollo_router_open_connections[{].+idle.+[}]"#).expect("regex");
-    // assert_eq!(idle.captures_iter(&metrics).count(), 1);
+    assert_eq!(active.captures_iter(&metrics).count(), 1);
+    let idle =
+        Regex::new(r#"(?m)^apollo_router_open_connections[{].+waiting_close.+[}]"#).expect("regex");
+    assert_eq!(idle.captures_iter(&metrics).count(), 1);
 }

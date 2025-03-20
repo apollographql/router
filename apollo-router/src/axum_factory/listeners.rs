@@ -319,14 +319,14 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
-                                                connection_handle.shutdown();
+                                                connection_handle.terminating();
                                                 c.graceful_shutdown();
 
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    connection_handle.shutdown_idle();
+                                                    connection_handle.waiting_to_close();
                                                     let _= connection.await;
                                                 }
                                             }
@@ -348,13 +348,13 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
-                                                connection_handle.shutdown();
+                                                connection_handle.terminating();
                                                 c.graceful_shutdown();
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    connection_handle.shutdown_idle();
+                                                    connection_handle.waiting_to_close();
                                                     let _= connection.await;
                                                 }
                                             }
@@ -387,13 +387,13 @@ pub(super) fn serve_router_on_listen_addr(
                                             // on the next request, then we wait for it to finish
                                             _ = connection_shutdown.notified() => {
                                                 let c = connection.as_mut();
-                                                connection_handle.shutdown();
+                                                connection_handle.terminating();
                                                 c.graceful_shutdown();
                                                 // if the connection was idle and we never received the first request,
                                                 // hyper's graceful shutdown would wait indefinitely, so instead we
                                                 // close the connection right away
                                                 if received_first_request.load(Ordering::Relaxed) {
-                                                    connection_handle.shutdown_idle();
+                                                    connection_handle.waiting_to_close();
                                                     let _= connection.await;
                                                 }
                                             }
