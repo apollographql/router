@@ -179,6 +179,16 @@ pub(crate) fn make_requests(
         Some(EntityResolver::Implicit) => {
             entities_with_fields_from_request(connector.clone(), &request)
         }
+        Some(EntityResolver::TypeBatch) => {
+            return Err(MakeRequestError::UnsupportedOperation(
+                "batch entity resolvers are not supported".into(),
+            ));
+        }
+        Some(EntityResolver::TypeSingle) => {
+            return Err(MakeRequestError::UnsupportedOperation(
+                "single entity resolvers on types are not supported".into(),
+            ));
+        }
         None => root_fields(connector.clone(), &request),
     }?;
 
