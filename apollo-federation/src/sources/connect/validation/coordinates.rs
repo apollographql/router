@@ -10,7 +10,6 @@ use apollo_compiler::schema::ObjectType;
 
 use super::DirectiveName;
 use crate::sources::connect::id::ConnectedElement;
-use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -124,16 +123,6 @@ impl Display for BaseUrlCoordinate<'_> {
             "`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`",
         )
     }
-}
-
-pub(super) fn connect_directive_http_body_coordinate(
-    connect: &ConnectDirectiveCoordinate,
-) -> String {
-    format!(
-        "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{element}`",
-        connect_directive_name = connect.directive.name,
-        element = connect.element
-    )
 }
 
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
