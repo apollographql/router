@@ -738,7 +738,9 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain("expected JWT 'exp' (expiry) claim to be an integer"));
+        assert!(logs_contain(
+            "expected JWT 'exp' (expiry) claim to be an integer"
+        ));
     }
 
     #[test]
