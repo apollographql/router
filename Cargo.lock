@@ -261,7 +261,6 @@ dependencies = [
  "apollo-compiler",
  "apollo-environment-detector",
  "apollo-federation",
- "async-channel 1.9.0",
  "async-compression",
  "async-trait",
  "aws-config",
