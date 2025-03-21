@@ -20,8 +20,6 @@ use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
-use crate::json_ext::Object;
-use crate::json_ext::Value;
 use crate::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
@@ -1268,14 +1266,10 @@ pub(crate) fn count_operation_error_codes(
     let errors: Vec<graphql::Error> = codes
         .iter()
         .map(|c| {
-            let mut extensions = Object::new();
-            extensions.insert("code", Value::String((*c).into()));
-            graphql::Error {
-                message: "".into(),
-                locations: vec![],
-                path: None,
-                extensions,
-            }
+            graphql::Error::builder()
+                .message("")
+                .extension_code(*c)
+                .build()
         })
         .collect();
 
@@ -1474,22 +1468,22 @@ mod test {
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
 
+    use crate::Context;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
     use crate::json_ext::Path;
-    use crate::metrics::count_operation_errors;
-    use crate::plugins::telemetry::CLIENT_NAME;
-    use crate::plugins::telemetry::CLIENT_VERSION;
-    use crate::query_planner::APOLLO_OPERATION_ID;
-    use crate::Context;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::count_operation_error_codes;
+    use crate::metrics::count_operation_errors;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
+    use crate::plugins::telemetry::CLIENT_NAME;
+    use crate::plugins::telemetry::CLIENT_VERSION;
     use crate::plugins::telemetry::apollo::ErrorsConfiguration;
     use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
+    use crate::query_planner::APOLLO_OPERATION_ID;
 
     #[test]
     fn test_gauge() {
@@ -1775,7 +1769,7 @@ mod test {
                 "graphql.error.path" = "",
                 "apollo.router.error.service" = ""
             );
-            
+
             assert_counter!(
                 "apollo.router.graphql_error",
                 1,
@@ -1828,7 +1822,7 @@ mod test {
                 "graphql.error.path" = "",
                 "apollo.router.error.service" = ""
             );
-            
+
             assert_counter!(
                 "apollo.router.graphql_error",
                 1,
@@ -1862,11 +1856,7 @@ mod test {
                 .path(Path::from("obj/field"))
                 .build();
 
-            count_operation_errors(
-                &[error],
-                &context,
-                &config,
-            );
+            count_operation_errors(&[error], &context, &config);
 
             assert_counter!(
                 "apollo.router.operations.error",
@@ -1881,7 +1871,7 @@ mod test {
                 "graphql.error.path" = "/obj/field",
                 "apollo.router.error.service" = "mySubgraph"
             );
-            
+
             assert_counter!("apollo.router.graphql_error", 1, code = "SOME_ERROR_CODE");
         }
         .with_metrics()
