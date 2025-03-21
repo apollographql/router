@@ -317,7 +317,7 @@ impl<'schema> Transport<'schema> {
 
     /// Type-check the `@connect(http:<METHOD>:)` directive.
     ///
-    /// TODO: get keys here instead of re-parsing later?
+    /// TODO: Return input shapes for keys instead reparsing for `Connector::resolvable_key` later
     fn type_check(self, schema: &SchemaInfo) -> Vec<Message> {
         let expression_context = Context::for_connect_request(
             schema,
