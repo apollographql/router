@@ -355,7 +355,7 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[derive(Debug, Clone, strum_macros::Display)]
+#[derive(Debug, Clone, Copy)]
 pub enum HTTPMethod {
     Get,
     Post,
@@ -389,6 +389,12 @@ impl FromStr for HTTPMethod {
             "DELETE" => Ok(HTTPMethod::Delete),
             _ => Err(format!("Invalid HTTP method: {s}")),
         }
+    }
+}
+
+impl Display for HTTPMethod {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
     }
 }
 
