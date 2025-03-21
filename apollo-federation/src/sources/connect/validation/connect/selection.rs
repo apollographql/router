@@ -6,15 +6,12 @@ use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
-use shape::Shape;
 
+use self::variables::VariableResolver;
 use super::Code;
 use super::Message;
 use super::Name;
@@ -28,18 +25,15 @@ use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::SelectionCoordinate;
-use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
-use crate::sources::connect::validation::expression;
-use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
+
+mod variables;
 
 pub(super) fn get_seen_fields_from_selection(
     coordinate: ConnectDirectiveCoordinate,
@@ -106,76 +100,6 @@ pub(super) fn get_seen_fields_from_selection(
                 .collect(),
         }),
     }
-}
-
-pub(super) fn validate_body_selection(
-    connect_directive: &Node<Directive>,
-    connect_coordinate: ConnectDirectiveCoordinate,
-    parent_type: &Node<ObjectType>,
-    field: &Component<FieldDefinition>,
-    schema: &SchemaInfo,
-    selection_node: &Node<Value>,
-) -> Vec<Message> {
-    let coordinate =
-        connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
-
-    // Ensure that the body selection is a valid JSON selection string
-    let selection_str = match GraphQLString::new(selection_node, &schema.sources) {
-        Ok(selection_str) => selection_str,
-        Err(_) => {
-            return vec![Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: selection_node
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }];
-        }
-    };
-    let selection = match JSONSelection::parse(selection_str.as_str()) {
-        Ok(selection) => selection,
-        Err(err) => {
-            return vec![Message {
-                code: Code::InvalidBody,
-                message: format!("{coordinate} is not valid: {err}"),
-                locations: selection_node
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }];
-        }
-    };
-    if selection.is_empty() {
-        return vec![Message {
-            code: Code::InvalidBody,
-            message: format!("{coordinate} is empty"),
-            locations: selection_node
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        }];
-    }
-
-    // Validate the selection shape
-    if let Err(mut message) = expression::validate(
-        &Expression {
-            expression: selection,
-            location: 0..selection_str.as_str().len(),
-        },
-        &Context::for_connect_request(
-            schema,
-            connect_coordinate,
-            &selection_str,
-            Code::InvalidBody,
-        ),
-        &Shape::unknown([]),
-    ) {
-        message.message = format!("In {coordinate}: {message}", message = message.message);
-        return vec![message];
-    }
-
-    Vec::new()
 }
 
 /// Validate variable references in a JSON Selection

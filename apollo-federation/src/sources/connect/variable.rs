@@ -89,6 +89,7 @@ pub enum Namespace {
     Context,
     Status,
     This,
+    Batch,
 }
 
 impl Namespace {
@@ -99,6 +100,7 @@ impl Namespace {
             Self::Context => "$context",
             Self::Status => "$status",
             Self::This => "$this",
+            Self::Batch => "$batch",
         }
     }
 }
@@ -113,6 +115,7 @@ impl FromStr for Namespace {
             "$context" => Ok(Self::Context),
             "$status" => Ok(Self::Status),
             "$this" => Ok(Self::This),
+            "$batch" => Ok(Self::Batch),
             _ => Err(()),
         }
     }

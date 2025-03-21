@@ -2,9 +2,8 @@ schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
   @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION)
-  @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect", "@source"]})
-  @join__directive(graphs: [CONNECTORS2], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
-  @join__directive(graphs: [CONNECTORS, CONNECTORS2], name: "source", args: {name: "json", http: {baseURL: "https://jsonplaceholder.typicode.com/", headers: [{name: "AuthToken", from: "X-Auth-Token"}, {name: "user-agent", value: "Firefox"}]}})
+  @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"]})
+  @join__directive(graphs: [ONE], name: "source", args: {name: "json", http: {baseURL: "http://localhost:4001/api"}})
 {
   query: Query
 }
@@ -39,8 +38,7 @@ scalar join__FieldSet
 scalar join__FieldValue
 
 enum join__Graph {
-  CONNECTORS @join__graph(name: "connectors", url: "http://unused")
-  CONNECTORS2 @join__graph(name: "connectors2", url: "http://unused")
+  ONE @join__graph(name: "one", url: "http://none")
 }
 
 scalar link__Import
@@ -57,26 +55,17 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Post
-  @join__type(graph: CONNECTORS)
-  @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {POST: "/posts", body: "ids: $batch.id"}, selection: "id title body"})
-{
-  id: ID!
-  title: String
-  body: String
-}
-
 type Query
-  @join__type(graph: CONNECTORS)
-  @join__type(graph: CONNECTORS2)
+  @join__type(graph: ONE)
 {
-  posts: [Post] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/posts"}, selection: "id title body"})
-  users: [User] @join__field(graph: CONNECTORS2) @join__directive(graphs: [CONNECTORS2], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id name"})
+  users: [User!]! @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id"})
 }
 
 type User
-  @join__type(graph: CONNECTORS2, key: "id", resolvable: false)
+  @join__type(graph: ONE)
+  @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {POST: "/users-batch", body: "ids: $batch.id"}, selection: "id name username"})
 {
   id: ID!
   name: String
+  username: String
 }
