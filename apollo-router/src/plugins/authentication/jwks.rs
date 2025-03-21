@@ -626,7 +626,6 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
         .flatten()
         .and_then(|claims_value: Option<serde_json::Value>| {
             let claims_obj = claims_value.as_ref()?.as_object();
-
             // Extract the expiry claim from the JWT, returning immediately if it's not present
             let exp = match claims_obj {
                 Some(exp) => exp.get("exp"),
@@ -636,7 +635,7 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
                 }
             };
             // Ensure the expiry claim is an integer
-            match exp.map(|it| it.as_i64()) {
+            match exp.and_then(|it| it.as_i64()) {
                 Some(ts) => Some(ts),
                 None => {
                     tracing::error!("expected JWT 'exp' (expiry) claim to be an integer");
@@ -644,7 +643,6 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
                 }
             }
         })
-        .flatten()
         .map(|exp| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -723,7 +721,7 @@ mod test {
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain("JWT claims should be an object"));
+        assert!(logs_contain("expected JWT claims to be an object"));
     }
 
     #[test]
@@ -733,14 +731,14 @@ mod test {
         context.insert_json_value(
             APOLLO_AUTHENTICATION_JWT_CLAIMS,
             json!({
-                "exp": "not an integer"
+                "exp": "\"not an integer\""
             }),
         );
 
         let expiry = jwt_expires_in(&context);
         assert_eq!(expiry, Duration::MAX);
 
-        assert!(logs_contain("JWT 'exp' (expiry) claim should be a number"));
+        assert!(logs_contain("expected JWT 'exp' (expiry) claim to be an integer"));
     }
 
     #[test]
