@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::panic::UnwindSafe;
+use std::panic::AssertUnwindSafe;
 use std::sync::atomic::AtomicUsize;
 use std::sync::OnceLock;
 
@@ -70,12 +70,13 @@ pub(crate) fn execute<T, F>(
     job: F,
 ) -> impl Future<Output = std::thread::Result<T>>
 where
-    F: FnOnce() -> T + Send + UnwindSafe + 'static,
+    F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
     let (tx, rx) = oneshot::channel();
     let job = Box::new(move || {
         // Ignore the error if the oneshot receiver was dropped
+        let job = AssertUnwindSafe(job);
         let _ = tx.send(std::panic::catch_unwind(job));
     });
     queue().send(priority, job);

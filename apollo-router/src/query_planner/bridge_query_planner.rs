@@ -25,6 +25,7 @@ use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::Service;
+use tracing_futures::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
@@ -46,6 +47,9 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::consts::BRIDGE_QUERY_PLANNER_CALL_SPAN_NAME;
+use crate::plugins::telemetry::consts::BRIDGE_QUERY_PLANNER_PLAN_SPAN_NAME;
+use crate::plugins::telemetry::consts::BRIDGE_QUERY_PLANNER_WORKER_POOL_SPAN_NAME;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
 use crate::query_planner::fetch::QueryHash;
@@ -226,7 +230,13 @@ impl PlannerMode {
             PlannerMode::Js(js) => {
                 let start = Instant::now();
 
-                let result = js.plan(filtered_query, operation, plan_options).await;
+                let result = js
+                    .plan(filtered_query, operation, plan_options)
+                    .instrument(tracing::info_span!(
+                        BRIDGE_QUERY_PLANNER_PLAN_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await;
 
                 let elapsed = start.elapsed().as_secs_f64();
                 metric_query_planning_plan_duration(JS_QP_MODE, elapsed);
@@ -247,34 +257,49 @@ impl PlannerMode {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
                 let priority = compute_job::Priority::P8; // High priority
+                let worker_pool_span = tracing::info_span!(
+                    BRIDGE_QUERY_PLANNER_WORKER_POOL_SPAN_NAME,
+                    "otel.kind" = "INTERNAL"
+                );
+                let internal_planning_span = tracing::info_span!(
+                    parent: &worker_pool_span,
+                    BRIDGE_QUERY_PLANNER_PLAN_SPAN_NAME,
+                    "otel.kind" = "INTERNAL"
+                );
                 let (plan, mut root_node) = compute_job::execute(priority, move || {
-                    let start = Instant::now();
+                    internal_planning_span.in_scope(|| {
+                        let start = Instant::now();
 
-                    let query_plan_options = QueryPlanOptions {
-                        override_conditions: plan_options.override_conditions,
-                    };
+                        let query_plan_options = QueryPlanOptions {
+                            override_conditions: plan_options.override_conditions,
+                        };
 
-                    let result = operation
-                        .as_deref()
-                        .map(|n| Name::new(n).map_err(FederationError::from))
-                        .transpose()
-                        .and_then(|operation| {
-                            rust_planner.build_query_plan(
-                                &doc.executable,
-                                operation,
-                                query_plan_options,
-                            )
+                        let result = operation
+                            .as_deref()
+                            .map(|n| Name::new(n).map_err(FederationError::from))
+                            .transpose()
+                            .and_then(|operation| {
+                                rust_planner.build_query_plan(
+                                    &doc.executable,
+                                    operation,
+                                    query_plan_options,
+                                )
+                            })
+                            .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+
+                        let elapsed = start.elapsed().as_secs_f64();
+                        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+                        result.map(|plan| {
+                            let root_node = convert_root_query_plan_node(&plan);
+                            (plan, root_node)
                         })
-                        .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
-
-                    let elapsed = start.elapsed().as_secs_f64();
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
-
-                    result.map(|plan| {
-                        let root_node = convert_root_query_plan_node(&plan);
-                        (plan, root_node)
                     })
                 })
+                // This span will indicate pure planning time.
+                // The difference between this one and its parent is the time
+                // spent waiting, or dealing with defer labels and the like.
+                .instrument(worker_pool_span)
                 .await
                 .expect("query planner panicked")?;
                 if let Some(node) = &mut root_node {
@@ -588,6 +613,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         } = req;
 
         let this = self.clone();
+
         let fut = async move {
             let mut doc = document;
 
@@ -638,7 +664,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     .build()),
                 Err(e) => Err(e),
             }
-        };
+        }
+        // Start of the query planning span which doesn't include waiting time,
+        // but does include defer labels, and operation signature processing.
+        .instrument(tracing::info_span!(
+            BRIDGE_QUERY_PLANNER_CALL_SPAN_NAME,
+            "otel.kind" = "INTERNAL"
+        ));
 
         // Return the response as an immediate future
         Box::pin(fut)

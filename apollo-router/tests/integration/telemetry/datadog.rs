@@ -94,6 +94,12 @@ async fn test_default_span_names() -> Result<(), BoxError> {
         .services(["client", "router", "subgraph"].into())
         .span_names(
             [
+                "cache_lookup",
+                "caching_query_planner_wrapper",
+                "parallelism_pool",
+                "worker_pool",
+                "invoke_planner",
+                "plan",
                 "query_planning",
                 "client_request",
                 "subgraph_request",

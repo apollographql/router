@@ -1,3 +1,4 @@
+experimental_query_planner_mode: new
 telemetry:
   exporters:
     tracing:

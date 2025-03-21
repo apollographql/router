@@ -19,6 +19,7 @@ use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use tower::Service;
 use tower::ServiceExt;
+use tracing_futures::Instrument;
 
 use super::bridge_query_planner::BridgeQueryPlanner;
 use super::QueryPlanResult;
@@ -27,6 +28,7 @@ use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::introspection::IntrospectionCache;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::consts::QUERY_PLANNER_POOL_SPAN_NAME;
 use crate::query_planner::PlannerMode;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -345,7 +347,13 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             }
 
             res
-        })
+        }
+        // Entering query planner pool span.
+        // Both JS and Rust QPs go through this code path, but the Rust QP is just a passthrough (noop).
+        .instrument(tracing::info_span!(
+            QUERY_PLANNER_POOL_SPAN_NAME,
+            "otel.kind" = "INTERNAL"
+        )))
     }
 }
 
