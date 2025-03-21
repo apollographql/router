@@ -2338,6 +2338,27 @@ expression: "&schema"
         }
       ]
     },
+    "DeduplicationConfig": {
+      "additionalProperties": false,
+      "description": "Deduplication configuration",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable the deduplication of subscriptions (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
+          "type": "boolean"
+        },
+        "ignored_headers": {
+          "default": [],
+          "description": "List of headers to ignore for deduplication, for example if you forward 'user-agent' header but doesn't interfere with data returned by the subscription we can just ignore it to not create a new subscription connection",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "type": "object"
+    },
     "DefaultAttributeRequirementLevel": {
       "oneOf": [
         {
@@ -6994,10 +7015,9 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Subscriptions configuration",
       "properties": {
-        "enable_deduplication": {
-          "default": true,
-          "description": "Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode) (default: true)",
-          "type": "boolean"
+        "deduplication": {
+          "$ref": "#/definitions/DeduplicationConfig",
+          "description": "#/definitions/DeduplicationConfig"
         },
         "enabled": {
           "default": true,
