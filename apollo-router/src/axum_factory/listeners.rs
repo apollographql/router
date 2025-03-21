@@ -262,6 +262,7 @@ macro_rules! handle_connection {
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn serve_router_on_listen_addr(
     pipeline_ref: Arc<PipelineRef>,
     mut listener: Listener,
