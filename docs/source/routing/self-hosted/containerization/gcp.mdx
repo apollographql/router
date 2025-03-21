@@ -6,11 +6,15 @@ description: Build and deploy Apollo GraphOS Router or Apollo Router Core to Goo
 
 Learn how to deploy the router on Google Cloud Platform (GCP) with Cloud Run.
 
-> Not deploying to GCP? Try our guides for deploying to AWS or Azure.
+<Note>
+
+Not deploying to GCP? Try our deployment guides AWS or Azure.
+
+</Note>
 
 ## Prerequisites
 
-Before you begin, set up the tools you need to deploy the router on Cloud Run:
+Before starting, set up the following tools:
 
 1. Install [Docker](https://www.docker.com/get-started/) locally.
 1. Create a new [Google Cloud account](https://cloud.google.com/) or go to an existing account.
@@ -24,7 +28,7 @@ Before you begin, set up the tools you need to deploy the router on Cloud Run:
 
 ## Build and push router image
 
-After setting up Docker and GCP, build a router image with custom router configuration and push the image to GCP:
+After setting up Docker and GCP, build a router image with custom configuration, then push it to your GCP registry:
 
 1. In a local directory, create a `router.yaml` file and copy-paste the following configuration into the file: 
     
@@ -59,14 +63,24 @@ After setting up Docker and GCP, build a router image with custom router configu
 
 1. Run `docker images` and validate that your router image was successfully built and loaded.
 
-1. Run the following `docker` commands to tag and push the local router image to Artifact Registry:
+1. Run `docker tag` to tag the image before pushing it to Artifact Registry. Make sure your tag conforms with Artifact Registry's [naming convention](https://cloud.google.com/artifact-registry/docs/docker/names) (for example, `us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0`).
 
     ```bash showLineNumbers=false
-    docker tag router-gcp:v1.61.0 us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
+    docker tag router-gcp:v1.61.0 \
+        us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
+    ```
+
+1. Run `docker push` to push the router image to Artifact Registry.
+
+    ```bash showLineNumbers=false
     docker push us-west2-docker.pkg.dev/my-project/my-repo/router-gcp:v1.61.0
     ```
 
-1. In GCP console for your project, go to Artifact Registry and validate the router image has been successfully pushed.
+1. Validate the router image has been successfully pushed to Artifact Registry. You can use Google Cloud Console and navigate to your repository in Artifact Registry. You can also use the gcloud CLI and run `gcloud artifacts docker images`. For example:
+
+    ```bash showLineNumbers=false
+    gcloud artifacts docker images list us-west2-docker.pkg.dev/my-project/my-repo
+    ```
 
 ## Configure and deploy router 
 
@@ -89,16 +103,14 @@ You can use either Google Cloud console or gcloud CLI. In either case, you need 
     * Set **Service name** to a name for your deployed router (for example, `my-router`).
     * Set **Region** to your GCP region.
     * Set **Authentication** to **Allow unauthenticated invocations**.
-1. On the **Container(s)** > **Edit Container** tab, update the following configurations:
-    1. On the **Settings** tab:
-        * Set **Container port** to `4000`. This port must match your router's configuration for `supergraph.listen`.
-        * Set **Container command** to `/dist/router`.
-        * (Optional) if running router in dev mode, set **Container arguments** to `--dev`.
-    1. On the **Variables & Secrets** tab, add the following variables (either as environment variables or referenced secrets):
-        * Add `APOLLO_KEY` and set it to your graph API key.
-        * Add `APOLLO_GRAPH_REF` and set it to your graph ref.   
-
-1. Click **Deploy** on the bottom-left of the console.
+1. On the **Container(s)** > **Edit Container** tab, go to the **Settings** tab and update the following configurations:
+    * Set **Container port** to `4000`. This port must match your router's configuration for `supergraph.listen`.
+    * Set **Container command** to `/dist/router`.
+    * (Optional) if running router in dev mode, set **Container arguments** to `--dev`.
+1. Also on the **Container(s)** > **Edit Container** tab, go to the **Variables & Secrets** tab and add the following variables (either as environment variables or referenced secrets):
+    * Add `APOLLO_KEY` and set it to your graph API key.
+    * Add `APOLLO_GRAPH_REF` and set it to your graph ref.   
+1. Click **Deploy** to deploy the router.
 
 ### Deploy with gcloud CLI
 
