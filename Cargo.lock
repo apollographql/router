@@ -261,7 +261,6 @@ dependencies = [
  "apollo-compiler",
  "apollo-environment-detector",
  "apollo-federation",
- "async-channel 1.9.0",
  "async-compression",
  "async-trait",
  "aws-config",
@@ -1263,20 +1262,17 @@ dependencies = [
 
 [[package]]
 name = "axum-server"
-version = "0.7.1"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56bac90848f6a9393ac03c63c640925c4b7c8ca21654de40d53f55964667c7d8"
+checksum = "495c05f60d6df0093e8fb6e74aa5846a0ad06abaf96d76166283720bf740f8ab"
 dependencies = [
  "bytes",
- "futures-util",
+ "fs-err",
  "http 1.2.0",
  "http-body 1.0.1",
- "http-body-util",
  "hyper 1.6.0",
  "hyper-util",
- "pin-project-lite",
  "tokio",
- "tower 0.4.13",
  "tower-service",
 ]
 
@@ -2663,6 +2659,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.90",
+]
+
+[[package]]
+name = "fs-err"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f89bda4c2a21204059a977ed3bfe746677dfd137b83c339e702b0ac91d482aa"
+dependencies = [
+ "autocfg",
+ "tokio",
 ]
 
 [[package]]
