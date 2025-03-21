@@ -312,7 +312,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
                 let variables = connector.variable_references().collect_vec();
                 messages.push(field_set_error(
                     &variables,
-                    connector.id.directive.field.type_name(),
+                    &connector.id.directive.coordinate(),
                 ))
             }
             Ok(Some(field_set)) => {

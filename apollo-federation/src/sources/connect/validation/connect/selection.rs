@@ -6,15 +6,12 @@ use std::ops::Range;
 
 use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Value;
 use apollo_compiler::parser::LineColumn;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
-use shape::Shape;
 
+use self::variables::VariableResolver;
 use super::Code;
 use super::Message;
 use super::Name;
@@ -23,22 +20,20 @@ use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
+use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::json_selection::ExternalVarPaths;
 use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::Ranged;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::SelectionCoordinate;
-use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
-use crate::sources::connect::validation::expression;
-use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::variable::VariableResolver;
 use crate::sources::connect::variable::Phase;
 use crate::sources::connect::variable::Target;
 use crate::sources::connect::variable::VariableContext;
+
+mod variables;
 
 pub(super) fn get_seen_fields_from_selection(
     coordinate: ConnectDirectiveCoordinate,
@@ -46,12 +41,7 @@ pub(super) fn get_seen_fields_from_selection(
 ) -> Result<Vec<(Name, Name)>, Message> {
     let (selection_arg, json_selection) = get_json_selection(coordinate, schema)?;
 
-    let context = VariableContext::new(
-        coordinate.field_coordinate.object,
-        coordinate.field_coordinate.field,
-        Phase::Response,
-        Target::Body,
-    );
+    let context = VariableContext::new(&coordinate.element, Phase::Response, Target::Body);
     validate_selection_variables(
         &VariableResolver::new(context.clone(), schema),
         selection_arg.coordinate,
@@ -61,100 +51,55 @@ pub(super) fn get_seen_fields_from_selection(
         json_selection.external_var_paths(),
     )?;
 
-    let field = coordinate.field_coordinate.field;
+    match coordinate.element {
+        ConnectedElement::Field {
+            parent_type,
+            field_def,
+        } => {
+            let parent_type = match parent_type {
+                ExtendedType::Object(node) => node,
+                _ => {
+                    return Err(Message {
+                        code: Code::GraphQLError,
+                        message: format!("{coordinate} is valid only on object types"),
+                        locations: coordinate
+                            .directive
+                            .line_column_range(&schema.sources)
+                            .into_iter()
+                            .collect(),
+                    });
+                }
+            };
 
-    let Some(return_type) = schema.get_object(field.ty.inner_named_type()) else {
-        // TODO: Validate scalar return types
-        return Ok(Vec::new());
-    };
-    let Some(sub_selection) = json_selection.next_subselection() else {
-        // TODO: Validate scalar selections
-        return Ok(Vec::new());
-    };
+            let Some(return_type) = schema.get_object(field_def.ty.inner_named_type()) else {
+                // TODO: Validate scalar return types
+                return Ok(Vec::new());
+            };
+            let Some(sub_selection) = json_selection.next_subselection() else {
+                // TODO: Validate scalar selections
+                return Ok(Vec::new());
+            };
 
-    let group = Group {
-        selection: sub_selection,
-        ty: return_type,
-        definition: field,
-    };
+            let group = Group {
+                selection: sub_selection,
+                ty: return_type,
+                definition: field_def,
+            };
 
-    SelectionValidator::new(
-        schema,
-        PathPart::Root(coordinate.field_coordinate.object),
-        selection_arg,
-    )
-    .walk(group)
-    .map(|validator| validator.seen_fields)
-}
-
-pub(super) fn validate_body_selection(
-    connect_directive: &Node<Directive>,
-    connect_coordinate: ConnectDirectiveCoordinate,
-    parent_type: &Node<ObjectType>,
-    field: &Component<FieldDefinition>,
-    schema: &SchemaInfo,
-    selection_node: &Node<Value>,
-) -> Vec<Message> {
-    let coordinate =
-        connect_directive_http_body_coordinate(&connect_directive.name, parent_type, &field.name);
-
-    // Ensure that the body selection is a valid JSON selection string
-    let selection_str = match GraphQLString::new(selection_node, &schema.sources) {
-        Ok(selection_str) => selection_str,
-        Err(_) => {
-            return vec![Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: selection_node
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }];
+            SelectionValidator::new(schema, PathPart::Root(parent_type), selection_arg)
+                .walk(group)
+                .map(|validator| validator.seen_fields)
         }
-    };
-    let selection = match JSONSelection::parse(selection_str.as_str()) {
-        Ok(selection) => selection,
-        Err(err) => {
-            return vec![Message {
-                code: Code::InvalidBody,
-                message: format!("{coordinate} is not valid: {err}"),
-                locations: selection_node
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }];
-        }
-    };
-    if selection.is_empty() {
-        return vec![Message {
-            code: Code::InvalidBody,
-            message: format!("{coordinate} is empty"),
-            locations: selection_node
+        ConnectedElement::Type { .. } => Err(Message {
+            code: Code::FeatureUnavailable,
+            message: format!("{coordinate} requires connect v0.2 or later"),
+            locations: coordinate
+                .directive
                 .line_column_range(&schema.sources)
                 .into_iter()
                 .collect(),
-        }];
+        }),
     }
-
-    // Validate the selection shape
-    if let Err(mut message) = expression::validate(
-        &Expression {
-            expression: selection,
-            location: 0..selection_str.as_str().len(),
-        },
-        &Context::for_connect_request(
-            schema,
-            connect_coordinate,
-            &selection_str,
-            Code::InvalidBody,
-        ),
-        &Shape::unknown([]),
-    ) {
-        message.message = format!("In {coordinate}: {message}", message = message.message);
-        return vec![message];
-    }
-
-    Vec::new()
 }
 
 /// Validate variable references in a JSON Selection

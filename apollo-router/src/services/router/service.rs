@@ -61,7 +61,7 @@ use crate::plugins::telemetry::CLIENT_NAME;
 use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
-use crate::plugins::telemetry::apollo::OtlpErrorMetricsMode;
+use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
@@ -685,6 +685,19 @@ impl RouterService {
                 }
             }
         };
+
+        if is_batch && self.batching.exceeds_batch_size(&result) {
+            return Err(TranslateError {
+                status: StatusCode::UNPROCESSABLE_ENTITY,
+                extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
+                extension_details: format!(
+                    "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                    result.len(),
+                    self.batching.maximum_size.unwrap_or_default()
+                ),
+            });
+        }
+
         Ok((result, is_batch))
     }
 
@@ -900,15 +913,15 @@ impl RouterService {
 
             let send_otlp_errors = if service.is_empty() {
                 matches!(
-                    errors_config.experimental_otlp_error_metrics,
-                    OtlpErrorMetricsMode::Enabled
+                    errors_config.preview_extended_error_metrics,
+                    ExtendedErrorMetricsMode::Enabled
                 )
             } else {
                 let subgraph_error_config = errors_config.subgraph.get_error_config(&service);
                 subgraph_error_config.send
                     && matches!(
-                        errors_config.experimental_otlp_error_metrics,
-                        OtlpErrorMetricsMode::Enabled
+                        errors_config.preview_extended_error_metrics,
+                        ExtendedErrorMetricsMode::Enabled
                     )
             };
 

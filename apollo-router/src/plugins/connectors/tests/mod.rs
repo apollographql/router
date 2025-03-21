@@ -38,6 +38,7 @@ use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
+mod connect_on_type;
 mod mock_api;
 mod quickstart;
 #[allow(dead_code)]
@@ -720,7 +721,7 @@ async fn test_tracing_connect_span() {
             assert!(
                 attributes
                     .fields()
-                    .field("apollo.connector.field.name")
+                    .field("apollo.connector.coordinate")
                     .is_some()
             );
             assert!(

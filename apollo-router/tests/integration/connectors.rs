@@ -843,7 +843,7 @@ mod telemetry {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `experimental_otlp_error_metrics` is enabled"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is indirectly configured to send errors to Apollo studio for a connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
         .await;
 
         Ok(())
@@ -885,7 +885,7 @@ mod telemetry {
 
         router.start().await;
         router
-        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `experimental_otlp_error_metrics` is enabled"#)
+        .wait_for_log_message(r#""subgraph":"connectors","message":"plugin `telemetry` is explicitly configured to send errors to Apollo studio for connector-enabled subgraph, which is only supported when `preview_extended_error_metrics` is enabled"#)
         .await;
 
         Ok(())
@@ -950,7 +950,7 @@ mod telemetry {
                 telemetry:
                   apollo:
                     errors:
-                      experimental_otlp_error_metrics: enabled
+                      preview_extended_error_metrics: enabled
                       subgraph:
                         all:
                           send: true
