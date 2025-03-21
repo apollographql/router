@@ -10,7 +10,7 @@ use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 
 use self::entity::validate_entity_arg;
-use self::selection::get_seen_fields_from_selection;
+use self::selection::Selection;
 use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
@@ -178,7 +178,14 @@ fn fields_seen_by_connector(
             },
         };
 
-        match get_seen_fields_from_selection(coordinate, schema) {
+        let selection = match Selection::parse(coordinate, schema) {
+            Ok(selection) => selection,
+            Err(err) => {
+                errors.push(err);
+                continue;
+            }
+        };
+        match selection.type_check(schema) {
             Ok(seen) => seen_fields.extend(seen),
             Err(error) => errors.push(error),
         }
