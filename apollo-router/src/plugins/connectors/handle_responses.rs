@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::FieldSetExt;
+use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
 use http::header::CONTENT_LENGTH;
 use itertools::Itertools;
@@ -297,44 +297,36 @@ impl MappedResponse {
                     };
                 }
                 ResponseKey::BatchEntity { keys, inputs, .. } => {
-                    if let serde_json_bytes::Value::Array(values) = value {
-                        let key_selection = keys
-                            .to_mapping()
-                            .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
-
-                        // Convert representations into keys for use in the map
-                        let key_values = inputs
-                            .batch
-                            .iter()
-                            .map(|v| {
-                                key_selection
-                                    .apply_to(&Value::Object(v.clone()))
-                                    .0
-                                    .unwrap_or(Value::Null)
-                            })
-                            .collect_vec();
-
-                        // Create a map of keys to entities
-                        let mut map = values
-                            .into_iter()
-                            .map(|v| {
-                                let key = key_selection.apply_to(&v).0.unwrap_or_default();
-                                (key, v)
-                            })
-                            .collect::<HashMap<_, _>>();
-
-                        // Make a list of entities that matches the representations list
-                        let entities = key_values
-                            .iter()
-                            .map(|key| map.remove(key).unwrap_or(Value::Null))
-                            .collect_vec();
-
-                        data.insert(ENTITIES, Value::Array(entities));
-                    } else {
+                    let Value::Array(values) = value else {
                         return Err(HandleResponseError::MergeError(
                             "Response for a batch request does not map to an array".into(),
                         ));
-                    }
+                    };
+
+                    let key_selection: Result<JSONSelection, _> = keys.try_into();
+                    let key_selection = key_selection
+                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+
+                    // Convert representations into keys for use in the map
+                    let key_values = inputs.batch.iter().map(|v| {
+                        key_selection
+                            .apply_to(&Value::Object(v.clone()))
+                            .0
+                            .unwrap_or(Value::Null)
+                    });
+
+                    // Create a map of keys to entities
+                    let mut map = values
+                        .into_iter()
+                        .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
+                        .collect::<HashMap<_, _>>();
+
+                    // Make a list of entities that matches the representations list
+                    let entities = key_values
+                        .map(|key| map.remove(&key).unwrap_or(Value::Null))
+                        .collect_vec();
+
+                    data.insert(ENTITIES, Value::Array(entities));
                 }
             },
         }

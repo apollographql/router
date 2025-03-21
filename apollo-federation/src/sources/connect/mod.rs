@@ -19,7 +19,6 @@ use apollo_compiler::name;
 use id::ConnectorPosition;
 use id::ObjectTypeDefinitionDirectivePosition;
 pub use json_selection::ApplyToError;
-pub use json_selection::FieldSetExt;
 pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;

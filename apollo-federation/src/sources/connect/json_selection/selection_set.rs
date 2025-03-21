@@ -23,6 +23,7 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
+use apollo_compiler::validation::Valid;
 use multimap::MultiMap;
 
 use super::JSONSelectionParseError;
@@ -38,31 +39,11 @@ use crate::sources::connect::SubSelection;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
 
-/// Extension trait for [`SelectionSet`] to add a method for merging a field set into a selection set.
-trait SelectionSetExt {
-    /// Create a new selection set that includes the fields in the given field set
-    fn merge_field_set(&self, field_set: &FieldSet) -> Self;
-}
+impl TryFrom<Valid<FieldSet>> for JSONSelection {
+    type Error = JSONSelectionParseError;
 
-impl SelectionSetExt for SelectionSet {
-    fn merge_field_set(&self, field_set: &FieldSet) -> Self {
-        let mut new_set = self.clone();
-        for selection in field_set.selection_set.selections.iter() {
-            new_set.push(selection.clone());
-        }
-        new_set
-    }
-}
-
-/// Extension trait for [`FieldSet`] to add a method for converting it to a [`JSONSelection`].
-pub trait FieldSetExt {
-    /// Convert the field set to a [`JSONSelection`]
-    fn to_mapping(&self) -> Result<JSONSelection, JSONSelectionParseError>;
-}
-
-impl FieldSetExt for FieldSet {
-    fn to_mapping(&self) -> Result<JSONSelection, JSONSelectionParseError> {
-        JSONSelection::parse(&self.serialize().no_indent().to_string())
+    fn try_from(field_set: Valid<FieldSet>) -> Result<Self, Self::Error> {
+        Self::parse(&field_set.serialize().no_indent().to_string())
     }
 }
 
@@ -81,7 +62,13 @@ impl JSONSelection {
         required_keys: Option<&FieldSet>,
     ) -> Self {
         let selection_set = match required_keys {
-            Some(keys) => selection_set.merge_field_set(keys),
+            Some(keys) => {
+                let mut new_set = selection_set.clone();
+                for selection in keys.selection_set.selections.iter() {
+                    new_set.push(selection.clone());
+                }
+                new_set
+            }
             None => selection_set.clone(),
         };
 
