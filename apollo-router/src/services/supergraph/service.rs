@@ -25,6 +25,8 @@ use tracing::field;
 use tracing::Span;
 use tracing_futures::Instrument;
 
+use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::batching::BatchQuery;
 use crate::configuration::Batching;
@@ -345,10 +347,19 @@ async fn service_call(
                 // Replace the existing usage report so we do not report invalid variable values to
                 // Studio.
                 context.extensions().with_lock(|lock| {
+                    // This will remove most stats from the usage report, but not all.
+                    // The best long-term solution would be to validate variables earilier as
+                    // part of or before query analysis, but this is difficult and higher risk. We
+                    // clear what we can here as a stop-gap.
                     lock.insert(Arc::new(UsageReporting {
                         stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
                         referenced_fields_by_type: Default::default(),
-                    }))
+                    }));
+                    lock.insert(ExtendedReferenceStats {
+                        referenced_input_fields: Default::default(),
+                        referenced_enums: Default::default(),
+                    });
+                    lock.insert(ReferencedEnums::default())
                 });
 
                 let mut res = SupergraphResponse::new_from_graphql_response(err, context);
