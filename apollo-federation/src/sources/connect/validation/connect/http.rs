@@ -1,5 +1,7 @@
 //! Parsing and validation for `@connect(http:)`
 
+use std::fmt::Display;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
@@ -22,7 +24,6 @@ use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::coordinates::HttpMethodCoordinate;
-use crate::sources::connect::validation::coordinates::connect_directive_http_body_coordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
@@ -54,11 +55,13 @@ pub(super) fn validate(
 
     let mut errors = Vec::new();
 
-    if let Some((_, body)) = http_arg
-        .iter()
-        .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-    {
-        errors.extend(validate_body(coordinate, schema, body));
+    // TODO: Store this body in the parsing phase, then run type checking later, not immediately
+    match Body::parse(http_arg, coordinate, schema) {
+        Ok(Some(body)) => {
+            errors.extend(body.type_check(schema).err());
+        }
+        Ok(None) => {}
+        Err(err) => errors.push(err),
     }
 
     errors.extend(headers::validate_arg(
@@ -85,70 +88,109 @@ pub(super) fn validate(
     errors
 }
 
-pub(super) fn validate_body(
-    connect_coordinate: ConnectDirectiveCoordinate,
-    schema: &SchemaInfo,
-    selection_node: &Node<Value>,
-) -> Vec<Message> {
-    let coordinate = connect_directive_http_body_coordinate(&connect_coordinate);
+struct Body<'schema> {
+    selection: JSONSelection,
+    string: GraphQLString<'schema>,
+    coordinate: BodyCoordinate<'schema>,
+}
 
-    // Ensure that the body selection is a valid JSON selection string
-    let selection_str = match GraphQLString::new(selection_node, &schema.sources) {
-        Ok(selection_str) => selection_str,
-        Err(_) => {
-            return vec![Message {
-                code: Code::GraphQLError,
-                message: format!("{coordinate} must be a string."),
-                locations: selection_node
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }];
-        }
-    };
-    let selection = match JSONSelection::parse(selection_str.as_str()) {
-        Ok(selection) => selection,
-        Err(err) => {
-            return vec![Message {
+impl<'schema> Body<'schema> {
+    pub(super) fn parse(
+        http_arg: &'schema [(Name, Node<Value>)],
+        connect: ConnectDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Option<Self>, Message> {
+        let Some((_, value)) = http_arg
+            .iter()
+            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
+        else {
+            return Ok(None);
+        };
+        let coordinate = BodyCoordinate { connect };
+
+        // Ensure that the body selection is a valid JSON selection string
+        let string = match GraphQLString::new(value, &schema.sources) {
+            Ok(selection_str) => selection_str,
+            Err(_) => {
+                return Err(Message {
+                    code: Code::GraphQLError,
+                    message: format!("{coordinate} must be a string."),
+                    locations: value
+                        .line_column_range(&schema.sources)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+        };
+        let selection = match JSONSelection::parse(string.as_str()) {
+            Ok(selection) => selection,
+            Err(err) => {
+                return Err(Message {
+                    code: Code::InvalidBody,
+                    message: format!("{coordinate} is not valid: {err}"),
+                    locations: value
+                        .line_column_range(&schema.sources)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+        };
+        if selection.is_empty() {
+            return Err(Message {
                 code: Code::InvalidBody,
-                message: format!("{coordinate} is not valid: {err}"),
-                locations: selection_node
+                message: format!("{coordinate} is empty"),
+                locations: value
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            }];
+            });
         }
-    };
-    if selection.is_empty() {
-        return vec![Message {
-            code: Code::InvalidBody,
-            message: format!("{coordinate} is empty"),
-            locations: selection_node
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        }];
+
+        Ok(Some(Self {
+            selection,
+            string,
+            coordinate,
+        }))
     }
 
-    // Validate the selection shape
-    if let Err(mut message) = expression::validate(
-        &Expression {
-            expression: selection,
-            location: 0..selection_str.as_str().len(),
-        },
-        &Context::for_connect_request(
-            schema,
-            connect_coordinate,
-            &selection_str,
-            Code::InvalidBody,
-        ),
-        &Shape::unknown([]),
-    ) {
-        message.message = format!("In {coordinate}: {message}", message = message.message);
-        return vec![message];
+    /// Check that the selection of the body matches the inputs at this location.
+    ///
+    /// TODO: check keys here?
+    pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Message> {
+        let Self {
+            selection,
+            string,
+            coordinate,
+        } = self;
+        expression::validate(
+            &Expression {
+                expression: selection,
+                location: 0..string.as_str().len(),
+            },
+            &Context::for_connect_request(schema, coordinate.connect, &string, Code::InvalidBody),
+            &Shape::unknown([]),
+        )
+        .map_err(|mut message| {
+            message.message = format!("In {coordinate}: {message}", message = message.message);
+            message
+        })
     }
+}
 
-    Vec::new()
+#[derive(Clone, Copy)]
+struct BodyCoordinate<'schema> {
+    connect: ConnectDirectiveCoordinate<'schema>,
+}
+
+impl Display for BodyCoordinate<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{element}`",
+            connect_directive_name = self.connect.directive.name,
+            element = self.connect.element
+        )
+    }
 }
 
 fn validate_method<'schema>(
