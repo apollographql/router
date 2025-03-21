@@ -99,8 +99,7 @@ impl From<&FieldSpecification> for FieldDefinition {
 
 pub(crate) trait TypeAndDirectiveSpecification {
     // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
-    // Note: Currently, all newly added item will be treated as built-in. For a non-built-in, we
-    //       will need a `SourceSpan` value.
+    // - The JS version only sets it `true` for GraphQL built-in types and directives.
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
