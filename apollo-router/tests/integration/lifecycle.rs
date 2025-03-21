@@ -513,7 +513,9 @@ async fn test_multi_pipelines() {
     assert_eq!(active.captures_iter(&metrics).count(), 1);
 }
 
-/// This test ensures that the rotuer will not leave
+/// This test ensures that the rotuer will not leave pipelines hanging around
+/// It has early cancel set to true in the config so that when we look at the piplines after connection
+/// termination they are removed.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_forced_connection_shutdown() {
     if !graph_os_enabled() {
