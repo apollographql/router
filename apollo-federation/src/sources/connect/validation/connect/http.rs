@@ -27,7 +27,7 @@ use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::http::headers;
+use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::http::url::validate_base_url;
 use crate::sources::connect::validation::source::SourceName;
 
@@ -54,7 +54,7 @@ pub(super) fn validate(
 
     let mut errors = Vec::new();
 
-    // TODO: Store this body in the parsing phase, then run type checking later, not immediately
+    // TODO: Store the results of each of these parsing phases, then run type checking all at the end
     match Body::parse(http_arg, coordinate, schema) {
         Ok(Some(body)) => {
             errors.extend(body.type_check(schema).err());
@@ -63,15 +63,17 @@ pub(super) fn validate(
         Err(err) => errors.push(err),
     }
 
-    errors.extend(headers::validate_arg(
+    match Headers::parse(
         http_arg,
         HttpHeadersCoordinate::Connect {
             connect: coordinate,
         },
         schema,
-    ));
+    ) {
+        Ok(headers) => errors.extend(headers.type_check(schema).err().into_iter().flatten()),
+        Err(errs) => errors.extend(errs),
+    }
 
-    // TODO: store transport in parsing phase and type check later
     match Transport::parse(
         http_arg,
         ConnectHTTPCoordinate::from(coordinate),
