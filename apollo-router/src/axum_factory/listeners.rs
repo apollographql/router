@@ -218,12 +218,54 @@ pub(super) async fn get_extra_listeners(
     Ok(listeners_and_routers)
 }
 
-// For now hard code this to 60 seconds. If graceful shutdown does not terminal the connection we give up.
-const CONNECTION_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60);
+// This macro unifies the logic tht deals with connections.
+// Ideally this would be a function, but the generics proved too difficult to figure out.
+macro_rules! handle_connection {
+    ($connection:expr, $connection_handle:expr, $connection_shutdown:expr, $connection_shutdown_timeout:expr, $received_first_request:expr) => {
+        let connection = $connection;
+        let mut connection_handle = $connection_handle;
+        let connection_shutdown = $connection_shutdown;
+        let connection_shutdown_timeout = $connection_shutdown_timeout;
+        let received_first_request = $received_first_request;
+        tokio::pin!(connection);
+        tokio::select! {
+            // the connection finished first
+            _res = &mut connection => {
+            }
+            // the shutdown receiver was triggered first,
+            // so we tell the connection to do a graceful shutdown
+            // on the next request, then we wait for it to finish
+            _ = connection_shutdown.notified() => {
+                connection_handle.shutdown();
+                connection.as_mut().graceful_shutdown();
+                // if the connection was idle and we never received the first request,
+                // hyper's graceful shutdown would wait indefinitely, so instead we
+                // close the connection right away
+                if received_first_request.load(Ordering::Relaxed) {
+                    // The connection may still not shutdown so we aplly a timeout from the configuration
+                    // Connections stuck terminating will keep the pipeline and everything related to that pipeline
+                    // in memory.
+
+                    if let Err(_) = connection.timeout(connection_shutdown_timeout).await {
+                        tracing::warn!(
+                            timeout = connection_shutdown_timeout.as_millis() / 1000,
+                            server.address = connection_handle.connection_ref.address.to_string(),
+                            schema.id = connection_handle.connection_ref.pipeline_ref.schema_id,
+                            config.hash = connection_handle.connection_ref.pipeline_ref.config_hash,
+                            launch.id = connection_handle.connection_ref.pipeline_ref.launch_id,
+                            "connection shutdown exceeded, forcing close",
+                        );
+                    }
+                }
+            }
+        }
+    };
+}
 
 pub(super) fn serve_router_on_listen_addr(
     pipeline_ref: Arc<PipelineRef>,
     mut listener: Listener,
+    connection_shutdown_timeout: Duration,
     address: ListenAddr,
     router: axum::Router,
     main_graphql_port: bool,
@@ -295,7 +337,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 let _connection_stop_signal = connection_stop_signal;
                                 let _session_count_instrument = session_count_instrument;
                                 let _session_count_guard = session_count_guard;
-                                let mut connection_handle = ConnectionHandle::new(pipeline_ref, address);
+                                let connection_handle = ConnectionHandle::new(pipeline_ref, address);
 
                                 match res {
                                     NetworkStream::Tcp(stream) => {
@@ -313,54 +355,15 @@ pub(super) fn serve_router_on_listen_addr(
                                             );
 
                                         let connection = http_config.serve_connection(stream, app);
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                connection_handle.shutdown();
-                                                c.graceful_shutdown();
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
 
-                                                // if the connection was idle and we never received the first request,
-                                                // hyper's graceful shutdown would wait indefinitely, so instead we
-                                                // close the connection right away
-                                                if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.timeout(CONNECTION_SHUTDOWN_TIMEOUT).await;
-                                                }
-                                            }
-                                        }
                                     }
                                     #[cfg(unix)]
                                     NetworkStream::Unix(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
                                         let app = IdleConnectionChecker::new(received_first_request.clone(), app);
                                         let connection = http_config.serve_connection(stream, app);
-
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                connection_handle.shutdown();
-                                                c.graceful_shutdown();
-                                                // if the connection was idle and we never received the first request,
-                                                // hyper's graceful shutdown would wait indefinitely, so instead we
-                                                // close the connection right away
-                                                if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.timeout(CONNECTION_SHUTDOWN_TIMEOUT).await;
-                                                }
-                                            }
-                                        }
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     },
                                     NetworkStream::Tls(stream) => {
                                         let received_first_request = Arc::new(AtomicBool::new(false));
@@ -378,27 +381,7 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = http_config
                                             .http2_only(http2)
                                             .serve_connection(stream, app);
-
-                                        tokio::pin!(connection);
-                                        tokio::select! {
-                                            // the connection finished first
-                                            _res = &mut connection => {
-                                            }
-                                            // the shutdown receiver was triggered first,
-                                            // so we tell the connection to do a graceful shutdown
-                                            // on the next request, then we wait for it to finish
-                                            _ = connection_shutdown.notified() => {
-                                                let c = connection.as_mut();
-                                                connection_handle.shutdown();
-                                                c.graceful_shutdown();
-                                                // if the connection was idle and we never received the first request,
-                                                // hyper's graceful shutdown would wait indefinitely, so instead we
-                                                // close the connection right away
-                                                if received_first_request.load(Ordering::Relaxed) {
-                                                    let _= connection.timeout(CONNECTION_SHUTDOWN_TIMEOUT).await;
-                                                }
-                                            }
-                                        }
+                                        handle_connection!(connection, connection_handle, connection_shutdown, connection_shutdown_timeout, received_first_request);
                                     }
                                 }
                             });
