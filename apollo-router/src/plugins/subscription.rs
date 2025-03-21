@@ -68,13 +68,33 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
-    /// Enable the deduplication of subscription (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
-    /// (default: true)
-    pub(crate) enable_deduplication: bool,
+    /// Configure the deduplication of subscriptions (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
+    pub(crate) deduplication: DeduplicationConfig,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
     /// It represent the capacity of the in memory queue to know how many events we can keep in a buffer
     pub(crate) queue_capacity: Option<usize>,
+}
+
+/// Deduplication configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct DeduplicationConfig {
+    /// Enable the deduplication of subscriptions (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
+    /// (default: true)
+    pub(crate) enabled: bool,
+    /// List of headers to ignore for deduplication, for example if you forward 'user-agent' header but doesn't interfere with data returned by the subscription we can just ignore it
+    /// to not create a new subscription connection
+    pub(crate) ignored_headers: HashSet<String>,
+}
+
+impl Default for DeduplicationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ignored_headers: Default::default(),
+        }
+    }
 }
 
 impl Default for SubscriptionConfig {
@@ -82,7 +102,7 @@ impl Default for SubscriptionConfig {
         Self {
             enabled: true,
             mode: Default::default(),
-            enable_deduplication: true,
+            deduplication: DeduplicationConfig::default(),
             max_opened_subscriptions: None,
             queue_capacity: None,
         }
@@ -1426,7 +1446,7 @@ mod tests {
         .unwrap();
 
         assert!(sub_config.enabled);
-        assert!(sub_config.enable_deduplication);
+        assert!(sub_config.deduplication.enabled);
         assert!(sub_config.max_opened_subscriptions.is_none());
         assert!(sub_config.queue_capacity.is_none());
     }
