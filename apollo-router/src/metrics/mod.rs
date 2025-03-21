@@ -1261,11 +1261,11 @@ macro_rules! assert_histogram_not_exists {
 }
 
 pub(crate) fn count_operation_error_codes(
-    codes: Vec<&str>,
+    codes: &[&str],
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {
-    let errors = codes
+    let errors: Vec<graphql::Error> = codes
         .iter()
         .map(|c| {
             let mut extensions = Object::new();
@@ -1283,7 +1283,7 @@ pub(crate) fn count_operation_error_codes(
 }
 
 pub(crate) fn count_operation_errors(
-    errors: &Vec<graphql::Error>,
+    errors: &[graphql::Error],
     context: &Context,
     errors_config: &ErrorsConfiguration,
 ) {

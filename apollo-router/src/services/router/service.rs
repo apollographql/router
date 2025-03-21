@@ -423,7 +423,7 @@ impl RouterService {
                     Ok(RouterResponse { response, context })
                 } else {
                     count_operation_error_codes(
-                        vec!["INVALID_ACCEPT_HEADER"],
+                        &vec!["INVALID_ACCEPT_HEADER"],
                         &context,
                         &self.apollo_telemetry_config.errors,
                     );
