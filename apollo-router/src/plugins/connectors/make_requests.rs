@@ -34,7 +34,7 @@ const TYPENAME: &str = "__typename";
 pub(crate) struct RequestInputs {
     args: Map<ByteString, Value>,
     this: Map<ByteString, Value>,
-    batch: Vec<Map<ByteString, Value>>,
+    pub(crate) batch: Vec<Map<ByteString, Value>>,
 }
 
 impl RequestInputs {
@@ -143,7 +143,6 @@ pub(crate) enum ResponseKey {
     },
     BatchEntity {
         selection: Arc<JSONSelection>,
-        #[allow(unused)]
         keys: Valid<FieldSet>,
         inputs: RequestInputs,
     },
