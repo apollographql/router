@@ -31,63 +31,85 @@ use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::http::url::validate_base_url;
 use crate::sources::connect::validation::source::SourceName;
 
-pub(super) fn validate(
-    coordinate: ConnectDirectiveCoordinate,
-    source_name: Option<&SourceName>,
-    schema: &SchemaInfo,
-) -> Vec<Message> {
-    let Some((http_arg, http_arg_node)) = coordinate
-        .directive
-        .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
-        .and_then(|arg| Some((arg.as_object()?, arg)))
-    else {
-        return vec![Message {
-            code: Code::GraphQLError,
-            message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."),
-            locations: coordinate
-                .directive
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        }];
-    };
+/// A valid, parsed (but not type-checked) `@connect(http:)`.
+///
+/// TODO: Use this when creating a `HttpJsonTransport` as well.
+pub(super) struct Http<'schema> {
+    transport: Transport<'schema>,
+    body: Option<Body<'schema>>,
+    headers: Headers<'schema>,
+}
 
-    let mut errors = Vec::new();
+impl<'schema> Http<'schema> {
+    pub(super) fn parse(
+        coordinate: ConnectDirectiveCoordinate<'schema>,
+        source_name: Option<&'schema SourceName>,
+        schema: &'schema SchemaInfo,
+    ) -> Result<Self, Vec<Message>> {
+        let Some((http_arg, http_arg_node)) = coordinate
+            .directive
+            .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
+            .and_then(|arg| Some((arg.as_object()?, arg)))
+        else {
+            return Err(vec![Message {
+                code: Code::GraphQLError,
+                message: format!("{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."),
+                locations: coordinate
+                    .directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
+        };
 
-    // TODO: Store the results of each of these parsing phases, then run type checking all at the end
-    match Body::parse(http_arg, coordinate, schema) {
-        Ok(Some(body)) => {
+        let body = Body::parse(http_arg, coordinate, schema).map_err(|err| vec![err])?;
+        let headers = Headers::parse(
+            http_arg,
+            HttpHeadersCoordinate::Connect {
+                connect: coordinate,
+            },
+            schema,
+        )?;
+        let transport = Transport::parse(
+            http_arg,
+            ConnectHTTPCoordinate::from(coordinate),
+            http_arg_node,
+            source_name,
+            schema,
+        )
+        .map_err(|err| vec![err])?;
+
+        Ok(Self {
+            transport,
+            body,
+            headers,
+        })
+    }
+
+    /// Type-check the `@connect(http:)` directive.
+    ///
+    /// TODO: Return some type checking results, like extracted keys?
+    pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Vec<Message>> {
+        let Self {
+            transport,
+            body,
+            headers,
+        } = self;
+
+        let mut errors = Vec::new();
+        if let Some(body) = body {
             errors.extend(body.type_check(schema).err());
         }
-        Ok(None) => {}
-        Err(err) => errors.push(err),
-    }
 
-    match Headers::parse(
-        http_arg,
-        HttpHeadersCoordinate::Connect {
-            connect: coordinate,
-        },
-        schema,
-    ) {
-        Ok(headers) => errors.extend(headers.type_check(schema).err().into_iter().flatten()),
-        Err(errs) => errors.extend(errs),
-    }
+        errors.extend(headers.type_check(schema).err().into_iter().flatten());
+        errors.extend(transport.type_check(schema));
 
-    match Transport::parse(
-        http_arg,
-        ConnectHTTPCoordinate::from(coordinate),
-        http_arg_node,
-        source_name,
-        schema,
-    ) {
-        Ok(transport) => {
-            errors.extend(transport.type_check(schema));
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
         }
-        Err(err) => errors.push(err),
     }
-
-    errors
 }
 
 struct Body<'schema> {
