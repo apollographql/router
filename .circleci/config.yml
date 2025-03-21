@@ -5,7 +5,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.6.2
+  gh: circleci/github-cli@2.7.0
   slack: circleci/slack@5.1.1
   secops: apollo/circleci-secops-orb@2.0.7
 
@@ -24,9 +24,9 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:current
-      - image: cimg/redis:7.4.1
-      - image: openzipkin/zipkin:3.4.3
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
+      - image: cimg/redis:7.4.2
+      - image: openzipkin/zipkin:3.5.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.20.0
     resource_class: 2xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -329,9 +329,11 @@ commands:
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
               ./rustup.sh -y --profile minimal --component clippy --component rustfmt --default-toolchain none
-              $HOME/.cargo/bin/rustc -V
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+            export PATH="$HOME/.cargo/bin:$PATH"
+            rustup toolchain install
+            rustc -V
 
       - when:
           condition:
@@ -367,18 +369,19 @@ commands:
       - run:
           name: Install cargo deny, about, edit
           command: |
-            # Until we are able to update rustc to at least 1.81.0,
-            # we need special handling of the cargo-about command.
-            rustup install 1.83.0
-            cargo +1.83.0 install --locked --version 0.6.6 cargo-about
+            if [[ ! -f "$HOME/.cargo/bin/cargo-binstall$EXECUTABLE_SUFFIX" ]]; then
+              curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+            fi
+
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --version 0.14.21 cargo-deny
-              cargo install --locked --version 0.12.2 cargo-edit
-              cargo install --locked --version 0.12.0 cargo-fuzz
+              cargo binstall -y --version 0.18.2 cargo-deny
+              cargo binstall -y --version 0.12.2 cargo-edit
+              cargo binstall -y --version 0.12.0 cargo-fuzz
+              cargo binstall -y --version 0.6.6 cargo-about
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
-              cargo install --locked --version 0.9.70 cargo-nextest
+              cargo binstall -y --version 0.9.70 cargo-nextest
             fi
 
   fetch_dependencies:

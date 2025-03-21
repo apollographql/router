@@ -4,6 +4,8 @@
 // Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
 // crate wide directive, allowing dead code here seems like the best options
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
@@ -20,12 +22,11 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::schema::FederationSchema;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -33,7 +34,6 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::FederationSchema;
 
 //////////////////////////////////////////////////////////////////////////////
 // Field and Argument Specifications
@@ -375,8 +375,10 @@ impl DirectiveSpecification {
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
         if composes {
-            assert!( supergraph_specification.is_some(),
-                "Should provide a @link specification to use in supergraph for directive @{name} if it composes");
+            assert!(
+                supergraph_specification.is_some(),
+                "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
+            );
             let mut argument_merger: Option<Box<ArgumentMergerFactory>> = None;
             let arg_strategies_iter = args
                 .iter()
@@ -390,8 +392,14 @@ impl DirectiveSpecification {
             let arg_strategies: IndexMap<String, ArgumentCompositionStrategy> =
                 IndexMap::from_iter(arg_strategies_iter);
             if !arg_strategies.is_empty() {
-                assert!(!repeatable, "Invalid directive specification for @{name}: @{name} is repeatable and should not define composition strategy for its arguments");
-                assert!(arg_strategies.len() == args.len(), "Invalid directive specification for @{name}: not all arguments define a composition strategy");
+                assert!(
+                    !repeatable,
+                    "Invalid directive specification for @{name}: @{name} is repeatable and should not define composition strategy for its arguments"
+                );
+                assert!(
+                    arg_strategies.len() == args.len(),
+                    "Invalid directive specification for @{name}: not all arguments define a composition strategy"
+                );
                 let name_capture = name.clone();
                 let args_capture = args.to_vec();
                 argument_merger = Some(Box::new(move |schema: &FederationSchema| -> Result<ArgumentMerger, SingleFederationError> {
@@ -783,9 +791,9 @@ mod tests {
     use crate::link::spec::Identity;
     use crate::link::spec::Version;
     use crate::link::spec_definition::SpecDefinition;
+    use crate::schema::FederationSchema;
     use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
     use crate::schema::type_and_directive_specification::DirectiveSpecification;
-    use crate::schema::FederationSchema;
 
     #[test]
     #[should_panic(

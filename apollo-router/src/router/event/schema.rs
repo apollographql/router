@@ -11,10 +11,10 @@ use url::Url;
 use crate::router::Event;
 use crate::router::Event::NoMoreSchema;
 use crate::router::Event::UpdateSchema;
+use crate::uplink::UplinkConfig;
 use crate::uplink::schema::SchemaState;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
-use crate::uplink::UplinkConfig;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
@@ -220,11 +220,11 @@ mod tests {
 
     use test_log::test;
     use tracing_futures::WithSubscriber;
-    use wiremock::matchers::method;
-    use wiremock::matchers::path;
     use wiremock::Mock;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers::method;
+    use wiremock::matchers::path;
 
     use super::*;
     use crate::assert_snapshot_subscriber;

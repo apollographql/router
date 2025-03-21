@@ -13,23 +13,24 @@ use rhai::Engine;
 use rhai::EvalAltResult;
 use serde_json::Value;
 use sha2::Digest;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::util::BoxService;
 use uuid::Uuid;
 
-use super::process_error;
-use super::subgraph;
 use super::PathBuf;
 use super::Rhai;
+use super::process_error;
+use super::subgraph;
+use crate::Context;
 use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
+use crate::plugin::DynPlugin;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockSupergraphService;
-use crate::plugin::DynPlugin;
 use crate::plugins::rhai::engine::RhaiExecutionDeferredResponse;
 use crate::plugins::rhai::engine::RhaiExecutionResponse;
 use crate::plugins::rhai::engine::RhaiRouterChunkedResponse;
@@ -41,7 +42,6 @@ use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::Context;
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...
@@ -62,10 +62,8 @@ async fn call_rhai_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
     let mut guard = scope.lock();
 
@@ -74,9 +72,9 @@ async fn call_rhai_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult
     let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
 
     // Call our rhai test function. If it doesn't return an error, the test failed.
-    block
+    rhai_instance
         .engine
-        .call_fn(&mut guard, &block.ast, fn_name, (response,))
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, (response,))
 }
 
 async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
@@ -99,10 +97,8 @@ async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
     let mut guard = scope.lock();
 
@@ -110,9 +106,9 @@ async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
     // happy
     let wrapped_arg = Arc::new(Mutex::new(Some(arg)));
 
-    block
+    rhai_instance
         .engine
-        .call_fn(&mut guard, &block.ast, fn_name, (wrapped_arg,))
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, (wrapped_arg,))
 }
 
 #[tokio::test]
@@ -315,17 +311,15 @@ async fn it_can_access_sdl_constant() {
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
     let mut guard = scope.lock();
 
     // Call our function to make sure we can access the sdl
-    let sdl: String = block
+    let sdl: String = rhai_instance
         .engine
-        .call_fn(&mut guard, &block.ast, "get_sdl", ())
+        .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
         .expect("can get sdl");
     assert_eq!(sdl.as_str(), "");
 }
@@ -590,15 +584,15 @@ async fn base_globals_function(fn_name: &str) -> Result<bool, Box<rhai::EvalAltR
     let it: &dyn std::any::Any = dyn_plugin.as_any();
     let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
-    let block = rhai_instance.block.load();
-
     // Get a scope to use for our test
-    let scope = block.scope.clone();
+    let scope = rhai_instance.scope.clone();
 
     let mut guard = scope.lock();
 
     // Call our rhai test function. If it doesn't return an error, the test failed.
-    block.engine.call_fn(&mut guard, &block.ast, fn_name, ())
+    rhai_instance
+        .engine
+        .call_fn(&mut guard, &rhai_instance.ast, fn_name, ())
 }
 
 #[tokio::test]
@@ -669,7 +663,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = call_rhai_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 251, position 5)'".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 257, position 5)'".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -697,7 +691,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
         assert_eq!(
             processed_error.message,
             Some(
-                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 262, position 5)'"
+                "rhai execution error: 'Runtime error: #{\"status\": 400} (line 268, position 5)'"
                     .to_string()
             )
         );

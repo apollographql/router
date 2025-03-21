@@ -12,21 +12,21 @@ use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse
 use prost::Message;
 use serde_json::Value;
 use tower::BoxError;
-use wiremock::matchers::method;
-use wiremock::matchers::path;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 use wiremock::Times;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
-use crate::integration::common::Telemetry;
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::DatadogId;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::DatadogId;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_error() -> Result<(), BoxError> {
@@ -47,7 +47,7 @@ async fn test_trace_error() -> Result<(), BoxError> {
 
     router.start().await;
     router.assert_started().await;
-    router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full").await;
+    router.assert_log_contained("OpenTelemetry trace error occurred: cannot send message to batch processor 'otlp-tracing' as the channel is full");
     router.assert_metrics_contains(r#"apollo_router_telemetry_batch_processor_errors_total{error="channel full",name="otlp-tracing",otel_scope_name="apollo/router"}"#, None).await;
     router.graceful_shutdown().await;
 
@@ -207,8 +207,8 @@ async fn test_otlp_request_with_datadog_propagator_no_agent() -> Result<(), BoxE
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog(
-) -> Result<(), BoxError> {
+async fn test_otlp_request_with_zipkin_trace_context_propagator_with_datadog()
+-> Result<(), BoxError> {
     if !graph_os_enabled() {
         panic!("Error: test skipped because GraphOS is not enabled");
     }
@@ -518,8 +518,8 @@ async fn test_priority_sampling_propagated() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
-) -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling()
+-> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
     let mock_server = mock_otlp_server(0..).await;
 

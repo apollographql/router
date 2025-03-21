@@ -7,25 +7,26 @@ use std::marker::PhantomData;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use tracing::field;
-use tracing_core::span::Id;
-use tracing_core::span::Record;
 use tracing_core::Event;
 use tracing_core::Field;
+use tracing_core::span::Id;
+use tracing_core::span::Record;
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::layer::Context;
-use tracing_subscriber::Layer;
 
 use super::config_new::ToOtelValue;
 use super::dynamic_attribute::LogAttributes;
-use super::formatters::EventFormatter;
 use super::formatters::EXCLUDED_ATTRIBUTES;
+use super::formatters::EventFormatter;
 use super::reload::IsSampled;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config_new::logging::Format;
 use crate::plugins::telemetry::config_new::logging::StdOut;
+use crate::plugins::telemetry::consts::EVENT_ATTRIBUTE_OMIT_LOG;
+use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::formatters::json::Json;
 use crate::plugins::telemetry::formatters::text::Text;
-use crate::plugins::telemetry::formatters::RateLimitFormatter;
 use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::resource::ConfigResource;
 
@@ -147,6 +148,12 @@ where
     }
 
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        let mut visitor = FieldsVisitor::new(&self.excluded_attributes);
+        event.record(&mut visitor);
+        if visitor.omit_from_logs {
+            return;
+        }
+
         thread_local! {
             static BUF: RefCell<String> = const { RefCell::new(String::new()) };
         }
@@ -180,6 +187,7 @@ where
 pub(crate) struct FieldsVisitor<'a, 'b> {
     pub(crate) values: HashMap<&'a str, serde_json::Value>,
     excluded_attributes: &'b HashSet<&'static str>,
+    omit_from_logs: bool,
 }
 
 impl<'b> FieldsVisitor<'_, 'b> {
@@ -187,6 +195,7 @@ impl<'b> FieldsVisitor<'_, 'b> {
         Self {
             values: HashMap::with_capacity(0),
             excluded_attributes,
+            omit_from_logs: false,
         }
     }
 }
@@ -214,6 +223,10 @@ impl field::Visit for FieldsVisitor<'_, '_> {
     fn record_bool(&mut self, field: &Field, value: bool) {
         self.values
             .insert(field.name(), serde_json::Value::from(value));
+
+        if field.name() == EVENT_ATTRIBUTE_OMIT_LOG && value {
+            self.omit_from_logs = true;
+        }
     }
 
     /// Visit a string value.
@@ -257,8 +270,8 @@ mod tests {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::URLTemplate;
-    use http::header::CONTENT_LENGTH;
     use http::HeaderValue;
+    use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
     use tests::events::RouterResponseBodyExtensionType;
@@ -274,19 +287,19 @@ mod tests {
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::events;
-    use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::events::EventLevel;
+    use crate::plugins::telemetry::config_new::events::log_event;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
-    use crate::services::connector::request_service::transport;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
+    use crate::services::connector::request_service::transport;
     use crate::services::router;
     use crate::services::router::body;
     use crate::services::subgraph;
@@ -799,7 +812,7 @@ connector:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));
@@ -1150,7 +1163,7 @@ subgraph:
                 subgraph_events.on_response(&subgraph_resp);
 
                 let context = crate::Context::default();
-                let mut http_request = http::Request::builder().body(body::empty()).unwrap();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
                 http_request
                     .headers_mut()
                     .insert("x-log-request", HeaderValue::from_static("log"));

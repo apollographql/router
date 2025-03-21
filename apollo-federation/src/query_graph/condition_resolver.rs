@@ -3,10 +3,10 @@
 //            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
-use apollo_compiler::ast::Type;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::ast::Type;
+use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
@@ -56,6 +56,30 @@ pub(crate) enum ConditionResolution {
         #[allow(dead_code)]
         reason: Option<UnsatisfiedConditionReason>,
     },
+}
+
+impl std::fmt::Display for ConditionResolution {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConditionResolution::Satisfied {
+                cost,
+                path_tree,
+                context_map,
+            } => {
+                writeln!(f, "Satisfied: cost={cost}")?;
+                if let Some(path_tree) = path_tree {
+                    writeln!(f, "path_tree:\n{path_tree}")?;
+                }
+                if let Some(context_map) = context_map {
+                    writeln!(f, ", context_map:\n{context_map:?}")?;
+                }
+                Ok(())
+            }
+            ConditionResolution::Unsatisfied { reason } => {
+                writeln!(f, "Unsatisfied: reason={:?}", reason)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -172,15 +196,17 @@ mod tests {
         let empty_destinations = ExcludedDestinations::default();
         let empty_conditions = ExcludedConditions::default();
 
-        assert!(cache
-            .contains(
-                edge1,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_miss());
+        assert!(
+            cache
+                .contains(
+                    edge1,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_miss()
+        );
 
         cache.insert(
             edge1,
@@ -188,26 +214,30 @@ mod tests {
             empty_destinations.clone(),
         );
 
-        assert!(cache
-            .contains(
-                edge1,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_hit(),);
+        assert!(
+            cache
+                .contains(
+                    edge1,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_hit(),
+        );
 
         let edge2 = EdgeIndex::new(2);
 
-        assert!(cache
-            .contains(
-                edge2,
-                &empty_context,
-                &empty_destinations,
-                &empty_conditions,
-                None
-            )
-            .is_miss());
+        assert!(
+            cache
+                .contains(
+                    edge2,
+                    &empty_context,
+                    &empty_destinations,
+                    &empty_conditions,
+                    None
+                )
+                .is_miss()
+        );
     }
 }

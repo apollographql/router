@@ -1,19 +1,23 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
 use http::header::CONTENT_LENGTH;
+use itertools::Itertools;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tracing::Span;
 
+use crate::Context;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::plugins::connectors::make_requests::ResponseKey;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::mapping::Problem;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::ConnectorDebugHttpRequest;
 use crate::plugins::connectors::plugin::debug::SelectionData;
@@ -26,14 +30,14 @@ use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::plugins::telemetry::tracing::apollo_telemetry::emit_error_event;
 use crate::services::connect::Response;
 use crate::services::connector;
-use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::connector::request_service::Error;
 use crate::services::connector::request_service::TransportResponse;
+use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
-use crate::Context;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -97,7 +101,7 @@ impl RawResponse {
 
                 let mapping_problems = aggregate_apply_to_errors(&apply_to_errors);
 
-                if let Some(ref debug) = debug_context {
+                if let Some(debug) = debug_context {
                     debug.lock().push_response(
                         debug_request.clone(),
                         &parts,
@@ -172,7 +176,7 @@ impl RawResponse {
                     .build()
                     .add_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
 
-                if let Some(ref debug) = debug_context {
+                if let Some(debug) = debug_context {
                     debug
                         .lock()
                         .push_response(debug_request.clone(), &parts, &data, None);
@@ -181,6 +185,16 @@ impl RawResponse {
                 MappedResponse::Error { error, key }
             }
         };
+
+        if let MappedResponse::Error {
+            error: ref mapped_error,
+            key: _,
+        } = mapped_response
+        {
+            if let Some(Value::String(error_code)) = mapped_error.extensions.get("code") {
+                emit_error_event(error_code.as_str(), "Connector error occurred");
+            }
+        }
 
         connector::request_service::Response {
             context: context.clone(),
@@ -281,6 +295,38 @@ impl MappedResponse {
                             entities.insert(index, Value::Object(entity));
                         }
                     };
+                }
+                ResponseKey::BatchEntity { keys, inputs, .. } => {
+                    let Value::Array(values) = value else {
+                        return Err(HandleResponseError::MergeError(
+                            "Response for a batch request does not map to an array".into(),
+                        ));
+                    };
+
+                    let key_selection: Result<JSONSelection, _> = keys.try_into();
+                    let key_selection = key_selection
+                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+
+                    // Convert representations into keys for use in the map
+                    let key_values = inputs.batch.iter().map(|v| {
+                        key_selection
+                            .apply_to(&Value::Object(v.clone()))
+                            .0
+                            .unwrap_or(Value::Null)
+                    });
+
+                    // Create a map of keys to entities
+                    let mut map = values
+                        .into_iter()
+                        .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
+                        .collect::<HashMap<_, _>>();
+
+                    // Make a list of entities that matches the representations list
+                    let entities = key_values
+                        .map(|key| map.remove(&key).unwrap_or(Value::Null))
+                        .collect_vec();
+
+                    data.insert(ENTITIES, Value::Array(entities));
                 }
             },
         }
@@ -536,7 +582,7 @@ async fn deserialize_response<T: HttpBody>(
     match serde_json::from_slice::<Value>(body) {
         Ok(json_data) => Ok(json_data),
         Err(_) => {
-            if let Some(ref debug_context) = debug_context {
+            if let Some(debug_context) = debug_context {
                 debug_context
                     .lock()
                     .push_invalid_response(debug_request.clone(), parts, body);
@@ -551,6 +597,7 @@ async fn deserialize_response<T: HttpBody>(
 mod tests {
     use std::sync::Arc;
 
+    use apollo_compiler::Schema;
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
@@ -560,13 +607,15 @@ mod tests {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use insta::assert_debug_snapshot;
+    use itertools::Itertools;
     use url::Url;
 
+    use crate::Context;
     use crate::plugins::connectors::handle_responses::process_response;
+    use crate::plugins::connectors::make_requests::RequestInputs;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
-    use crate::Context;
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
@@ -772,6 +821,120 @@ mod tests {
             },
         }
         "###);
+    }
+
+    #[tokio::test]
+    async fn test_handle_responses_batch() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(User),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Post,
+                headers: Default::default(),
+                body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
+            },
+            selection: JSONSelection::parse("$.data { id name }").unwrap(),
+            entity_resolver: Some(EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        });
+
+        let keys = connector
+            .resolvable_key(
+                &Schema::parse_and_validate("type Query { _: ID } type User { id: ID! }", "")
+                    .unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+
+        let response1: http::Response<RouterBody> = http::Response::builder()
+            // different order from the request inputs
+            .body(router::body::from_bytes(
+                r#"{"data":[{"id": "2","name":"B"},{"id": "1","name":"A"}]}"#,
+            ))
+            .unwrap();
+
+        let mut inputs: RequestInputs = RequestInputs::default();
+        let representations = serde_json_bytes::json!([{"__typename": "User", "id": "1"}, {"__typename": "User", "id": "2"}]);
+        inputs.batch = representations
+            .as_array()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(|v| v.as_object().unwrap().clone())
+            .collect_vec();
+
+        let response_key1 = ResponseKey::BatchEntity {
+            selection: Arc::new(JSONSelection::parse("$.data { id name }").unwrap()),
+            keys,
+            inputs,
+        };
+
+        let res = super::aggregate_responses(vec![
+            process_response(
+                Ok(response1),
+                response_key1,
+                connector.clone(),
+                &Context::default(),
+                None,
+                &None,
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap();
+
+        assert_debug_snapshot!(res, @r#"
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "_entities": Array([
+                                Object({
+                                    "id": String(
+                                        "1",
+                                    ),
+                                    "name": String(
+                                        "A",
+                                    ),
+                                }),
+                                Object({
+                                    "id": String(
+                                        "2",
+                                    ),
+                                    "name": String(
+                                        "B",
+                                    ),
+                                }),
+                            ]),
+                        }),
+                    ),
+                    path: None,
+                    errors: [],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
+                },
+            },
+        }
+        "#);
     }
 
     #[tokio::test]

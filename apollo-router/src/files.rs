@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::prelude::*;
-use notify::event::DataChange;
-use notify::event::MetadataKind;
-use notify::event::ModifyKind;
 use notify::Config;
 use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
+use notify::event::ModifyKind;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 
@@ -29,11 +29,11 @@ const DEFAULT_WATCH_DURATION: Duration = Duration::from_millis(100);
 ///
 /// returns: impl Stream<Item=()>
 ///
-pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
+pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> + use<> {
     watch_with_duration(path, DEFAULT_WATCH_DURATION)
 }
 
-fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> {
+fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> + use<> {
     // Due to the vagaries of file watching across multiple platforms, instead of watching the
     // supplied path (file), we are going to watch the parent (directory) of the path.
     let config_file_path = PathBuf::from(path);
@@ -101,6 +101,101 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
         .boxed()
 }
 
+/// Creates a stream events whenever the path has changes. The stream never terminates
+/// and must be dropped to finish watching.
+///
+/// # Arguments
+///
+/// * `path`: The path to watch
+///
+/// returns: impl Stream<Item=()>
+///
+pub(crate) fn watch_rhai(path: &Path) -> impl Stream<Item = ()> + use<> {
+    watch_rhai_with_duration(path, DEFAULT_WATCH_DURATION)
+}
+
+// We need different watcher configuration for Rhai source.
+fn watch_rhai_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> + use<> {
+    // Due to the vagaries of file watching across multiple platforms, instead of watching the
+    // supplied path (file), we are going to watch the parent (directory) of the path.
+    let rhai_source_path = PathBuf::from(path);
+
+    let (watch_sender, watch_receiver) = mpsc::channel(1);
+    let watch_receiver_stream = tokio_stream::wrappers::ReceiverStream::new(watch_receiver);
+    // We can't use the recommended watcher, because there's just too much variation across
+    // platforms and file systems. We use the Poll Watcher, which is implemented consistently
+    // across all platforms. Less reactive than other mechanisms, but at least it's predictable
+    // across all environments. We compare contents as well, which reduces false positives with
+    // some additional processing burden.
+    let config = Config::default()
+        .with_poll_interval(duration)
+        .with_compare_contents(true);
+    let mut watcher = PollWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            match res {
+                Ok(event) => {
+                    // Let's limit the events we are interested in to:
+                    //  - Modified files
+                    //  - Created/Remove files
+                    //  - with suffix "rhai"
+                    if matches!(
+                        event.kind,
+                        EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
+                            | EventKind::Modify(ModifyKind::Data(DataChange::Any))
+                            | EventKind::Create(_)
+                            | EventKind::Remove(_)
+                    ) {
+                        let mut proceed = false;
+                        for path in &event.paths {
+                            if path.extension().is_some_and(|ext| ext == "rhai") {
+                                proceed = true;
+                                break;
+                            }
+                        }
+
+                        if proceed {
+                            loop {
+                                match watch_sender.try_send(()) {
+                                    Ok(_) => break,
+                                    Err(err) => {
+                                        tracing::warn!(
+                                            "could not process file watch notification. {}",
+                                            err.to_string()
+                                        );
+                                        if matches!(err, TrySendError::Full(_)) {
+                                            std::thread::sleep(Duration::from_millis(50));
+                                        } else {
+                                            panic!("event channel failed: {err}");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::error!("rhai watching event error: {:?}", e),
+            }
+        },
+        config,
+    )
+    .unwrap_or_else(|_| panic!("could not create watch on: {rhai_source_path:?}"));
+    watcher
+        .watch(&rhai_source_path, RecursiveMode::Recursive)
+        .unwrap_or_else(|_| panic!("could not watch: {rhai_source_path:?}"));
+    // Tell watchers once they should read the file once,
+    // then listen to fs events.
+    stream::once(future::ready(()))
+        .chain(watch_receiver_stream)
+        .chain(stream::once(async move {
+            // This exists to give the stream ownership of the hotwatcher.
+            // Without it hotwatch will get dropped and the stream will terminate.
+            // This code never actually gets run.
+            // The ideal would be that hotwatch implements a stream and
+            // therefore we don't need this hackery.
+            drop(watcher);
+        }))
+        .boxed()
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use std::env::temp_dir;

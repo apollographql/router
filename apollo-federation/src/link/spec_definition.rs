@@ -1,22 +1,29 @@
-use std::collections::btree_map::Keys;
 use std::collections::BTreeMap;
+use std::collections::btree_map::Keys;
 use std::sync::Arc;
 
-use apollo_compiler::schema::DirectiveDefinition;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::ExtendedType;
 
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::Link;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
-use crate::link::Link;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
+#[allow(dead_code)]
 pub(crate) trait SpecDefinition {
     fn url(&self) -> &Url;
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>>;
 
     fn identity(&self) -> &Identity {
         &self.url().identity
@@ -118,16 +125,38 @@ pub(crate) trait SpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Option<Arc<Link>>, FederationError> {
         let Some(metadata) = schema.metadata() else {
-            return Err(SingleFederationError::Internal {
-                message: "Schema is not a core schema (add @link first)".to_owned(),
-            }
-            .into());
+            return Ok(None);
         };
         Ok(metadata.for_identity(self.identity()))
     }
 
     fn to_string(&self) -> String {
         self.url().to_string()
+    }
+
+    fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let mut errors = MultipleFederationErrors { errors: vec![] };
+        for type_spec in self.type_specs() {
+            // TODO: In JS, `check_or_add` take in the "feature" (ie. the link), and we'll likely need to
+            // do the same here and below to account for renamed directives and imports
+            if let Err(err) = type_spec.check_or_add(schema) {
+                errors.push(err);
+            }
+        }
+
+        for directive_spec in self.directive_specs() {
+            if let Err(err) = directive_spec.check_or_add(schema) {
+                errors.push(err);
+            }
+        }
+
+        if errors.errors.len() > 1 {
+            Err(FederationError::MultipleFederationErrors(errors))
+        } else if let Some(error) = errors.errors.pop() {
+            Err(FederationError::SingleFederationError(error))
+        } else {
+            Ok(())
+        }
     }
 }
 

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::ControlFlow;
 
-use apollo_compiler::ast;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::ast;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -15,18 +15,20 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::authenticated::AuthenticatedCheckVisitor;
-use self::authenticated::AuthenticatedVisitor;
 use self::authenticated::AUTHENTICATED_SPEC_BASE_URL;
 use self::authenticated::AUTHENTICATED_SPEC_VERSION_RANGE;
-use self::policy::PolicyExtractionVisitor;
-use self::policy::PolicyFilteringVisitor;
+use self::authenticated::AuthenticatedCheckVisitor;
+use self::authenticated::AuthenticatedVisitor;
 use self::policy::POLICY_SPEC_BASE_URL;
 use self::policy::POLICY_SPEC_VERSION_RANGE;
-use self::scopes::ScopeExtractionVisitor;
-use self::scopes::ScopeFilteringVisitor;
+use self::policy::PolicyExtractionVisitor;
+use self::policy::PolicyFilteringVisitor;
 use self::scopes::REQUIRES_SCOPES_SPEC_BASE_URL;
 use self::scopes::REQUIRES_SCOPES_SPEC_VERSION_RANGE;
+use self::scopes::ScopeExtractionVisitor;
+use self::scopes::ScopeFilteringVisitor;
+use crate::Configuration;
+use crate::Context;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -41,12 +43,10 @@ use crate::register_plugin;
 use crate::services::execution;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::supergraph;
-use crate::spec::query::transform;
-use crate::spec::query::traverse;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::Configuration;
-use crate::Context;
+use crate::spec::query::transform;
+use crate::spec::query::traverse;
 
 pub(crate) mod authenticated;
 pub(crate) mod policy;
@@ -451,14 +451,19 @@ impl AuthorizationPlugin {
 
             if visitor.query_requires_authentication {
                 if is_authenticated {
-                    tracing::debug!("the query contains @authenticated, the request is authenticated, keeping the query");
+                    tracing::debug!(
+                        "the query contains @authenticated, the request is authenticated, keeping the query"
+                    );
                     Ok(None)
                 } else {
-                    tracing::debug!("the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}", visitor
-                .unauthorized_paths
-                .iter()
-                .map(|path| path.to_string())
-                .collect::<Vec<_>>());
+                    tracing::debug!(
+                        "the query contains @authenticated, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                        visitor
+                            .unauthorized_paths
+                            .iter()
+                            .map(|path| path.to_string())
+                            .collect::<Vec<_>>()
+                    );
 
                     Ok(Some((modified_query, visitor.unauthorized_paths)))
                 }
@@ -487,13 +492,14 @@ impl AuthorizationPlugin {
             let modified_query = transform::document(&mut visitor, doc)
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
             if visitor.query_requires_scopes {
-                tracing::debug!("the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
-                visitor
-                    .unauthorized_paths
-                    .iter()
-                    .map(|path| path.to_string())
-                    .collect::<Vec<_>>()
-            );
+                tracing::debug!(
+                    "the query required scopes, the requests present scopes: {scopes:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                    visitor
+                        .unauthorized_paths
+                        .iter()
+                        .map(|path| path.to_string())
+                        .collect::<Vec<_>>()
+                );
                 Ok(Some((modified_query, visitor.unauthorized_paths)))
             } else {
                 tracing::debug!("the query does not require scopes");
@@ -522,13 +528,14 @@ impl AuthorizationPlugin {
                 .map_err(|e| SpecError::TransformError(e.to_string()))?;
 
             if visitor.query_requires_policies {
-                tracing::debug!("the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
-                visitor
-                    .unauthorized_paths
-                    .iter()
-                    .map(|path| path.to_string())
-                    .collect::<Vec<_>>()
-            );
+                tracing::debug!(
+                    "the query required policies, the requests present policies: {policies:?}, modified query:\n{modified_query}\nunauthorized paths: {:?}",
+                    visitor
+                        .unauthorized_paths
+                        .iter()
+                        .map(|path| path.to_string())
+                        .collect::<Vec<_>>()
+                );
                 Ok(Some((modified_query, visitor.unauthorized_paths)))
             } else {
                 tracing::debug!("the query does not require policies");

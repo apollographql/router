@@ -13,11 +13,11 @@ use super::graph_path::ArgumentsToContextUsages;
 use super::graph_path::MatchingContextIds;
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNode;
 use crate::query_graph::graph_path::GraphPathItem;
 use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
-use crate::query_graph::QueryGraph;
-use crate::query_graph::QueryGraphNode;
 use crate::utils::FallibleIterator;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
@@ -574,24 +574,25 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::parser::Parser;
     use apollo_compiler::ExecutableDocument;
+    use apollo_compiler::parser::Parser;
     use petgraph::stable_graph::NodeIndex;
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
-    use crate::operation::normalize_operation;
     use crate::operation::Field;
+    use crate::operation::never_cancel;
+    use crate::operation::normalize_operation;
+    use crate::query_graph::QueryGraph;
+    use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
     use crate::query_graph::graph_path::OpGraphPathTrigger;
     use crate::query_graph::graph_path::OpPathElement;
     use crate::query_graph::path_tree::OpPathTree;
-    use crate::query_graph::QueryGraph;
-    use crate::query_graph::QueryGraphEdgeTransition;
-    use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::ValidFederationSchema;
+    use crate::schema::position::SchemaRootDefinitionKind;
 
     // NB: stole from operation.rs
     fn parse_schema_and_operation(
@@ -715,9 +716,14 @@ mod tests {
             "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
-        let normalized_operation =
-            normalize_operation(operation, Default::default(), &schema, &Default::default())
-                .unwrap();
+        let normalized_operation = normalize_operation(
+            operation,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            &never_cancel,
+        )
+        .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
         let paths = vec![

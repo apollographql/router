@@ -1,14 +1,14 @@
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::trace::Link;
 use opentelemetry::trace::SamplingDecision;
 use opentelemetry::trace::SamplingResult;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceId;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
 use opentelemetry_sdk::trace::ShouldSample;
 
-use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 
 /// The Datadog Agent Sampler
 ///
@@ -100,6 +100,9 @@ impl ShouldSample for DatadogAgentSampling {
 #[cfg(test)]
 mod tests {
     use buildstructor::Builder;
+    use opentelemetry::Context;
+    use opentelemetry::KeyValue;
+    use opentelemetry::Value;
     use opentelemetry::trace::Link;
     use opentelemetry::trace::SamplingDecision;
     use opentelemetry::trace::SamplingResult;
@@ -110,15 +113,12 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::Context;
-    use opentelemetry::KeyValue;
-    use opentelemetry::Value;
     use opentelemetry_sdk::trace::Sampler;
     use opentelemetry_sdk::trace::ShouldSample;
 
     use crate::plugins::telemetry::tracing::datadog::DatadogAgentSampling;
-    use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
     use crate::plugins::telemetry::tracing::datadog_exporter::DatadogTraceState;
+    use crate::plugins::telemetry::tracing::datadog_exporter::propagator::SamplingPriority;
 
     #[derive(Debug, Clone, Builder)]
     struct StubSampler {
@@ -169,11 +169,13 @@ mod tests {
             Some(SamplingPriority::AutoReject)
         );
         // Verify that the sampling.priority attribute is set correctly
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -204,11 +206,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoReject)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -239,11 +243,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoKeep)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -275,11 +281,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::AutoKeep)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::AutoKeep.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -317,11 +325,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::UserReject)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::UserReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::UserReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());
@@ -359,11 +369,13 @@ mod tests {
             result.trace_state.sampling_priority(),
             Some(SamplingPriority::UserReject)
         );
-        assert!(result
-            .attributes
-            .iter()
-            .any(|kv| kv.key.as_str() == "sampling.priority"
-                && kv.value == Value::I64(SamplingPriority::UserReject.as_i64())));
+        assert!(
+            result
+                .attributes
+                .iter()
+                .any(|kv| kv.key.as_str() == "sampling.priority"
+                    && kv.value == Value::I64(SamplingPriority::UserReject.as_i64()))
+        );
 
         // Verify that measuring is enabled
         assert!(result.trace_state.measuring_enabled());

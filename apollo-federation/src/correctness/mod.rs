@@ -4,26 +4,28 @@ pub mod query_plan_analysis_test;
 pub mod response_shape;
 pub mod response_shape_compare;
 #[cfg(test)]
+pub mod response_shape_compare_test;
+#[cfg(test)]
 pub mod response_shape_test;
 mod subgraph_constraint;
 
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
 
+use crate::FederationError;
 use crate::compat::coerce_executable_values;
-use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::correctness::response_shape_compare::ComparisonError;
+use crate::correctness::response_shape_compare::compare_response_shapes_with_constraint;
 use crate::query_plan::QueryPlan;
 use crate::schema::ValidFederationSchema;
-use crate::FederationError;
 
 //==================================================================================================
 // Public API
 
-#[derive(derive_more::From)]
+#[derive(derive_more::From, Debug)]
 pub enum CorrectnessError {
     /// Correctness checker's own error
     FederationError(FederationError),
@@ -78,6 +80,7 @@ pub fn check_plan(
     );
 
     let path_constraint = subgraph_constraint::SubgraphConstraint::at_root(subgraphs_by_name);
-    compare_response_shapes_with_constraint(&path_constraint, &op_rs, &plan_rs)?;
+    let assumption = response_shape::Clause::default(); // empty assumption at the top level
+    compare_response_shapes_with_constraint(&path_constraint, &assumption, &op_rs, &plan_rs)?;
     Ok(())
 }

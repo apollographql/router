@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::io;
 use std::sync::Arc;
 
@@ -7,30 +8,37 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
-use rustls::pki_types::CertificateDer;
 use rustls::RootCertStore;
+use rustls::pki_types::CertificateDer;
 use serde_json::Map;
 use serde_json::Value;
-use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
+use tower::service_fn;
 use tower_service::Service;
 use tracing::Instrument;
 
+use crate::ListenAddr;
+use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
-use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::subscription::Subscription;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
-use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
+use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
+use crate::services::HasConfig;
+use crate::services::HasSchema;
+use crate::services::PluggableSupergraphServiceBuilder;
+use crate::services::Plugins;
+use crate::services::SubgraphService;
+use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -38,16 +46,10 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
-use crate::services::HasConfig;
-use crate::services::HasSchema;
-use crate::services::PluggableSupergraphServiceBuilder;
-use crate::services::Plugins;
-use crate::services::SubgraphService;
-use crate::services::SupergraphCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::ListenAddr;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 
@@ -108,6 +110,8 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory
@@ -397,9 +401,19 @@ pub(crate) async fn create_http_services(
     schema: &Schema,
     configuration: &Configuration,
 ) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
-    let tls_root_store: RootCertStore = configuration
+    // Note we are grabbing these root stores once and then reusing it for each subgraph. Why?
+    // When TLS was not configured for subgraphs, the OS provided list of certificates was parsed once per subgraph, which resulted in long loading times on OSX.
+    // This generates the native root store once, and reuses it across subgraphs
+    let subgraph_tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
+        .all
+        .create_certificate_store()
+        .transpose()?
+        .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
+    let connector_tls_root_store: RootCertStore = configuration
+        .tls
+        .connector
         .all
         .create_certificate_store()
         .transpose()?
@@ -411,18 +425,52 @@ pub(crate) async fn create_http_services(
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
+    let connector_subgraphs: HashSet<String> = schema
+        .connectors
+        .as_ref()
+        .map(|c| {
+            c.by_service_name
+                .iter()
+                .map(|(_, connector)| connector.id.subgraph_name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
-        let http_service = crate::services::http::HttpClientService::from_config(
+        if connector_subgraphs.contains(name) {
+            continue; // Avoid adding services for subgraphs that are actually connectors since we'll separately add them below per source
+        }
+        let http_service = crate::services::http::HttpClientService::from_config_for_subgraph(
             name,
             configuration,
-            &tls_root_store,
+            &subgraph_tls_root_store,
             shaping.subgraph_client_config(name),
         )?;
 
         let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
         http_services.insert(name.clone(), http_service_factory);
     }
+
+    // Also create client service factories for connector sources
+    let connector_sources = schema
+        .connectors
+        .as_ref()
+        .map(|c| c.source_config_keys.clone())
+        .unwrap_or_default();
+
+    for name in connector_sources.iter() {
+        let http_service = crate::services::http::HttpClientService::from_config_for_connector(
+            name,
+            configuration,
+            &connector_tls_root_store,
+            shaping.connector_client_config(name),
+        )?;
+
+        let http_service_factory = HttpClientServiceFactory::new(http_service, plugins.clone());
+        http_services.insert(name.clone(), http_service_factory);
+    }
+
     Ok(http_services)
 }
 
@@ -747,9 +795,16 @@ pub(crate) async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
+        let errors_list = errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<String>>()
+            .join("\n");
+
         Err(BoxError::from(format!(
-            "there were {} configuration errors",
-            errors.len()
+            "there were {} configuration errors\n{}",
+            errors.len(),
+            errors_list
         )))
     } else {
         Ok(plugin_instances)
@@ -794,9 +849,9 @@ mod test {
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
-    use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
+    use crate::router_factory::inject_schema_id;
     use crate::spec::Schema;
     use crate::uplink::license_enforcement::LicenseState;
 

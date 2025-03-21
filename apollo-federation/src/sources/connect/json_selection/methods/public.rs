@@ -4,25 +4,25 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
-use shape::location::SourceId;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::SourceId;
 
 use crate::impl_arrow_method;
+use crate::sources::connect::json_selection::ApplyToError;
+use crate::sources::connect::json_selection::ApplyToInternal;
+use crate::sources::connect::json_selection::MethodArgs;
+use crate::sources::connect::json_selection::PathList;
+use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::known_var::KnownVariable;
 use crate::sources::connect::json_selection::lit_expr::LitExpr;
-use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
-use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
-use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
-use crate::sources::connect::json_selection::VarsWithPathsMap;
+use crate::sources::connect::json_selection::location::merge_ranges;
 
 impl_arrow_method!(EchoMethod, echo_method, echo_shape);
 fn echo_method(

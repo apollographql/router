@@ -4,12 +4,12 @@ use std::hash::Hash;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
-use serde_json_bytes::json;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
-use shape::location::SourceId;
+use serde_json_bytes::json;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::SourceId;
 
 use super::helpers::json_merge;
 use super::helpers::json_type_name;
@@ -2563,14 +2563,17 @@ mod tests {
         // );
 
         assert_eq!(
-            selection!(r#"
+            selection!(
+                r#"
                 id
                 name
                 friends: friend_ids { id: @ }
                 alias: arrayOfArrays { x y }
                 ys: arrayOfArrays.y xs: arrayOfArrays.x
-            "#).shape().pretty_print(),
-
+            "#
+            )
+            .shape()
+            .pretty_print(),
             // This output shape is wrong if $root.friend_ids turns out to be an
             // array, and it's tricky to see how to transform the shape to what
             // it would have been if we knew that, where friends: List<{ id:
