@@ -109,9 +109,7 @@ impl SupergraphStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: supergraph request stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: supergraph request stage error: {error}");
                         error
                     });
                     u64_counter!(
@@ -149,9 +147,7 @@ impl SupergraphStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: supergraph response stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: supergraph response stage error: {error}");
                         error
                     });
                     u64_counter!(
