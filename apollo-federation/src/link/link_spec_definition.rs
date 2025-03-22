@@ -6,6 +6,7 @@ use apollo_compiler::ast::Type;
 use apollo_compiler::name;
 use apollo_compiler::ty;
 
+use crate::bail;
 use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
@@ -24,6 +25,8 @@ use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecificati
 
 pub(crate) const LINK_DIRECTIVE_AS_ARGUMENT_NAME: Name = name!("as");
 pub(crate) const LINK_DIRECTIVE_URL_ARGUMENT_NAME: Name = name!("url");
+pub(crate) const LINK_DIRECTIVE_FOR_ARGUMENT_NAME: Name = name!("for");
+pub(crate) const LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME: Name = name!("import");
 
 pub(crate) struct LinkSpecDefinition {
     url: Url,
@@ -41,7 +44,7 @@ impl LinkSpecDefinition {
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: LINK_DIRECTIVE_URL_ARGUMENT_NAME,
-                    get_type: |_| Ok(ty!(String)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -49,7 +52,7 @@ impl LinkSpecDefinition {
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: LINK_DIRECTIVE_AS_ARGUMENT_NAME,
-                    get_type: |_| Ok(ty!(String)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -58,8 +61,15 @@ impl LinkSpecDefinition {
         if self.supports_purpose() {
             specs.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: DEFAULT_PURPOSE_ENUM_NAME,
-                    get_type: |_| Ok(Type::Named(DEFAULT_PURPOSE_ENUM_NAME)),
+                    name: LINK_DIRECTIVE_FOR_ARGUMENT_NAME,
+                    get_type: |_schema, link| {
+                        let Some(link) = link else {
+                            bail!(
+                                "Type {DEFAULT_PURPOSE_ENUM_NAME} shouldn't be added without being attached to a @link spec"
+                            )
+                        };
+                        Ok(Type::Named(link.type_name_in_schema(&DEFAULT_PURPOSE_ENUM_NAME)))
+                    },
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -68,10 +78,15 @@ impl LinkSpecDefinition {
         if self.supports_import() {
             specs.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: DEFAULT_IMPORT_SCALAR_NAME,
-                    get_type: |_| {
+                    name: LINK_DIRECTIVE_IMPORT_ARGUMENT_NAME,
+                    get_type: |_, link| {
+                        let Some(link) = link else {
+                            bail!(
+                                "Type {DEFAULT_IMPORT_SCALAR_NAME} shouldn't be added without being attached to a @link spec"
+                            )
+                        };
                         Ok(Type::List(Box::new(Type::Named(
-                            DEFAULT_IMPORT_SCALAR_NAME,
+                            link.type_name_in_schema(&DEFAULT_IMPORT_SCALAR_NAME),
                         ))))
                     },
                     default_value: None,

@@ -213,6 +213,9 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(
+        expected = r#"MultipleFederationErrors { errors: [Internal { message: "Type Purpose shouldn't be added without being attached to a @link spec" }, Internal { message: "Type Import shouldn't be added without being attached to a @link spec" }] }"#
+    )]
     fn detects_federation_2_subgraphs_correctly() {
         let schema = Schema::parse(
             r#"
