@@ -157,35 +157,32 @@ async fn insert() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
-    let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
-                    "__typename": "Organization",
-                    "id": "1"
-                } }}}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
-            "variables": {
-                "representations": [
-                    {
-                        "id": "1",
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
                         "__typename": "Organization",
+                        "id": "1",
                     }
-                ]
-            }}},
-            serde_json::json!{{"data": {
-                "_entities": [{
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
                     "creatorUser": {
                         "__typename": "User",
                         "id": 2
                     }
-                }]
-            }}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
-    ].into_iter().collect());
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
 
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
@@ -219,11 +216,13 @@ async fn insert() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
-        .extra_plugin(subgraphs)
         .build_supergraph()
         .await
         .unwrap();
