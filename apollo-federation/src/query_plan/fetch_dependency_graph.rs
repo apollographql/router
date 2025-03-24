@@ -31,7 +31,6 @@ use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::internal_error;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::ArgumentList;
 use crate::operation::ContainmentOptions;
@@ -65,6 +64,8 @@ use crate::query_plan::conditions::Conditions;
 use crate::query_plan::conditions::remove_conditions_from_selection_set;
 use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::requires_selection;
+use crate::query_plan::serializable_document::SerializableDocument;
 use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
@@ -1337,10 +1338,6 @@ impl FetchDependencyGraph {
         // Some helper functions
 
         let try_get_type_condition = |selection: &Selection| match selection {
-            Selection::FragmentSpread(fragment) => {
-                Some(fragment.spread.type_condition_position.clone())
-            }
-
             Selection::InlineFragment(inline) => {
                 inline.inline_fragment.type_condition_position.clone()
             }
@@ -2567,11 +2564,11 @@ impl FetchDependencyGraphNode {
         }
     }
 
-    pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
+    pub(crate) fn cost(&mut self) -> QueryPlanCost {
         if self.cached_cost.is_none() {
-            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0)?)
+            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0))
         }
-        Ok(self.cached_cost.unwrap())
+        self.cached_cost.unwrap()
     }
 
     pub(crate) fn to_plan_node(
@@ -2656,43 +2653,33 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let operation = operation_compression.compress(operation)?;
-        let operation_document = operation.try_into().map_err(|err| match err {
-            FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
-                diagnostics,
-            }) => internal_error!(
-                "Query planning produced an invalid subgraph operation.\n{diagnostics}"
-            ),
-            _ => err,
-        })?;
+        let operation_document = operation_compression.compress(operation)?;
 
         // this function removes unnecessary pieces of the query plan requires selection set.
         // PORT NOTE: this function was called trimSelectioNodes in the JS implementation
         fn trim_requires_selection_set(
             selection_set: &executable::SelectionSet,
-        ) -> Vec<executable::Selection> {
+        ) -> Vec<requires_selection::Selection> {
             selection_set
                 .selections
                 .iter()
                 .filter_map(|s| match s {
-                    executable::Selection::Field(field) => Some(executable::Selection::from(
-                        executable::Field::new(field.name.clone(), field.definition.clone())
-                            .with_selections(trim_requires_selection_set(&field.selection_set)),
-                    )),
+                    executable::Selection::Field(field) => Some(
+                        requires_selection::Selection::Field(requires_selection::Field {
+                            alias: None,
+                            name: field.name.clone(),
+                            selections: trim_requires_selection_set(&field.selection_set),
+                        }),
+                    ),
                     executable::Selection::InlineFragment(inline_fragment) => {
-                        let new_fragment = inline_fragment
-                            .type_condition
-                            .clone()
-                            .map(executable::InlineFragment::with_type_condition)
-                            .unwrap_or_else(|| {
-                                executable::InlineFragment::without_type_condition(
-                                    inline_fragment.selection_set.ty.clone(),
-                                )
-                            })
-                            .with_selections(trim_requires_selection_set(
-                                &inline_fragment.selection_set,
-                            ));
-                        Some(executable::Selection::from(new_fragment))
+                        Some(requires_selection::Selection::InlineFragment(
+                            requires_selection::InlineFragment {
+                                type_condition: inline_fragment.type_condition.clone(),
+                                selections: trim_requires_selection_set(
+                                    &inline_fragment.selection_set,
+                                ),
+                            },
+                        ))
                     }
                     executable::Selection::FragmentSpread(_) => None,
                 })
@@ -2706,8 +2693,9 @@ impl FetchDependencyGraphNode {
                 .as_ref()
                 .map(executable::SelectionSet::try_from)
                 .transpose()?
-                .map(|selection_set| trim_requires_selection_set(&selection_set)),
-            operation_document,
+                .map(|selection_set| trim_requires_selection_set(&selection_set))
+                .unwrap_or_default(),
+            operation_document: SerializableDocument::from_parsed(operation_document),
             operation_name,
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
@@ -2989,9 +2977,6 @@ impl FetchDependencyGraphNode {
                         )?;
                     }
                 }
-                Selection::FragmentSpread(_) => {
-                    bail!("Contexts shouldn't contain named fragment spreads");
-                }
                 Selection::InlineFragment(inline_fragment_selection) => {
                     if let Some(type_condition) = &inline_fragment_selection
                         .inline_fragment
@@ -3086,7 +3071,6 @@ fn operation_for_entities_fetch(
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
         selection_set,
-        named_fragments: Default::default(),
     })
 }
 
@@ -3105,7 +3089,6 @@ fn operation_for_query_fetch(
         variables: Arc::new(variable_definitions),
         directives: operation_directives.clone(),
         selection_set,
-        named_fragments: Default::default(),
     })
 }
 
@@ -3128,7 +3111,7 @@ fn representations_variable_definition(
 }
 
 impl SelectionSet {
-    pub(crate) fn cost(&self, depth: QueryPlanCost) -> Result<QueryPlanCost, FederationError> {
+    pub(crate) fn cost(&self, depth: QueryPlanCost) -> QueryPlanCost {
         // The cost is essentially the number of elements in the selection,
         // but we make deep element cost a tiny bit more,
         // mostly to make things a tad more deterministic
@@ -3137,22 +3120,17 @@ impl SelectionSet {
         // and one that doesn't, and both will be almost identical,
         // except that the type-exploded field will be a different depth;
         // by favoring lesser depth in that case, we favor not type-exploding).
-        self.selections.values().try_fold(0.0, |sum, selection| {
+        self.selections.values().fold(0.0, |sum, selection| {
             let subselections = match selection {
                 Selection::Field(field) => field.selection_set.as_ref(),
                 Selection::InlineFragment(inline) => Some(&inline.selection_set),
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal(
-                        "unexpected fragment spread in FetchDependencyGraphNode",
-                    ));
-                }
             };
             let subselections_cost = if let Some(selection_set) = subselections {
-                selection_set.cost(depth + 1.0)?
+                selection_set.cost(depth + 1.0)
             } else {
                 0.0
             };
-            Ok(sum + depth + subselections_cost)
+            sum + depth + subselections_cost
         })
     }
 }
@@ -3488,6 +3466,7 @@ pub(crate) fn compute_nodes_for_tree(
     initial_node_path: FetchDependencyGraphNodePath,
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
     snapshot!("OpPathTree", initial_tree.to_string(), "path_tree");
     let mut stack = vec![ComputeNodesStackItem {
@@ -3500,6 +3479,7 @@ pub(crate) fn compute_nodes_for_tree(
     }];
     let mut created_nodes = IndexSet::default();
     while let Some(stack_item) = stack.pop() {
+        check_cancellation()?;
         let node =
             FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
         for selection_set in &stack_item.tree.local_selection_sets {
@@ -3545,6 +3525,7 @@ pub(crate) fn compute_nodes_for_tree(
                                 edge_id,
                                 new_context,
                                 &mut created_nodes,
+                                check_cancellation,
                             )?);
                         }
                         QueryGraphEdgeTransition::RootTypeResolution { root_kind } => {
@@ -3572,6 +3553,7 @@ pub(crate) fn compute_nodes_for_tree(
                         child,
                         operation,
                         &mut created_nodes,
+                        check_cancellation,
                     )?);
                 }
             }
@@ -3596,6 +3578,7 @@ fn compute_nodes_for_key_resolution<'a>(
     edge_id: EdgeIndex,
     new_context: &'a OpGraphPathContext,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let edge = stack_item.tree.graph.edge_weight(edge_id)?;
     let Some(conditions) = &child.conditions else {
@@ -3611,6 +3594,7 @@ fn compute_nodes_for_key_resolution<'a>(
         stack_item.node_path.clone(),
         stack_item.defer_context.for_conditions(),
         &Default::default(),
+        check_cancellation,
     )?;
     created_nodes.extend(conditions_nodes.iter().copied());
     // Then we can "take the edge", creating a new node.
@@ -3849,6 +3833,7 @@ fn compute_nodes_for_op_path_element<'a>(
     child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     operation_element: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {
     let Some(edge_id) = child.edge else {
         // A null edge means that the operation does nothing
@@ -3955,6 +3940,7 @@ fn compute_nodes_for_op_path_element<'a>(
             },
             &updated.defer_context,
             created_nodes,
+            check_cancellation,
         )?;
 
         if let Some(matching_context_ids) = &child.matching_context_ids {
@@ -4434,6 +4420,7 @@ fn handle_conditions_tree(
     query_graph_edge_id_if_typename_needed: Option<EdgeIndex>,
     defer_context: &DeferContext,
     created_nodes: &mut IndexSet<NodeIndex>,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<ConditionsNodeData, FederationError> {
     // In many cases, we can optimize conditions by merging the fields into previously existing
     // nodes. However, we only do this when the current node has only a single parent (it's hard to
@@ -4517,6 +4504,7 @@ fn handle_conditions_tree(
         fetch_node_path.clone(),
         defer_context.for_conditions(),
         &OpGraphPathContext::default(),
+        check_cancellation,
     )?;
 
     if newly_created_node_ids.is_empty() {

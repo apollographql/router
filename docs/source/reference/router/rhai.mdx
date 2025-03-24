@@ -24,7 +24,7 @@ fn supergraph_service(service) {
   let request_callback = |request| {
       print("Supergraph service: Client request received");
   };
-  
+
   let response_callback = |response| {
       print("Supergraph service: Client response ready to send");
   };
@@ -117,7 +117,7 @@ fn supergraph_service(service) {
 }
 ```
 
-Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](/router/customizations/coprocessor/#terminating-a-client-request).
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [coprocessor section](/router/customizations/coprocessor/#terminating-a-client-request).
 
 If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
@@ -301,7 +301,7 @@ Look at the examples to see how this works in practice.
 
 ## Unix timestamp
 
-Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch. 
+Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch.
 
 ```rhai
 fn supergraph_service(service) {
@@ -311,7 +311,7 @@ fn supergraph_service(service) {
 
 ## Unix timestamp (in milliseconds)
 
-Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch.
 
 ```rhai
 fn supergraph_service(service) {
@@ -322,7 +322,7 @@ fn supergraph_service(service) {
 ## Unique IDs (UUID)
 
 Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
- 
+
 ```rhai
 fn supergraph_service(service) {
     let id = uuid_v4();
@@ -381,6 +381,7 @@ request.body.query
 request.body.operation_name
 request.body.variables
 request.body.extensions
+request.uri.scheme
 request.uri.host
 request.uri.path
 request.uri.port
@@ -400,6 +401,7 @@ request.subgraph.body.query
 request.subgraph.body.operation_name
 request.subgraph.body.variables
 request.subgraph.body.extensions
+request.subgraph.uri.scheme
 request.subgraph.uri.host
 request.subgraph.uri.path
 request.subgraph.uri.port
@@ -433,7 +435,7 @@ let my_cache_key = response.headers["cache-key"];
 
 // Define an upsert resolver callback
 // The `current` parameter is the current value for the specified key.
-// This particular callback checks whether `current` is an ObjectMap 
+// This particular callback checks whether `current` is an ObjectMap
 // (default is the unit value of ()). If not, assign an empty ObjectMap.
 // Finally, update the stored ObjectMap with our subgraph name as key
 // and the returned cache-key as a value.
@@ -528,6 +530,16 @@ Request extensions may be read or modified. They are exposed to Rhai as an [Obje
 
 ```rhai
 print(`${request.body.extensions}`); // Log all extensions
+```
+
+### `request.uri.scheme`
+
+This is the scheme component of the request's URI, as a string.
+
+Modifying this value for a client request has no effect, because the request has already reached the router. However, modifying `request.subgraph.uri.scheme` in a `subgraph_service` callback _does_ modify the scheme that the router uses to communicate with the corresponding subgraph.
+
+```rhai
+print(`${request.uri.scheme}`); // Log the request scheme
 ```
 
 ### `request.uri.host`

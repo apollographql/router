@@ -1,5 +1,6 @@
 use std::cell::Cell;
 use std::num::NonZeroU32;
+use std::ops::ControlFlow;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -9,6 +10,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use itertools::Itertools;
+use serde::Deserialize;
 use serde::Serialize;
 use tracing::trace;
 
@@ -19,7 +21,7 @@ use crate::Supergraph;
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::operation::NamedFragments;
+use crate::internal_error;
 use crate::operation::NormalizedDefer;
 use crate::operation::Operation;
 use crate::operation::SelectionSet;
@@ -164,14 +166,14 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default, Serialize)]
+#[derive(Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
     pub evaluated_plan_paths: Cell<usize>,
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct QueryPlanOptions {
+#[derive(Default, Clone)]
+pub struct QueryPlanOptions<'a> {
     /// A set of labels which will be used _during query planning_ to
     /// enable/disable edges with a matching label in their override condition.
     /// Edges with override conditions require their label to be present or absent
@@ -179,6 +181,24 @@ pub struct QueryPlanOptions {
     /// progressive @override feature.
     // PORT_NOTE: In JS implementation this was a Map
     pub override_conditions: Vec<String>,
+
+    pub check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+}
+
+impl std::fmt::Debug for QueryPlanOptions<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryPlanOptions")
+            .field("override_conditions", &self.override_conditions)
+            .field(
+                "check_for_cooperative_cancellation",
+                if self.check_for_cooperative_cancellation.is_some() {
+                    &"Some(...)"
+                } else {
+                    &"None"
+                },
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -345,9 +365,14 @@ impl QueryPlanner {
 
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&document.fragments, &self.api_schema),
+            &document.fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
+            &|| {
+                QueryPlanningParameters::check_cancellation_with(
+                    &options.check_for_cooperative_cancellation,
+                )
+            },
         )?;
 
         let NormalizedDefer {
@@ -414,6 +439,7 @@ impl QueryPlanner {
             override_conditions: EnabledOverrideConditions(IndexSet::from_iter(
                 options.override_conditions,
             )),
+            check_for_cooperative_cancellation: options.check_for_cooperative_cancellation,
             fetch_id_generator: Arc::new(FetchIdGenerator::new()),
         };
 
@@ -553,6 +579,7 @@ fn compute_root_serial_dependency_graph(
                 &mut fetch_dependency_graph,
                 &prev_path,
                 parameters.config.type_conditioned_fetching,
+                &|| parameters.check_cancellation(),
             )?;
         } else {
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
@@ -591,6 +618,7 @@ pub(crate) fn compute_root_fetch_groups(
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
     type_conditioned_fetching_enabled: bool,
+    check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
 ) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
@@ -640,6 +668,7 @@ pub(crate) fn compute_root_fetch_groups(
             )?,
             Default::default(),
             &Default::default(),
+            check_cancellation,
         )?;
     }
     Ok(())
@@ -784,14 +813,23 @@ pub(crate) enum SubgraphOperationCompression {
 
 impl SubgraphOperationCompression {
     /// Compress a subgraph operation.
-    pub(crate) fn compress(&mut self, operation: Operation) -> Result<Operation, FederationError> {
+    pub(crate) fn compress(
+        &mut self,
+        operation: Operation,
+    ) -> Result<Valid<ExecutableDocument>, FederationError> {
         match self {
-            Self::GenerateFragments => {
-                let mut operation = operation;
-                operation.generate_fragments()?;
-                Ok(operation)
+            Self::GenerateFragments => Ok(operation.generate_fragments()?),
+            Self::Disabled => {
+                let operation_document = operation.try_into().map_err(|err| match err {
+                    FederationError::SingleFederationError(
+                        SingleFederationError::InvalidGraphQL { diagnostics },
+                    ) => internal_error!(
+                        "Query planning produced an invalid subgraph operation.\n{diagnostics}"
+                    ),
+                    _ => err,
+                })?;
+                Ok(operation_document)
             }
-            Self::Disabled => Ok(operation),
         }
     }
 }

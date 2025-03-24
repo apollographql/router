@@ -12,20 +12,21 @@ use req_asserts::Matcher;
 use serde_json::Value;
 use serde_json_bytes::json;
 use tower::ServiceExt;
+use tracing_core::Event;
+use tracing_core::Metadata;
 use tracing_core::span::Attributes;
 use tracing_core::span::Id;
 use tracing_core::span::Record;
-use tracing_core::Event;
-use tracing_core::Metadata;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
 use wiremock::matchers::body_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
 
+use crate::Configuration;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
@@ -36,8 +37,8 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
 
+mod connect_on_type;
 mod mock_api;
 mod quickstart;
 #[allow(dead_code)]
@@ -601,49 +602,51 @@ async fn test_headers() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("GET")
-            .header(
-                HeaderName::from_str("x-forward").unwrap(),
-                HeaderValue::from_str("forwarded").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-forward").unwrap(),
-                HeaderValue::from_str("forwarded-again").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-new-name").unwrap(),
-                HeaderValue::from_str("renamed-by-connect").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-insert").unwrap(),
-                HeaderValue::from_str("inserted").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-insert-multi-value").unwrap(),
-                HeaderValue::from_str("first").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-insert-multi-value").unwrap(),
-                HeaderValue::from_str("second").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-config-variable-source").unwrap(),
-                HeaderValue::from_str("before val-from-config-source after").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-config-variable-connect").unwrap(),
-                HeaderValue::from_str("before val-from-config-connect after").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-context-value-source").unwrap(),
-                HeaderValue::from_str("before val-from-request-context after").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-context-value-connect").unwrap(),
-                HeaderValue::from_str("before val-from-request-context after").unwrap(),
-            )
-            .path("/users")],
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded-again").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-new-name").unwrap(),
+                    HeaderValue::from_str("renamed-by-connect").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("first").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("second").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-config-variable-source").unwrap(),
+                    HeaderValue::from_str("before val-from-config-source after").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-config-variable-connect").unwrap(),
+                    HeaderValue::from_str("before val-from-config-connect after").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-context-value-source").unwrap(),
+                    HeaderValue::from_str("before val-from-request-context after").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-context-value-connect").unwrap(),
+                    HeaderValue::from_str("before val-from-request-context after").unwrap(),
+                )
+                .path("/users"),
+        ],
     );
 }
 
@@ -709,26 +712,36 @@ async fn test_tracing_connect_span() {
     mock_subscriber.expect_new_span().returning(|attributes| {
         if attributes.metadata().name() == CONNECT_SPAN_NAME {
             assert!(attributes.fields().field("apollo.connector.type").is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.detail")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.field.name")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.selection")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.source.name")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.source.detail")
-                .is_some());
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.detail")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.coordinate")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.selection")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.source.name")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.source.detail")
+                    .is_some()
+            );
             assert!(attributes.fields().field(OTEL_STATUS_CODE).is_some());
             Id::from_u64(1)
         } else {
@@ -834,10 +847,12 @@ async fn test_mutation() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .body(serde_json::json!({ "username": "New User" }))
-            .path("/user")],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .body(serde_json::json!({ "username": "New User" }))
+                .path("/user"),
+        ],
     );
 }
 
@@ -879,10 +894,12 @@ async fn test_mutation_empty_body() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .body(serde_json::json!({ "username": "New User" }))
-            .path("/user")],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .body(serde_json::json!({ "username": "New User" }))
+                .path("/user"),
+        ],
     );
 }
 
@@ -1029,16 +1046,18 @@ async fn test_default_argument_values() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .path("/default-args")
-            .body(serde_json::json!({
-              "str": "default",
-              "int": 42,
-              "float": 1.23,
-              "bool": true,
-              "arr": ["default"],
-            }))],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/default-args")
+                .body(serde_json::json!({
+                  "str": "default",
+                  "int": 42,
+                  "float": 1.23,
+                  "bool": true,
+                  "arr": ["default"],
+                })),
+        ],
     );
 }
 
@@ -1071,16 +1090,18 @@ async fn test_default_argument_overrides() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .path("/default-args")
-            .body(serde_json::json!({
-              "str": "hi",
-              "int": 108,
-              "float": 9.87,
-              "bool": false,
-              "arr": ["hi again"],
-            }))],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/default-args")
+                .body(serde_json::json!({
+                  "str": "hi",
+                  "int": 108,
+                  "float": 9.87,
+                  "bool": false,
+                  "arr": ["hi again"],
+                })),
+        ],
     );
 }
 
@@ -1169,7 +1190,10 @@ async fn test_form_encoding() {
 
     let reqs = mock_server.received_requests().await.unwrap();
     let body = String::from_utf8_lossy(&reqs[0].body).to_string();
-    assert_eq!(body, "int=1&str=s&bool=true&id=id&intArr%5B0%5D=1&intArr%5B1%5D=2&strArr%5B0%5D=a&strArr%5B1%5D=b&boolArr%5B0%5D=true&boolArr%5B1%5D=false&idArr%5B0%5D=id1&idArr%5B1%5D=id2&obj%5Ba%5D=1&obj%5Bb%5D=b&obj%5Bc%5D=true&obj%5Bnested%5D%5Bd%5D=1&obj%5Bnested%5D%5Be%5D=e&obj%5Bnested%5D%5Bf%5D=true&objArr%5B0%5D%5Ba%5D=1&objArr%5B0%5D%5Bb%5D=b&objArr%5B0%5D%5Bc%5D=true&objArr%5B0%5D%5Bnested%5D%5Bd%5D=1&objArr%5B0%5D%5Bnested%5D%5Be%5D=e&objArr%5B0%5D%5Bnested%5D%5Bf%5D=true&objArr%5B1%5D%5Ba%5D=2&objArr%5B1%5D%5Bb%5D=bb&objArr%5B1%5D%5Bc%5D=false&objArr%5B1%5D%5Bnested%5D%5Bd%5D=1&objArr%5B1%5D%5Bnested%5D%5Be%5D=e&objArr%5B1%5D%5Bnested%5D%5Bf%5D=true");
+    assert_eq!(
+        body,
+        "int=1&str=s&bool=true&id=id&intArr%5B0%5D=1&intArr%5B1%5D=2&strArr%5B0%5D=a&strArr%5B1%5D=b&boolArr%5B0%5D=true&boolArr%5B1%5D=false&idArr%5B0%5D=id1&idArr%5B1%5D=id2&obj%5Ba%5D=1&obj%5Bb%5D=b&obj%5Bc%5D=true&obj%5Bnested%5D%5Bd%5D=1&obj%5Bnested%5D%5Be%5D=e&obj%5Bnested%5D%5Bf%5D=true&objArr%5B0%5D%5Ba%5D=1&objArr%5B0%5D%5Bb%5D=b&objArr%5B0%5D%5Bc%5D=true&objArr%5B0%5D%5Bnested%5D%5Bd%5D=1&objArr%5B0%5D%5Bnested%5D%5Be%5D=e&objArr%5B0%5D%5Bnested%5D%5Bf%5D=true&objArr%5B1%5D%5Ba%5D=2&objArr%5B1%5D%5Bb%5D=bb&objArr%5B1%5D%5Bc%5D=false&objArr%5B1%5D%5Bnested%5D%5Bd%5D=1&objArr%5B1%5D%5Bnested%5D%5Be%5D=e&objArr%5B1%5D%5Bnested%5D%5Bf%5D=true"
+    );
 }
 
 #[tokio::test]

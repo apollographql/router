@@ -1,23 +1,23 @@
-use std::env;
 use std::env::consts::ARCH;
 use std::env::consts::OS;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
 use futures::StreamExt;
 use http_body::Body as _;
 use http_body_util::BodyExt as _;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt as _;
+use tower::util::BoxService;
 use tracing::debug;
 
 use crate::executable::APOLLO_TELEMETRY_DISABLED;
@@ -224,11 +224,9 @@ impl PluginPrivate for FleetDetector {
 
     async fn new(plugin: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         debug!("initialising fleet detection plugin");
-        if let Ok(val) = env::var(APOLLO_TELEMETRY_DISABLED) {
-            if val == "true" {
-                debug!("fleet detection disabled, no telemetry will be sent");
-                return Ok(FleetDetector::default());
-            }
+        if APOLLO_TELEMETRY_DISABLED.load(Ordering::Relaxed) {
+            debug!("fleet detection disabled, no telemetry will be sent");
+            return Ok(FleetDetector::default());
         }
 
         let gauge_options = GaugeOptions {
@@ -534,9 +532,9 @@ mod tests {
     use tower::Service as _;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt as _;
     use crate::metrics::collect_metrics;
     use crate::metrics::test_utils::MetricType;
-    use crate::metrics::FutureMetricsExt as _;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::services::router::Body;

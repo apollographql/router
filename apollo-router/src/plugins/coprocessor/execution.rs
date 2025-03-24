@@ -12,8 +12,8 @@ use tower_service::Service;
 
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
 
@@ -103,9 +103,7 @@ impl ExecutionStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: execution request stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: execution request stage error: {error}");
                         error
                     });
 
@@ -144,9 +142,7 @@ impl ExecutionStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: execution response stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: execution response stage error: {error}");
                         error
                     });
 
@@ -255,12 +251,14 @@ where
                 serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
                     .unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                .build()])
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                    .build(),
+                            ])
                             .build()
                     });
 
@@ -349,7 +347,7 @@ where
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
     let (first, rest): (Option<graphql::Response>, graphql::ResponseStream) =
-        body.into_future().await;
+        StreamExt::into_future(body).await;
 
     // If first is None, we return an error
     let first = first.ok_or_else(|| {

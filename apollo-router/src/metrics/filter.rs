@@ -3,10 +3,11 @@ use std::borrow::Cow;
 use std::sync::Arc;
 
 use buildstructor::buildstructor;
-use opentelemetry::metrics::noop::NoopMeterProvider;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::Callback;
 use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Gauge;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
@@ -16,7 +17,7 @@ use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
 use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::KeyValue;
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -195,6 +196,10 @@ impl InstrumentProvider for FilteredInstrumentProvider {
     filter_instrument_fn!(u64_counter, u64, Counter);
     filter_instrument_fn!(f64_counter, f64, Counter);
 
+    filter_instrument_fn!(u64_gauge, u64, Gauge);
+    filter_instrument_fn!(i64_gauge, i64, Gauge);
+    filter_instrument_fn!(f64_gauge, f64, Gauge);
+
     filter_observable_instrument_fn!(f64_observable_counter, f64, ObservableCounter);
     filter_observable_instrument_fn!(u64_observable_counter, u64, ObservableCounter);
 
@@ -300,30 +305,42 @@ mod test {
             .flat_map(|m| m.scope_metrics.into_iter())
             .flat_map(|m| m.metrics)
             .collect();
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.operations.test"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.test")
+        );
 
         assert!(metrics.iter().any(|m| m.name == "apollo.router.operations"));
 
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.graphos.cloud.test"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.graphos.cloud.test")
+        );
 
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.unknown.test"));
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.unknown.test")
+        );
 
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.lifecycle.api_schema"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.lifecycle.api_schema")
+        );
 
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.operations.connectors"));
-        assert!(metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.schema.connectors"));
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.connectors")
+        );
+        assert!(
+            metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.schema.connectors")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -422,18 +439,26 @@ mod test {
             .collect();
 
         assert!(!metrics.iter().any(|m| m.name == "apollo.router.config"));
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.config.test"));
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.config.test")
+        );
         assert!(!metrics.iter().any(|m| m.name == "apollo.router.entities"));
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.entities.test"));
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.operations.connectors"));
-        assert!(!metrics
-            .iter()
-            .any(|m| m.name == "apollo.router.schema.connectors"));
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.entities.test")
+        );
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.operations.connectors")
+        );
+        assert!(
+            !metrics
+                .iter()
+                .any(|m| m.name == "apollo.router.schema.connectors")
+        );
     }
 }

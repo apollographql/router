@@ -1,24 +1,23 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::PeriodicReader;
 use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::Resource;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
-use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo_exporter::get_uname;
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
@@ -60,7 +59,9 @@ impl MetricsConfigurator for Config {
                 ..
             } => {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
-                    tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
+                    tracing::info!(
+                        "Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details"
+                    );
                 }
 
                 builder = Self::configure_apollo_metrics(
@@ -128,7 +129,8 @@ impl Config {
             ),
         )?;
         let reader = PeriodicReader::builder(exporter, runtime::Tokio)
-            .with_interval(Duration::from_secs(60))
+            .with_interval(batch_processor.scheduled_delay)
+            .with_timeout(batch_processor.max_export_timeout)
             .build();
 
         builder.apollo_meter_provider_builder = builder
@@ -183,29 +185,29 @@ mod test {
     use std::time::Duration;
 
     use http::header::HeaderName;
-    use tokio_stream::wrappers::ReceiverStream;
     use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::ReceiverStream;
     use tower::ServiceExt;
     use url::Url;
 
     use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
+    use crate::Context;
+    use crate::TestHarness;
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
-    use crate::plugins::telemetry::apollo;
-    use crate::plugins::telemetry::apollo::default_buffer_size;
-    use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
-    use crate::plugins::telemetry::apollo_exporter::Sender;
-    use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::apollo;
+    use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
+    use crate::plugins::telemetry::apollo::default_buffer_size;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
-    use crate::Context;
-    use crate::TestHarness;
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {

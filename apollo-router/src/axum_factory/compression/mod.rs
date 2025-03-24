@@ -42,16 +42,20 @@ impl Compressor {
                 "deflate" => {
                     return Some(Compressor::Deflate(
                         DeflateEncoder::new(Compression::fast()),
-                    ))
+                    ));
                 }
-                // FIXME: find the "fast" brotli encoder params
                 "br" => {
                     return Some(Compressor::Brotli(Box::new(BrotliEncoder::new(
-                        BrotliEncoderParams::default(),
-                    ))))
+                        BrotliEncoderParams {
+                            // '4' is a reasonable setting for 'fast'
+                            // https://github.com/dropbox/rust-brotli/issues/93
+                            quality: 4,
+                            ..BrotliEncoderParams::default()
+                        },
+                    ))));
                 }
                 "zstd" => {
-                    return Some(Compressor::Zstd(ZstdEncoder::new(zstd_safe::min_c_level())))
+                    return Some(Compressor::Zstd(ZstdEncoder::new(zstd_safe::min_c_level())));
                 }
                 _ => {}
             }

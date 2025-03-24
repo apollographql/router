@@ -3,14 +3,14 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
-use http::header::HeaderName;
 use http::HeaderValue;
+use http::header::HeaderName;
 use regex::Regex;
+use serde::Deserializer;
 use serde::de;
 use serde::de::Error;
 use serde::de::SeqAccess;
 use serde::de::Visitor;
-use serde::Deserializer;
 
 /// De-serialize an optional [`HeaderName`].
 pub fn deserialize_option_header_name<'de, D>(

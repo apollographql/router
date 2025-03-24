@@ -1,5 +1,6 @@
 //! Logic for loading configuration in to an object model
 use std::fmt;
+use std::hash::Hash;
 use std::io;
 use std::io::BufReader;
 use std::iter;
@@ -11,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use connector::ConnectorConfiguration;
 use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
@@ -20,19 +22,20 @@ pub(crate) use persisted_queries::PersistedQueriesPrewarmQueryPlanCache;
 #[cfg(test)]
 pub(crate) use persisted_queries::PersistedQueriesSafelist;
 use regex::Regex;
+use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
-use rustls::ServerConfig;
-use schemars::gen::SchemaGenerator;
+use schemars::JsonSchema;
+use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
+use sha2::Digest;
 use thiserror::Error;
 
 use self::cors::Cors;
@@ -40,20 +43,21 @@ use self::expansion::Expansion;
 pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
+pub(crate) use self::schema::validate_yaml_configuration;
 use self::subgraph::SubgraphConfiguration;
+use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::healthcheck::Config as HealthCheck;
 #[cfg(test)]
 use crate::plugins::healthcheck::test_listen;
-use crate::plugins::healthcheck::Config as HealthCheck;
 use crate::plugins::limits;
-use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::uplink::UplinkConfig;
-use crate::ApolloRouterError;
 
 pub(crate) mod connector;
 pub(crate) mod cors;
@@ -134,7 +138,7 @@ impl From<proteus::parser::Error> for ConfigurationError {
 #[derivative(Debug)]
 // We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
-    /// The raw configuration string.
+    /// The raw configuration value.
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
@@ -337,6 +341,18 @@ impl Configuration {
 }
 
 impl Configuration {
+    pub(crate) fn hash(&self) -> String {
+        let mut hasher = sha2::Sha256::new();
+        let defaulted_raw = self
+            .validated_yaml
+            .as_ref()
+            .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
+            .unwrap_or_default();
+        hasher.update(defaulted_raw);
+        let hash: String = format!("{:x}", hasher.finalize());
+        hash
+    }
+
     fn notify(
         apollo_plugins: &Map<String, Value>,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
@@ -475,13 +491,12 @@ impl Configuration {
         }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                self.supergraph.path,
-                self.supergraph.path
-            ),
-        });
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                    self.supergraph.path, self.supergraph.path
+                ),
+            });
         }
         if self.supergraph.path.ends_with('*')
             && !self.supergraph.path.ends_with("/*")
@@ -496,15 +511,13 @@ impl Configuration {
             });
         }
         if self.supergraph.path.contains("/*/") {
-            return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.graphql_path' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        self.supergraph.path
-                    ),
-                },
-            );
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                    self.supergraph.path
+                ),
+            });
         }
 
         // PQs.
@@ -579,17 +592,20 @@ impl JsonSchema for ApolloPlugins {
         stringify!(Plugins).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
-            .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .filter(|factory| {
+                factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
+                    && !factory.hidden_from_config_json_schema
+            })
             .map(|factory| {
                 (
                     factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
-                    factory.create_schema(gen),
+                    factory.create_schema(generator),
                 )
             })
             .collect::<schemars::Map<String, Schema>>();
@@ -612,14 +628,14 @@ impl JsonSchema for UserPlugins {
         stringify!(Plugins).to_string()
     }
 
-    fn json_schema(gen: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         // This is a manual implementation of Plugins schema to allow plugins that have been registered at
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
             .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|factory| (factory.name.to_string(), factory.create_schema(gen)))
+            .map(|factory| (factory.name.to_string(), factory.create_schema(generator)))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
     }
@@ -1029,6 +1045,7 @@ pub(crate) struct Tls {
     /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
     pub(crate) supergraph: Option<Arc<TlsSupergraph>>,
     pub(crate) subgraph: SubgraphConfiguration<TlsClient>,
+    pub(crate) connector: ConnectorConfiguration<TlsClient>,
 }
 
 /// Configuration options pertaining to the supergraph server component.
@@ -1125,19 +1142,19 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKeyDer<'static>> {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("could not parse the key: {e}"),
-            ))
+            ));
         }
         Some(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "expected a private key",
-            ))
+            ));
         }
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "could not find a private key",
-            ))
+            ));
         }
     };
 
@@ -1396,6 +1413,10 @@ pub(crate) struct Batching {
 
     /// Subgraph options for batching
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+
+    /// Maximum size for a batch
+    #[serde(default)]
+    pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
@@ -1428,6 +1449,13 @@ impl Batching {
                         .is_some_and(|x| x.enabled)
                 }
             }
+            None => false,
+        }
+    }
+
+    pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
+        match self.maximum_size {
+            Some(maximum_size) => batch.len() > maximum_size,
             None => false,
         }
     }

@@ -4,6 +4,8 @@
 // Rather than littering this module with `#[allow(dead_code)]`s or adding a config_atr to the
 // crate wide directive, allowing dead code here seems like the best options
 
+use std::sync::Arc;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::DirectiveLocation;
@@ -26,6 +28,7 @@ use apollo_compiler::schema::UnionType;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
+use crate::link::Link;
 use crate::schema::FederationSchema;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -95,8 +98,25 @@ impl From<&FieldSpecification> for FieldDefinition {
 // Type Specifications
 
 pub(crate) trait TypeAndDirectiveSpecification {
-    // PORT_NOTE: The JS version takes additional optional arguments `feature` and `asBuiltIn`.
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError>;
+    // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
+    // - The JS version only sets it `true` for GraphQL built-in types and directives.
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError>;
+}
+
+/// Retrieves the actual type name in the importing schema via `@link`; Otherwise, returns `name`.
+fn actual_type_name(name: &Name, link: Option<&Arc<Link>>) -> Name {
+    link.map(|link| link.type_name_in_schema(name))
+        .unwrap_or_else(|| name.clone())
+}
+
+/// Retrieves the actual directive name in the importing schema via `@link`; Otherwise, returns `name`.
+fn actual_directive_name(name: &Name, link: Option<&Arc<Link>>) -> Name {
+    link.map(|link| link.directive_name_in_schema(name))
+        .unwrap_or_else(|| name.clone())
 }
 
 pub(crate) struct ScalarTypeSpecification {
@@ -104,15 +124,20 @@ pub(crate) struct ScalarTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let existing = schema.try_get_type(self.name.clone());
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
             // Ignore redundant type specifications if they are are both scalar types.
             return ensure_expected_type_kind(TypeKind::Scalar, &existing);
         }
 
         let type_pos = ScalarTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -132,9 +157,14 @@ pub(crate) struct ObjectTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
         let field_specs = (self.fields)(schema);
-        let existing = schema.try_get_type(self.name.clone());
+        let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
             // ensure existing definition is an object type
             ensure_expected_type_kind(TypeKind::Object, &existing)?;
@@ -158,7 +188,7 @@ impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
         }
 
         let type_pos = ObjectTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -186,9 +216,14 @@ impl<F> TypeAndDirectiveSpecification for UnionTypeSpecification<F>
 where
     F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
 {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
         let members = (self.members)(schema);
-        let existing = schema.try_get_type(self.name.clone());
+        let existing = schema.try_get_type(actual_name.clone());
 
         // ensure new union has at least one member
         if members.is_empty() {
@@ -229,7 +264,7 @@ where
         }
 
         let type_pos = UnionTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name.clone(),
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -255,8 +290,13 @@ pub(crate) struct EnumTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for EnumTypeSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
-        let existing = schema.try_get_type(self.name.clone());
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_type_name(&self.name, link);
+        let existing = schema.try_get_type(actual_name.clone());
         if let Some(existing) = existing {
             ensure_expected_type_kind(TypeKind::Enum, &existing)?;
             let existing_type = existing.get(schema.schema())?;
@@ -293,7 +333,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
         }
 
         let type_pos = EnumTypeDefinitionPosition {
-            type_name: self.name.clone(),
+            type_name: actual_name,
         };
         type_pos.pre_insert(schema)?;
         type_pos.insert(
@@ -455,7 +495,12 @@ impl DirectiveSpecification {
 }
 
 impl TypeAndDirectiveSpecification for DirectiveSpecification {
-    fn check_or_add(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn check_or_add(
+        &self,
+        schema: &mut FederationSchema,
+        link: Option<&Arc<Link>>,
+    ) -> Result<(), FederationError> {
+        let actual_name = actual_directive_name(&self.name, link);
         let mut resolved_args = Vec::new();
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for arg in self.args.iter() {
@@ -473,12 +518,12 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
             };
         }
         errors.into_result()?;
-        let existing = schema.get_directive_definition(&self.name);
+        let existing = schema.get_directive_definition(&actual_name);
         if let Some(existing) = existing {
             let existing_directive = existing.get(schema.schema())?;
             return ensure_same_directive_structure(
                 existing_directive,
-                &self.name,
+                &actual_name,
                 &resolved_args,
                 self.repeatable,
                 &self.locations,
@@ -487,7 +532,7 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
         }
 
         let directive_pos = DirectiveDefinitionPosition {
-            directive_name: self.name.clone(),
+            directive_name: actual_name,
         };
         directive_pos.pre_insert(schema)?;
         directive_pos.insert(

@@ -1,10 +1,12 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::ast;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
+use apollo_federation::query_plan::requires_selection;
+use apollo_federation::query_plan::serializable_document::SerializableDocument;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -12,12 +14,11 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
-use tracing::instrument;
 use tracing::Instrument;
+use tracing::instrument;
 
 use super::rewrites;
 use super::selection::execute_selection_set;
-use super::selection::Selection;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
 use crate::error::Error;
@@ -32,9 +33,9 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::services::SubgraphRequest;
 use crate::services::fetch::ErrorMapping;
 use crate::services::subgraph::BoxService;
-use crate::services::SubgraphRequest;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
@@ -124,13 +125,13 @@ pub(crate) struct FetchNode {
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     #[serde(default)]
-    pub(crate) requires: Vec<Selection>,
+    pub(crate) requires: Vec<requires_selection::Selection>,
 
     /// The variables that are used for the subgraph fetch.
     pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the fetch.
-    pub(crate) operation: SubgraphOperation,
+    pub(crate) operation: SerializableDocument,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<Arc<str>>,
@@ -160,111 +161,6 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
-#[derive(Clone)]
-pub(crate) struct SubgraphOperation {
-    serialized: String,
-    /// Ideally this would be always present, but we don’t have access to the subgraph schemas
-    /// during `Deserialize`.
-    parsed: Option<Arc<Valid<ExecutableDocument>>>,
-}
-
-impl SubgraphOperation {
-    pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
-        Self {
-            serialized: serialized.into(),
-            parsed: None,
-        }
-    }
-
-    pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
-        let parsed = parsed.into();
-        Self {
-            serialized: parsed.serialize().no_indent().to_string(),
-            parsed: Some(parsed),
-        }
-    }
-
-    pub(crate) fn as_serialized(&self) -> &str {
-        &self.serialized
-    }
-
-    pub(crate) fn init_parsed(
-        &mut self,
-        subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
-        match &mut self.parsed {
-            Some(parsed) => Ok(parsed),
-            option => {
-                let parsed = Arc::new(ExecutableDocument::parse_and_validate(
-                    subgraph_schema,
-                    &self.serialized,
-                    "operation.graphql",
-                )?);
-                Ok(option.insert(parsed))
-            }
-        }
-    }
-
-    pub(crate) fn as_parsed(
-        &self,
-    ) -> Result<&Arc<Valid<ExecutableDocument>>, SubgraphOperationNotInitialized> {
-        self.parsed.as_ref().ok_or(SubgraphOperationNotInitialized)
-    }
-}
-
-/// Failed to call `SubgraphOperation::init_parsed` after creating a query plan
-#[derive(Debug, displaydoc::Display, thiserror::Error)]
-pub(crate) struct SubgraphOperationNotInitialized;
-
-impl SubgraphOperationNotInitialized {
-    pub(crate) fn into_graphql_errors(self) -> Vec<Error> {
-        vec![graphql::Error::builder()
-            .extension_code(self.code())
-            .message(self.to_string())
-            .build()]
-    }
-
-    pub(crate) fn code(&self) -> &'static str {
-        "SUBGRAPH_OPERATION_NOT_INITIALIZED"
-    }
-}
-
-impl Serialize for SubgraphOperation {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.as_serialized().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for SubgraphOperation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(Self::from_string(String::deserialize(deserializer)?))
-    }
-}
-
-impl PartialEq for SubgraphOperation {
-    fn eq(&self, other: &Self) -> bool {
-        self.as_serialized() == other.as_serialized()
-    }
-}
-
-impl std::fmt::Debug for SubgraphOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.as_serialized(), f)
-    }
-}
-
-impl std::fmt::Display for SubgraphOperation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.as_serialized(), f)
-    }
-}
-
 #[derive(Default)]
 pub(crate) struct Variables {
     pub(crate) variables: Object,
@@ -276,7 +172,7 @@ impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        requires: &[Selection],
+        requires: &[requires_selection::Selection],
         variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
@@ -396,10 +292,12 @@ impl FetchNode {
         if !response.is_primary() {
             return (
                 Value::default(),
-                vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: self.service_name.to_string(),
-                }
-                .to_graphql_error(Some(current_dir.to_owned()))],
+                vec![
+                    FetchError::SubrequestUnexpectedPatchResponse {
+                        service: self.service_name.to_string(),
+                    }
+                    .to_graphql_error(Some(current_dir.to_owned())),
+                ],
             );
         }
 
@@ -423,7 +321,12 @@ impl FetchNode {
                     1
                 );
                 if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
-                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, id, e);
+                    tracing::error!(
+                        "error sending fetch result at path {} and id {:?} for deferred response building: {}",
+                        current_dir,
+                        id,
+                        e
+                    );
                 }
             }
         }

@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use schemars::JsonSchema;
+use serde::Deserialize;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use super::subgraph::AuthConfig;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::services::connector;
 use crate::services::connector_service::ConnectorSourceRef;
@@ -38,4 +41,13 @@ impl ConnectorAuth {
             .service(service)
             .boxed()
     }
+}
+
+/// Configure connector authentication
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) struct Config {
+    #[serde(default)]
+    /// Create a configuration that will apply only to a specific source.
+    pub(crate) sources: HashMap<String, AuthConfig>,
 }

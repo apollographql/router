@@ -9,7 +9,7 @@ license = "Elastic-2.0"
 
 # renovate-automation: rustc version
 rust-version = "1.85.0"
-edition = "2021"
+edition = "2024"
 build = "build/main.rs"
 default-run = "router"
 
@@ -56,11 +56,9 @@ ci = []
 snapshot = ["axum-server", "serde_regex"]
 
 [dependencies]
-arc-swap = "1.6.0"
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=2.0.0" }
-async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
@@ -109,7 +107,7 @@ hyper = { version = "1.5.1", features = ["full"] }
 hyper-util = { version = "0.1.10", features = ["full"] }
 hyper-rustls = { version = "0.27.3", features = ["http1", "http2", "rustls-native-certs"] }
 indexmap = { version = "2.2.6", features = ["serde"] }
-itertools = "0.13.0"
+itertools = "0.14.0"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
 jsonschema = { version = "0.17.1", default-features = false }
@@ -204,7 +202,7 @@ serde_regex = { version = "1.1.0", optional = true }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
-strum_macros = "0.26.0"
+strum_macros = "0.27.0"
 sys-info = "0.9.1"
 sysinfo = { version = "0.32.0", features = ["system", "windows"], default-features = false }
 thiserror = "1.0.61"
@@ -312,7 +310,6 @@ rhai = { version = "1.17.1", features = [
     "testing-environ",
 ] }
 serde_regex = { version = "1.1.0" }
-serial_test = { version = "3.1.1" }
 tempfile.workspace = true
 test-log = { version = "0.2.16", default-features = false, features = [
     "trace",
@@ -330,8 +327,8 @@ tracing-opentelemetry = "0.25.0"
 tracing-test = "0.2.5"
 walkdir = "2.5.0"
 wiremock = "0.5.22"
-libtest-mimic = "0.7.3"
-rstest = "0.22.0"
+libtest-mimic = "0.8.0"
+rstest = "0.25.0"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
@@ -371,6 +368,11 @@ harness = false
 name = "compute_backpressure"
 path = "tests/compute_backpressure.rs"
 
+[[test]]
+name = "telemetry_resources"
+path = "tests/telemetry_resource_tests.rs"
+harness = false
+
 [[bin]]
 name = "snapshot"
 path = "src/test_harness/http_snapshot_main.rs"
@@ -387,3 +389,20 @@ harness = false
 
 [[example]]
 name = "planner"
+
+[lints.rust]
+
+# Compatibility with the 2024 edition, remove after switching to it:
+boxed-slice-into-iter = "warn"
+dependency-on-unit-never-type-fallback = "warn"
+deprecated-safe-2024 = "warn"
+impl-trait-overcaptures = "warn"
+keyword-idents-2024 = "warn"
+missing-unsafe-on-extern = "warn"
+never-type-fallback-flowing-into-unsafe = "warn"
+rust-2024-guarded-string-incompatible-syntax = "warn"
+rust-2024-incompatible-pat = "warn"
+rust-2024-prelude-collisions = "warn"
+static-mut-refs = "warn"
+unsafe-attr-outside-unsafe = "warn"
+unsafe-op-in-unsafe-fn = "warn"

@@ -1,13 +1,13 @@
 #![allow(missing_docs)] // FIXME
 
 use futures::future::ready;
-use futures::stream::once;
 use futures::stream::StreamExt;
-use http::header::HeaderName;
-use http::method::Method;
+use futures::stream::once;
 use http::HeaderValue;
 use http::StatusCode;
 use http::Uri;
+use http::header::HeaderName;
+use http::method::Method;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -16,14 +16,14 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::Context;
 
 pub(crate) mod service;
 #[cfg(test)]

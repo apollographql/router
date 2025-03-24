@@ -1923,13 +1923,6 @@ impl FederatedQueryGraphBuilder {
                             stack.push((node, &inline_fragment_selection.selection_set));
                         }
                     }
-                    Selection::FragmentSpread(_) => {
-                        return Err(SingleFederationError::Internal {
-                            message: "Unexpectedly found named fragment in FieldSet scalar"
-                                .to_owned(),
-                        }
-                        .into());
-                    }
                 }
             }
         }
@@ -2370,7 +2363,7 @@ fn context_parse_error(context: &str, message: &str) -> FederationError {
     .into()
 }
 
-fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+pub(crate) fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     // PORT_NOTE: The original JS regex, as shown below
     //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
     // makes use of negative lookaheads, which aren't supported natively by Rust's regex crate.

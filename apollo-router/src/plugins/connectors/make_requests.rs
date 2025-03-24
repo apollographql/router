@@ -1,37 +1,40 @@
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
-use apollo_compiler::Name;
+use apollo_compiler::validation::Valid;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::Namespace;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 
-use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use super::http_json_transport::make_request;
+use crate::Context;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::services::connect;
 use crate::services::connector::request_service::Request;
-use crate::Context;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default)]
 pub(crate) struct RequestInputs {
     args: Map<ByteString, Value>,
     this: Map<ByteString, Value>,
+    pub(crate) batch: Vec<Map<ByteString, Value>>,
 }
 
 impl RequestInputs {
@@ -60,6 +63,14 @@ impl RequestInputs {
             map.insert(
                 Namespace::This.as_str().into(),
                 Value::Object(self.this.clone()),
+            );
+        }
+
+        // $batch only applies to entity resolvers on types
+        if variables_used.contains(&Namespace::Batch) {
+            map.insert(
+                Namespace::Batch.as_str().into(),
+                Value::Array(self.batch.clone().into_iter().map(Value::Object).collect()),
             );
         }
 
@@ -96,7 +107,19 @@ impl RequestInputs {
     }
 }
 
-#[derive(Clone, Debug)]
+impl std::fmt::Debug for RequestInputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "RequestInputs {{\n    args: {},\n    this: {},\n    batch: {}\n}}",
+            serde_json::to_string(&self.args).unwrap_or("<invalid JSON>".to_string()),
+            serde_json::to_string(&self.this).unwrap_or("<invalid JSON>".to_string()),
+            serde_json::to_string(&self.batch).unwrap_or("<invalid JSON>".to_string()),
+        )
+    }
+}
+
+#[derive(Clone)]
 pub(crate) enum ResponseKey {
     RootField {
         name: String,
@@ -118,6 +141,11 @@ pub(crate) enum ResponseKey {
         selection: Arc<JSONSelection>,
         inputs: RequestInputs,
     },
+    BatchEntity {
+        selection: Arc<JSONSelection>,
+        keys: Valid<FieldSet>,
+        inputs: RequestInputs,
+    },
 }
 
 impl ResponseKey {
@@ -126,6 +154,7 @@ impl ResponseKey {
             ResponseKey::RootField { selection, .. } => selection,
             ResponseKey::Entity { selection, .. } => selection,
             ResponseKey::EntityField { selection, .. } => selection,
+            ResponseKey::BatchEntity { selection, .. } => selection,
         }
     }
 
@@ -134,6 +163,7 @@ impl ResponseKey {
             ResponseKey::RootField { inputs, .. } => inputs,
             ResponseKey::Entity { inputs, .. } => inputs,
             ResponseKey::EntityField { inputs, .. } => inputs,
+            ResponseKey::BatchEntity { inputs, .. } => inputs,
         }
     }
 }
@@ -163,6 +193,60 @@ impl From<&ResponseKey> for Path {
                 PathElement::Index(*index),
                 PathElement::Key(field_name.clone(), None),
             ]),
+            ResponseKey::BatchEntity { .. } => {
+                Path::from_iter(vec![PathElement::Key("_entities".to_string(), None)])
+            }
+        }
+    }
+}
+
+impl std::fmt::Debug for ResponseKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RootField {
+                name,
+                selection,
+                inputs,
+            } => f
+                .debug_struct("RootField")
+                .field("name", name)
+                .field("selection", &selection.to_string())
+                .field("inputs", inputs)
+                .finish(),
+            Self::Entity {
+                index,
+                selection,
+                inputs,
+            } => f
+                .debug_struct("Entity")
+                .field("index", index)
+                .field("selection", &selection.to_string())
+                .field("inputs", inputs)
+                .finish(),
+            Self::EntityField {
+                index,
+                field_name,
+                typename,
+                selection,
+                inputs,
+            } => f
+                .debug_struct("EntityField")
+                .field("index", index)
+                .field("field_name", field_name)
+                .field("typename", typename)
+                .field("selection", &selection.to_string())
+                .field("inputs", inputs)
+                .finish(),
+            Self::BatchEntity {
+                selection,
+                keys,
+                inputs,
+            } => f
+                .debug_struct("BatchEntity")
+                .field("selection", &selection.to_string())
+                .field("key_selection", &keys.serialize().no_indent().to_string())
+                .field("inputs", inputs)
+                .finish(),
         }
     }
 }
@@ -175,10 +259,13 @@ pub(crate) fn make_requests(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
-        Some(EntityResolver::Explicit) => entities_from_request(connector.clone(), &request),
+        Some(EntityResolver::Explicit) | Some(EntityResolver::TypeSingle) => {
+            entities_from_request(connector.clone(), &request)
+        }
         Some(EntityResolver::Implicit) => {
             entities_with_fields_from_request(connector.clone(), &request)
         }
+        Some(EntityResolver::TypeBatch) => batch_entities_from_request(connector.clone(), &request),
         None => root_fields(connector.clone(), &request),
     }?;
 
@@ -299,16 +386,16 @@ fn root_fields(
 
                 let request_inputs = RequestInputs {
                     args,
-                    this: Default::default(),
+                    ..Default::default()
                 };
 
                 let response_key = ResponseKey::RootField {
                     name: response_name,
-                    selection: Arc::new(
-                        connector
-                            .selection
-                            .apply_selection_set(&request.operation, &field.selection_set),
-                    ),
+                    selection: Arc::new(connector.selection.apply_selection_set(
+                        &request.operation,
+                        &field.selection_set,
+                        None,
+                    )),
                     inputs: request_inputs,
                 };
 
@@ -363,11 +450,11 @@ fn entities_from_request(
 
     let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
 
-    let selection = Arc::new(
-        connector
-            .selection
-            .apply_selection_set(&request.operation, &entities_field.selection_set),
-    );
+    let selection = Arc::new(connector.selection.apply_selection_set(
+        &request.operation,
+        &entities_field.selection_set,
+        None,
+    ));
 
     representations
         .as_array()
@@ -375,16 +462,30 @@ fn entities_from_request(
         .iter()
         .enumerate()
         .map(|(i, rep)| {
-            let request_inputs = RequestInputs {
-                args: rep
-                    .as_object()
-                    .ok_or_else(|| {
-                        InvalidRepresentations("representation is not an object".into())
-                    })?
-                    .clone(),
-                // entity connectors are always on Query fields, so they cannot use
-                // sibling fields with $this
-                this: Default::default(),
+            let request_inputs = match connector.entity_resolver {
+                Some(EntityResolver::Explicit) => RequestInputs {
+                    args: rep
+                        .as_object()
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
+                        .clone(),
+                    ..Default::default()
+                },
+                Some(EntityResolver::TypeSingle) => RequestInputs {
+                    this: rep
+                        .as_object()
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
+                        .clone(),
+                    ..Default::default()
+                },
+                _ => {
+                    return Err(InvalidRepresentations(
+                        "entity resolver not supported for this connector".into(),
+                    ));
+                }
             };
 
             Ok(ResponseKey::Entity {
@@ -461,7 +562,7 @@ fn entities_with_fields_from_request(
                                 return Some(Err(InvalidOperation(
                                     "handling fragments inside entity selections not implemented"
                                         .into(),
-                                )))
+                                )));
                             }
                         };
                         field.map(|f| Ok((typename, f)))
@@ -518,11 +619,11 @@ fn entities_with_fields_from_request(
         .into_iter()
         .flatten()
         .flat_map(|(typename, field)| {
-            let selection = Arc::new(
-                connector
-                    .selection
-                    .apply_selection_set(&request.operation, &field.selection_set),
-            );
+            let selection = Arc::new(connector.selection.apply_selection_set(
+                &request.operation,
+                &field.selection_set,
+                None,
+            ));
 
             representations.iter().map(move |(i, representation)| {
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
@@ -544,6 +645,7 @@ fn entities_with_fields_from_request(
                             InvalidRepresentations("representation is not an object".into())
                         })?
                         .clone(),
+                    ..Default::default()
                 };
                 Ok::<_, MakeRequestError>(ResponseKey::EntityField {
                     index: *i,
@@ -563,13 +665,78 @@ fn entities_with_fields_from_request(
         .collect::<Result<Vec<_>, _>>()
 }
 
+// --- BATCH ENTITIES ----------------------------------------------------------------
+
+/// Connectors on types can make a single batch request for multiple entities
+/// using the `$batch` variable.
+///
+/// The key (pun intended) to batching is that we have to return entities in an
+/// order than matches the `representations` variable. We use the "key" fields
+/// to construct a HashMap key for each representation and response object,
+/// which allows us to match them up and return them in the correct order.
+fn batch_entities_from_request(
+    connector: Arc<Connector>,
+    request: &connect::Request,
+) -> Result<Vec<ResponseKey>, MakeRequestError> {
+    use MakeRequestError::*;
+
+    let Some(keys) = &request.keys else {
+        return Err(InvalidOperation("TODO better error type".into()));
+    };
+
+    let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
+        return Err(InvalidRepresentations(
+            "batch_entities_from_request called without representations".into(),
+        ));
+    };
+
+    let op = request
+        .operation
+        .operations
+        .get(None)
+        .map_err(|_| InvalidOperation("no operation document".into()))?;
+
+    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation, op)?;
+
+    let selection = Arc::new(connector.selection.apply_selection_set(
+        &request.operation,
+        &entities_field.selection_set,
+        Some(keys),
+    ));
+
+    let inputs = RequestInputs {
+        batch: representations
+            .as_array()
+            .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
+            .iter()
+            .map(|rep| {
+                let obj = rep
+                    .as_object()
+                    .ok_or_else(|| {
+                        InvalidRepresentations("representation is not an object".into())
+                    })?
+                    .clone();
+                Ok::<_, MakeRequestError>(obj)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        ..Default::default()
+    };
+
+    Ok(vec![ResponseKey::BatchEntity {
+        selection: selection.clone(),
+        inputs,
+        keys: keys.clone(),
+    }])
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::name;
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
+    use apollo_compiler::executable::FieldSet;
+    use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
@@ -579,10 +746,10 @@ mod tests {
     use insta::assert_debug_snapshot;
     use url::Url;
 
+    use crate::Context;
     use crate::graphql;
     use crate::query_planner::fetch::Variables;
     use crate::services::connector::request_service::TransportRequest;
-    use crate::Context;
 
     #[test]
     fn test_root_fields_simple() {
@@ -638,78 +805,30 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
         Ok(
             [
                 RootField {
                     name: "a",
-                    selection: Named(
-                        SubSelection {
-                            selections: [
-                                Field(
-                                    None,
-                                    WithRange {
-                                        node: Field(
-                                            "f",
-                                        ),
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    None,
-                                ),
-                            ],
-                            range: Some(
-                                0..1,
-                            ),
-                        },
-                    ),
+                    selection: "f",
                     inputs: RequestInputs {
                         args: {},
                         this: {},
+                        batch: []
                     },
                 },
                 RootField {
                     name: "a2",
-                    selection: Named(
-                        SubSelection {
-                            selections: [
-                                Field(
-                                    Some(
-                                        Alias {
-                                            name: WithRange {
-                                                node: Field(
-                                                    "f2",
-                                                ),
-                                                range: None,
-                                            },
-                                            range: None,
-                                        },
-                                    ),
-                                    WithRange {
-                                        node: Field(
-                                            "f",
-                                        ),
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    None,
-                                ),
-                            ],
-                            range: Some(
-                                0..1,
-                            ),
-                        },
-                    ),
+                    selection: "f2: f",
                     inputs: RequestInputs {
                         args: {},
                         this: {},
+                        batch: []
                     },
                 },
             ],
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -769,80 +888,30 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
         Ok(
             [
                 RootField {
                     name: "b",
-                    selection: Path(
-                        PathSelection {
-                            path: WithRange {
-                                node: Var(
-                                    WithRange {
-                                        node: $,
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Empty,
-                                        range: Some(
-                                            1..1,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    0..1,
-                                ),
-                            },
-                        },
-                    ),
+                    selection: "$",
                     inputs: RequestInputs {
-                        args: {
-                            "var": String(
-                                "inline",
-                            ),
-                        },
+                        args: {"var":"inline"},
                         this: {},
+                        batch: []
                     },
                 },
                 RootField {
                     name: "b2",
-                    selection: Path(
-                        PathSelection {
-                            path: WithRange {
-                                node: Var(
-                                    WithRange {
-                                        node: $,
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Empty,
-                                        range: Some(
-                                            1..1,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    0..1,
-                                ),
-                            },
-                        },
-                    ),
+                    selection: "$",
                     inputs: RequestInputs {
-                        args: {
-                            "var": String(
-                                "variable",
-                            ),
-                        },
+                        args: {"var":"variable"},
                         this: {},
+                        batch: []
                     },
                 },
             ],
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -928,138 +997,30 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r###"
+        assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
         Ok(
             [
                 RootField {
                     name: "c",
-                    selection: Path(
-                        PathSelection {
-                            path: WithRange {
-                                node: Var(
-                                    WithRange {
-                                        node: $,
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Key(
-                                            WithRange {
-                                                node: Field(
-                                                    "data",
-                                                ),
-                                                range: Some(
-                                                    2..6,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    6..6,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            1..6,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    0..6,
-                                ),
-                            },
-                        },
-                    ),
+                    selection: "$.data",
                     inputs: RequestInputs {
-                        args: {
-                            "var1": Number(1),
-                            "var2": Bool(
-                                true,
-                            ),
-                            "var3": Number(0.9),
-                            "var4": String(
-                                "123",
-                            ),
-                            "var5": Object({
-                                "a": Number(42),
-                            }),
-                            "var6": Array([
-                                String(
-                                    "item",
-                                ),
-                            ]),
-                            "var7": Null,
-                        },
+                        args: {"var1":1,"var2":true,"var3":0.9,"var4":"123","var5":{"a":42},"var6":["item"],"var7":null},
                         this: {},
+                        batch: []
                     },
                 },
                 RootField {
                     name: "c2",
-                    selection: Path(
-                        PathSelection {
-                            path: WithRange {
-                                node: Var(
-                                    WithRange {
-                                        node: $,
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Key(
-                                            WithRange {
-                                                node: Field(
-                                                    "data",
-                                                ),
-                                                range: Some(
-                                                    2..6,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    6..6,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            1..6,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    0..6,
-                                ),
-                            },
-                        },
-                    ),
+                    selection: "$.data",
                     inputs: RequestInputs {
-                        args: {
-                            "var1": Number(1),
-                            "var2": Bool(
-                                true,
-                            ),
-                            "var3": Number(0.9),
-                            "var4": String(
-                                "123",
-                            ),
-                            "var5": Object({
-                                "a": Number(42),
-                            }),
-                            "var6": Array([
-                                String(
-                                    "item",
-                                ),
-                            ]),
-                            "var7": Null,
-                        },
+                        args: {"var1":1,"var2":true,"var3":0.9,"var4":"123","var5":{"a":42},"var6":["item"],"var7":null},
                         this: {},
+                        batch: []
                     },
                 },
             ],
         )
-        "###);
+        "#);
     }
 
     #[test]
@@ -1157,124 +1118,28 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
             Entity {
                 index: 0,
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "alias",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..5,
-                        ),
-                    },
-                ),
+                selection: "field\nalias: field",
                 inputs: RequestInputs {
-                    args: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"__typename":"Entity","id":"1"},
                     this: {},
+                    batch: []
                 },
             },
             Entity {
                 index: 1,
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "alias",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..5,
-                        ),
-                    },
-                ),
+                selection: "field\nalias: field",
                 inputs: RequestInputs {
-                    args: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"__typename":"Entity","id":"2"},
                     this: {},
+                    batch: []
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]
@@ -1373,124 +1238,28 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
             Entity {
                 index: 0,
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "alias",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..5,
-                        ),
-                    },
-                ),
+                selection: "field\nalias: field",
                 inputs: RequestInputs {
-                    args: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"__typename":"Entity","id":"1"},
                     this: {},
+                    batch: []
                 },
             },
             Entity {
                 index: 1,
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                            Field(
-                                Some(
-                                    Alias {
-                                        name: WithRange {
-                                            node: Field(
-                                                "alias",
-                                            ),
-                                            range: None,
-                                        },
-                                        range: None,
-                                    },
-                                ),
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..5,
-                        ),
-                    },
-                ),
+                selection: "field\nalias: field",
                 inputs: RequestInputs {
-                    args: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"__typename":"Entity","id":"2"},
                     this: {},
+                    batch: []
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]
@@ -1570,124 +1339,28 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
             RootField {
                 name: "a",
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                Some(
-                                    SubSelection {
-                                        selections: [
-                                            Field(
-                                                None,
-                                                WithRange {
-                                                    node: Field(
-                                                        "field",
-                                                    ),
-                                                    range: Some(
-                                                        8..13,
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                        ],
-                                        range: Some(
-                                            6..15,
-                                        ),
-                                    },
-                                ),
-                            ),
-                        ],
-                        range: Some(
-                            0..15,
-                        ),
-                    },
-                ),
+                selection: "field {\n  field\n}",
                 inputs: RequestInputs {
-                    args: {
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"id":"1"},
                     this: {},
+                    batch: []
                 },
             },
             RootField {
                 name: "b",
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "field",
-                                    ),
-                                    range: Some(
-                                        0..5,
-                                    ),
-                                },
-                                Some(
-                                    SubSelection {
-                                        selections: [
-                                            Field(
-                                                Some(
-                                                    Alias {
-                                                        name: WithRange {
-                                                            node: Field(
-                                                                "alias",
-                                                            ),
-                                                            range: None,
-                                                        },
-                                                        range: None,
-                                                    },
-                                                ),
-                                                WithRange {
-                                                    node: Field(
-                                                        "field",
-                                                    ),
-                                                    range: Some(
-                                                        8..13,
-                                                    ),
-                                                },
-                                                None,
-                                            ),
-                                        ],
-                                        range: Some(
-                                            6..15,
-                                        ),
-                                    },
-                                ),
-                            ),
-                        ],
-                        range: Some(
-                            0..15,
-                        ),
-                    },
-                ),
+                selection: "field {\n  alias: field\n}",
                 inputs: RequestInputs {
-                    args: {
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"id":"2"},
                     this: {},
+                    batch: []
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]
@@ -1789,7 +1462,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
             EntityField {
                 index: 0,
@@ -1797,41 +1470,11 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "hi",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"foo":"hi"},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
                 },
             },
             EntityField {
@@ -1840,41 +1483,11 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "hi",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"foo":"hi"},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
             EntityField {
@@ -1883,41 +1496,11 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "bye",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"foo":"bye"},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
                 },
             },
             EntityField {
@@ -1926,45 +1509,15 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "bye",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"foo":"bye"},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]
@@ -2067,7 +1620,7 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
             EntityField {
                 index: 0,
@@ -2075,41 +1628,11 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "hi",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"foo":"hi"},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
                 },
             },
             EntityField {
@@ -2118,41 +1641,11 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "hi",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"foo":"hi"},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
             EntityField {
@@ -2161,41 +1654,11 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "bye",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"foo":"bye"},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
                 },
             },
             EntityField {
@@ -2204,45 +1667,15 @@ mod tests {
                 typename: Some(
                     "Entity",
                 ),
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "bye",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"foo":"bye"},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
         ]
-        "###);
+        "#);
     }
 
     #[test]
@@ -2342,92 +1775,267 @@ mod tests {
             response_variables: Default::default(),
         };
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
         [
             EntityField {
                 index: 0,
                 field_name: "field",
                 typename: None,
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "bar",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "1",
-                        ),
-                    },
+                    args: {"foo":"bar"},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
                 },
             },
             EntityField {
                 index: 1,
                 field_name: "field",
                 typename: None,
-                selection: Named(
-                    SubSelection {
-                        selections: [
-                            Field(
-                                None,
-                                WithRange {
-                                    node: Field(
-                                        "selected",
-                                    ),
-                                    range: Some(
-                                        0..8,
-                                    ),
-                                },
-                                None,
-                            ),
-                        ],
-                        range: Some(
-                            0..8,
-                        ),
-                    },
-                ),
+                selection: "selected",
                 inputs: RequestInputs {
-                    args: {
-                        "foo": String(
-                            "bar",
-                        ),
-                    },
-                    this: {
-                        "__typename": String(
-                            "Entity",
-                        ),
-                        "id": String(
-                            "2",
-                        ),
-                    },
+                    args: {"foo":"bar"},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
         ]
-        "###);
+        "#);
+    }
+
+    #[test]
+    fn batch_entities_from_request() {
+        let partial_sdl = r#"
+        type Query {
+          entity(id: ID!): Entity
+        }
+
+        type Entity {
+          id: ID!
+          field: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let keys = FieldSet::parse_and_validate(&subgraph_schema, name!(Entity), "id", "").unwrap();
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Entity_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field
+                            alias: field
+                        }
+                    }
+                }
+                "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .and_keys(Some(keys))
+            .build();
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("id field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        };
+
+        assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        [
+            BatchEntity {
+                selection: "id\nfield\nalias: field",
+                key_selection: "id",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {},
+                    batch: [{"__typename":"Entity","id":"1"},{"__typename":"Entity","id":"2"}]
+                },
+            },
+        ]
+        "#);
+    }
+
+    #[test]
+    fn entities_from_request_on_type() {
+        let partial_sdl = r#"
+        type Query {
+          entity(id: ID!): Entity
+        }
+
+        type Entity {
+          id: ID!
+          field: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let keys = FieldSet::parse_and_validate(&subgraph_schema, name!(Entity), "id", "").unwrap();
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Entity_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field
+                            alias: field
+                        }
+                    }
+                }
+                "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .and_keys(Some(keys))
+            .build();
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("id field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        };
+
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        [
+            Entity {
+                index: 0,
+                selection: "field\nalias: field",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
+                },
+            },
+            Entity {
+                index: 1,
+                selection: "field\nalias: field",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
+                },
+            },
+        ]
+        "#);
     }
 
     #[test]
@@ -2500,7 +2108,7 @@ mod tests {
         })
         .collect();
 
-        assert_debug_snapshot!(requests, @r###"
+        assert_debug_snapshot!(requests, @r#"
         [
             (
                 Request {
@@ -2512,53 +2120,17 @@ mod tests {
                 },
                 RootField {
                     name: "a",
-                    selection: Path(
-                        PathSelection {
-                            path: WithRange {
-                                node: Var(
-                                    WithRange {
-                                        node: $,
-                                        range: Some(
-                                            0..1,
-                                        ),
-                                    },
-                                    WithRange {
-                                        node: Key(
-                                            WithRange {
-                                                node: Field(
-                                                    "data",
-                                                ),
-                                                range: Some(
-                                                    2..6,
-                                                ),
-                                            },
-                                            WithRange {
-                                                node: Empty,
-                                                range: Some(
-                                                    6..6,
-                                                ),
-                                            },
-                                        ),
-                                        range: Some(
-                                            1..6,
-                                        ),
-                                    },
-                                ),
-                                range: Some(
-                                    0..6,
-                                ),
-                            },
-                        },
-                    ),
+                    selection: "$.data",
                     inputs: RequestInputs {
                         args: {},
                         this: {},
+                        batch: []
                     },
                 },
                 None,
             ),
         ]
-        "###);
+        "#);
     }
 }
 

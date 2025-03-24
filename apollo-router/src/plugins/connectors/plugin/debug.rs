@@ -64,15 +64,16 @@ impl ConnectorContext {
     }
 
     pub(super) fn serialize(self) -> serde_json_bytes::Value {
-        json!(self
-            .requests
-            .into_iter()
-            .zip(self.responses.into_iter())
-            .map(|(req, res)| json!({
-                "request": req,
-                "response": res,
-            }))
-            .collect::<Vec<_>>())
+        json!(
+            self.requests
+                .into_iter()
+                .zip(self.responses.into_iter())
+                .map(|(req, res)| json!({
+                    "request": req,
+                    "response": res,
+                }))
+                .collect::<Vec<_>>()
+        )
     }
 }
 

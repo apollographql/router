@@ -12,13 +12,13 @@ use std::task::Poll;
 use std::time::Instant;
 use std::time::SystemTime;
 
+use futures::Stream;
+use futures::StreamExt;
 use futures::future::Ready;
 use futures::stream::FilterMap;
 use futures::stream::Fuse;
 use futures::stream::Repeat;
 use futures::stream::Zip;
-use futures::Stream;
-use futures::StreamExt;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
 use tokio_util::time::DelayQueue;
@@ -26,6 +26,8 @@ use tokio_util::time::DelayQueue;
 use super::license_enforcement::LicenseLimits;
 use super::license_enforcement::TpsLimit;
 use crate::router::Event;
+use crate::uplink::UplinkRequest;
+use crate::uplink::UplinkResponse;
 use crate::uplink::license_enforcement::Audience;
 use crate::uplink::license_enforcement::Claims;
 use crate::uplink::license_enforcement::License;
@@ -33,8 +35,6 @@ use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::OneOrMany;
 use crate::uplink::license_stream::license_query::FetchErrorCode;
 use crate::uplink::license_stream::license_query::LicenseQueryRouterEntitlements;
-use crate::uplink::UplinkRequest;
-use crate::uplink::UplinkResponse;
 
 const APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED: &str = "APOLLO_ROUTER_LICENSE_OFFLINE_UNSUPPORTED";
 
@@ -311,16 +311,16 @@ mod test {
 
     use crate::assert_snapshot_subscriber;
     use crate::router::Event;
+    use crate::uplink::UplinkConfig;
     use crate::uplink::license_enforcement::Audience;
     use crate::uplink::license_enforcement::Claims;
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseState;
     use crate::uplink::license_enforcement::OneOrMany;
-    use crate::uplink::license_stream::to_positive_instant;
     use crate::uplink::license_stream::LicenseQuery;
     use crate::uplink::license_stream::LicenseStreamExt;
+    use crate::uplink::license_stream::to_positive_instant;
     use crate::uplink::stream_from_uplink;
-    use crate::uplink::UplinkConfig;
 
     #[tokio::test]
     async fn integration_test() {
@@ -339,13 +339,15 @@ mod test {
             .collect::<Vec<_>>()
             .await;
 
-            assert!(results
-                .first()
-                .expect("expected one result")
-                .as_ref()
-                .expect("license should be OK")
-                .claims
-                .is_some())
+            assert!(
+                results
+                    .first()
+                    .expect("expected one result")
+                    .as_ref()
+                    .expect("license should be OK")
+                    .claims
+                    .is_some()
+            )
         }
     }
 
@@ -531,7 +533,7 @@ mod test {
                 }
                 Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,
                 Event::NoMoreLicense => SimpleEvent::NoMoreLicense,
-                Event::Reload => SimpleEvent::ForcedHotReload,
+                Event::Reload | Event::RhaiReload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }
