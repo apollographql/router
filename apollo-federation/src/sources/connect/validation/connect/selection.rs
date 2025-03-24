@@ -146,7 +146,7 @@ impl<'schema> Selection<'schema> {
                 let group = Group {
                     selection: sub_selection,
                     ty: return_type,
-                    definition: field_def,
+                    definition: Some(field_def),
                 };
 
                 SelectionValidator::new(
@@ -158,15 +158,42 @@ impl<'schema> Selection<'schema> {
                 .walk(group)
                 .map(|validator| validator.seen_fields)
             }
-            ConnectedElement::Type { .. } => Err(Message {
-                code: Code::FeatureUnavailable,
-                message: format!("{coordinate} requires connect v0.2 or later"),
-                locations: coordinate
-                    .directive
-                    .line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            }),
+            ConnectedElement::Type { type_def } => {
+                let base_type = match type_def {
+                    ExtendedType::Object(node) => node,
+                    _ => {
+                        return Err(Message {
+                            code: Code::GraphQLError,
+                            message: format!("{coordinate} is valid only on object types"),
+                            locations: coordinate
+                                .directive
+                                .line_column_range(&schema.sources)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
+                };
+
+                let Some(sub_selection) = self.parsed.next_subselection() else {
+                    // TODO: Validate scalar selections
+                    return Ok(Vec::new());
+                };
+
+                let group = Group {
+                    selection: sub_selection,
+                    ty: base_type,
+                    definition: None,
+                };
+
+                SelectionValidator::new(
+                    schema,
+                    PathPart::Root(base_type),
+                    self.string,
+                    self.coordinate,
+                )
+                .walk(group)
+                .map(|validator| validator.seen_fields)
+            }
         }
     }
 }
@@ -356,7 +383,7 @@ impl PathPart<'_> {
 struct Group<'schema> {
     selection: &'schema SubSelection,
     ty: &'schema Node<ObjectType>,
-    definition: &'schema Node<FieldDefinition>,
+    definition: Option<&'schema Node<FieldDefinition>>,
 }
 
 // TODO: Once there is location data for JSONSelection, return multiple errors instead of stopping
@@ -382,17 +409,23 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for SelectionValidato
         Ok(Some(Group {
             selection,
             ty,
-            definition: field.definition,
+            definition: Some(field.definition),
         }))
     }
 
     /// Get all the fields for an object type / selection.
     /// Returns an error if a selection points at a field which does not exist on the schema.
     fn enter_group(&mut self, group: &Group<'schema>) -> Result<Vec<Field<'schema>>, Self::Error> {
-        self.path.push(PathPart::Field {
-            definition: group.definition,
-            ty: group.ty,
-        });
+        match group.definition {
+            Some(definition) => {
+                self.path.push(PathPart::Field {
+                    definition,
+                    ty: group.ty,
+                });
+            }
+            None => {} // this happens at the root of a connector on a type, and we've already added the root path part
+        }
+
         group.selection.selections_iter().flat_map(|selection| {
             let mut results = Vec::new();
             for field_name in selection.names() {

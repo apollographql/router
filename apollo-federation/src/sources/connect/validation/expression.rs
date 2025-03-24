@@ -42,13 +42,13 @@ impl<'schema> Context<'schema> {
         source: &'schema GraphQLString,
         code: Code,
     ) -> Self {
-        let on_root_type = coordinate.element.on_root_type(schema.schema);
-
         match coordinate.element {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
             } => {
+                let on_root_type = coordinate.element.on_root_type(schema.schema);
+
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
                     (Namespace::Config, Shape::unknown([])),
@@ -68,12 +68,23 @@ impl<'schema> Context<'schema> {
                     code,
                 }
             }
-            ConnectedElement::Type { .. } => Self {
-                schema,
-                var_lookup: Default::default(), // TODO: $batch
-                source,
-                code,
-            },
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
         }
     }
 
