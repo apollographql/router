@@ -7,6 +7,7 @@ use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 
 use crate::sources::connect::id::ConnectedElement;
@@ -171,12 +172,12 @@ fn get_root<'a>(reference: &'a VariableReference<'a, Namespace>) -> Option<Varia
 
 /// Resolves variables in the `$this` namespace
 pub(crate) struct ThisResolver<'a> {
-    object: &'a ExtendedType,
+    object: &'a ObjectType,
     field: &'a Component<FieldDefinition>,
 }
 
 impl<'a> ThisResolver<'a> {
-    pub(crate) fn new(object: &'a ExtendedType, field: &'a Component<FieldDefinition>) -> Self {
+    pub(crate) fn new(object: &'a ObjectType, field: &'a Component<FieldDefinition>) -> Self {
         Self { object, field }
     }
 }
@@ -192,10 +193,7 @@ impl NamespaceResolver for ThisResolver<'_> {
             return Ok(()); // Not something we can type check this way
         };
 
-        let fields = match self.object {
-            ExtendedType::Object(node) => &node.fields,
-            _ => return Ok(()), // TODO: interfaces
-        };
+        let fields = &self.object.fields;
 
         let field_type = fields
             .get(root.as_str())
@@ -203,7 +201,7 @@ impl NamespaceResolver for ThisResolver<'_> {
                 code: Code::UndefinedField,
                 message: format!(
                     "`{object}` does not have a field named `{root}`",
-                    object = self.object.name(),
+                    object = self.object.name,
                     root = root.as_str(),
                 ),
                 locations: expression
