@@ -178,14 +178,14 @@ impl SubgraphMetadata {
         // @shareable is only avalaible on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).
-        let Ok(shareable_directive_definition) =
-            federation_spec_definition.shareable_directive_definition(schema)
+        let Some(shareable_directive_name) =
+            federation_spec_definition.shareable_directive_name_in_schema(schema)?
         else {
             return Ok(shareable_fields);
         };
         let shareable_directive_referencers = schema
             .referencers
-            .get_directive(&shareable_directive_definition.name)?;
+            .get_directive(&shareable_directive_name)?;
 
         // Fields of shareable object types are shareable
         for object_type_position in &shareable_directive_referencers.object_types {
@@ -334,15 +334,14 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let Ok(external_directive_definition) =
-            federation_spec_definition.external_directive_definition(schema)
+        let Some(external_directive_name) =
+            federation_spec_definition.external_directive_name_in_schema(schema)?
         else {
             return Ok(Default::default());
         };
 
-        let external_directive_referencers = schema
-            .referencers
-            .get_directive(&external_directive_definition.name)?;
+        let external_directive_referencers =
+            schema.referencers.get_directive(&external_directive_name)?;
 
         let mut external_fields = IndexSet::default();
 
@@ -406,15 +405,14 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let Ok(external_directive_definition) =
-            federation_spec_definition.external_directive_definition(schema)
+        let Some(external_directive_name) =
+            federation_spec_definition.external_directive_name_in_schema(schema)?
         else {
             return Ok(Default::default());
         };
 
-        let external_directive_referencers = schema
-            .referencers
-            .get_directive(&external_directive_definition.name)?;
+        let external_directive_referencers =
+            schema.referencers.get_directive(&external_directive_name)?;
 
         let mut fields_on_external_types = IndexSet::default();
         for object_type_position in &external_directive_referencers.object_types {

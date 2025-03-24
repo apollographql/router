@@ -15,6 +15,7 @@ use apollo_compiler::ty;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_string_argument;
@@ -235,6 +236,13 @@ impl FederationSpecDefinition {
             })
     }
 
+    pub(crate) fn external_directive_name_in_schema(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<Option<Name>, FederationError> {
+        self.directive_name_in_schema(schema, &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn external_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -256,7 +264,7 @@ impl FederationSpecDefinition {
         reason: Option<String>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC)?
+            .external_directive_name_in_schema(schema)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -365,6 +373,13 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn shareable_directive_name_in_schema(
+        &self,
+        schema: &FederationSchema,
+    ) -> Result<Option<Name>, FederationError> {
+        self.directive_name_in_schema(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)
+    }
+
     pub(crate) fn shareable_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -383,7 +398,7 @@ impl FederationSpecDefinition {
         schema: &FederationSchema,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
-            .directive_name_in_schema(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)?
+            .shareable_directive_name_in_schema(schema)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
@@ -572,7 +587,7 @@ impl FederationSpecDefinition {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                get_type: |_, _| Ok(Type::Named(FIELDSET_SCALAR_NAME)),
+                get_type: |schema, _| Ok(Type::non_null(field_set_type(schema)?)),
                 default_value: None,
             },
             composition_strategy: None,
@@ -703,6 +718,14 @@ impl FederationSpecDefinition {
     }
 }
 
+fn field_set_type(schema: &FederationSchema) -> Result<Type, FederationError> {
+    // PORT_NOTE: `schema.subgraph_metadata` is not accessible, since it's not validated, yet.
+    // PORT_NOTE: No counterpart for metadata.fieldSetType. Use FederationSchema::field_set_type.
+    schema
+        .field_set_type()
+        .map(|pos| Type::non_null(Type::Named(pos.type_name)))
+}
+
 impl SpecDefinition for FederationSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
@@ -788,6 +811,21 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
         }));
         definitions
     });
+
+pub(crate) fn federation_spec(
+    version: &Version,
+) -> Result<&'static FederationSpecDefinition, FederationError> {
+    FEDERATION_VERSIONS
+        .find(version)
+        .ok_or_else(|| internal_error!("Unknown Federation spec version: {version}"))
+}
+
+pub(crate) fn federation_spec_latest() -> &'static FederationSpecDefinition {
+    let Some(latest_version) = FEDERATION_VERSIONS.versions().last() else {
+        panic!("No Federation spec versions found")
+    };
+    federation_spec(latest_version).unwrap()
+}
 
 pub(crate) fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,

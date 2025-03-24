@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use apollo_compiler::Name;
@@ -7,14 +8,20 @@ use apollo_compiler::name;
 use apollo_compiler::ty;
 
 use crate::bail;
+use crate::error::FederationError;
+use crate::error::MultiTry;
+use crate::error::MultiTryAll;
+use crate::error::SingleFederationError;
 use crate::link::DEFAULT_IMPORT_SCALAR_NAME;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::DEFAULT_PURPOSE_ENUM_NAME;
+use crate::link::Link;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::FederationSchema;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveArgumentSpecification;
 use crate::schema::type_and_directive_specification::DirectiveSpecification;
@@ -104,6 +111,59 @@ impl LinkSpecDefinition {
     fn supports_import(&self) -> bool {
         self.version().satisfies(&Version { major: 1, minor: 0 })
     }
+
+    pub(crate) fn add_to_schema(
+        &self,
+        schema: &mut FederationSchema,
+        alias: Option<Name>,
+    ) -> Result<(), FederationError> {
+        self.add_definitions_to_schema(schema, alias)?;
+
+        // TODO: port `SchemaDefinition::hasExtensionElements/hasNonExtensionElements`
+        Ok(())
+    }
+
+    pub(crate) fn add_definitions_to_schema(
+        &self,
+        schema: &mut FederationSchema,
+        alias: Option<Name>,
+        // imports: Vec<Import>, // TODO
+    ) -> Result<(), FederationError> {
+        if let Some(metadata) = schema.metadata() {
+            let link_spec_def = metadata.link_spec_definition()?;
+            if link_spec_def.url.identity == *self.identity() {
+                // Already exists with the same version, let it be.
+                return Ok(());
+            }
+            let self_fmt = format!("{}/{}", self.identity(), self.version());
+            return Err(SingleFederationError::InvalidLinkDirectiveUsage {
+                message: format!(
+                    "Cannot add feature {self_fmt} to the schema, it already uses (unknown/TODO)",
+                ),
+            }
+            .into());
+        }
+
+        // The @link spec is special in that it is the one that bootstrap everything, and by the
+        // time this method is called, the `schema` may not yet have any `schema.metadata()` set up
+        // yet. To have `check_or_add` calls below still work, we pass a mock link object with the
+        // proper information (not that the `Directive` we pass is not complete and not even
+        // attached to the schema, but that is not used in practice so unused).
+        let mock_link = Arc::new(Link {
+            url: self.url.clone(),
+            spec_alias: alias,
+            imports: vec![], // TODO
+            purpose: None,
+        });
+        Ok(())
+            .and_try(create_link_purpose_type_spec().check_or_add(schema, Some(&mock_link)))
+            .and_try(create_link_import_type_spec().check_or_add(schema, Some(&mock_link)))
+            .and_try(
+                self.directive_specs()
+                    .into_iter()
+                    .try_for_all(|spec| spec.check_or_add(schema, Some(&mock_link))),
+            )
+    }
 }
 
 impl SpecDefinition for LinkSpecDefinition {
@@ -125,30 +185,48 @@ impl SpecDefinition for LinkSpecDefinition {
     fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
         let mut specs: Vec<Box<dyn TypeAndDirectiveSpecification>> = Vec::with_capacity(2);
         if self.supports_purpose() {
-            specs.push(Box::new(EnumTypeSpecification {
-                name: DEFAULT_PURPOSE_ENUM_NAME,
-                values: vec![
-                    EnumValueSpecification {
-                        name: name!("SECURITY"),
-                        description: Some(
-                            "`SECURITY` features provide metadata necessary to securely resolve fields.".to_string(),
-                        ),
-                    },
-                    EnumValueSpecification {
-                        name: name!("EXECUTION"),
-                        description: Some(
-                            "`EXECUTION` features provide metadata necessary for operation execution.".to_string(),
-                        ),
-                    },
-                ],
-            }),)
+            specs.push(Box::new(create_link_purpose_type_spec()))
         }
         if self.supports_import() {
-            specs.push(Box::new(ScalarTypeSpecification {
-                name: DEFAULT_IMPORT_SCALAR_NAME,
-            }))
+            specs.push(Box::new(create_link_import_type_spec()))
         }
         specs
+    }
+
+    fn add_elements_to_schema(
+        &self,
+        _schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        // Link is special and the @link directive is added in `add_to_schema` above
+        Ok(())
+    }
+}
+
+fn create_link_purpose_type_spec() -> EnumTypeSpecification {
+    EnumTypeSpecification {
+        name: DEFAULT_PURPOSE_ENUM_NAME,
+        values: vec![
+            EnumValueSpecification {
+                name: name!("SECURITY"),
+                description: Some(
+                    "`SECURITY` features provide metadata necessary to securely resolve fields."
+                        .to_string(),
+                ),
+            },
+            EnumValueSpecification {
+                name: name!("EXECUTION"),
+                description: Some(
+                    "`EXECUTION` features provide metadata necessary for operation execution."
+                        .to_string(),
+                ),
+            },
+        ],
+    }
+}
+
+fn create_link_import_type_spec() -> ScalarTypeSpecification {
+    ScalarTypeSpecification {
+        name: DEFAULT_IMPORT_SCALAR_NAME,
     }
 }
 
@@ -174,3 +252,8 @@ pub(crate) static LINK_VERSIONS: LazyLock<SpecDefinitions<LinkSpecDefinition>> =
         ));
         definitions
     });
+
+pub(crate) fn link_spec_latest() -> &'static LinkSpecDefinition {
+    let latest_version = LINK_VERSIONS.versions().last().unwrap();
+    LINK_VERSIONS.find(latest_version).unwrap()
+}

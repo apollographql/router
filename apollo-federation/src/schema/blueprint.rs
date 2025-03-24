@@ -1,21 +1,30 @@
+use std::sync::Arc;
+
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::name;
 use apollo_compiler::ty;
 
 use crate::bail;
 use crate::error::FederationError;
+use crate::error::MultiTry;
+use crate::error::MultiTryAll;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
+use crate::link::Link;
 use crate::link::Purpose;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::link_spec_latest;
+use crate::link::spec::Identity;
 use crate::link::spec::Url;
+use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
@@ -34,6 +43,43 @@ struct FederationBlueprint {
     with_root_type_renaming: bool,
 }
 
+// PORT_NOTE: From `FAKE_FED1_CORE_FEATURE_TO_RENAME_TYPES` in JS
+/**
+ * Federation 1 has that specificity that it wasn't using @link to name-space federation elements,
+ * and so to "distinguish" the few federation type names, it prefixed those with a `_`. That is,
+ * the `FieldSet` type was named `_FieldSet` in federation1. To handle this without too much effort,
+ * we use a fake `CoreFeature` with imports for all the fed1 types to use those specific "aliases"
+ * and we pass it when adding those types. This allows to reuse the same `TypeSpecification` objects
+ * for both fed1 and fed2. Note that in the object below, all that is used is the imports, the rest
+ * is just filling the blanks.
+ */
+fn fake_fed1_link_to_rename_types(fed_spec_def: &FederationSpecDefinition) -> Arc<Link> {
+    let fed1_types = fed_spec_def.type_specs();
+    let imports = fed1_types
+        .iter()
+        .map(|type_spec| {
+            Arc::new(Import {
+                element: type_spec.name().clone(),
+                is_directive: false,
+                alias: Some(Name::new_unchecked(&format!("_{}", type_spec.name()))),
+            })
+        })
+        .collect();
+    // PORT_NOTE: `Link` has no fields to save a directive, while JS version saves a fake one.
+    Arc::new(Link {
+        url: Url {
+            identity: Identity {
+                domain: "<fed1>".to_string(),
+                name: name!("fed1"),
+            },
+            version: Version { major: 0, minor: 1 },
+        },
+        spec_alias: Some(name!("fed1")),
+        imports,
+        purpose: None,
+    })
+}
+
 #[allow(dead_code)]
 impl FederationBlueprint {
     fn new(with_root_type_renaming: bool) -> Self {
@@ -47,22 +93,43 @@ impl FederationBlueprint {
         directive: &Directive,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
-            let latest_version = LINK_VERSIONS.versions().last().unwrap();
-            let link_spec = LINK_VERSIONS.find(latest_version).unwrap();
-            link_spec.add_elements_to_schema(schema)?;
+            // TODO: pass `alias` and `imports`
+            link_spec_latest().add_definitions_to_schema(schema, /*alias*/ None)?;
+            Ok(schema.get_directive_definition(&directive.name))
+        } else {
+            Ok(None)
         }
-        Ok(schema.get_directive_definition(&DEFAULT_LINK_NAME))
     }
 
     fn on_directive_definition_and_schema_parsed(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
+        // PORT_NOTE: Mirrors a part of `completeSubgraphSchema`
         let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
         if federation_spec.is_fed1() {
+            // PORT_NOTE: Mirrors a part of `completeFed1SubgraphSchema`
             Self::remove_federation_definitions_broken_in_known_ways(schema)?;
+            let fed1_types = federation_spec.type_specs();
+            let fed1_directives = federation_spec.directive_specs();
+            let fake_fed1_link = fake_fed1_link_to_rename_types(federation_spec);
+            Ok(())
+                .and_try(
+                    fed1_types.iter().try_for_all(|type_spec| {
+                        type_spec.check_or_add(schema, Some(&fake_fed1_link))
+                    }),
+                )
+                .and_try(
+                    fed1_directives
+                        .iter()
+                        .try_for_all(|directive_spec| directive_spec.check_or_add(schema, None)),
+                )?;
+            Self::expand_known_features(schema)
+        } else {
+            link_spec_latest().add_to_schema(schema, /*alias*/ None)?;
+            // PORT_NOTE: Mirrors a part of `completeFed2SubgraphSchema`?
+            federation_spec.add_elements_to_schema(schema)?;
+            Self::expand_known_features(schema)
         }
-        federation_spec.add_elements_to_schema(schema)?;
-        Self::expand_known_features(schema)
     }
 
     fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
@@ -208,11 +275,7 @@ mod tests {
         assert!(!metadata.is_fed_2_schema());
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
-    #[should_panic(
-        expected = r#"MultipleFederationErrors { errors: [Internal { message: "Type Purpose shouldn't be added without being attached to a @link spec" }, Internal { message: "Type Import shouldn't be added without being attached to a @link spec" }] }"#
-    )]
     fn detects_federation_2_subgraphs_correctly() {
         let schema = Schema::parse(
             r#"
@@ -266,7 +329,6 @@ mod tests {
         );
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn injects_missing_directive_definitions_fed_2_0() {
         let schema = Schema::parse(
@@ -293,21 +355,20 @@ mod tests {
             defined_directive_names,
             vec![
                 name!("deprecated"),
-                name!("external"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
                 name!("include"),
-                name!("key"),
                 name!("link"),
-                name!("override"),
-                name!("provides"),
-                name!("requires"),
-                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
         );
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn injects_missing_directive_definitions_fed_2_1() {
         let schema = Schema::parse(
@@ -333,16 +394,16 @@ mod tests {
         assert_eq!(
             defined_directive_names,
             vec![
-                name!("composeDirective"),
                 name!("deprecated"),
-                name!("external"),
+                name!("federation__composeDirective"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
                 name!("include"),
-                name!("key"),
                 name!("link"),
-                name!("override"),
-                name!("provides"),
-                name!("requires"),
-                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -380,7 +441,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
         assert!(
             key_definition
@@ -400,7 +461,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
 
         let requires_definition = subgraph
@@ -415,7 +476,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
     }
 

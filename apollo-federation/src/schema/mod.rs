@@ -12,8 +12,11 @@ use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use referencer::Referencers;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
+use crate::link::Link;
 use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
@@ -21,7 +24,10 @@ use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
+use crate::link::federation_spec_definition::federation_spec_latest;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -32,6 +38,7 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::subgraph::spec::FIELDSET_SCALAR_NAME;
 
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
@@ -221,6 +228,70 @@ impl FederationSchema {
             ))),
             None => Ok(None),
         }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.fieldSetType` in JS.
+    pub(crate) fn field_set_type(&self) -> Result<ScalarTypeDefinitionPosition, FederationError> {
+        let name_in_schema = self.federation_type_name_in_schema(FIELDSET_SCALAR_NAME)?;
+        match self.schema.types.get(&name_in_schema) {
+            Some(ExtendedType::Scalar(_)) => Ok(ScalarTypeDefinitionPosition {
+                type_name: name_in_schema,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{name_in_schema}` type definition"
+            ),
+            None => bail!("Unexpected: type not found for federation spec's `{name_in_schema}`"),
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.federationTypeNameInSchema` in JS.
+    // Note: Unfortunately, this overlaps with `ValidFederationSchema`'s
+    //       `federation_type_name_in_schema` method. This method was added because it's used
+    //       during composition before `ValidFederationSchema` is created.
+    pub(crate) fn federation_type_name_in_schema(
+        &self,
+        name: Name,
+    ) -> Result<Name, FederationError> {
+        // Currently, the types used to define the federation operations, that is _Any, _Entity and
+        // _Service, are not considered part of the federation spec, and are instead hardcoded to
+        // the names above. The reason being that there is no way to maintain backward
+        // compatibility with fed2 if we were to add those to the federation spec without requiring
+        // users to add those types to their @link `import`, and that wouldn't be a good user
+        // experience (because most users don't really know what those types are/do). And so we
+        // special case it.
+        if name.starts_with('_') {
+            return Ok(name);
+        }
+
+        if self.is_fed2_schema() {
+            let Some(links) = self.metadata() else {
+                bail!("Schema should be a core schema")
+            };
+            let Some(federation_link) = links.by_identity.get(federation_spec_latest().identity())
+            else {
+                bail!("Schema should have the federation feature")
+            };
+            Ok(federation_link.type_name_in_schema(&name))
+        } else {
+            // The only type here so far is the the `FieldSet` one. And in fed1, it's called `_FieldSet`, so ...
+            Name::new(&format!("_{name}"))
+                .map_err(|e| internal_error!("Invalid name `_{name}`: {e}"))
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.isFed2Schema` in JS
+    fn is_fed2_schema(&self) -> bool {
+        self.federation_link()
+            .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
+    fn federation_link(&self) -> Option<&Arc<Link>> {
+        self.metadata().and_then(|metadata| {
+            metadata
+                .by_identity
+                .get(federation_spec_latest().identity())
+        })
     }
 
     pub(crate) fn context_directive_applications(

@@ -136,6 +136,11 @@ pub(crate) trait SpecDefinition {
 
     fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let link = self.link_in_schema(schema)?;
+        assert!(
+            link.is_some(),
+            "The ${self_url} specification should have been added to the schema before this is called",
+            self_url = self.url()
+        );
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for type_spec in self.type_specs() {
             if let Err(err) = type_spec.check_or_add(schema, link.as_ref()) {
