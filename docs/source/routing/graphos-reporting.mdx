@@ -392,13 +392,13 @@ telemetry:
 
 <PreviewFeature />
 
-Enable richer error reporting via `preview_extended_error_metrics` and `redaction_policy` options.
+Enable richer error reporting via `preview_extended_error_metrics` and `redaction_policy` router configurations.
 
-When enabled, the Router will send metrics to Studio
-with additional attributes including the `service` and `code` found in GraphQL error extensions (`errors[].extensions.service` and `errors[].extensions.code`).
+When enabled, the router sends metrics to Studio
+with additional attributes including the `service` and `code` found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format) (`errors[].extensions.service` and `errors[].extensions.code`, respectively).
 
-Additional diagnostic capabilities available in Studio now support viewing errors by `service` / `code`. The `service` dimension refers to the subgraph or connector where the error originated from.
-The `code` refers to the specific type of error that was raised by the Router or federated subgraphs / connectors.
+Additional diagnostic capabilities available in Studio now support viewing errors by `service` or `code`. The `service` dimension refers to the subgraph or connector where the error originated from.
+The `code` refers to the specific type of error that was raised by the router, federated subgraphs, or connectors.
 
 ```yaml title="router.yaml"
 telemetry:
