@@ -2,10 +2,9 @@ use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::ty;
 
-use crate::JOIN_VERSIONS;
 use crate::error::FederationError;
-use crate::error::SingleFederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Purpose;
@@ -15,7 +14,6 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LINK_VERSIONS;
-use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -110,6 +108,13 @@ impl FederationBlueprint {
     fn remove_federation_definitions_broken_in_known_ways(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
+        // We special case @key, @requires and @provides because we've seen existing user schemas where those
+        // have been defined in an invalid way, but in a way that fed1 wasn't rejecting. So for convenience,
+        // if we detect one of those case, we just remove the definition and let the code afteward add the
+        // proper definition back.
+        // Note that, in a perfect world, we'd do this within the `SchemaUpgrader`. But the way the code
+        // is organised, this method is called before we reach the `SchemaUpgrader`, and it doesn't seem
+        // worth refactoring things drastically for that minor convenience.
         for directive_name in &[
             FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC,
             FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC,
@@ -117,14 +122,24 @@ impl FederationBlueprint {
         ] {
             if let Some(pos) = schema.get_directive_definition(directive_name) {
                 let directive = pos.get(schema.schema())?;
+                // The patterns we recognize and "correct" (by essentially ignoring the definition) are:
+                //  1. if the definition has no arguments at all.
+                //  2. if the `fields` argument is declared as nullable.
+                //  3. if the `fields` argument type is named "FieldSet" instead of "_FieldSet".
+                // All of these correspond to things we've seen in user schemas.
+                //
+                // To be on the safe side, we check that `fields` is the only argument. That's because
+                // fed2 accepts the optional `resolvable` arg for @key, fed1 only ever had one arguemnt.
+                // If the user had defined more arguments _and_ provided values for the extra argument,
+                // removing the definition would create validation errors that would be hard to understand.
                 if directive.arguments.is_empty()
                     || (directive.arguments.len() == 1
                         && directive
                             .argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME)
                             .is_some_and(|fields| {
-                                fields.ty.inner_named_type() == "String"
-                                    || fields.ty.inner_named_type() == "_FieldSet"
-                                    || fields.ty.inner_named_type() == "FieldSet"
+                                *fields.ty == ty!(String)
+                                    || *fields.ty == ty!(_FieldSet)
+                                    || *fields.ty == ty!(FieldSet)
                             }))
                 {
                     pos.remove(schema)?;
@@ -139,16 +154,9 @@ impl FederationBlueprint {
             return Ok(());
         };
 
-        for link in links_metadata.links.clone() {
-            if link.url.identity == Identity::join_identity() {
-                let spec = JOIN_VERSIONS.find(&link.url.version).ok_or_else(|| {
-                    SingleFederationError::UnknownLinkVersion {
-                        message: format!("Unknown join spec version {}", link.url.version),
-                    }
-                })?;
-                spec.add_elements_to_schema(schema)?;
-            }
-            // TODO: Remaining known features
+        for _link in links_metadata.links.clone() {
+            // TODO: Pick out known features by link identity and call `add_elements_to_schema`.
+            // JS calls coreFeatureDefinitionIfKnown here, but we don't have a feature registry yet.
         }
         Ok(())
     }

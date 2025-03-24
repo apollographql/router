@@ -646,61 +646,37 @@ impl FederationSpecDefinition {
             FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
             &[],
             self.version().gt(&Version { major: 2, minor: 1 }), // repeatable in Fed 2.2 or later
-            &[DirectiveLocation::FieldDefinition],
+            &[
+                DirectiveLocation::FieldDefinition,
+                DirectiveLocation::Object,
+            ],
             false,
             None,
         )
     }
 
-    fn override_directive_specification() -> DirectiveSpecification {
+    fn override_directive_specification(&self) -> DirectiveSpecification {
+        let mut args = vec![DirectiveArgumentSpecification {
+            base_spec: ArgumentSpecification {
+                name: FEDERATION_FROM_ARGUMENT_NAME,
+                get_type: |_| Ok(ty!(String!)),
+                default_value: None,
+            },
+            composition_strategy: None,
+        }];
+        if self.version().satisfies(&Version { major: 2, minor: 7 }) {
+            args.push(DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                    get_type: |_| Ok(ty!(String)),
+                    default_value: None,
+                },
+                composition_strategy: None,
+            });
+        }
         DirectiveSpecification::new(
             FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
-            &[
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: FEDERATION_FROM_ARGUMENT_NAME,
-                        get_type: |_| Ok(ty!(String!)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
-                        get_type: |_| Ok(ty!(String!)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-            ],
-            false,
-            &[DirectiveLocation::FieldDefinition],
-            false,
-            None,
-        )
-    }
-
-    fn progressive_override_directive_specification() -> DirectiveSpecification {
-        DirectiveSpecification::new(
-            FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC,
-            &[
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: FEDERATION_FROM_ARGUMENT_NAME,
-                        get_type: |_| Ok(ty!(String!)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-                DirectiveArgumentSpecification {
-                    base_spec: ArgumentSpecification {
-                        name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
-                        get_type: |_| Ok(ty!(String!)),
-                        default_value: None,
-                    },
-                    composition_strategy: None,
-                },
-            ],
+            &args,
             false,
             &[DirectiveLocation::FieldDefinition],
             false,
@@ -745,13 +721,7 @@ impl SpecDefinition for FederationSpecDefinition {
         }
 
         specs.push(Box::new(self.shareable_directive_specification()));
-        if self.version().satisfies(&Version { major: 2, minor: 7 }) {
-            specs.push(Box::new(
-                Self::progressive_override_directive_specification(),
-            ));
-        } else {
-            specs.push(Box::new(Self::override_directive_specification()));
-        }
+        specs.push(Box::new(self.override_directive_specification()));
 
         if self.version().satisfies(&Version { major: 2, minor: 1 }) {
             specs.push(Box::new(Self::compose_directive_directive_specification()));
