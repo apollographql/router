@@ -129,7 +129,8 @@ fn size_shape(
 mod tests {
     use serde_json_bytes::json;
 
-    use crate::{selection, sources::connect::ApplyToError};
+    use crate::selection;
+    use crate::sources::connect::ApplyToError;
 
     #[test]
     fn size_should_return_0_when_empty_array() {

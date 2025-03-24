@@ -169,7 +169,8 @@ fn entries_shape(
 mod tests {
     use serde_json_bytes::json;
 
-    use crate::{selection, sources::connect::ApplyToError};
+    use crate::selection;
+    use crate::sources::connect::ApplyToError;
 
     #[test]
     fn entries_should_return_keys_and_values_when_applied_to_object() {

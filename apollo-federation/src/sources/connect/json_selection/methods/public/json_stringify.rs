@@ -74,10 +74,11 @@ fn json_stringify_shape(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json_bytes::json;
 
-    use crate::{selection, sources::connect::ApplyToError};
+    use super::*;
+    use crate::selection;
+    use crate::sources::connect::ApplyToError;
 
     #[rstest::rstest]
     #[case(json!(null), json!("null"), vec![])]
