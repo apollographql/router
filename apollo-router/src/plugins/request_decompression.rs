@@ -6,6 +6,7 @@ use tower::ServiceExt;
 
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
+use crate::services::fetch::Request;
 use crate::services::router;
 
 #[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
@@ -13,16 +14,27 @@ struct RequestDecompressionConfig {
     /// When `true`, brotli-encoded request bodies will be automatically decompressed.
     ///
     /// Defaults to `true`.
-    br: Option<bool>,
+    br: bool,
     /// When `true`, gzip-encoded request bodies will be automatically decompressed.
     ///
     /// Defaults to `true`.
-    gzip: Option<bool>,
+    gzip: bool,
     /// When `true`, deflate-encoded request bodies will be automatically decompressed.
     ///
     /// Defaults to `true`.
-    deflate: Option<bool>,
+    deflate: bool,
 }
+
+impl Default for RequestDecompressionConfig {
+    fn default() -> Self {
+        Self {
+            br: true,
+            gzip: true,
+            deflate: true,
+        }
+    }
+}
+
 struct RequestDecompressionPlugin {
     br: bool,
     gzip: bool,
@@ -35,9 +47,9 @@ impl PluginPrivate for RequestDecompressionPlugin {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, tower::BoxError> {
         Ok(RequestDecompressionPlugin {
-            br: init.config.br.unwrap_or_default(),
-            gzip: init.config.gzip.unwrap_or_default(),
-            deflate: init.config.deflate.unwrap_or_default(),
+            br: init.config.br,
+            gzip: init.config.gzip,
+            deflate: init.config.deflate,
         })
     }
 
