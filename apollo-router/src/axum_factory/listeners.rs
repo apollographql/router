@@ -238,11 +238,10 @@ macro_rules! handle_connection {
             _ = connection_shutdown.notified() => {
                 connection_handle.shutdown();
                 connection.as_mut().graceful_shutdown();
-                // if the connection was idle and we never received the first request,
-                // hyper's graceful shutdown would wait indefinitely, so instead we
-                // close the connection right away
+                // Only wait for the connection to close gracfully if we recieved a request.
+                // On hyper 0.x awaiting the connection would potentially hang forever if no request was recieved.
                 if received_first_request.load(Ordering::Relaxed) {
-                    // The connection may still not shutdown so we aplly a timeout from the configuration
+                    // The connection may still not shutdown so we apply a timeout from the configuration
                     // Connections stuck terminating will keep the pipeline and everything related to that pipeline
                     // in memory.
 
