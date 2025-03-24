@@ -4,7 +4,7 @@ When a connection is closed we call `graceful_shutdown` on hyper and then await 
 
 Hyper 0.x has various issues around shutdown that may result in us waiting for extended periods for the connection to eventually be closed.
 
-This PR introduces a configurable timeout from signal to terminate to actual termination defaulted to 60 seconds. After the timeout is reached the connection is forcibly terminated.
+This PR introduces a configurable timeout from the termination signal to actual termination, defaulted to 60 seconds. The connection is forcibly terminated after the timeout is reached.
 
 To configure, set the option in router yaml. It accepts human time durations:
 ```
