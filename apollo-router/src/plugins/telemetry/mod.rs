@@ -1431,6 +1431,8 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
+                                    client_library_name: String::new(),
+                                    client_library_version: String::new(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
                                         .to_string(),

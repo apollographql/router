@@ -140,7 +140,7 @@ expression: "&connectors"
         response_variables: {},
     },
     ConnectId {
-        label: "connectors.json http: GET /posts?id=1",
+        label: "connectors.json http: POST /posts",
         subgraph_name: "connectors",
         source_name: Some(
             "json",
@@ -154,7 +154,7 @@ expression: "&connectors"
         ),
     }: Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /posts?id=1",
+            label: "connectors.json http: POST /posts",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -199,32 +199,9 @@ expression: "&connectors"
                         ],
                     },
                 ],
-                query: [
-                    (
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "id",
-                                        location: 7..9,
-                                    },
-                                ),
-                            ],
-                        },
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "1",
-                                        location: 10..11,
-                                    },
-                                ),
-                            ],
-                        },
-                    ),
-                ],
+                query: [],
             },
-            method: Get,
+            method: Post,
             headers: {
                 "authtoken": From(
                     "x-auth-token",
@@ -244,7 +221,71 @@ expression: "&connectors"
                     ),
                 ),
             },
-            body: None,
+            body: Some(
+                Named(
+                    SubSelection {
+                        selections: [
+                            Path {
+                                alias: Some(
+                                    Alias {
+                                        name: WithRange {
+                                            node: Field(
+                                                "ids",
+                                            ),
+                                            range: Some(
+                                                0..3,
+                                            ),
+                                        },
+                                        range: Some(
+                                            0..4,
+                                        ),
+                                    },
+                                ),
+                                inline: false,
+                                path: PathSelection {
+                                    path: WithRange {
+                                        node: Var(
+                                            WithRange {
+                                                node: $batch,
+                                                range: Some(
+                                                    5..11,
+                                                ),
+                                            },
+                                            WithRange {
+                                                node: Key(
+                                                    WithRange {
+                                                        node: Field(
+                                                            "id",
+                                                        ),
+                                                        range: Some(
+                                                            12..14,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Empty,
+                                                        range: Some(
+                                                            14..14,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    11..14,
+                                                ),
+                                            },
+                                        ),
+                                        range: Some(
+                                            5..14,
+                                        ),
+                                    },
+                                },
+                            },
+                        ],
+                        range: Some(
+                            0..14,
+                        ),
+                    },
+                ),
+            ),
         },
         selection: Named(
             SubSelection {
@@ -293,9 +334,13 @@ expression: "&connectors"
         ),
         config: None,
         max_requests: None,
-        entity_resolver: None,
+        entity_resolver: Some(
+            TypeBatch,
+        ),
         spec: V0_2,
-        request_variables: {},
+        request_variables: {
+            $batch,
+        },
         response_variables: {},
     },
 }

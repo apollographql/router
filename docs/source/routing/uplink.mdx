@@ -151,9 +151,9 @@ APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT=https://aws.uplink.api.apollographql.com/
 
 ## Schema size limit
 
-Supergraph schemas provided by Uplink cannot exceed 6MB in size. The vast majority of supergraph schemas are well below this limit.
+Supergraph schemas provided by Uplink cannot exceed 10MB in size. The vast majority of supergraph schemas are well below this limit.
 
-If your supergraph schema does exceed 6MB, you can set up a [build status webhook](/graphos/platform/insights/notifications/build-status) for your graph. Whenever you're notified of a successful supergraph schema composition, your webhook can fetch the latest supergraph schema [via the Rover CLI](/rover/commands/supergraphs#supergraph-fetch).
+If your supergraph schema does exceed 10MB, you can set up a [build status webhook](/graphos/platform/insights/notifications/build-status) for your graph. Whenever you're notified of a successful supergraph schema composition, your webhook can fetch the latest supergraph schema [via the Rover CLI](/rover/commands/supergraphs#supergraph-fetch).
 
 ## Bypassing Uplink
 

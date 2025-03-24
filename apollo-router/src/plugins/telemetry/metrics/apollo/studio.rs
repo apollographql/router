@@ -535,6 +535,8 @@ mod test {
                             result: "".to_string(),
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
+                            client_library_name: String::new(),
+                            client_library_version: String::new(),
                             operation_type: String::new(),
                             operation_subtype: String::new(),
                         },

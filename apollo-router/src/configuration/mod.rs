@@ -598,7 +598,10 @@ impl JsonSchema for ApolloPlugins {
 
         let plugins = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
-            .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .filter(|factory| {
+                factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
+                    && !factory.hidden_from_config_json_schema
+            })
             .map(|factory| {
                 (
                     factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
