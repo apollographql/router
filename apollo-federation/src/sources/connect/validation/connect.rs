@@ -20,6 +20,7 @@ use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::validation::connect::http::Http;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 mod entity;
@@ -200,7 +201,15 @@ fn fields_seen_by_connector(
             }
         };
 
-        errors.extend(http::validate(coordinate, source_name, schema));
+        // TODO: Do all parsing in one stage, then all type checking in a later stage
+        let http = match Http::parse(coordinate, source_name, schema) {
+            Ok(http) => http,
+            Err(errs) => {
+                errors.extend(errs);
+                continue;
+            }
+        };
+        errors.extend(http.type_check(schema).err().into_iter().flatten());
     }
 
     if errors.is_empty() {
