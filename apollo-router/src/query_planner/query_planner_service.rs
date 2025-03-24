@@ -576,10 +576,9 @@ pub(crate) struct QueryPlanResult {
 }
 
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
-    f64_histogram_with_unit!(
+    f64_histogram!(
         "apollo.router.query_planning.plan.duration",
         "Duration of the query planning.",
-        "s",
         elapsed,
         "planner" = planner
     );
