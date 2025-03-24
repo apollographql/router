@@ -626,7 +626,7 @@ pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
         .flatten()
         .and_then(|claims_value: Option<serde_json::Value>| {
             let claims_obj = claims_value.as_ref()?.as_object();
-            // Extract the expiry claim from the JWT, returning immediately if it's not present
+            // Extract the expiry claim from the JWT
             let exp = match claims_obj {
                 Some(exp) => exp.get("exp"),
                 None => {
