@@ -59,7 +59,7 @@ pub(super) enum ArrowMethod {
 macro_rules! impl_arrow_method {
     ($struct_name:ident, $impl_fn_name:ident, $shape_fn_name:ident) => {
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        pub(super) struct $struct_name;
+        pub(crate) struct $struct_name;
         impl $crate::sources::connect::json_selection::methods::ArrowMethodImpl for $struct_name {
             fn apply(
                 &self,
