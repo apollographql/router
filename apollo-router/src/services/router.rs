@@ -78,18 +78,35 @@ impl From<Body> for IntoBody {
         Self(value)
     }
 }
+
 impl From<String> for IntoBody {
     fn from(value: String) -> Self {
         Self(self::body::from_bytes(value))
     }
 }
+
 impl From<Bytes> for IntoBody {
     fn from(value: Bytes) -> Self {
         Self(self::body::from_bytes(value))
     }
 }
+
 impl From<Vec<u8>> for IntoBody {
     fn from(value: Vec<u8>) -> Self {
+        Self(self::body::from_bytes(value))
+    }
+}
+
+#[cfg(test)]
+impl From<&'static [u8]> for IntoBody {
+    fn from(value: &'static [u8]) -> Self {
+        Self(self::body::from_bytes(value))
+    }
+}
+
+#[cfg(test)]
+impl From<&'static str> for IntoBody {
+    fn from(value: &'static str) -> Self {
         Self(self::body::from_bytes(value))
     }
 }
