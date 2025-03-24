@@ -283,6 +283,9 @@ async fn get_json_query_plan(query: &str) -> serde_json::Value {
 
     let supergraph_service = TestHarness::builder()
         .configuration_json(serde_json::json! {{
+            "include_subgraph_errors": {
+                "all": true
+            },
             "plugins": {
                 "experimental.expose_query_plan": true
             }
