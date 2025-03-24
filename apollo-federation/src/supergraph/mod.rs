@@ -1711,8 +1711,8 @@ fn add_federation_operations(
     federation_spec_definition: &'static FederationSpecDefinition,
 ) -> Result<(), FederationError> {
     // the `_Any` and `_Service` Type
-    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
-    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
+    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
 
     // the `_Entity` Type
     let key_directive_definition =
@@ -1724,7 +1724,7 @@ fn add_federation_operations(
             name: FEDERATION_ENTITY_TYPE_NAME,
             members: |_| entity_members.clone(),
         }
-        .check_or_add(&mut subgraph.schema)?;
+        .check_or_add(&mut subgraph.schema, None)?;
     }
 
     // the `Query` Type
@@ -1732,7 +1732,7 @@ fn add_federation_operations(
         root_kind: SchemaRootDefinitionKind::Query,
     };
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
-        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
         query_root_pos.insert(
             &mut subgraph.schema,
             ComponentName::from(QUERY_TYPE_SPEC.name),
@@ -2731,7 +2731,7 @@ mod tests {
         let supergraph = r###"schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-                @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"]})
+                @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"]})
             {
                 query: Query
             }
@@ -2787,6 +2787,15 @@ mod tests {
                 @join__type(graph: SUBGRAPH)
             {
                 f: String
+                    @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/"}, selection: "$"})
+            }
+
+            type T
+                @join__type(graph: SUBGRAPH)
+                @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/{$batch.id}"}, selection: "$"})
+            {
+                id: ID!
+                f: String
             }
         "###;
 
@@ -2798,6 +2807,8 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r###" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9") @link(url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"])"###);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
+        assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
     }
 }

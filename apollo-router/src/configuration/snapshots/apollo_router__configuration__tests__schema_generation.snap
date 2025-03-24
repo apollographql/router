@@ -314,6 +314,14 @@ expression: "&schema"
           "description": "Activates Batching (disabled by default)",
           "type": "boolean"
         },
+        "maximum_size": {
+          "default": null,
+          "description": "Maximum size for a batch",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "mode": {
           "$ref": "#/definitions/BatchingMode",
           "description": "#/definitions/BatchingMode"
@@ -2168,6 +2176,12 @@ expression: "&schema"
           "nullable": true,
           "type": "integer"
         },
+        "preview_connect_v0_2": {
+          "default": null,
+          "description": "Feature gate for connect spec v0.2. Set to `true` to enable the using the v0.2 spec during the preview phase.",
+          "nullable": true,
+          "type": "boolean"
+        },
         "sources": {
           "additionalProperties": {
             "$ref": "#/definitions/SourceConfiguration",
@@ -2682,6 +2696,10 @@ expression: "&schema"
           "description": "Redact subgraph errors to Apollo Studio",
           "type": "boolean"
         },
+        "redaction_policy": {
+          "$ref": "#/definitions/ErrorRedactionPolicy",
+          "description": "#/definitions/ErrorRedactionPolicy"
+        },
         "send": {
           "default": true,
           "description": "Send subgraph errors to Apollo Studio",
@@ -2715,6 +2733,25 @@ expression: "&schema"
         }
       ]
     },
+    "ErrorRedactionPolicy": {
+      "description": "Allow some error fields to be send to Apollo Studio even when `redact` is true.",
+      "oneOf": [
+        {
+          "description": "Applies redaction to all error details.",
+          "enum": [
+            "strict"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Modifies the `redact` setting by excluding the `extensions.code` field in errors from redaction.",
+          "enum": [
+            "extended"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ErrorRepr": {
       "oneOf": [
         {
@@ -2729,9 +2766,9 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "experimental_otlp_error_metrics": {
-          "$ref": "#/definitions/OtlpErrorMetricsMode",
-          "description": "#/definitions/OtlpErrorMetricsMode"
+        "preview_extended_error_metrics": {
+          "$ref": "#/definitions/ExtendedErrorMetricsMode",
+          "description": "#/definitions/ExtendedErrorMetricsMode"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphErrorConfig",
@@ -3083,6 +3120,25 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ExtendedErrorMetricsMode": {
+      "description": "Extended Open Telemetry error metrics mode",
+      "oneOf": [
+        {
+          "description": "Do not send extended OTLP error metrics",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`]. If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.",
+          "enum": [
+            "enabled"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "FieldName": {
       "oneOf": [
@@ -3989,6 +4045,10 @@ expression: "&schema"
           },
           "type": "array"
         },
+        "on_error": {
+          "$ref": "#/definitions/OnError",
+          "description": "#/definitions/OnError"
+        },
         "sources": {
           "description": "Alternative sources to extract the JWT",
           "items": {
@@ -4394,6 +4454,13 @@ expression: "&schema"
         }
       ]
     },
+    "OnError": {
+      "enum": [
+        "Continue",
+        "Error"
+      ],
+      "type": "string"
+    },
     "Operation": {
       "oneOf": [
         {
@@ -4461,25 +4528,6 @@ expression: "&schema"
           "description": "A hash of the operation name.",
           "enum": [
             "hash"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "OtlpErrorMetricsMode": {
-      "description": "Open Telemetry error metrics mode",
-      "oneOf": [
-        {
-          "description": "Do not store OTLP error metrics",
-          "enum": [
-            "disabled"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Send OTLP error metrics to Apollo Studio",
-          "enum": [
-            "enabled"
           ],
           "type": "string"
         }

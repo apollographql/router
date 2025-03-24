@@ -18,7 +18,7 @@ use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::coordinates::source_http_argument_coordinate;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-use crate::sources::connect::validation::http::headers;
+use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::parse_url;
 
 /// A `@source` directive along with any errors related to it.
@@ -29,7 +29,7 @@ pub(super) struct SourceDirective<'schema> {
 
 impl<'schema> SourceDirective<'schema> {
     pub(super) fn find(schema: &'schema SchemaInfo) -> (Vec<Self>, Vec<Message>) {
-        let source_directive_name = schema.source_directive_name;
+        let source_directive_name = schema.source_directive_name();
         let mut directives = Vec::new();
         let mut messages = Vec::new();
         for directive in &schema.schema_definition.directives {
@@ -89,13 +89,20 @@ impl<'schema> SourceDirective<'schema> {
                 }
             }
 
-            errors.extend(headers::validate_arg(
-                http_arg,
-                HttpHeadersCoordinate::Source {
-                    directive_name: &directive.name,
-                },
-                schema,
-            ));
+            errors.extend(
+                Headers::parse(
+                    http_arg,
+                    HttpHeadersCoordinate::Source {
+                        directive_name: &directive.name,
+                    },
+                    schema,
+                )
+                // TODO: Move type checking to a later phase so parsing can be shared with runtime
+                .and_then(|headers| headers.type_check(schema))
+                .err()
+                .into_iter()
+                .flatten(),
+            );
         } else {
             errors.push(Message {
                 code: Code::GraphQLError,
