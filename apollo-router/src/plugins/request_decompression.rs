@@ -100,9 +100,9 @@ mod test {
                 .await
                 .unwrap();
 
-        assert_eq!(plugin.br, false);
-        assert_eq!(plugin.gzip, false);
-        assert_eq!(plugin.deflate, false);
+        assert!(!plugin.br);
+        assert!(!plugin.gzip);
+        assert!(!plugin.deflate);
     }
 
     const ORIGINAL_BODY: &[u8] = b"Hello, world!";
@@ -136,7 +136,7 @@ mod test {
     #[tokio::test]
     async fn test_gzip_request_decompression_success() {
         let compressed_body = {
-            let mut d = GzEncoder::new(&ORIGINAL_BODY[..], flate2::Compression::default());
+            let mut d = GzEncoder::new(ORIGINAL_BODY, flate2::Compression::default());
             let mut s = Vec::new();
             d.read_to_end(&mut s).expect("writing to buffer succeeds");
             s
@@ -156,7 +156,7 @@ mod test {
     #[tokio::test]
     async fn test_deflate_request_decompression_success() {
         let compressed_body = {
-            let mut d = DeflateEncoder::new(&ORIGINAL_BODY[..], flate2::Compression::default());
+            let mut d = DeflateEncoder::new(ORIGINAL_BODY, flate2::Compression::default());
             let mut s = Vec::new();
             d.read_to_end(&mut s).expect("writing to buffer succeeds");
             s
@@ -178,7 +178,7 @@ mod test {
         let compressed_body = {
             let s = Vec::new();
             let mut d = brotli::CompressorWriter::new(s, 4096, 11, 22);
-            d.write_all(&ORIGINAL_BODY[..])
+            d.write_all(ORIGINAL_BODY)
                 .expect("writing to buffer succeeds");
             d.flush().expect("flushing buffer succeeds");
             d.into_inner()
