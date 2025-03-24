@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = r#"MultipleFederationErrors { errors: [Internal { message: "Type Purpose shouldn't be added without being attached to a @link spec" }, Internal { message: "Type Import shouldn't be added without being attached to a @link spec" }] }"#
+        expected = r#"builds subgraph: Internal { message: "Schema definition's directive application \"@link\" does not refer to an existing directive." }"#
     )]
     fn detects_federation_2_subgraphs_correctly() {
         let schema = Schema::parse(
