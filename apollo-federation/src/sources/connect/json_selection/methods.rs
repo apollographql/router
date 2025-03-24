@@ -141,15 +141,15 @@ impl std::ops::Deref for ArrowMethod {
     fn deref(&self) -> &Self::Target {
         match self {
             // Public methods:
-            Self::Echo => &public::echo::EchoMethod,
-            Self::Map => &public::map::MapMethod,
-            Self::Match => &public::r#match::MatchMethod,
-            Self::First => &public::first::FirstMethod,
-            Self::Last => &public::last::LastMethod,
-            Self::Slice => &public::slice::SliceMethod,
-            Self::Size => &public::size::SizeMethod,
-            Self::Entries => &public::entries::EntriesMethod,
-            Self::JsonStringify => &public::json_stringify::JsonStringifyMethod,
+            Self::Echo => &public::EchoMethod,
+            Self::Map => &public::MapMethod,
+            Self::Match => &public::MatchMethod,
+            Self::First => &public::FirstMethod,
+            Self::Last => &public::LastMethod,
+            Self::Slice => &public::SliceMethod,
+            Self::Size => &public::SizeMethod,
+            Self::Entries => &public::EntriesMethod,
+            Self::JsonStringify => &public::JsonStringifyMethod,
 
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,

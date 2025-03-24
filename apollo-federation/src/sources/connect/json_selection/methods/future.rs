@@ -184,7 +184,7 @@ fn match_if_shape(
     named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
 ) -> Shape {
-    use super::super::methods::public::r#match::match_shape;
+    use super::super::methods::public::match_shape;
     // Since match_shape does not inspect the candidate expressions, we can
     // reuse it for ->matchIf, where the only functional difference is that the
     // candidate expressions are expected to be boolean.
