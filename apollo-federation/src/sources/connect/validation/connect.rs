@@ -40,7 +40,17 @@ pub(super) fn fields_seen_by_all_connects(
         .filter(|ty| !ty.is_built_in())
         .for_each(|extended_type| {
             if let ExtendedType::Object(node) = extended_type {
-                match fields_seen_by_object_connectors(
+                match fields_seen_by_connectors_on_types(
+                    extended_type,
+                    node,
+                    schema,
+                    all_source_names,
+                ) {
+                    Ok(fields) => seen_fields.extend(fields),
+                    Err(errs) => messages.extend(errs),
+                }
+
+                match fields_seen_by_connectors_on_fields(
                     extended_type,
                     node,
                     schema,
@@ -66,20 +76,25 @@ pub(crate) enum ObjectCategory {
     Other,
 }
 
-/// Make sure that any `@connect` directives on object fields are valid
-fn fields_seen_by_object_connectors(
+/// Make sure that any `@connect` directives on types are valid
+fn fields_seen_by_connectors_on_types(
     extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
+    let connect_directives = object
+        .directives
+        .iter()
+        .filter(|directive| directive.name == *schema.connect_directive_name())
+        .collect_vec();
+
+    if connect_directives.is_empty() {
+        return Ok(Vec::new());
+    }
+
     // TODO: find a better place for feature gates like this
-    if schema.connect_link.spec == ConnectSpec::V0_1
-        && object
-            .directives
-            .iter()
-            .any(|d| d.name == *schema.connect_directive_name())
-    {
+    if schema.connect_link.spec == ConnectSpec::V0_1 {
         return Err(vec![Message {
             code: Code::FeatureUnavailable,
             message: format!(
@@ -94,6 +109,65 @@ fn fields_seen_by_object_connectors(
         }]);
     }
 
+    let mut messages = Vec::new();
+    let mut seen_fields = Vec::new();
+
+    for connect_directive in connect_directives {
+        let coordinate = ConnectDirectiveCoordinate {
+            directive: connect_directive,
+            element: ConnectedElement::Type {
+                type_def: extended_type,
+            },
+        };
+
+        let selection = match Selection::parse(coordinate, schema) {
+            Ok(selection) => selection,
+            Err(err) => {
+                messages.push(err);
+                continue;
+            }
+        };
+        match selection.type_check(schema) {
+            Ok(seen) => seen_fields.extend(seen),
+            Err(error) => messages.push(error),
+        }
+
+        // TODO: validate batch/this arguments as key fields
+
+        let source_name =
+            match validate_source_name(connect_directive, &coordinate, source_names, schema) {
+                Ok(source_name) => source_name,
+                Err(err) => {
+                    messages.push(err);
+                    continue;
+                }
+            };
+
+        // TODO: Do all parsing in one stage, then all type checking in a later stage
+        let http = match Http::parse(coordinate, source_name, schema) {
+            Ok(http) => http,
+            Err(errs) => {
+                messages.extend(errs);
+                continue;
+            }
+        };
+        messages.extend(http.type_check(schema).err().into_iter().flatten());
+    }
+
+    if messages.is_empty() {
+        Ok(seen_fields)
+    } else {
+        Err(messages)
+    }
+}
+
+/// Make sure that any `@connect` directives on object fields are valid
+fn fields_seen_by_connectors_on_fields(
+    extended_type: &ExtendedType,
+    object: &Node<ObjectType>,
+    schema: &SchemaInfo,
+    source_names: &[SourceName],
+) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let object_category = if schema
         .schema_definition
         .query
@@ -194,19 +268,14 @@ fn fields_seen_by_connector(
         errors
             .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
 
-        let source_name = match validate_source_name(
-            connect_directive,
-            &field.name,
-            &object.name,
-            source_names,
-            schema,
-        ) {
-            Ok(source_name) => source_name,
-            Err(err) => {
-                errors.push(err);
-                continue;
-            }
-        };
+        let source_name =
+            match validate_source_name(connect_directive, &coordinate, source_names, schema) {
+                Ok(source_name) => source_name,
+                Err(err) => {
+                    errors.push(err);
+                    continue;
+                }
+            };
 
         // TODO: Do all parsing in one stage, then all type checking in a later stage
         let http = match Http::parse(coordinate, source_name, schema) {
@@ -228,8 +297,7 @@ fn fields_seen_by_connector(
 
 pub(super) fn validate_source_name<'schema>(
     directive: &Node<Directive>,
-    field_name: &Name,
-    object_name: &Name,
+    coordinate: &ConnectDirectiveCoordinate,
     source_names: &'schema [SourceName],
     schema: &SchemaInfo,
 ) -> Result<Option<&'schema SourceName<'schema>>, Message> {
@@ -253,8 +321,7 @@ pub(super) fn validate_source_name<'schema>(
     let qualified_directive = connect_directive_name_coordinate(
         schema.connect_directive_name(),
         &source_name_arg.value,
-        object_name,
-        field_name,
+        coordinate,
     );
     if let Some(first_source_name) = source_names.first() {
         Err(Message {

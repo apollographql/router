@@ -144,11 +144,11 @@ pub(super) fn source_name_value_coordinate(
 pub(super) fn connect_directive_name_coordinate(
     connect_directive_name: &Name,
     source: &Node<Value>,
-    object_name: &Name,
-    field_name: &Name,
+    coordinate: &ConnectDirectiveCoordinate,
 ) -> String {
     format!(
-        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field_name}`"
+        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{element}`",
+        element = coordinate.element
     )
 }
 
