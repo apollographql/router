@@ -420,10 +420,9 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                 )
                 .await;
 
-            f64_histogram_with_unit!(
+            f64_histogram!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
-                "s",
                 start.elapsed().as_secs_f64()
             );
 

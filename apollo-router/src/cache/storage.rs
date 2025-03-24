@@ -169,10 +169,9 @@ where
         match res {
             Some(v) => {
                 let duration = instant_memory.elapsed();
-                f64_histogram_with_unit!(
+                f64_histogram!(
                     "apollo.router.cache.hit.time",
-                    "Time to get a value from the cache",
-                    "s",
+                    "Time to get a value from the cache in seconds",
                     duration.as_secs_f64(),
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
@@ -181,10 +180,9 @@ where
             }
             None => {
                 let duration = instant_memory.elapsed();
-                f64_histogram_with_unit!(
+                f64_histogram!(
                     "apollo.router.cache.miss.time",
-                    "Time to check the cache for an uncached value",
-                    "s",
+                    "Time to check the cache for an uncached value in seconds",
                     duration.as_secs_f64(),
                     kind = self.caller,
                     storage = CacheStorageName::Memory.to_string()
@@ -209,10 +207,9 @@ where
                             self.insert_in_memory(key.clone(), v.0.clone()).await;
 
                             let duration = instant_redis.elapsed();
-                            f64_histogram_with_unit!(
+                            f64_histogram!(
                                 "apollo.router.cache.hit.time",
-                                "Time to get a value from the cache",
-                                "s",
+                                "Time to get a value from the cache in seconds",
                                 duration.as_secs_f64(),
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
@@ -221,10 +218,9 @@ where
                         }
                         None => {
                             let duration = instant_redis.elapsed();
-                            f64_histogram_with_unit!(
+                            f64_histogram!(
                                 "apollo.router.cache.miss.time",
-                                "Time to check the cache for an uncached value",
-                                "s",
+                                "Time to check the cache for an uncached value in seconds",
                                 duration.as_secs_f64(),
                                 kind = self.caller,
                                 storage = CacheStorageName::Redis.to_string()
