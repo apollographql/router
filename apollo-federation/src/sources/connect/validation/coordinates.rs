@@ -39,12 +39,12 @@ impl Display for ConnectDirectiveCoordinate<'_> {
 
 #[derive(Clone, Copy)]
 pub(super) struct SelectionCoordinate<'a> {
-    pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
+    pub(crate) connect: ConnectDirectiveCoordinate<'a>,
 }
 
 impl Display for SelectionCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let ConnectDirectiveCoordinate { directive, element } = self.connect_directive_coordinate;
+        let ConnectDirectiveCoordinate { directive, element } = self.connect;
         write!(
             f,
             "`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{element}`",
@@ -56,7 +56,7 @@ impl Display for SelectionCoordinate<'_> {
 impl<'a> From<ConnectDirectiveCoordinate<'a>> for SelectionCoordinate<'a> {
     fn from(connect_directive_coordinate: ConnectDirectiveCoordinate<'a>) -> Self {
         Self {
-            connect_directive_coordinate,
+            connect: connect_directive_coordinate,
         }
     }
 }
@@ -144,11 +144,11 @@ pub(super) fn source_name_value_coordinate(
 pub(super) fn connect_directive_name_coordinate(
     connect_directive_name: &Name,
     source: &Node<Value>,
-    object_name: &Name,
-    field_name: &Name,
+    coordinate: &ConnectDirectiveCoordinate,
 ) -> String {
     format!(
-        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field_name}`"
+        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{element}`",
+        element = coordinate.element
     )
 }
 
