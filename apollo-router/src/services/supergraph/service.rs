@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 use std::task::Poll;
 use std::time::Instant;
 
+use futures::FutureExt;
 use futures::TryFutureExt;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
@@ -40,6 +41,7 @@ use crate::graphql::Response;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::DynPlugin;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::connectors::query_plans::store_connectors;
 use crate::plugins::connectors::query_plans::store_connectors_labels;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -559,9 +561,17 @@ async fn subscription_task(
     let mut configuration_updated_rx = notify.subscribe_configuration();
     let mut schema_updated_rx = notify.subscribe_schema();
 
-    let expires_in = crate::plugins::authentication::jwt_expires_in(&supergraph_req.context);
-
-    let mut timeout = Box::pin(tokio::time::sleep(expires_in));
+    let mut timeout = if supergraph_req
+        .context
+        .get_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+        .is_some()
+    {
+        let expires_in =
+            crate::plugins::authentication::jwks::jwt_expires_in(&supergraph_req.context);
+        tokio::time::sleep(expires_in).boxed()
+    } else {
+        futures::future::pending().boxed()
+    };
 
     loop {
         tokio::select! {

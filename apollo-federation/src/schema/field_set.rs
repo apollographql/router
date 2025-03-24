@@ -217,21 +217,15 @@ mod tests {
     use crate::Supergraph;
     use crate::error::FederationError;
     use crate::query_graph::build_federated_query_graph;
-    use crate::subgraph::Subgraph;
 
     #[test]
     fn test_aliases_in_field_set() -> Result<(), FederationError> {
-        let sdl = r#"
-        type Query {
-            a: Int! @requires(fields: "r1: r")
-            r: Int! @external
-          }
-        "#;
-
-        let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
-        let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
-        let err = super::parse_field_set(&supergraph.schema, Name::new("Query").unwrap(), "r1: r")
-            .map(|_| "Unexpected success") // ignore the Ok value
+        // Note: `field-set-alias.graphqls` has multiple alias errors in the same field set.
+        let schema_str = include_str!("fixtures/field-set-alias.graphqls");
+        let supergraph = Supergraph::new(schema_str).expect("Expected supergraph schema to parse");
+        // Note: `Supergraph::new` does not error out on aliases in field sets.
+        // We call `parse_field_set` directly to test the alias error.
+        let err = super::parse_field_set(&supergraph.schema, Name::new("T").unwrap(), "r1: r")
             .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),
@@ -242,22 +236,12 @@ mod tests {
 
     #[test]
     fn test_aliases_in_field_set_via_build_federated_query_graph() -> Result<(), FederationError> {
-        // NB: This tests multiple alias errors in the same field set.
-        let sdl = r#"
-        type Query {
-            a: Int! @requires(fields: "r1: r s q1: q")
-            r: Int! @external
-            s: String! @external
-            q: String! @external
-          }
-        "#;
-
-        let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
-        let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
+        // Note: `field-set-alias.graphqls` has multiple alias errors in the same field set.
+        let schema_str = include_str!("fixtures/field-set-alias.graphqls");
+        let supergraph = Supergraph::new(schema_str).expect("Expected supergraph schema to parse");
         let api_schema = supergraph.to_api_schema(Default::default())?;
         // Testing via `build_federated_query_graph` function, which validates the @requires directive.
         let err = build_federated_query_graph(supergraph.schema, api_schema, None, None)
-            .map(|_| "Unexpected success") // ignore the Ok value
             .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),

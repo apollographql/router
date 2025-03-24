@@ -479,9 +479,7 @@ impl RouterStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: router request stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: router request stage error: {error}");
                         error
                     });
                     u64_counter!(
@@ -518,9 +516,7 @@ impl RouterStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: router response stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: router response stage error: {error}");
                         error
                     });
                     u64_counter!(
@@ -617,9 +613,7 @@ impl SubgraphStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: subgraph request stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: subgraph request stage error: {error}");
                         error
                     });
                     u64_counter!(
@@ -657,9 +651,7 @@ impl SubgraphStage {
                     .await
                     .map_err(|error| {
                         succeeded = false;
-                        tracing::error!(
-                            "external extensibility: subgraph response stage error: {error}"
-                        );
+                        tracing::error!("coprocessor: subgraph response stage error: {error}");
                         error
                     });
                     u64_counter!(
