@@ -178,7 +178,8 @@ mod test {
         let compressed_body = {
             let s = Vec::new();
             let mut d = brotli::CompressorWriter::new(s, 4096, 11, 22);
-            d.write_all(&ORIGINAL_BODY[..]).expect("writing to buffer succeeds");
+            d.write_all(&ORIGINAL_BODY[..])
+                .expect("writing to buffer succeeds");
             d.flush().expect("flushing buffer succeeds");
             d.into_inner()
         };
@@ -263,6 +264,6 @@ mod test {
                 .unwrap(),
             "brotli error".to_owned(),
         )
-            .await;
+        .await;
     }
 }
