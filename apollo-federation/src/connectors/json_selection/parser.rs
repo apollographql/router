@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::str::FromStr;
 
+use apollo_compiler::collections::IndexSet;
 use itertools::Itertools;
 use nom::IResult;
 use nom::Slice;
@@ -21,15 +22,19 @@ use nom::sequence::tuple;
 use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
+use super::helpers::vec_push;
 use super::known_var::KnownVariable;
 use super::lit_expr::LitExpr;
 use super::location::OffsetRange;
 use super::location::Ranged;
 use super::location::Span;
+use super::location::SpanExtra;
 use super::location::WithRange;
 use super::location::merge_ranges;
 use super::location::new_span;
+use super::location::new_span_with_spec;
 use super::location::ranged_span;
+use crate::connectors::ConnectSpec;
 use crate::connectors::Namespace;
 use crate::connectors::variable::VariableNamespace;
 use crate::connectors::variable::VariableReference;
@@ -45,17 +50,20 @@ pub(super) type ParseResult<'a, T> = IResult<Span<'a>, T>;
 
 // Generates a non-fatal error with the given suffix and message, allowing the
 // parser to recover and continue.
-pub(super) fn nom_error_message<'a>(
-    suffix: Span<'a>,
+pub(super) fn nom_error_message(
+    suffix: Span,
     // This message type forbids computing error messages with format!, which
     // might be worthwhile in the future. For now, it's convenient to avoid
     // String messages so the Span type can remain Copy, so we don't have to
     // clone spans frequently in the parsing code. In most cases, the suffix
     // provides the dynamic context needed to interpret the static message.
-    message: &'static str,
-) -> nom::Err<nom::error::Error<Span<'a>>> {
+    message: impl Into<String>,
+) -> nom::Err<nom::error::Error<Span>> {
     nom::Err::Error(nom::error::Error::from_error_kind(
-        suffix.map_extra(|_| Some(message)),
+        suffix.map_extra(|extra| SpanExtra {
+            errors: vec_push(extra.errors, message.into()),
+            ..extra
+        }),
         nom::error::ErrorKind::IsNot,
     ))
 }
@@ -64,12 +72,15 @@ pub(super) fn nom_error_message<'a>(
 // parser to abort with the given error message, which is useful after
 // recognizing syntax that completely constrains what follows (like the -> token
 // before a method name), and what follows does not parse as required.
-pub(super) fn nom_fail_message<'a>(
-    suffix: Span<'a>,
-    message: &'static str,
-) -> nom::Err<nom::error::Error<Span<'a>>> {
+pub(super) fn nom_fail_message(
+    suffix: Span,
+    message: impl Into<String>,
+) -> nom::Err<nom::error::Error<Span>> {
     nom::Err::Failure(nom::error::Error::from_error_kind(
-        suffix.map_extra(|_| Some(message)),
+        suffix.map_extra(|extra| SpanExtra {
+            errors: vec_push(extra.errors, message.into()),
+            ..extra
+        }),
         nom::error::ErrorKind::IsNot,
     ))
 }
@@ -131,7 +142,16 @@ impl JSONSelection {
     // as the input type and a custom JSONSelectionParseError type as the error
     // type, rather than using Span or nom::error::Error directly.
     pub fn parse(input: &str) -> Result<Self, JSONSelectionParseError> {
-        match JSONSelection::parse_span(new_span(input)) {
+        JSONSelection::parse_with_spec(input, ConnectSpec::V0_2)
+    }
+
+    pub fn parse_with_spec(
+        input: &str,
+        spec: ConnectSpec,
+    ) -> Result<Self, JSONSelectionParseError> {
+        let span = new_span_with_spec(input, spec);
+
+        match JSONSelection::parse_span(span) {
             Ok((remainder, selection)) => {
                 let fragment = remainder.fragment();
                 if fragment.is_empty() {
@@ -146,14 +166,29 @@ impl JSONSelection {
             }
 
             Err(e) => match e {
-                nom::Err::Error(e) | nom::Err::Failure(e) => Err(JSONSelectionParseError {
-                    message: e.input.extra.map_or_else(
-                        || format!("nom::error::ErrorKind::{:?}", e.code),
-                        |message_str| message_str.to_string(),
-                    ),
-                    fragment: e.input.fragment().to_string(),
-                    offset: e.input.location_offset(),
-                }),
+                nom::Err::Error(e) | nom::Err::Failure(e) => {
+                    let mut error_set = IndexSet::default();
+                    error_set.extend(e.input.extra.errors.iter());
+
+                    let message = if !error_set.is_empty() {
+                        error_set.iter().join("\n")
+                    } else {
+                        // These errors aren't the most user-friendly, but with
+                        // any luck we can gradually replace them with custom
+                        // error messages over time.
+                        format!("nom::error::ErrorKind::{:?}", e.code)
+                    };
+
+                    let fragment = e.input.fragment().to_string();
+
+                    let offset = e.input.location_offset();
+
+                    Err(JSONSelectionParseError {
+                        message,
+                        fragment,
+                        offset,
+                    })
+                }
 
                 nom::Err::Incomplete(_) => unreachable!("nom::Err::Incomplete not expected here"),
             },
@@ -316,7 +351,7 @@ impl NamedSelection {
 
     // Parses either NamedPathSelection or PathWithSubSelection.
     fn parse_path(input: Span) -> ParseResult<Self> {
-        if let Ok((remainder, alias)) = Alias::parse(input) {
+        if let Ok((remainder, alias)) = Alias::parse(input.clone()) {
             match PathSelection::parse(remainder) {
                 Ok((remainder, path)) => Ok((
                     remainder,
@@ -328,12 +363,12 @@ impl NamedSelection {
                 )),
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
                 Err(_) => Err(nom_error_message(
-                    input,
+                    input.clone(),
                     "Path selection alias must be followed by a path",
                 )),
             }
         } else {
-            match PathSelection::parse(input) {
+            match PathSelection::parse(input.clone()) {
                 Ok((remainder, path)) => {
                     if path.has_subselection() {
                         Ok((
@@ -347,14 +382,14 @@ impl NamedSelection {
                         ))
                     } else {
                         Err(nom_fail_message(
-                            input,
+                            input.clone(),
                             "Named path selection must either begin with alias or ..., or end with subselection",
                         ))
                     }
                 }
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
                 Err(_) => Err(nom_error_message(
-                    input,
+                    input.clone(),
                     "Path selection must either begin with alias or ..., or end with subselection",
                 )),
             }
@@ -452,7 +487,7 @@ impl Ranged for PathSelection {
 }
 
 impl PathSelection {
-    pub fn parse(input: Span) -> ParseResult<Self> {
+    pub(crate) fn parse(input: Span) -> ParseResult<Self> {
         PathList::parse(input).map(|(input, path)| (input, Self { path }))
     }
 
@@ -565,9 +600,9 @@ pub(super) enum PathList {
 
 impl PathList {
     pub(super) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
-        match Self::parse_with_depth(input, 0) {
+        match Self::parse_with_depth(input.clone(), 0) {
             Ok((_, parsed)) if matches!(*parsed, Self::Empty) => Err(nom_error_message(
-                input,
+                input.clone(),
                 // As a small technical note, you could consider
                 // NamedGroupSelection (an Alias followed by a SubSelection) as
                 // a kind of NamedPathSelection where the path is empty, but
@@ -608,13 +643,14 @@ impl PathList {
             // case needs to come before the $ (and $var) case, because $( looks
             // like the $ variable followed by a parse error in the variable
             // case, unless we add some complicated lookahead logic there.
-            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) = tuple((
-                spaces_or_comments,
-                ranged_span("$("),
-                LitExpr::parse,
-                spaces_or_comments,
-                ranged_span(")"),
-            ))(input)
+            if let Ok((suffix, (_, dollar_open_paren, expr, close_paren, _))) =
+                tuple((
+                    spaces_or_comments,
+                    ranged_span("$("),
+                    LitExpr::parse,
+                    spaces_or_comments,
+                    ranged_span(")"),
+                ))(input.clone())
             {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let expr_range = merge_ranges(dollar_open_paren.range(), close_paren.range());
@@ -626,7 +662,7 @@ impl PathList {
             }
 
             if let Ok((suffix, (dollar, opt_var))) =
-                tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input)
+                tuple((ranged_span("$"), opt(parse_identifier_no_space)))(input.clone())
             {
                 let dollar_range = dollar.range();
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
@@ -649,7 +685,7 @@ impl PathList {
                 };
             }
 
-            if let Ok((suffix, at)) = ranged_span("@")(input) {
+            if let Ok((suffix, at)) = ranged_span("@")(input.clone()) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 let full_range = merge_ranges(at.range(), rest.range());
                 return Ok((
@@ -661,7 +697,7 @@ impl PathList {
                 ));
             }
 
-            if let Ok((suffix, key)) = Key::parse(input) {
+            if let Ok((suffix, key)) = Key::parse(input.clone()) {
                 let (remainder, rest) = Self::parse_with_depth(suffix, depth + 1)?;
                 return match rest.as_ref() {
                     // We use nom_error_message rather than nom_fail_message
@@ -669,7 +705,7 @@ impl PathList {
                     // which means we want to unwind parsing the path and fall
                     // back to parsing other kinds of NamedSelection.
                     Self::Empty | Self::Selection(_) => Err(nom_error_message(
-                        input,
+                        input.clone(),
                         // Another place where format! might be useful to
                         // suggest .{key}, which would require storing error
                         // messages as owned Strings.
@@ -686,19 +722,19 @@ impl PathList {
         if depth == 0 {
             // If the PathSelection does not start with a $var (or $ or @), a
             // key., or $(expr), it is not a valid PathSelection.
-            if tuple((ranged_span("."), Key::parse))(input).is_ok() {
+            if tuple((ranged_span("."), Key::parse))(input.clone()).is_ok() {
                 // Since we previously allowed starting key paths with .key but
                 // now forbid that syntax (because it can be ambiguous), suggest
                 // the unambiguous $.key syntax instead.
                 return Err(nom_fail_message(
-                    input,
+                    input.clone(),
                     "Key paths cannot start with just .key (use $.key instead)",
                 ));
             }
             // This error technically covers the case above, but doesn't suggest
             // a helpful solution.
             return Err(nom_error_message(
-                input,
+                input.clone(),
                 "Path selection must start with key., $variable, $, @, or $(expression)",
             ));
         }
@@ -716,7 +752,7 @@ impl PathList {
         // be written as a subproperty of the $ variable, e.g. $.key, which is
         // equivalent to the old behavior, but parses unambiguously. In terms of
         // this code, that means we allow a .key only at depths > 0.
-        if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input) {
+        if let Ok((remainder, (dot, key))) = tuple((ranged_span("."), Key::parse))(input.clone()) {
             let (remainder, rest) = Self::parse_with_depth(remainder, depth + 1)?;
             let dot_key_range = merge_ranges(dot.range(), key.range());
             let full_range = merge_ranges(dot_key_range, rest.range());
@@ -727,14 +763,14 @@ impl PathList {
         // character, it's an error unless it's the beginning of a ... token.
         if input.fragment().starts_with('.') && !input.fragment().starts_with("...") {
             return Err(nom_fail_message(
-                input,
+                input.clone(),
                 "Path selection . must be followed by key (identifier or quoted string literal)",
             ));
         }
 
         // PathSelection can never start with a naked ->method (instead, use
         // $->method or @->method if you want to operate on the current value).
-        if let Ok((suffix, arrow)) = ranged_span("->")(input) {
+        if let Ok((suffix, arrow)) = ranged_span("->")(input.clone()) {
             // As soon as we see a -> token, we know what follows must be a
             // method name, so we can unconditionally return based on what
             // parse_identifier tells us. since MethodArgs::parse is optional,
@@ -748,7 +784,10 @@ impl PathList {
                         WithRange::new(Self::Method(method, args, rest), full_range),
                     ))
                 }
-                Err(_) => Err(nom_fail_message(input, "Method name must follow ->")),
+                Err(_) => Err(nom_fail_message(
+                    input.clone(),
+                    "Method name must follow ->",
+                )),
             };
         }
 
@@ -757,7 +796,7 @@ impl PathList {
         // responsible for enforcing a trailing SubSelection in the
         // PathWithSubSelection case, since that requirement is checked by
         // NamedSelection::parse_path.
-        if let Ok((suffix, selection)) = SubSelection::parse(input) {
+        if let Ok((suffix, selection)) = SubSelection::parse(input.clone()) {
             let selection_range = selection.range();
             return Ok((
                 suffix,
@@ -767,7 +806,7 @@ impl PathList {
 
         // The Self::Empty enum case is used to indicate the end of a
         // PathSelection that has no SubSelection.
-        Ok((input, WithRange::new(Self::Empty, range_if_empty)))
+        Ok((input.clone(), WithRange::new(Self::Empty, range_if_empty)))
     }
 
     pub(super) fn is_single_key(&self) -> bool {
@@ -1010,7 +1049,7 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn parse(input: Span) -> ParseResult<WithRange<Self>> {
+    pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         alt((
             map(parse_identifier, |id| id.take_as(Key::Field)),
             map(parse_string_literal, |s| s.take_as(Key::Quoted)),
@@ -1144,12 +1183,10 @@ pub(crate) fn parse_string_literal(input: Span) -> ParseResult<WithRange<String>
             remainder_opt
                 .ok_or_else(|| nom_fail_message(input, "Unterminated string literal"))
                 .map(|remainder| {
+                    let range = Some(start..remainder.location_offset());
                     (
                         remainder,
-                        WithRange::new(
-                            chars.iter().collect::<String>(),
-                            Some(start..remainder.location_offset()),
-                        ),
+                        WithRange::new(chars.iter().collect::<String>(), range),
                     )
                 })
         }
@@ -1181,13 +1218,13 @@ impl MethodArgs {
         input = spaces_or_comments(input)?.0;
 
         let mut args = Vec::new();
-        if let Ok((remainder, first)) = LitExpr::parse(input) {
+        if let Ok((remainder, first)) = LitExpr::parse(input.clone()) {
             args.push(first);
             input = remainder;
 
-            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
                 input = spaces_or_comments(remainder)?.0;
-                if let Ok((remainder, arg)) = LitExpr::parse(input) {
+                if let Ok((remainder, arg)) = LitExpr::parse(input.clone()) {
                     args.push(arg);
                     input = remainder;
                 } else {
@@ -1196,8 +1233,8 @@ impl MethodArgs {
             }
         }
 
-        input = spaces_or_comments(input)?.0;
-        let (input, close_paren) = ranged_span(")")(input)?;
+        input = spaces_or_comments(input.clone())?.0;
+        let (input, close_paren) = ranged_span(")")(input.clone())?;
 
         let range = merge_ranges(open_paren.range(), close_paren.range());
         Ok((input, Self { args, range }))
@@ -1223,7 +1260,7 @@ mod tests {
         fn check(input: &str, expected_name: &str) {
             let (remainder, name) = parse_identifier(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
+                span_is_all_spaces_or_comments(remainder.clone()),
                 "remainder is `{remainder}`"
             );
             assert_eq!(name.as_ref(), expected_name);
@@ -1246,12 +1283,12 @@ mod tests {
         {
             let identifier_with_leading_space = new_span("  oyez   ");
             assert_eq!(
-                parse_identifier_no_space(identifier_with_leading_space),
+                parse_identifier_no_space(identifier_with_leading_space.clone()),
                 Err(nom::Err::Error(nom::error::Error::from_error_kind(
                     // The parse_identifier_no_space function does not provide a
                     // custom error message, since it's only used internally.
                     // Testing it directly here is somewhat contrived.
-                    identifier_with_leading_space,
+                    identifier_with_leading_space.clone(),
                     nom::error::ErrorKind::OneOf,
                 ))),
             );
@@ -1263,7 +1300,7 @@ mod tests {
         fn check(input: &str, expected: &str) {
             let (remainder, lit) = parse_string_literal(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
+                span_is_all_spaces_or_comments(remainder.clone()),
                 "remainder is `{remainder}`"
             );
             assert_eq!(lit.as_ref(), expected);
@@ -1280,7 +1317,7 @@ mod tests {
         fn check(input: &str, expected: &Key) {
             let (remainder, key) = Key::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
+                span_is_all_spaces_or_comments(remainder.clone()),
                 "remainder is `{remainder}`"
             );
             assert_eq!(key.as_ref(), expected);
@@ -1298,7 +1335,7 @@ mod tests {
         fn check(input: &str, alias: &str) {
             let (remainder, parsed) = Alias::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
+                span_is_all_spaces_or_comments(remainder.clone()),
                 "remainder is `{remainder}`"
             );
             assert_eq!(parsed.name(), alias);
@@ -1316,7 +1353,7 @@ mod tests {
         fn assert_result_and_names(input: &str, expected: NamedSelection, names: &[&str]) {
             let (remainder, selection) = NamedSelection::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
+                span_is_all_spaces_or_comments(remainder.clone()),
                 "remainder is `{remainder}`"
             );
             let selection = selection.strip_ranges();
@@ -1645,7 +1682,7 @@ mod tests {
     fn check_path_selection(input: &str, expected: PathSelection) {
         let (remainder, path_selection) = PathSelection::parse(new_span(input)).unwrap();
         assert!(
-            span_is_all_spaces_or_comments(remainder),
+            span_is_all_spaces_or_comments(remainder.clone()),
             "remainder is `{remainder}`"
         );
         assert_eq!(&path_selection.strip_ranges(), &expected);
@@ -2106,7 +2143,12 @@ mod tests {
         );
 
         #[track_caller]
-        fn check_path_parse_error(input: &str, expected_offset: usize, expected_message: &str) {
+        fn check_path_parse_error(
+            input: &str,
+            expected_offset: usize,
+            expected_message: impl Into<String>,
+        ) {
+            let expected_message: String = expected_message.into();
             match PathSelection::parse(new_span(input)) {
                 Ok((remainder, path)) => {
                     panic!(
@@ -2119,7 +2161,13 @@ mod tests {
                     // The PartialEq implementation for LocatedSpan
                     // unfortunately ignores span.extra, so we have to check
                     // e.input.extra manually.
-                    assert_eq!(e.input.extra, Some(expected_message));
+                    assert_eq!(
+                        e.input.extra,
+                        SpanExtra {
+                            spec: ConnectSpec::V0_2,
+                            errors: vec![expected_message],
+                        }
+                    );
                 }
                 Err(e) => {
                     panic!("Unexpected error {:?}", e);
@@ -2700,7 +2748,7 @@ mod tests {
         fn check_parsed(input: &str, expected: SubSelection) {
             let (remainder, parsed) = SubSelection::parse(new_span(input)).unwrap();
             assert!(
-                span_is_all_spaces_or_comments(remainder),
+                span_is_all_spaces_or_comments(remainder.clone()),
                 "remainder is `{remainder}`"
             );
             assert_eq!(parsed.strip_ranges(), expected);

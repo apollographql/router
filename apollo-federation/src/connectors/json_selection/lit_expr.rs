@@ -61,7 +61,7 @@ impl LitExpr {
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
 
-        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input) {
+        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input.clone()) {
             Ok((suffix, initial_literal)) => {
                 // If we parsed an initial literal expression, it may be the
                 // entire result, but we also want to greedily parse one or more
@@ -77,7 +77,7 @@ impl LitExpr {
                 // We begin parsing the path at depth 1 rather than 0 because
                 // we've already parsed the initial literal at depth 0, so the
                 // subpath should obey the parsing rules for for depth > 0.
-                match PathList::parse_with_depth(suffix, 1) {
+                match PathList::parse_with_depth(suffix.clone(), 1) {
                     Ok((remainder, subpath)) => {
                         if matches!(subpath.as_ref(), PathList::Empty) {
                             return Ok((remainder, initial_literal));
@@ -95,7 +95,7 @@ impl LitExpr {
 
             // If we failed to parse a primitive, object, or array, try parsing
             // a PathSelection (which cannot be a LitPath).
-            Err(_) => PathSelection::parse(input).map(|(remainder, path)| {
+            Err(_) => PathSelection::parse(input.clone()).map(|(remainder, path)| {
                 let range = path.range();
                 (remainder, WithRange::new(Self::Path(path), range))
             }),
@@ -196,7 +196,7 @@ impl LitExpr {
                     },
                 ),
             )),
-        ))(input)?;
+        ))(input.clone())?;
 
         let mut number = String::new();
         if neg.is_some() {
@@ -204,26 +204,17 @@ impl LitExpr {
         }
         number.push_str(num.as_str());
 
-        number.parse().map(Self::Number).map_or_else(
-            |_| {
-                // CONSIDER USING THIS ERROR? now that we have access to them?
-                Err(nom_error_message(
-                    input,
-                    // We could include the faulty number in the error message, but
-                    // it will also appear at the beginning of the input span.
-                    "Failed to parse numeric literal",
-                ))
-            },
-            |lit_number| {
-                Ok((
-                    suffix,
-                    WithRange::new(
-                        lit_number,
-                        merge_ranges(neg.and_then(|n| n.range()), num.range()),
-                    ),
-                ))
-            },
-        )
+        if let Ok(lit_number) = number.parse().map(Self::Number) {
+            let range = merge_ranges(neg.and_then(|n| n.range()), num.range());
+            Ok((suffix, WithRange::new(lit_number, range)))
+        } else {
+            Err(nom_error_message(
+                input.clone(),
+                // We could include the faulty number in the error message, but
+                // it will also appear at the beginning of the input span.
+                "Failed to parse numeric literal",
+            ))
+        }
     }
 
     // LitObject ::= "{" (LitProperty ("," LitProperty)* ","?)? "}"
@@ -234,13 +225,13 @@ impl LitExpr {
 
         let mut output = IndexMap::default();
 
-        if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+        if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
             output.insert(key, value);
             input = remainder;
 
-            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
                 input = remainder;
-                if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+                if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
                     output.insert(key, value);
                     input = remainder;
                 } else {
@@ -249,7 +240,7 @@ impl LitExpr {
             }
         }
 
-        let (input, _) = spaces_or_comments(input)?;
+        let (input, _) = spaces_or_comments(input.clone())?;
         let (input, close_brace) = ranged_span("}")(input)?;
 
         let range = merge_ranges(open_brace.range(), close_brace.range());
