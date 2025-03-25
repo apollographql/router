@@ -195,7 +195,6 @@ mod helpers {
     use apollo_compiler::schema::ComponentOrigin;
     use apollo_compiler::schema::DirectiveList;
     use apollo_compiler::schema::EnumType;
-    use apollo_compiler::schema::ExtendedType;
     use apollo_compiler::schema::ObjectType;
     use apollo_compiler::schema::ScalarType;
     use apollo_compiler::ty;
@@ -342,6 +341,7 @@ mod helpers {
                 ConnectedElement::Field {
                     field_def,
                     parent_type,
+                    ..
                 } => {
                     let field_type = self
                         .original_schema
@@ -394,27 +394,22 @@ mod helpers {
                     // Add the root type for this connector, optionally inserting a dummy query root
                     // if the connector is not defined within a field on a Query (since a subgraph is invalid
                     // without at least a root-level Query)
-                    let ExtendedType::Object(parent_object) = parent_type else {
-                        return Err(FederationError::internal(
-                            "connect directives on interfaces is not yet supported",
-                        ));
-                    };
 
                     let parent_pos = ObjectTypeDefinitionPosition {
-                        type_name: parent_object.name.clone(),
+                        type_name: parent_type.name.clone(),
                     };
 
                     self.insert_object_and_field(&mut schema, &parent_pos, field_def)?;
                     self.ensure_query_root_type(
                         &mut schema,
                         &query_alias,
-                        Some(&parent_object.name),
+                        Some(&parent_type.name),
                     )?;
                     if let Some(mutation_alias) = mutation_alias {
                         self.ensure_mutation_root_type(
                             &mut schema,
                             &mutation_alias,
-                            &parent_object.name,
+                            &parent_type.name,
                         )?;
                     }
 
@@ -422,17 +417,11 @@ mod helpers {
                     self.process_outputs(
                         &mut schema,
                         connector,
-                        parent_object.name.clone(),
+                        parent_type.name.clone(),
                         field_def.ty.inner_named_type().clone(),
                     )?;
                 }
                 ConnectedElement::Type { type_def } => {
-                    let ExtendedType::Object(object) = type_def else {
-                        return Err(FederationError::internal(
-                            "connect directives on interfaces, unions, enums, scalars, or input objects are not supported",
-                        ));
-                    };
-
                     SchemaVisitor::new(
                         self.original_schema,
                         &mut schema,
@@ -440,7 +429,7 @@ mod helpers {
                     )
                     .walk((
                         ObjectTypeDefinitionPosition {
-                            type_name: object.name.clone(),
+                            type_name: type_def.name.clone(),
                         },
                         connector.selection.next_subselection().cloned().ok_or(
                             FederationError::internal("empty selections are not allowed"),
@@ -454,8 +443,8 @@ mod helpers {
                     self.process_outputs(
                         &mut schema,
                         connector,
-                        type_def.name().clone(),
-                        type_def.name().clone(),
+                        type_def.name.clone(),
+                        type_def.name.clone(),
                     )?;
                 }
             }
