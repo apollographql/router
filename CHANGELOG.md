@@ -2,6 +2,264 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.1.0] - 2025-03-25
+
+## 🚀 Features
+
+### Metric to Measure Cardinality Overflow Frequency ([PR #6998](https://github.com/apollographql/router/pull/6998))
+
+Adds a new counter metric, `apollo.router.telemetry.metrics.cardinality_overflow`, that is incremented when the [cardinality overflow log](https://github.com/open-telemetry/opentelemetry-rust/blob/d583695d30681ee1bd910156de27d91be3711822/opentelemetry-sdk/src/metrics/internal/mod.rs#L134) from [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust) occurs. This log means that a metric in a batch has reached a cardinality of > 2000 and that any excess attributes will be ignored.
+
+By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/6998
+
+### feat: Introduce PQ Manifest `hot_reload` option for local manifests ([PR #6987](https://github.com/apollographql/router/pull/6987))
+
+This change introduces a [`persisted_queries.hot_reload` configuration option](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#hot_reload) to allow the router to hot reload local PQ manifest changes.
+
+If you configure `local_manifests`, you can set `hot_reload` to `true` to automatically reload manifest files whenever they change. This lets you update local manifest files without restarting the router.
+
+```yaml
+persisted_queries:
+  enabled: true
+  local_manifests:
+    - ./path/to/persisted-query-manifest.json
+  hot_reload: true
+```
+
+Note: This change explicitly does _not_ piggyback on the existing `--hot-reload` flag.
+
+By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/6987
+
+### Metrics for value completion errors ([PR #6905](https://github.com/apollographql/router/pull/6905))
+
+When Router encounters a value completion error, it is not included in the GraphQL errors array, making it harder to observe. To surface this issue in a more obvious way, Router now counts value completion error metrics via the metric instruments `apollo.router.graphql.error` and `apollo.router.operations.error`, distinguishable via the `code` attribute with value `RESPONSE_VALIDATION_FAILED`.
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6905
+
+### Changes to experimental error metrics ([PR #6966](https://github.com/apollographql/router/pull/6966))
+
+In 2.0.0, an experimental metric `telemetry.apollo.errors.experimental_otlp_error_metrics` was introduced to track errors with additional attributes. A few related changes are included here:
+
+- Sending these metrics now also respects the subgraph's `send` flag e.g. `telemetry.apollo.errors.subgraph.[all|(subgraph name)].send`.
+- A new configuration option `telemetry.apollo.errors.subgraph.[all|(subgraph name)].redaction_policy` has been added. This flag only applies when `redact` is set to `true`. When set to `ErrorRedactionPolicy.Strict`, error redaction will behave as it has in the past. Setting this to `ErrorRedactionPolicy.Extended` will allow the `extensions.code` value from subgraph errors to pass through redaction and be sent to Studio.
+- A warning about incompatibility of error telemetry with connectors will be suppressed when this feature is enabled, since it _does_ support connectors when using the new mode.
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6966
+
+### Add router config validate subcommand ([PR #7016](https://github.com/apollographql/router/pull/7016))
+
+Added new `router config validate` subcommand to allow validation of a Router config file without fully starting up the Router.
+
+```
+./router config validate <path-to-config-file.yaml>
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7016
+
+### Traffic shaping for connectors ([PR #6737](https://github.com/apollographql/router/pull/6737))
+
+Traffic shaping is now supported for connectors. To target a specific source, use the `subgraph_name.source_name` under the new `connector.sources` property of `traffic_shaping`. Settings under `connector.all` will apply to all connectors. `deduplicate_query` is not supported at this time.
+
+Example config:
+
+```
+traffic_shaping:
+  connector:
+    all:
+      timeout: 5s
+    sources:
+      connector-graph.random_person_api:
+        global_rate_limit:
+          capacity: 20
+          interval: 1s
+        experimental_http2: http2only
+        timeout: 1s
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6737
+
+### Add apollo.router.pipelines metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+
+When the Router reloads either via schema change or config change a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests 
+such as Subscriptions that do not finish.
+
+To enable debugging when request pipelines are being kept around a new gauge metric has been added:
+
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
+
+### Update JWKS handling ([PR #6930](https://github.com/apollographql/router/pull/6930))
+
+This PR updates JWT-handling in the `AuthenticationPlugin`;
+
+- JWT-related code has been moved around a bit for organizational purposes
+- Users may now set a new a new config option `config.authentication.router.jwt.on_error`. When set to the default `Error`, JWT-related errors will be returned to users (the current behavior.) When set to `Continue`, JWT errors will instead be ignored. When a JWT error is encountered, JWT claims will not be set in the request context.
+- When JWTs are processed, whether processing fails or succeeds, request context will contain a new variable `apollo::authentication::jwt_status` which notes the result of processing.
+- I applied a few lints that RustRover highlighted.
+
+By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/6930
+
+### Support to get/set URI scheme in Rhai ([Issue #6897](https://github.com/apollographql/router/issues/6897))
+
+This adds support to read the scheme from the `request.uri.scheme`/`request.subgraph.uri.scheme` functions in Rhai, 
+enabling the ability to switch between http and https for subgraph fetches. For example:
+
+```rs
+fn subgraph_service(service, subgraph){
+    service.map_request(|request|{
+        log_info(``);
+        if request.subgraph.uri.scheme == {} {
+            log_info("Scheme is not explicitly set");
+        }
+        request.subgraph.uri.scheme = "https"
+        request.subgraph.uri.host = "api.apollographql.com";
+        request.subgraph.uri.path = "/api/graphql";
+        request.subgraph.uri.port = 1234;
+        log_info(``);
+    });
+}
+```
+By [@starJammer](https://github.com/starJammer) in https://github.com/apollographql/router/pull/6906
+
+### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
+
+To help users to diagnose when connections are keeping pipelines hanging around the following metric has been added:
+- `apollo.router.open_connections` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration.
+    - `server.address` - The address that the router is listening on.
+    - `server.port` - The port that the router is listening on if not a unix socket.
+    - `http.connection.state` - Either `active` or `terminating`.
+
+Connections can be held open by clients via keepalive or even just a long-running request, so it's useful to know when this is happening.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7023
+
+### Add configuration option to limit maximum batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+
+Add an optional `maximum_size` parameter to the batching configuration.
+
+* When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
+* When unspecified, the router performs no size checking (the current behavior).
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (
+`Unprocessable Content`). For example:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
+
+### WIP: Connectors with TLS ([PR #6995](https://github.com/apollographql/router/pull/6995))
+
+Connectors now supports TLS configuration for using custom certificate authorities and utilizing client certificate authentication.
+
+```
+tls:
+  connector:
+    sources:
+      connector-graph.random_person_api:
+        certificate_authorities: 
+        client_authentication:
+          certificate_chain: 
+          key: 
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6995
+
+### Enable Remote Proxy Downloads
+
+This enables users without direct download access to specify a remote proxy mirror location for the github download of
+the Apollo Router releases.
+
+By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apollographql/router/pull/6667
+
+### Span events for traces containing errors ([PR #6727](https://github.com/apollographql/router/pull/6727))
+
+We have added new span events to trace spans that include some errors. These span events include the GraphQL error code that relates to the error. So far this only includes errors generated by connectors and the demand control plugin.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/6727
+
+## 🐛 Fixes
+
+### fix: export gauge instruments ([Issue #6859](https://github.com/apollographql/router/issues/6859))
+
+In router 2.x, you can use the router's OTel `meter_provider()` to report metrics from Rust plugins.
+
+Gauge instruments, such as those created using `.u64_gauge()`, were previously not exported. Now they are.
+
+By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/6865
+
+### Use batch_processor config for Apollo metrics PeriodicReader ([PR #7024](https://github.com/apollographql/router/pull/7024))
+
+The Apollo otlp `batch_processor` configurations `telemetry.apollo.batch_processor.scheduled_delay` and `telemetry.apollo.batch_processor.max_export_timeout` now also control the Apollo otlp `PeriodicReader` export interval and timeout respectively. This brings parity between Apollo otlp metrics and [non-Apollo otlp Exporter metrics](https://github.com/apollographql/router/blob/0f88850e0b164d12c14b1f05b0043076f21a3b28/apollo-router/src/plugins/telemetry/metrics/otlp.rs#L37-L40)
+
+By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/7024
+
+### Reduce Brotli compression level ([Issue #6857](https://github.com/apollographql/router/issues/6857))
+
+The current Brotli compression level used is `11`, which is the highest quality (and slowest). The value has been
+changed to `4`
+to mimic the other compression algorithms' `fast` setting; it is also a much more reasonable value for dynamic
+workloads.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7007
+
+### Fix CPU Count for cgroup environments
+
+This fixes an issue where the fleet_detector plugin would not infer correctly the CPU limits for a system used cgroup2 or cgroup.
+
+By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/6787
+
+### Do not include other fields from representation variable than the entity keys for entity cache([Issue #6673](https://github.com/apollographql/router/issues/6673))
+
+Separate entity keys and representation variable value in the cache key to avoid issues with `@requires` for example.
+
+close #6673
+
+> [!IMPORTANT]
+>
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6888
+
+### Replace Rhai specific hot-reload functionality with general hot-reload ([PR #6950](https://github.com/apollographql/router/pull/6950))
+
+In Router 2.0 the rhai hot-reload capability was not working. The cause was the architectural improvements to the router which meant that the entire service stack is no longer re-created for each request.
+
+The fix adds the rhai source files into the primary list of elements, configuration, schema, etc..., watched by the router and removes the old Rhai-specific file watching logic.
+
+If --hot-reload is enabled, the router will reload on changes to Rhai source code just like it would for changes to configuration, for example.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/6950
+
+## 📃 Configuration
+
+### Make experimental OTLP error metrics feature flag non-experimental ([PR #7033](https://github.com/apollographql/router/pull/7033))
+
+Because the OTLP error metrics feature is being promoted to `preview` from `experimental`, this change updates its feature flag name from `experimental_otlp_error_metrics` to `preview_extended_error_metrics`.
+
+By [@merylc](https://github.com/merylc) in https://github.com/apollographql/router/pull/7033
+
+
+
 > [!TIP]
 > All notable changes to Router v2.x after its initial release will be documented in this file.  To see previous history, see the [changelog prior to v2.0.0](https://github.com/apollographql/router/blob/1.x/CHANGELOG.md).
 
