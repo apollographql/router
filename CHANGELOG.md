@@ -167,7 +167,7 @@ If the number of queries provided exceeds the maximum batch size, the entire bat
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
 
-### WIP: Connectors with TLS ([PR #6995](https://github.com/apollographql/router/pull/6995))
+### TLS configuration for connectors ([PR #6995](https://github.com/apollographql/router/pull/6995))
 
 Connectors now supports TLS configuration for using custom certificate authorities and utilizing client certificate authentication.
 
