@@ -169,13 +169,7 @@ impl QueryPlannerService {
         };
         let (plan, mut root_node) = compute_job::execute(priority, job)
             .map_err(MaybeBackPressureError::TemporaryError)?
-            .await
-            // `expect()` propagates any panic that potentially happens in the closure, but:
-            //
-            // * We try to avoid such panics in the first place and consider them bugs
-            // * The panic handler in `apollo-router/src/executable.rs` exits the process
-            //   so this error case should never be reached.
-            .expect("query planner panicked")?;
+            .await?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }

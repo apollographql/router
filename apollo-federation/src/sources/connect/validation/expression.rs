@@ -409,7 +409,6 @@ mod tests {
     fn validate_with_context(selection: &str, expected: Shape) -> Result<(), Message> {
         let schema_str = schema_for(selection);
         let schema = Schema::parse(&schema_str, "schema").unwrap();
-        let parent_type = schema.types.get("Query").unwrap();
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
@@ -429,7 +428,7 @@ mod tests {
         .unwrap();
         let coordinate = ConnectDirectiveCoordinate {
             element: ConnectedElement::Field {
-                parent_type,
+                parent_type: object,
                 field_def: field,
             },
             directive,
