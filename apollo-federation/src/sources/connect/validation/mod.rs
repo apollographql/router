@@ -22,7 +22,6 @@ mod http;
 mod link;
 mod schema;
 mod source;
-mod variable;
 
 use std::fmt::Display;
 use std::ops::Range;
@@ -261,6 +260,8 @@ pub enum Code {
     NullabilityMismatch,
     /// The version set in the connectors `@link` URL is not recognized.
     UnknownConnectorsVersion,
+    /// Feature unavailable
+    FeatureUnavailable,
 }
 
 impl Code {
