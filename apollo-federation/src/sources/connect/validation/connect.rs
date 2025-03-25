@@ -40,22 +40,12 @@ pub(super) fn fields_seen_by_all_connects(
         .filter(|ty| !ty.is_built_in())
         .for_each(|extended_type| {
             if let ExtendedType::Object(node) = extended_type {
-                match fields_seen_by_connectors_on_types(
-                    extended_type,
-                    node,
-                    schema,
-                    all_source_names,
-                ) {
+                match fields_seen_by_connectors_on_types(node, schema, all_source_names) {
                     Ok(fields) => seen_fields.extend(fields),
                     Err(errs) => messages.extend(errs),
                 }
 
-                match fields_seen_by_connectors_on_fields(
-                    extended_type,
-                    node,
-                    schema,
-                    all_source_names,
-                ) {
+                match fields_seen_by_connectors_on_fields(node, schema, all_source_names) {
                     Ok(fields) => seen_fields.extend(fields),
                     Err(errs) => messages.extend(errs),
                 }
@@ -78,7 +68,6 @@ pub(crate) enum ObjectCategory {
 
 /// Make sure that any `@connect` directives on types are valid
 fn fields_seen_by_connectors_on_types(
-    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
@@ -115,9 +104,7 @@ fn fields_seen_by_connectors_on_types(
     for connect_directive in connect_directives {
         let coordinate = ConnectDirectiveCoordinate {
             directive: connect_directive,
-            element: ConnectedElement::Type {
-                type_def: extended_type,
-            },
+            element: ConnectedElement::Type { type_def: object },
         };
 
         let selection = match Selection::parse(coordinate, schema) {
@@ -163,7 +150,6 @@ fn fields_seen_by_connectors_on_types(
 
 /// Make sure that any `@connect` directives on object fields are valid
 fn fields_seen_by_connectors_on_fields(
-    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
@@ -188,14 +174,7 @@ fn fields_seen_by_connectors_on_fields(
     let mut seen_fields = Vec::new();
     let mut messages = Vec::new();
     for field in object.fields.values() {
-        match fields_seen_by_connector(
-            field,
-            object_category,
-            source_names,
-            extended_type,
-            object,
-            schema,
-        ) {
+        match fields_seen_by_connector(field, object_category, source_names, object, schema) {
             Ok(fields) => seen_fields.extend(fields),
             Err(errs) => messages.extend(errs),
         }
@@ -211,7 +190,6 @@ fn fields_seen_by_connector(
     field: &Component<FieldDefinition>,
     category: ObjectCategory,
     source_names: &[SourceName],
-    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
@@ -248,7 +226,7 @@ fn fields_seen_by_connector(
         let coordinate = ConnectDirectiveCoordinate {
             directive: connect_directive,
             element: ConnectedElement::Field {
-                parent_type: extended_type,
+                parent_type: object,
                 field_def: field,
             },
         };

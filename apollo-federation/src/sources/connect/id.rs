@@ -4,11 +4,13 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
 
 use crate::error::FederationError;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
@@ -35,9 +37,19 @@ impl ConnectorPosition {
     ) -> Result<ConnectedElement<'s>, FederationError> {
         match self {
             Self::Field(pos) => Ok(ConnectedElement::Field {
-                parent_type: schema.types.get(pos.field.parent().type_name()).ok_or(
-                    FederationError::internal("Parent type for connector not found"),
-                )?,
+                parent_type: schema
+                    .types
+                    .get(pos.field.parent().type_name())
+                    .and_then(|ty| {
+                        if let ExtendedType::Object(obj) = ty {
+                            Some(obj)
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(FederationError::internal(
+                        "Parent type for connector not found",
+                    ))?,
                 field_def: pos.field.get(schema).map_err(|_| {
                     FederationError::internal("Field definition for connector not found")
                 })?,
@@ -46,6 +58,13 @@ impl ConnectorPosition {
                 type_def: schema
                     .types
                     .get(&pos.type_name)
+                    .and_then(|ty| {
+                        if let ExtendedType::Object(obj) = ty {
+                            Some(obj)
+                        } else {
+                            None
+                        }
+                    })
                     .ok_or(FederationError::internal("Type for connector not found"))?,
             }),
         }
@@ -133,11 +152,11 @@ impl ConnectorPosition {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConnectedElement<'schema> {
     Field {
-        parent_type: &'schema ExtendedType,
+        parent_type: &'schema Node<ObjectType>,
         field_def: &'schema Component<FieldDefinition>,
     },
     Type {
-        type_def: &'schema ExtendedType,
+        type_def: &'schema Node<ObjectType>,
     },
 }
 
@@ -147,8 +166,8 @@ impl Display for ConnectedElement<'_> {
             Self::Field {
                 parent_type,
                 field_def,
-            } => write!(f, "{}.{}", parent_type.name(), field_def.name),
-            Self::Type { type_def } => write!(f, "{}", type_def.name()),
+            } => write!(f, "{}.{}", parent_type.name, field_def.name),
+            Self::Type { type_def } => write!(f, "{}", type_def.name),
         }
     }
 }
@@ -160,7 +179,7 @@ impl ConnectedElement<'_> {
             .query
             .as_ref()
             .is_some_and(|query| match self {
-                ConnectedElement::Field { parent_type, .. } => *parent_type.name() == query.name,
+                ConnectedElement::Field { parent_type, .. } => parent_type.name == query.name,
                 ConnectedElement::Type { .. } => false,
             })
             || schema
@@ -169,7 +188,7 @@ impl ConnectedElement<'_> {
                 .as_ref()
                 .is_some_and(|mutation| match self {
                     ConnectedElement::Field { parent_type, .. } => {
-                        *parent_type.name() == mutation.name
+                        parent_type.name == mutation.name
                     }
                     ConnectedElement::Type { .. } => false,
                 })
