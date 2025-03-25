@@ -292,60 +292,61 @@ impl<'a> SchemaUpgrader<'a> {
                 .iter()
                 .try_for_each(|application| -> Result<(), FederationError> {
                     if let Ok(application) = (*application).as_ref() {
-                        if metadata
-                            .external_metadata()
-                            .is_external(&application.target)
-                        {
-                            let used_in_other_definitions =
-                                self.subgraphs.subgraphs.iter().fallible_any(
-                                    |(name, subgraph)| -> Result<bool, FederationError> {
-                                        if self.original_subgraph.name.as_str() != name.as_ref() {
-                                            // check to see if the field is external in the other subgraphs
-                                            if let Some(other_metadata) =
-                                                &subgraph.schema.subgraph_metadata
-                                            {
-                                                if !other_metadata
-                                                    .external_metadata()
-                                                    .is_external(&application.target)
+                        if let Ok(target) = FieldDefinitionPosition::try_from(application.target.clone()) {
+                            if metadata
+                                .external_metadata()
+                                .is_external(&target)
+                            {
+                                let used_in_other_definitions =
+                                    self.subgraphs.subgraphs.iter().fallible_any(
+                                        |(name, subgraph)| -> Result<bool, FederationError> {
+                                            if self.original_subgraph.name.as_str() != name.as_ref() {
+                                                // check to see if the field is external in the other subgraphs
+                                                if let Some(other_metadata) =
+                                                    &subgraph.schema.subgraph_metadata
                                                 {
-                                                    // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
-                                                    let other_applications = subgraph
-                                                        .schema
-                                                        .tag_directive_applications()?;
-                                                    return other_applications.iter().fallible_any(
-                                                        |other_app_result| -> Result<bool, FederationError> {
-                                                            if let Ok(other_tag_directive) =
-                                                                (*other_app_result).as_ref()
-                                                            {
-                                                                if application.target
-                                                                    == other_tag_directive.target
-                                                                    && application.arguments.name
-                                                                        == other_tag_directive
-                                                                            .arguments
-                                                                            .name
+                                                    if !other_metadata
+                                                        .external_metadata()
+                                                        .is_external(&target)
+                                                    {
+                                                        // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
+                                                        let other_applications = subgraph
+                                                            .schema
+                                                            .tag_directive_applications()?;
+                                                        return other_applications.iter().fallible_any(
+                                                            |other_app_result| -> Result<bool, FederationError> {
+                                                                if let Ok(other_tag_directive) =
+                                                                    (*other_app_result).as_ref()
                                                                 {
-                                                                    return Ok(true);
+                                                                    if application.target
+                                                                        == other_tag_directive.target
+                                                                        && application.arguments.name
+                                                                            == other_tag_directive
+                                                                                .arguments
+                                                                                .name
+                                                                    {
+                                                                        return Ok(true);
+                                                                    }
                                                                 }
-                                                            }
-                                                            Ok(false)
-                                                        },
-                                                    );
+                                                                Ok(false)
+                                                            },
+                                                        );
+                                                    }
                                                 }
                                             }
-                                        }
-                                        Ok(false)
-                                    },
-                                );
-                            if used_in_other_definitions? {
-                                // remove @tag
-                                to_delete.push((
-                                    application.target.clone(),
-                                    application.directive.clone(),
-                                ));
+                                            Ok(false)
+                                        },
+                                    );
+                                if used_in_other_definitions? {
+                                    // remove @tag
+                                    to_delete.push((
+                                        target.clone(),
+                                        application.directive.clone(),
+                                    ));
+                                }
                             }
                         }
                     }
-
                     Ok(())
                 })?;
         }

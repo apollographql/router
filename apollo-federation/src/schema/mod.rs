@@ -10,9 +10,9 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use position::FieldDefinitionPosition;
 use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
+use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
 use crate::error::FederationError;
@@ -229,7 +229,9 @@ impl FederationSchema {
     }
 
     pub(crate) fn is_fed_2(&self) -> bool {
-        self.subgraph_metadata.as_ref().is_some_and(|meta| meta.is_fed_2_schema())
+        self.subgraph_metadata
+            .as_ref()
+            .is_some_and(|meta| meta.is_fed_2_schema())
     }
 
     pub(crate) fn context_directive_applications(
@@ -461,7 +463,7 @@ impl FederationSchema {
                             federation_spec.tag_directive_arguments(tag_directive_application);
                         applications.push(arguments.map(|args| TagDirective {
                             arguments: args,
-                            target: FieldDefinitionPosition::Object(
+                            target: TagDirectiveTargetPosition::ObjectField(
                                 field_definition_position.clone(),
                             ),
                             directive: tag_directive_application,
@@ -518,7 +520,7 @@ pub(crate) struct TagDirective<'schema> {
     /// The parsed arguments of this `@tag` application
     arguments: TagDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
-    target: FieldDefinitionPosition, // TODO: Make this a reference
+    target: TagDirectiveTargetPosition, // TODO: Make this a reference
     /// Reference to the directive in the schema
     directive: &'schema Node<Directive>,
 }
