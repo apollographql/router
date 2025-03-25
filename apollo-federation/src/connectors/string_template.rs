@@ -19,6 +19,7 @@ use serde_json_bytes::Value;
 
 pub(crate) use self::encoding::UriString;
 use super::ApplyToError;
+use super::ConnectSpec;
 use crate::connectors::JSONSelection;
 use crate::connectors::json_selection::helpers::json_to_string;
 
@@ -34,7 +35,18 @@ impl FromStr for StringTemplate {
     type Err = Error;
 
     fn from_str(input: &str) -> Result<Self, Error> {
-        let mut offset = 0;
+        Self::parse_with_spec(input, 0, ConnectSpec::latest())
+    }
+}
+
+impl StringTemplate {
+    /// Parse a [`StringTemplate`] from a particular `offset` according to a
+    /// given [`ConnectSpec`].
+    pub(crate) fn parse_with_spec(
+        input: &str,
+        mut offset: usize,
+        spec: ConnectSpec,
+    ) -> Result<Self, Error> {
         let mut chars = input.chars().peekable();
         let mut parts = Vec::new();
         while let Some(next) = chars.peek() {
@@ -63,7 +75,9 @@ impl FromStr for StringTemplate {
                     });
                 }
                 offset += 1; // Account for opening brace
-                let parsed = JSONSelection::parse(&expression).map_err(|err| {
+                // TODO This should call JSONSelection::parse_with_spec with a
+                // ConnectSpec, but we don't have that information handy.
+                let parsed = JSONSelection::parse_with_spec(&expression, spec).map_err(|err| {
                     let start_of_parse_error = offset + err.offset;
                     Error {
                         message: err.message,
@@ -90,9 +104,7 @@ impl FromStr for StringTemplate {
         }
         Ok(StringTemplate { parts })
     }
-}
 
-impl StringTemplate {
     /// Get all the dynamic [`Expression`] pieces of the template for validation. If interpolating
     /// the entire template, use [`Self::interpolate`] instead.
     pub(crate) fn expressions(&self) -> impl Iterator<Item = &Expression> {
