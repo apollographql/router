@@ -7047,6 +7047,14 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
       "properties": {
+        "connection_shutdown_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "The timeout for shutting down connections during a router shutdown or a schema reload.",
+          "type": "string"
+        },
         "defer_support": {
           "default": true,
           "description": "Set to false to disable defer support",

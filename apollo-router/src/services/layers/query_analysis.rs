@@ -97,10 +97,6 @@ impl QueryAnalysisLayer {
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        // TODO: is this correct?
-        let span = std::panic::AssertUnwindSafe(span);
-        let conf = std::panic::AssertUnwindSafe(conf);
-
         let priority = compute_job::Priority::P4; // Medium priority
         compute_job::execute(priority, move |_| {
             span.in_scope(|| {
@@ -114,12 +110,6 @@ impl QueryAnalysisLayer {
         })
         .map_err(MaybeBackPressureError::TemporaryError)?
         .await
-        // `expect()` propagates any panic that potentially happens in the closure, but:
-        //
-        // * We try to avoid such panics in the first place and consider them bugs
-        // * The panic handler in `apollo-router/src/executable.rs` exits the process
-        //   so this error case should never be reached.
-        .expect("Query::parse_document panicked")
         .map_err(MaybeBackPressureError::PermanentError)
     }
 
