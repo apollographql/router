@@ -645,7 +645,7 @@ impl FederationSpecDefinition {
         DirectiveSpecification::new(
             FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC,
             &[],
-            self.version().gt(&Version { major: 2, minor: 1 }), // repeatable in Fed 2.2 or later
+            self.version().ge(&Version { major: 2, minor: 2 }),
             &[
                 DirectiveLocation::FieldDefinition,
                 DirectiveLocation::Object,

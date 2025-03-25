@@ -4,6 +4,7 @@ use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ty;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
@@ -122,6 +123,23 @@ impl FederationBlueprint {
         ] {
             if let Some(pos) = schema.get_directive_definition(directive_name) {
                 let directive = pos.get(schema.schema())?;
+                // We shouldn't have applications at the time of this writing because `completeSubgraphSchema`, which calls this,
+                // is only called:
+                // 1. during schema parsing, by `FederationBluePrint.onDirectiveDefinitionAndSchemaParsed`, and that is called
+                //   before we process any directive applications.
+                // 2. by `setSchemaAsFed2Subgraph`, but as the name imply, this trickles to `completeFed2SubgraphSchema`, not
+                //   this one method.
+                // In other words, there is currently no way to create a full fed1 schema first, and get that method called
+                // second. If that changes (no real reason but...), we'd have to modify this because when we remove the
+                // definition to re-add the "correct" version, we'd have to re-attach existing applications (doable but not
+                // done). This assert is so we notice it quickly if that ever happens (again, unlikely, because fed1 schema
+                // is a backward compatibility thing and there is no reason to expand that too much in the future).
+                if schema.referencers().get_directive(&directive_name)?.len() > 0 {
+                    bail!(
+                        "Subgraph has applications of @{directive_name} but we are trying to remove the definition."
+                    );
+                }
+
                 // The patterns we recognize and "correct" (by essentially ignoring the definition) are:
                 //  1. if the definition has no arguments at all.
                 //  2. if the `fields` argument is declared as nullable.

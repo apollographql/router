@@ -443,7 +443,7 @@ impl_copy_directive! {
 }
 
 impl DirectiveReferencers {
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.schema.as_ref().map(|_| 1).unwrap_or_default()
             + self.scalar_types.len()
             + self.object_types.len()
