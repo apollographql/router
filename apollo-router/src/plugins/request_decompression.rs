@@ -9,7 +9,7 @@ use crate::plugin::PluginPrivate;
 use crate::services::fetch::Request;
 use crate::services::router;
 
-#[derive(Debug, Default, Deserialize, JsonSchema, Serialize)]
+#[derive(Debug, Deserialize, JsonSchema, Serialize)]
 struct RequestDecompressionConfig {
     /// When `true`, brotli-encoded request bodies will be automatically decompressed.
     ///
