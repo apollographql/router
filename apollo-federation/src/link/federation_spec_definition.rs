@@ -572,7 +572,7 @@ impl FederationSpecDefinition {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                get_type: |_| Ok(Type::Named(FIELDSET_SCALAR_NAME)),
+                get_type: |_, _| Ok(Type::Named(FIELDSET_SCALAR_NAME)),
                 default_value: None,
             },
             composition_strategy: None,
@@ -583,7 +583,7 @@ impl FederationSpecDefinition {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_RESOLVABLE_ARGUMENT_NAME,
-                get_type: |_| Ok(ty!(Boolean)),
+                get_type: |_, _| Ok(ty!(Boolean)),
                 default_value: Some(Value::Boolean(true)),
             },
             composition_strategy: None,
@@ -618,7 +618,7 @@ impl FederationSpecDefinition {
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_REASON_ARGUMENT_NAME,
-                    get_type: |_| Ok(ty!(String)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -659,7 +659,7 @@ impl FederationSpecDefinition {
         let mut args = vec![DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_FROM_ARGUMENT_NAME,
-                get_type: |_| Ok(ty!(String!)),
+                get_type: |_, _| Ok(ty!(String!)),
                 default_value: None,
             },
             composition_strategy: None,
@@ -668,7 +668,7 @@ impl FederationSpecDefinition {
             args.push(DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
-                    get_type: |_| Ok(ty!(String)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -690,7 +690,7 @@ impl FederationSpecDefinition {
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: FEDERATION_NAME_ARGUMENT_NAME,
-                    get_type: |_| Ok(ty!(String!)),
+                    get_type: |_, _| Ok(ty!(String!)),
                     default_value: None,
                 },
                 composition_strategy: None,
