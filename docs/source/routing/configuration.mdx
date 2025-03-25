@@ -779,6 +779,37 @@ telemetry:
     metrics_reference_mode: extended # Default is legacy
 ```
 
+<MinVersion version="2.1.0">
+
+### Extended error reporting
+
+</MinVersion>
+
+<PreviewFeature />
+
+<Note>
+
+The router supports extended error reporting in the following versions:
+
+- [Preview](/resources/product-launch-stages/#preview) in v2.1.0 and later
+- [Experimental](/resources/product-launch-stages/#experimental-features) in v2.0.0
+
+</Note>
+
+You can configure the router to report extended error information for improved diagnostics.
+Apollo's legacy error reporting doesn't include the service or error code, meaning you can't easily attribute errors to their root cause in GraphOS Studio.
+
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.errors.preview_extended_error_metrics` option like so:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    errors:
+      preview_extended_error_metrics: enabled # Default is disabled
+```
+
+[Learn more.](/graphos/routing/graphos-reporting#errors)
+
 #### Configuration effect timing
 
 Once you configure extended reference reporting, you can view enum value and input field usage alongside object [field usage in GraphOS Studio](/graphos/metrics/field-usage) for all subsequent operations.
