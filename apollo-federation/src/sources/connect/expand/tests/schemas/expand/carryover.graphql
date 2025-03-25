@@ -6,6 +6,7 @@ schema
   @link(url: "https://specs.apollo.dev/authenticated/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/requiresScopes/v0.1", for: SECURITY)
   @link(url: "https://specs.apollo.dev/policy/v0.1", for: SECURITY)
+  @link(url: "https://specs.apollo.dev/context/v0.1", for: SECURITY)
   @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
   @link(url: "https://specs.apollo.dev/connect/v0.1", for: EXECUTION)
   @join__directive(graphs: [ONE], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect", "@source"]})
@@ -15,6 +16,10 @@ schema
 }
 
 directive @authenticated on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
+
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+
+directive @context__fromContext(field: context__ContextFieldValue) on ARGUMENT_DEFINITION
 
 directive @custom on OBJECT | FIELD_DEFINITION
 
@@ -41,6 +46,8 @@ directive @policy(policies: [[policy__Policy!]!]!) on FIELD_DEFINITION | OBJECT 
 directive @requiresScopes(scopes: [[requiresScopes__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
 directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION | SCHEMA
+
+scalar context__ContextFieldValue
 
 input join__ContextArgument {
   name: String!
@@ -82,6 +89,7 @@ type Query
 {
   ts: [T] @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t"}, selection: "id\ntagged\nhidden\ncustom\nauthenticated\nrequiresScopes\npolicy\noverridden"})
   t(id: ID): T @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t/{$args.id}"}, selection: "id\ntagged\nhidden\ncustom\nauthenticated\nrequiresScopes\npolicy\noverridden", entity: true})
+  z: Z @join__field(graph: TWO)
 }
 
 type R
@@ -105,4 +113,20 @@ type T
   policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
   overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO, overrideLabel: "label")
   r: R @join__field(graph: ONE) @join__directive(graphs: [ONE], name: "connect", args: {source: "json", http: {GET: "/t/{$this.id}/r"}, selection: "id"})
+}
+
+type X
+  @join__type(graph: TWO, key: "id")
+{
+  id: ID!
+  w: String @join__field(graph: TWO, contextArguments: [{context: "two__ctx", name: "z", type: "String", selection: " { y }"}])
+}
+
+type Z
+  @join__type(graph: TWO, key: "id")
+  @context(name: "two__ctx")
+{
+  id: ID!
+  y: String
+  x: X
 }
