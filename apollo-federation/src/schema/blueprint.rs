@@ -134,7 +134,7 @@ impl FederationBlueprint {
                 // definition to re-add the "correct" version, we'd have to re-attach existing applications (doable but not
                 // done). This assert is so we notice it quickly if that ever happens (again, unlikely, because fed1 schema
                 // is a backward compatibility thing and there is no reason to expand that too much in the future).
-                if schema.referencers().get_directive(&directive_name)?.len() > 0 {
+                if schema.referencers().get_directive(directive_name)?.len() > 0 {
                     bail!(
                         "Subgraph has applications of @{directive_name} but we are trying to remove the definition."
                     );
