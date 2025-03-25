@@ -309,6 +309,7 @@ impl<'a> SchemaUpgrader<'a> {
                                                     .is_external(&application.target)
                                                 {
                                                     // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
+                                                    let other_schema = subgraph.schema.schema();
                                                     let other_applications = subgraph
                                                         .schema
                                                         .tag_directive_applications()?;
@@ -319,10 +320,10 @@ impl<'a> SchemaUpgrader<'a> {
                                                             {
                                                                 if application.target
                                                                     == other_tag_directive.target
-                                                                    && application.arguments.fields
+                                                                    && application.arguments.name
                                                                         == other_tag_directive
                                                                             .arguments
-                                                                            .fields
+                                                                            .name
                                                                 {
                                                                     return Ok(true);
                                                                 }

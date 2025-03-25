@@ -26,8 +26,6 @@ use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::spec::Identity;
-use crate::link::spec::Version;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -231,14 +229,7 @@ impl FederationSchema {
     }
 
     pub(crate) fn is_fed_2(&self) -> bool {
-        self.metadata()
-            .and_then(|metadata| metadata.for_identity(&Identity::federation_identity()))
-            .is_some_and(|federation| {
-                federation
-                    .url
-                    .version
-                    .satisfies(&Version { major: 2, minor: 0 })
-            })
+        self.subgraph_metadata.as_ref().is_some_and(|meta| meta.is_fed_2_schema())
     }
 
     pub(crate) fn context_directive_applications(

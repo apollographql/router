@@ -54,7 +54,7 @@ pub(crate) struct RequiresDirectiveArguments<'doc> {
 }
 
 pub(crate) struct TagDirectiveArguments<'doc> {
-    pub(crate) fields: &'doc str,
+    pub(crate) name: &'doc str,
 }
 
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
@@ -320,7 +320,7 @@ impl FederationSpecDefinition {
         application: &'doc Node<Directive>,
     ) -> Result<TagDirectiveArguments<'doc>, FederationError> {
         Ok(TagDirectiveArguments {
-            fields: directive_required_string_argument(
+            name: directive_required_string_argument(
                 application,
                 &FEDERATION_FIELDS_ARGUMENT_NAME,
             )?,
