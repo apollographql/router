@@ -1160,8 +1160,8 @@ supergraph:
 
 ### Connection shutdown timeout
 
-When the Router schema or configuration updates all connections must be closed for the existing resources to be freed.
-To ensure that long-lived connections do hang on to these resources a maximum graceful shutdown timeout can be configured.
+When the Router schema or configuration updates all connections must be closed for resources to be freed.
+To ensure that long-lived connections do not hang on to resources, a maximum graceful shutdown timeout can be configured.
 
 ```yaml
 connection_shutdown_timeout: 60s
