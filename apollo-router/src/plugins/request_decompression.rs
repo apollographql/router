@@ -6,7 +6,6 @@ use tower::ServiceExt;
 
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
-use crate::services::fetch::Request;
 use crate::services::router;
 
 #[derive(Debug, Deserialize, JsonSchema, Serialize)]
