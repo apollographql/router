@@ -7,7 +7,7 @@ subscription:
     callback:
       path: /graphql
       public_url: https://example.com/graphql
-  enable_deduplication: false
+  deduplication:
+    enabled: false
   queue_capacity: 2
   max_opened_subscriptions: 3
-
