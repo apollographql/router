@@ -3,7 +3,6 @@
 use std::fmt;
 use std::fmt::Display;
 
-use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
@@ -148,16 +147,18 @@ enum Group<'schema> {
     Child {
         input_type: &'schema Node<InputObjectType>,
         entity_type: &'schema ExtendedType,
-        root_entity_type: &'schema Name,
     },
 }
 
 #[derive(Clone, Debug)]
 struct Field<'schema> {
     node: &'schema Node<InputValueDefinition>,
-    input_type: &'schema ExtendedType,
-    entity_type: &'schema ExtendedType,
-    root_entity_type: &'schema Name,
+    /// The object which has a field that we're comparing against
+    object_type: &'schema ObjectType,
+    /// The field definition of the input that correlates to a field on the entity
+    input_field: &'schema ExtendedType,
+    /// The field of the entity that we're comparing against, part of `object_type`
+    entity_field: &'schema ExtendedType,
 }
 
 /// Visitor for entity resolver arguments.
@@ -178,11 +179,10 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for ArgumentVisitor<'
     ) -> Result<Option<Group<'schema>>, Self::Error> {
         Ok(
             // Each input type within an argument to the entity field is another group to visit
-            if let ExtendedType::InputObject(input_object_type) = field.input_type {
+            if let ExtendedType::InputObject(input_object_type) = field.input_field {
                 Some(Group::Child {
                     input_type: input_object_type,
-                    entity_type: field.entity_type,
-                    root_entity_type: field.root_entity_type,
+                    entity_type: field.entity_field,
                 })
             } else {
                 None
@@ -198,9 +198,8 @@ impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for ArgumentVisitor<'
             Group::Child {
                 input_type,
                 entity_type,
-                root_entity_type,
                 ..
-            } => self.enter_child_group(input_type, entity_type, root_entity_type),
+            } => self.enter_child_group(input_type, entity_type),
         }
     }
 
@@ -213,10 +212,10 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
     type Error = Message;
 
     fn visit(&mut self, field: Field<'schema>) -> Result<(), Self::Error> {
-        let ok = match field.input_type {
-            ExtendedType::InputObject(_) => field.entity_type.is_object(),
+        let ok = match field.input_field {
+            ExtendedType::InputObject(_) => field.entity_field.is_object(),
             ExtendedType::Scalar(_) | ExtendedType::Enum(_) => {
-                field.input_type == field.entity_type
+                field.input_field == field.entity_field
             }
             _ => true,
         };
@@ -226,11 +225,12 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
             Err(Message {
                 code: Code::EntityResolverArgumentMismatch,
                 message: format!(
-                    "`{coordinate}` has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
+                    "`{coordinate}({field_name}:)` is of type `{input_type}`, but must match `{object}.{field_name}` of type `{entity_type}` because `entity` is `true`.",
                     coordinate = self.coordinate.connect.element,
                     field_name = field.node.name.as_str(),
-                    input_type = field.input_type.name(),
-                    entity_type = field.entity_type.name(),
+                    object = field.object_type.name,
+                    input_type = field.input_field.name(),
+                    entity_type = field.entity_field.name(),
                 ),
                 locations: field
                     .node
@@ -256,14 +256,13 @@ impl<'schema> ArgumentVisitor<'schema> {
         field.arguments.iter().filter_map(|arg| {
             if let Some(input_type) = self.schema.types.get(arg.ty.inner_named_type()) {
                 // Check that the argument has a corresponding field on the entity type
-                let root_entity_type = &entity_type.name;
-                if let Some(entity_type) = entity_type.fields.get(&*arg.name)
+                if let Some(entity_field) = entity_type.fields.get(&*arg.name)
                     .and_then(|entity_field| self.schema.types.get(entity_field.ty.inner_named_type())) {
                     Some(Ok(Field {
                         node: arg,
-                        input_type,
-                        entity_type,
-                        root_entity_type,
+                        input_field: input_type,
+                        entity_field,
+                        object_type: entity_type,
                     }))
                 } else {
                     Some(Err(Message {
@@ -292,7 +291,6 @@ impl<'schema> ArgumentVisitor<'schema> {
         &mut self,
         child_input_type: &'schema Node<InputObjectType>,
         entity_type: &'schema ExtendedType,
-        root_entity_type: &'schema Name,
     ) -> Result<
         Vec<Field<'schema>>,
         <ArgumentVisitor<'schema> as FieldVisitor<Field<'schema>>>::Error,
@@ -309,9 +307,9 @@ impl<'schema> ArgumentVisitor<'schema> {
 
                 self.schema.types.get(entity_field_type).map(|entity_type| Ok(Field {
                     node: input_field,
-                    input_type,
-                    entity_type,
-                    root_entity_type,
+                    object_type: entity_object_type,
+                    input_field: input_type,
+                    entity_field: entity_type,
                 }))
             } else {
                 // The input type field does not have a corresponding field on the entity type
