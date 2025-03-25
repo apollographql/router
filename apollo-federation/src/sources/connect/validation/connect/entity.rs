@@ -115,7 +115,7 @@ pub(super) fn validate_entity_arg(
         return Err(Message {
             code: Code::EntityResolverArgumentMismatch,
             message: format!(
-                "{coordinate} must have arguments when using `entity: true`. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                "`{coordinate}` must have arguments when using `entity: true`. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
                 coordinate = coordinate.connect.element,
             ),
             locations: entity_arg
@@ -226,7 +226,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
             Err(Message {
                 code: Code::EntityResolverArgumentMismatch,
                 message: format!(
-                    "{coordinate} has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
+                    "`{coordinate}` has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
                     coordinate = self.coordinate.connect.element,
                     field_name = field.node.name.as_str(),
                     input_type = field.input_type.name(),
@@ -269,7 +269,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                     Some(Err(Message {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
-                            "{coordinate} has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
+                            "`{coordinate}` has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
                             coordinate = self.coordinate.connect.element,
                             arg_name = &*arg.name,
                             entity_type = entity_type.name,
@@ -318,7 +318,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                 Some(Err(Message {
                     code: Code::EntityResolverArgumentMismatch,
                     message: format!(
-                        "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
+                        "`{coordinate}` has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
                         coordinate = self.coordinate.connect.element,
                         input_type = child_input_type.name,
                         entity_type = entity_object_type.name,

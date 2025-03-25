@@ -6,7 +6,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/keys_and_
 [
     Message {
         code: EntityResolverArgumentMismatch,
-        message: "Query.product has invalid arguments. Field `id` on `CountryInput` does not have a matching field `id` on `Country`.",
+        message: "`Query.product` has invalid arguments. Field `id` on `CountryInput` does not have a matching field `id` on `Country`.",
         locations: [
             42:3..42:10,
             12:7..12:19,
