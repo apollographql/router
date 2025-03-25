@@ -24,6 +24,8 @@ use super::PathBuf;
 use super::Rhai;
 use super::process_error;
 use super::subgraph;
+use crate::Context;
+use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -42,7 +44,6 @@ use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::{Context, assert_snapshot_subscriber};
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...
