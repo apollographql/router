@@ -1,4 +1,4 @@
-### Add `apollo.router.open_connections` metric `state` attribute rename ([PR #7091](https://github.com/apollographql/router/pull/7023))
+### Add `apollo.router.open_connections` metric `state` attribute rename ([PR #7091](https://github.com/apollographql/router/pull/7091))
 
 The `state` attribute on `apollo.router.open_connections` has been renamed to `http.connection.state`.
 
