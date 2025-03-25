@@ -113,7 +113,7 @@ fn fields_seen_by_connectors_on_types(
             Err(error) => messages.push(error),
         }
 
-        // TODO: validate batch/this arguments as key fields
+        messages.extend(validate_entity_arg(coordinate, schema).err());
 
         let source_name =
             match validate_source_name(connect_directive, &coordinate, source_names, schema) {
@@ -238,8 +238,7 @@ fn fields_seen_by_connector(
             Err(error) => errors.push(error),
         }
 
-        errors
-            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
+        errors.extend(validate_entity_arg(coordinate, schema).err());
 
         let source_name =
             match validate_source_name(connect_directive, &coordinate, source_names, schema) {

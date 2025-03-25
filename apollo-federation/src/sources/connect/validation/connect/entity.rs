@@ -1,13 +1,13 @@
 //! Validations for the `@connect(entity:)` argument.
 
+use std::fmt;
+use std::fmt::Display;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::ast::Value;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::ObjectType;
@@ -17,45 +17,66 @@ use super::Message;
 use super::ObjectCategory;
 use crate::sources::connect::expand::visitors::FieldVisitor;
 use crate::sources::connect::expand::visitors::GroupVisitor;
+use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
-use crate::sources::connect::validation::coordinates::connect_directive_entity_argument_coordinate;
-use crate::sources::connect::validation::coordinates::field_with_connect_directive_entity_true_coordinate;
+use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 /// Applies additional validations to `@connect` if `entity` is `true`.
 pub(super) fn validate_entity_arg(
-    field: &Component<FieldDefinition>,
-    connect_directive: &Node<Directive>,
-    object: &Node<ObjectType>,
+    connect: ConnectDirectiveCoordinate,
     schema: &SchemaInfo,
-    category: ObjectCategory,
 ) -> Result<(), Message> {
-    let connect_directive_name = &connect_directive.name;
-
-    let Some(entity_arg) = connect_directive
+    let Some(entity_arg) = connect
+        .directive
         .arguments
         .iter()
         .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
     else {
         return Ok(());
     };
+
     let entity_arg_value = &entity_arg.value;
-    if !entity_arg_value.to_bool().unwrap_or_default() {
-        // This is not an entity resolver
-        return Ok(());
-    }
+    let Some(value) = entity_arg_value.to_bool() else {
+        return Ok(()); // The default value is always okay
+    };
+
+    let coordinate = Coordinate { connect, value };
+
+    let (field, category) = match (connect.element, value) {
+        (ConnectedElement::Field { .. }, false) | (ConnectedElement::Type { .. }, true) => {
+            // Explicit values set to the default are always okay
+            return Ok(());
+        }
+        (ConnectedElement::Type { .. }, false) => {
+            // `@connect` on a type is _always_ an entity resolver, so this is an error
+            return Err(Message {
+                code: Code::ConnectOnTypeMustBeEntity,
+                message: format!(
+                    "{coordinate} is invalid. `entity` can't be false for connectors on types."
+                ),
+                locations: entity_arg
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+        (
+            // For `entity: true` on fields, we have additional checks we now need to run
+            ConnectedElement::Field {
+                field_def,
+                parent_category,
+                ..
+            },
+            true,
+        ) => (field_def, parent_category),
+    };
 
     if category != ObjectCategory::Query {
         return Err(Message {
             code: Code::EntityNotOnRootQuery,
             message: format!(
                 "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
-                coordinate = connect_directive_entity_argument_coordinate(
-                    connect_directive_name,
-                    entity_arg_value.as_ref(),
-                    object,
-                    &field.name
-                )
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
@@ -69,12 +90,6 @@ pub(super) fn validate_entity_arg(
             code: Code::EntityTypeInvalid,
             message: format!(
                 "{coordinate} is invalid. Entity connectors must return object types.",
-                coordinate = connect_directive_entity_argument_coordinate(
-                    connect_directive_name,
-                    entity_arg_value.as_ref(),
-                    object,
-                    &field.name
-                )
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
@@ -88,12 +103,6 @@ pub(super) fn validate_entity_arg(
             code: Code::EntityTypeInvalid,
             message: format!(
                 "{coordinate} is invalid. Entity connectors must return non-list, nullable, object types. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
-                coordinate = connect_directive_entity_argument_coordinate(
-                    connect_directive_name,
-                    entity_arg_value.as_ref(),
-                    object,
-                    &field.name
-                )
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
@@ -106,13 +115,8 @@ pub(super) fn validate_entity_arg(
         return Err(Message {
             code: Code::EntityResolverArgumentMismatch,
             message: format!(
-                "{coordinate} must have arguments. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
-                coordinate = field_with_connect_directive_entity_true_coordinate(
-                    connect_directive_name,
-                    entity_arg_value.as_ref(),
-                    object,
-                    &field.name,
-                ),
+                "{coordinate} must have arguments when using `entity: true`. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                coordinate = coordinate.connect.element,
             ),
             locations: entity_arg
                 .line_column_range(&schema.sources)
@@ -124,9 +128,7 @@ pub(super) fn validate_entity_arg(
     ArgumentVisitor {
         schema,
         entity_arg,
-        entity_arg_value,
-        object,
-        field: &field.name,
+        coordinate,
     }
     .walk(Group::Root {
         field,
@@ -166,9 +168,7 @@ struct Field<'schema> {
 struct ArgumentVisitor<'schema> {
     schema: &'schema SchemaInfo<'schema>,
     entity_arg: &'schema Node<Argument>,
-    entity_arg_value: &'schema Node<Value>,
-    object: &'schema Node<ObjectType>,
-    field: &'schema Name,
+    coordinate: Coordinate<'schema>,
 }
 
 impl<'schema> GroupVisitor<Group<'schema>, Field<'schema>> for ArgumentVisitor<'schema> {
@@ -227,12 +227,7 @@ impl<'schema> FieldVisitor<Field<'schema>> for ArgumentVisitor<'schema> {
                 code: Code::EntityResolverArgumentMismatch,
                 message: format!(
                     "{coordinate} has invalid arguments. Mismatched type on field `{field_name}` - expected `{entity_type}` but found `{input_type}`.",
-                    coordinate = field_with_connect_directive_entity_true_coordinate(
-                        self.schema.connect_directive_name(),
-                        self.entity_arg_value.as_ref(),
-                        self.object,
-                        self.field,
-                    ),
+                    coordinate = self.coordinate.connect.element,
                     field_name = field.node.name.as_str(),
                     input_type = field.input_type.name(),
                     entity_type = field.entity_type.name(),
@@ -275,12 +270,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                         code: Code::EntityResolverArgumentMismatch,
                         message: format!(
                             "{coordinate} has invalid arguments. Argument `{arg_name}` does not have a matching field `{arg_name}` on type `{entity_type}`.",
-                            coordinate = field_with_connect_directive_entity_true_coordinate(
-                                self.schema.connect_directive_name(),
-                                self.entity_arg_value.as_ref(),
-                                self.object,
-                                &field.name
-                            ),
+                            coordinate = self.coordinate.connect.element,
                             arg_name = &*arg.name,
                             entity_type = entity_type.name,
                         ),
@@ -329,12 +319,7 @@ impl<'schema> ArgumentVisitor<'schema> {
                     code: Code::EntityResolverArgumentMismatch,
                     message: format!(
                         "{coordinate} has invalid arguments. Field `{name}` on `{input_type}` does not have a matching field `{name}` on `{entity_type}`.",
-                        coordinate = field_with_connect_directive_entity_true_coordinate(
-                            self.schema.connect_directive_name(),
-                            self.entity_arg_value.as_ref(),
-                            self.object,
-                            self.field,
-                        ),
+                        coordinate = self.coordinate.connect.element,
                         input_type = child_input_type.name,
                         entity_type = entity_object_type.name,
                     ),
@@ -346,5 +331,29 @@ impl<'schema> ArgumentVisitor<'schema> {
                 }))
             }
         }).collect()
+    }
+}
+
+/// Contains info about a `@connect(entity:)` argument location so it can be displayed in error
+/// messages.
+#[derive(Clone, Copy)]
+struct Coordinate<'schema> {
+    connect: ConnectDirectiveCoordinate<'schema>,
+    value: bool,
+}
+
+impl Display for Coordinate<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Self {
+            connect: ConnectDirectiveCoordinate { directive, element },
+            value,
+        } = self;
+        write!(
+            f,
+            "`@{connect_directive_name}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{element}`",
+            connect_directive_name = directive.name,
+            value = value,
+            element = element,
+        )
     }
 }
