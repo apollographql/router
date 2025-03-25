@@ -93,7 +93,7 @@ To enable debugging when request pipelines are being kept around a new gauge met
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
 
-### Update JWKS handling ([PR #6930](https://github.com/apollographql/router/pull/6930))
+### Update JWT handling ([PR #6930](https://github.com/apollographql/router/pull/6930))
 
 This PR updates JWT-handling in the `AuthenticationPlugin`;
 
