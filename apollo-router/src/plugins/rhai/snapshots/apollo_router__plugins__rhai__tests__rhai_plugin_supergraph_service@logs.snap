@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/plugins/rhai/tests.rs
+expression: yaml
+---
+[]
