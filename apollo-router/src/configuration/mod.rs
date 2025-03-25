@@ -598,7 +598,10 @@ impl JsonSchema for ApolloPlugins {
 
         let plugins = crate::plugin::plugins()
             .sorted_by_key(|factory| factory.name.clone())
-            .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .filter(|factory| {
+                factory.name.starts_with(APOLLO_PLUGIN_PREFIX)
+                    && !factory.hidden_from_config_json_schema
+            })
             .map(|factory| {
                 (
                     factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
@@ -646,6 +649,11 @@ pub(crate) struct Supergraph {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
     pub(crate) listen: ListenAddr,
+
+    /// The timeout for shutting down connections during a router shutdown or a schema reload.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String", default = "default_connection_shutdown_timeout")]
+    pub(crate) connection_shutdown_timeout: Duration,
 
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
@@ -696,6 +704,7 @@ impl Supergraph {
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -706,6 +715,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -724,6 +735,7 @@ impl Supergraph {
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -734,6 +746,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -1387,6 +1401,10 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+fn default_connection_shutdown_timeout() -> Duration {
+    Duration::from_secs(60)
 }
 
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]

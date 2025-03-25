@@ -6,10 +6,16 @@ extend schema
   @source(name: "v2", http: { baseURL: "http://127.0.0.1" })
 
 type Query {
-  resources: [String!]!
+  emptySelection: [String!]!
+    @connect(
+      source: "v2"
+      http: { POST: "/resources" }
+      selection: "# comment"
+    )
+  emptyBody: [String!]!
     @connect(
       source: "v2"
       http: { POST: "/resources", body: "  " }
-      selection: "# comment"
+      selection: "$"
     )
 }

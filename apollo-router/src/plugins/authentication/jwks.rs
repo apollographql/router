@@ -617,40 +617,44 @@ pub(super) fn decode_jwt(
 }
 
 pub(crate) fn jwt_expires_in(context: &Context) -> Duration {
-    let claims = context
+    context
         .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-        .map_err(|err| tracing::error!("could not read JWT claims: {err}"))
-        .ok()
-        .flatten();
-    let ts_opt = claims
-        .as_ref()
-        .and_then(|x: &serde_json::Value| match x.as_object() {
-            Some(claims) => claims.get("exp")?.as_i64(),
-            None => {
-                tracing::error!("expected JWT claims to be an object");
-                None
+        .unwrap_or_else(|err| {
+            tracing::error!("could not read JWT claims: {err}");
+            None
+        })
+        .flatten()
+        .and_then(|claims_value: Option<serde_json::Value>| {
+            let claims_obj = claims_value.as_ref()?.as_object();
+            // Extract the expiry claim from the JWT
+            let exp = match claims_obj {
+                Some(exp) => exp.get("exp"),
+                None => {
+                    tracing::error!("expected JWT claims to be an object");
+                    None
+                }
+            };
+            // Ensure the expiry claim is an integer
+            match exp.and_then(|it| it.as_i64()) {
+                Some(ts) => Some(ts),
+                None => {
+                    tracing::error!("expected JWT 'exp' (expiry) claim to be an integer");
+                    None
+                }
             }
-        });
-
-    match ts_opt {
-        Some(ts) => {
+        })
+        .map(|exp| {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .expect("we should not run before EPOCH")
+                .expect("no time travel allowed")
                 .as_secs() as i64;
-            if now < ts {
-                Duration::from_secs((ts - now) as u64)
+            if now < exp {
+                Duration::from_secs((exp - now) as u64)
             } else {
                 Duration::ZERO
             }
-        }
-        None => {
-            tracing::error!(
-                "expected JWT 'exp' (expiry) claim to be an integer, defaulting to maximum duration"
-            );
-            Duration::MAX
-        }
-    }
+        })
+        .unwrap_or(Duration::MAX)
 }
 
 // Apparently the `jsonwebtoken` crate now has 2 different enums for algorithms
@@ -687,5 +691,86 @@ fn convert_algorithm(algorithm: Algorithm) -> KeyAlgorithm {
         Algorithm::PS384 => KeyAlgorithm::PS384,
         Algorithm::PS512 => KeyAlgorithm::PS512,
         Algorithm::EdDSA => KeyAlgorithm::EdDSA,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::Duration;
+    use std::time::UNIX_EPOCH;
+
+    use serde_json_bytes::json;
+
+    use super::APOLLO_AUTHENTICATION_JWT_CLAIMS;
+    use super::Context;
+    use super::jwt_expires_in;
+
+    #[test]
+    fn test_exp_defaults_to_max_when_no_jwt_claims_present() {
+        let context = Context::new();
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::MAX);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_jwt_claims_not_object() {
+        let context = Context::new();
+        context.insert_json_value(APOLLO_AUTHENTICATION_JWT_CLAIMS, json!("not an object"));
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::MAX);
+
+        assert!(logs_contain("expected JWT claims to be an object"));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_expiry_claim_not_integer() {
+        let context = Context::new();
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({
+                "exp": "\"not an integer\""
+            }),
+        );
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::MAX);
+
+        assert!(logs_contain(
+            "expected JWT 'exp' (expiry) claim to be an integer"
+        ));
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_expiry_claim_is_valid_but_expired() {
+        let context = Context::new();
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({
+                "exp": 0
+            }),
+        );
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::ZERO);
+    }
+
+    #[test]
+    #[tracing_test::traced_test]
+    fn test_expiry_claim_is_valid() {
+        let context = Context::new();
+        let exp = UNIX_EPOCH.elapsed().unwrap().as_secs() + 3600;
+        context.insert_json_value(
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
+            json!({
+                "exp": exp
+            }),
+        );
+
+        let expiry = jwt_expires_in(&context);
+        assert_eq!(expiry, Duration::from_secs(3600));
     }
 }
