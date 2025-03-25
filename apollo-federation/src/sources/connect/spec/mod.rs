@@ -158,7 +158,7 @@ impl ConnectSpec {
     }
 
     pub(crate) const fn available() -> &'static [ConnectSpec] {
-        if cfg!(any(feature = "connect_v02", test)) {
+        if cfg!(any(feature = "connect_v0.2", test)) {
             &[ConnectSpec::V0_1, ConnectSpec::V0_2]
         } else {
             &[ConnectSpec::V0_1]
@@ -171,7 +171,7 @@ impl TryFrom<&Version> for ConnectSpec {
     fn try_from(version: &Version) -> Result<Self, Self::Error> {
         match (version.major, version.minor) {
             (0, 1) => Ok(Self::V0_1),
-            #[cfg(any(feature = "connect_v02", test))]
+            #[cfg(any(feature = "connect_v0.2", test))]
             (0, 2) => Ok(Self::V0_2),
             _ => Err(SingleFederationError::UnknownLinkVersion {
                 message: format!("Unknown connect version: {version}"),
