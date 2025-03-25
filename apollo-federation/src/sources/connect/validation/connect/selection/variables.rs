@@ -34,6 +34,7 @@ impl<'a> VariableResolver<'a> {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
+                ..
             } => {
                 resolvers.insert(
                     Namespace::This,

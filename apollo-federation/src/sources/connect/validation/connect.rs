@@ -19,6 +19,7 @@ use super::coordinates::source_name_value_coordinate;
 use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::validation::connect::http::Http;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -57,13 +58,6 @@ pub(super) fn fields_seen_by_all_connects(
     } else {
         Err(messages)
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ObjectCategory {
-    Query,
-    Mutation,
-    Other,
 }
 
 /// Make sure that any `@connect` directives on types are valid
@@ -209,7 +203,7 @@ fn fields_seen_by_connector(
     let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
 
     // direct recursion isn't allowed, like a connector on User.friends: [User]
-    if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
+    if &object.name == field.ty.inner_named_type() {
         errors.push(Message {
             code: Code::CircularReference,
             message: format!(
@@ -227,6 +221,7 @@ fn fields_seen_by_connector(
             directive: connect_directive,
             element: ConnectedElement::Field {
                 parent_type: object,
+                parent_category: category,
                 field_def: field,
             },
         };
