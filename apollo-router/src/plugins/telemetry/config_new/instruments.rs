@@ -963,8 +963,9 @@ impl InstrumentsConfig {
                                 "config.hash",
                                 connection.pipeline_ref.config_hash.clone(),
                             ));
+                            // Technically we need to support `idle` state, but that will have to be a follow-up,
                             attributes.push(KeyValue::new(
-                                "state",
+                                "http.connection.state",
                                 match connection.state {
                                     ConnectionState::Active => "active",
                                     ConnectionState::Terminating => "terminating",

@@ -131,7 +131,7 @@ The initial call to Uplink during router startup is not reflected in metrics.
   - `config.hash` - The hash of the configuration.
   - `server.address` - The address that the router is listening on.
   - `server.port` - The port that the router is listening on if not a unix socket.
-  - `state` - Either `active` or `terminating`.
+  - `http.connection.state` - Either `active` or `terminating`.
 
 ### Deprecated
 
@@ -148,4 +148,3 @@ The following metrics have been deprecated and should not be used.
 - `apollo_router_http_request_duration_seconds_bucket` - **Deprecated**: HTTP router request duration. It is replaced by `http.server.request.duration` metric configured in [instruments](./instruments).
 - `apollo_router_http_request_duration_seconds_bucket` - **Deprecated**: HTTP subgraph request duration (replaced by `http.client.request.duration` metric configured in [instruments](./instruments)), attributes:
   - `subgraph`: (Optional) The subgraph being queried
-
