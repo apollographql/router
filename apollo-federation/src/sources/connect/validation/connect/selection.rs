@@ -118,6 +118,7 @@ impl<'schema> Selection<'schema> {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
+                ..
             } => {
                 let Some(return_type) = schema.get_object(field_def.ty.inner_named_type()) else {
                     // TODO: Validate scalar return types
