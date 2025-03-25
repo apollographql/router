@@ -55,6 +55,21 @@ impl PartialOrd for ConnectSpec {
 }
 
 impl ConnectSpec {
+    /// Returns the most recently released [`ConnectSpec`].
+    pub(crate) fn latest() -> Self {
+        Self::V0_2
+    }
+
+    /// Returns the next version of the [`ConnectSpec`] to be released.
+    #[allow(dead_code)]
+    pub(crate) fn next() -> Self {
+        match Self::latest() {
+            Self::V0_1 => Self::V0_2,
+            Self::V0_2 => Self::V0_3,
+            Self::V0_3 => Self::V0_3,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::V0_1 => "0.1",

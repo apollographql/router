@@ -61,7 +61,7 @@ impl LitExpr {
     pub(crate) fn parse(input: Span) -> ParseResult<WithRange<Self>> {
         let (input, _) = spaces_or_comments(input)?;
 
-        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input) {
+        match alt((Self::parse_primitive, Self::parse_object, Self::parse_array))(input.clone()) {
             Ok((suffix, initial_literal)) => {
                 // If we parsed an initial literal expression, it may be the
                 // entire result, but we also want to greedily parse one or more
@@ -77,7 +77,7 @@ impl LitExpr {
                 // We begin parsing the path at depth 1 rather than 0 because
                 // we've already parsed the initial literal at depth 0, so the
                 // subpath should obey the parsing rules for for depth > 0.
-                match PathList::parse_with_depth(suffix, 1) {
+                match PathList::parse_with_depth(suffix.clone(), 1) {
                     Ok((remainder, subpath)) => {
                         if matches!(subpath.as_ref(), PathList::Empty) {
                             return Ok((remainder, initial_literal));
@@ -89,13 +89,13 @@ impl LitExpr {
                         ))
                     }
                     // If we failed to parse a path, return initial_literal as-is.
-                    Err(_) => Ok((suffix, initial_literal)),
+                    Err(_) => Ok((suffix.clone(), initial_literal)),
                 }
             }
 
             // If we failed to parse a primitive, object, or array, try parsing
             // a PathSelection (which cannot be a LitPath).
-            Err(_) => PathSelection::parse(input).map(|(remainder, path)| {
+            Err(_) => PathSelection::parse(input.clone()).map(|(remainder, path)| {
                 let range = path.range();
                 (remainder, WithRange::new(Self::Path(path), range))
             }),
@@ -196,7 +196,7 @@ impl LitExpr {
                     },
                 ),
             )),
-        ))(input)?;
+        ))(input.clone())?;
 
         let mut number = String::new();
         if neg.is_some() {
@@ -234,13 +234,13 @@ impl LitExpr {
 
         let mut output = IndexMap::default();
 
-        if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+        if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
             output.insert(key, value);
             input = remainder;
 
-            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input) {
+            while let Ok((remainder, _)) = tuple((spaces_or_comments, char(',')))(input.clone()) {
                 input = remainder;
-                if let Ok((remainder, (key, value))) = Self::parse_property(input) {
+                if let Ok((remainder, (key, value))) = Self::parse_property(input.clone()) {
                     output.insert(key, value);
                     input = remainder;
                 } else {
@@ -249,7 +249,7 @@ impl LitExpr {
             }
         }
 
-        let (input, _) = spaces_or_comments(input)?;
+        let (input, _) = spaces_or_comments(input.clone())?;
         let (input, close_brace) = ranged_span("}")(input)?;
 
         let range = merge_ranges(open_brace.range(), close_brace.range());
