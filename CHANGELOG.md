@@ -12,7 +12,7 @@ Traffic shaping is now supported for connectors. To target a specific source, us
 
 Example config:
 
-```
+```yaml
 traffic_shaping:
   connector:
     all:
@@ -32,15 +32,15 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 Connectors now supports TLS configuration for using custom certificate authorities and utilizing client certificate authentication.
 
-```
+```yaml
 tls:
   connector:
     sources:
       connector-graph.random_person_api:
-        certificate_authorities:
+        certificate_authorities: ${file.ca.crt}
         client_authentication:
-          certificate_chain:
-          key:
+          certificate_chain: ${file.client.crt}
+          key: ${file.client.key}
 ```
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6995
@@ -55,6 +55,49 @@ This PR updates JWT-handling in the `AuthenticationPlugin`;
 - When JWTs are processed, whether processing succeeds or fails, the request context will contain a new variable `apollo::authentication::jwt_status` which notes the result of processing.
 
 By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/6930
+
+### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+
+Add an optional `maximum_size` parameter to the batching configuration.
+
+* When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
+* When unspecified, the router performs no size checking (the current behavior).
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (`Unprocessable Content`). For example:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
+
+### Introduce PQ manifest `hot_reload` option for local manifests ([PR #6987](https://github.com/apollographql/router/pull/6987))
+
+This change introduces a [`persisted_queries.hot_reload` configuration option](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#hot_reload) to allow the router to hot reload local PQ manifest changes.
+
+If you configure `local_manifests`, you can set `hot_reload` to `true` to automatically reload manifest files whenever they change. This lets you update local manifest files without restarting the router.
+
+```yaml
+persisted_queries:
+  enabled: true
+  local_manifests:
+    - ./path/to/persisted-query-manifest.json
+  hot_reload: true
+```
+
+Note: This change explicitly does _not_ piggyback on the existing `--hot-reload` flag.
+
+By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/6987
 
 ### Add support to get/set URI scheme in Rhai ([Issue #6897](https://github.com/apollographql/router/issues/6897))
 
@@ -72,7 +115,7 @@ fn subgraph_service(service, subgraph){
         request.subgraph.uri.host = "api.apollographql.com";
         request.subgraph.uri.path = "/api/graphql";
         request.subgraph.uri.port = 1234;
-        log_info(``);
+        log_info(`${request.subgraph.uri}`);
     });
 }
 ```
@@ -107,16 +150,6 @@ When the router encounters a value completion error, it is not included in the G
 
 By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6905
 
-### Changes to experimental error metrics ([PR #6966](https://github.com/apollographql/router/pull/6966))
-
-In 2.0.0, an experimental metric `telemetry.apollo.errors.experimental_otlp_error_metrics` was introduced to track errors with additional attributes. A few related changes are included here:
-
-- Sending these metrics now also respects the subgraph's `send` flag e.g. `telemetry.apollo.errors.subgraph.[all|(subgraph name)].send`.
-- A new configuration option `telemetry.apollo.errors.subgraph.[all|(subgraph name)].redaction_policy` has been added. This flag only applies when `redact` is set to `true`. When set to `ErrorRedactionPolicy.Strict`, error redaction will behave as it has in the past. Setting this to `ErrorRedactionPolicy.Extended` will allow the `extensions.code` value from subgraph errors to pass through redaction and be sent to Studio.
-- A warning about incompatibility of error telemetry with connectors will be suppressed when this feature is enabled, since it _does_ support connectors when using the new mode.
-
-By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6966
-
 ### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
 
 When the router reloads, either via schema change or config change, a new request pipeline is created.
@@ -146,37 +179,22 @@ You can use this metric to monitor when connections are open via long running re
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7023
 
-### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
-
-Add an optional `maximum_size` parameter to the batching configuration.
-
-* When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
-* When unspecified, the router performs no size checking (the current behavior).
-
-If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (
-`Unprocessable Content`). For example:
-
-```json
-{
-  "errors": [
-    {
-      "message": "Invalid GraphQL request",
-      "extensions": {
-        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
-        "code": "BATCH_LIMIT_EXCEEDED"
-      }
-    }
-  ]
-}
-```
-
-By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
-
 ### Add span events to error spans for connectors and demand control plugin ([PR #6727](https://github.com/apollographql/router/pull/6727))
 
 New span events have been added to trace spans which include errors. These span events include the GraphQL error code that relates to the error. So far, this only includes errors generated by connectors and the demand control plugin.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/6727
+
+### Changes to experimental error metrics ([PR #6966](https://github.com/apollographql/router/pull/6966))
+
+In 2.0.0, an experimental metric `telemetry.apollo.errors.experimental_otlp_error_metrics` was introduced to track errors with additional attributes. A few related changes are included here:
+
+- Sending these metrics now also respects the subgraph's `send` flag e.g. `telemetry.apollo.errors.subgraph.[all|(subgraph name)].send`.
+- A new configuration option `telemetry.apollo.errors.subgraph.[all|(subgraph name)].redaction_policy` has been added. This flag only applies when `redact` is set to `true`. When set to `ErrorRedactionPolicy.Strict`, error redaction will behave as it has in the past. Setting this to `ErrorRedactionPolicy.Extended` will allow the `extensions.code` value from subgraph errors to pass through redaction and be sent to Studio.
+- A warning about incompatibility of error telemetry with connectors will be suppressed when this feature is enabled, since it _does_ support connectors when using the new mode.
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6966
+
 
 ## 🐛 Fixes
 
