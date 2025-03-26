@@ -8,6 +8,7 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
+use multi_try::MultiTry;
 
 use self::entity::validate_entity_arg;
 use self::selection::Selection;
@@ -69,6 +70,17 @@ struct Connect<'schema> {
 }
 
 impl<'schema> Connect<'schema> {
+    /// Parse the `@connect` directive and run just enough checks to be able to use it at runtime.
+    /// More advanced checks are done in [`Self::type_check`].
+    ///
+    /// Three sub-pieces are parsed:
+    /// 1. `@connect(http:)` with [`Http::parse`]
+    /// 2. `@connect(source:)` with [`validate_source_name`]
+    /// 3. `@connect(selection:)` with [`Selection::parse`]
+    ///
+    /// `selection` and `source` are _always_ checked and their errors are returned.
+    /// The order these two run in doesn't matter.
+    /// `http` can't be validated without knowing whether a `source` was set, so it's only checked if `source` is valid.
     fn parse(
         directive: &'schema Node<Directive>,
         element: ConnectedElement<'schema>,
@@ -77,12 +89,14 @@ impl<'schema> Connect<'schema> {
     ) -> Result<Self, Vec<Message>> {
         let coordinate = ConnectDirectiveCoordinate { directive, element };
 
-        // TODO: don't return early, collect all errors
-        let selection = Selection::parse(coordinate, schema).map_err(|err| vec![err])?;
-
-        let source_name = validate_source_name(directive, &coordinate, source_names, schema)
-            .map_err(|err| vec![err])?;
-        let http = Http::parse(coordinate, source_name, schema)?;
+        let (selection, http) = Selection::parse(coordinate, schema)
+            .map_err(|err| vec![err])
+            .and_try(
+                validate_source_name(directive, &coordinate, source_names, schema)
+                    .map_err(|err| vec![err])
+                    .and_then(|source_name| Http::parse(coordinate, source_name, schema)),
+            )
+            .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
         Ok(Self {
             selection,
