@@ -222,7 +222,7 @@ This fixes an issue where the `fleet_detector` plugin would not correctly infer 
 
 By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/6787
 
-### Do not include other fields from representation variable than the entity keys for entity cache([Issue #6673](https://github.com/apollographql/router/issues/6673))
+### Separate entity keys and representation variables in entity cache key ([Issue #6673](https://github.com/apollographql/router/issues/6673))
 
 This fix separates the entity keys and representation variable values in the cache key, to avoid issues with `@requires` for example.
 
