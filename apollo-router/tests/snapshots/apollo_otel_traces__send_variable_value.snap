@@ -213,6 +213,78 @@ resourceSpans:
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 1
+            name: cache_lookup
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: process_and_plan
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: worker_pool
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
+            name: plan
+            kind: 1
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
+            attributes: []
+            droppedAttributesCount: 0
+            events: []
+            droppedEventsCount: 0
+            links: []
+            droppedLinksCount: 0
+            status:
+              message: ""
+              code: 0
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
+            traceState: ""
+            parentSpanId: "[span_id]"
+            flags: 1
             name: execution
             kind: 1
             startTimeUnixNano: "[start_time]"

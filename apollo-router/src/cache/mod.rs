@@ -6,12 +6,14 @@ use tokio::sync::Mutex;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tower::BoxError;
+use tracing_futures::Instrument;
 
 use self::storage::CacheStorage;
 use self::storage::InMemoryCache;
 use self::storage::KeyType;
 use self::storage::ValueType;
 use crate::configuration::RedisCache;
+use crate::plugins::telemetry::consts::WAITING_TO_RECEIVE_CACHE_SPAN_NAME;
 
 pub(crate) mod redis;
 mod size_estimation;
@@ -193,7 +195,20 @@ where
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
-            EntryInner::Receiver { mut receiver } => match receiver.recv().await {
+            EntryInner::Receiver { mut receiver } => match receiver
+                .recv()
+                // This was not the first cache item to get this value, nor do we
+                // have this value in cache. Therefore, before we get access to
+                // this value from cache, we have to wait for another connection
+                // to write it to cache.
+                //
+                // This span indicates that we are waiting to have an item from cache.
+                .instrument(tracing::info_span!(
+                    WAITING_TO_RECEIVE_CACHE_SPAN_NAME,
+                    "otel.kind" = "INTERNAL",
+                ))
+                .await
+            {
                 Ok(Ok(value)) => Ok(value),
                 Ok(Err(e)) => Err(EntryError::UncachedError(e)),
                 Err(broadcast::error::RecvError::Closed)

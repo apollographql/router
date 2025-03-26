@@ -31,6 +31,7 @@ use crate::error::QueryPlannerError;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::telemetry::consts::CACHE_LOOKUP_SPAN_NAME;
 use crate::plugins::telemetry::utils::Timer;
 use crate::query_planner::QueryPlannerService;
 use crate::query_planner::fetch::SubgraphSchemas;
@@ -499,6 +500,11 @@ where
             .get(&caching_key, |v| {
                 init_query_plan_from_redis(&self.subgraph_schemas, v)
             })
+            // Query planning cache lookup span.
+            .instrument(tracing::info_span!(
+                CACHE_LOOKUP_SPAN_NAME,
+                "otel.kind" = "INTERNAL"
+            ))
             .await;
         if entry.is_first() {
             let query_planner::CachingRequest {

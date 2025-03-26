@@ -590,6 +590,10 @@ async fn test_default_span_names() -> Result<(), BoxError> {
         .span_names(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "client_request",
                 "subgraph_request",
                 "subgraph",
@@ -632,6 +636,10 @@ async fn test_override_span_names() -> Result<(), BoxError> {
         .span_names(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "client_request",
                 "subgraph_request",
                 "subgraph",
@@ -673,6 +681,10 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
         .span_names(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "client_request",
                 "subgraph_request",
                 "subgraph",
@@ -749,6 +761,10 @@ async fn test_basic() -> Result<(), BoxError> {
         .span_names(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "client_request",
                 "ExampleQuery__products__0",
                 "products",
@@ -764,6 +780,10 @@ async fn test_basic() -> Result<(), BoxError> {
         .measured_spans(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "subgraph",
                 "http_request",
                 "subgraph_request",
@@ -801,6 +821,10 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
         .span_names(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "client_request",
                 "ExampleQuery__products__0",
                 "products",
@@ -816,6 +840,10 @@ async fn test_with_parent_span() -> Result<(), BoxError> {
         .measured_spans(
             [
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "subgraph",
                 "http_request",
                 "subgraph_request",
@@ -869,6 +897,10 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
                 "client_request",
                 "execution",
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "products",
                 "fetch",
                 "subgraph server",
@@ -908,6 +940,10 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
                 "client_request",
                 "execution",
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "products",
                 "fetch",
                 "subgraph server",
@@ -947,6 +983,10 @@ async fn test_span_metrics() -> Result<(), BoxError> {
                 "client_request",
                 "execution",
                 "query_planning",
+                "cache_lookup",
+                "process_and_plan",
+                "worker_pool",
+                "plan",
                 "products",
                 "fetch",
                 "subgraph server",

@@ -19,6 +19,7 @@ use opentelemetry::metrics::ObservableGauge;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::Service;
+use tracing_futures::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
@@ -40,6 +41,9 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::consts::QUERY_PLANNER_SERVICE_INVOKE_PLANNER_SPAN_NAME;
+use crate::plugins::telemetry::consts::QUERY_PLANNER_SERVICE_PLAN_SPAN_NAME;
+use crate::plugins::telemetry::consts::QUERY_PLANNER_SERVICE_WORKER_POOL_SPAN_NAME;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::fetch::SubgraphSchema;
 use crate::query_planner::fetch::SubgraphSchemas;
@@ -132,7 +136,25 @@ impl QueryPlannerService {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
+        let worker_pool_span = tracing::info_span!(
+            QUERY_PLANNER_SERVICE_WORKER_POOL_SPAN_NAME,
+            "otel.kind" = "INTERNAL"
+        );
+        // This span will indicate pure planning time.
+        // The difference between this one and its parent (worker_pool) is the time
+        // spent waiting in the queue.
+        //
+        // The span has to be entered only once the job begins to execute, in a
+        // closure below, but created here, as we need a reference to the parent
+        // span in order to keep the order across multiple threads.
+        let internal_planning_span = tracing::info_span!(
+            parent: &worker_pool_span,
+            QUERY_PLANNER_SERVICE_PLAN_SPAN_NAME,
+            "otel.kind" = "INTERNAL"
+        );
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
+            // Enter the span created above for pure planning time.
+            let guard = internal_planning_span.entered();
             let start = Instant::now();
 
             let check = move || status.check_for_cooperative_cancellation();
@@ -165,10 +187,17 @@ impl QueryPlannerService {
 
             let plan = result?;
             let root_node = convert_root_query_plan_node(&plan);
+
+            // Drop the span guard and close the span.
+            let _dropped_span = guard.exit();
+
             Ok((plan, root_node))
         };
         let (plan, mut root_node) = compute_job::execute(priority, job)
             .map_err(MaybeBackPressureError::TemporaryError)?
+            // This span indicates the total time spent waiting in the compute
+            // job queue and planning the operation.
+            .instrument(worker_pool_span)
             .await?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
@@ -426,7 +455,14 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                     .build()),
                 Err(e) => Err(e),
             }
-        };
+        }
+        // Start of the query planning pre-processing.  This span includes
+        // planning time, time waiting in the compute_job queue, time spent
+        // processing defer labels and operation signatures.
+        .instrument(tracing::info_span!(
+            QUERY_PLANNER_SERVICE_INVOKE_PLANNER_SPAN_NAME,
+            "otel.kind" = "INTERNAL"
+        ));
 
         // Return the response as an immediate future
         Box::pin(fut)

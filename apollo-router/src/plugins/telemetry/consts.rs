@@ -22,6 +22,11 @@ pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request";
 pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query";
 pub(crate) const CONNECT_SPAN_NAME: &str = "connect";
 pub(crate) const CONNECT_REQUEST_SPAN_NAME: &str = "connect_request";
+pub(crate) const CACHE_LOOKUP_SPAN_NAME: &str = "cache_lookup";
+pub(crate) const QUERY_PLANNER_SERVICE_PLAN_SPAN_NAME: &str = "plan";
+pub(crate) const QUERY_PLANNER_SERVICE_WORKER_POOL_SPAN_NAME: &str = "worker_pool";
+pub(crate) const QUERY_PLANNER_SERVICE_INVOKE_PLANNER_SPAN_NAME: &str = "process_and_plan";
+pub(crate) const WAITING_TO_RECEIVE_CACHE_SPAN_NAME: &str = "waiting_for_cache";
 
 pub(crate) const BUILT_IN_SPAN_NAMES: [&str; 11] = [
     REQUEST_SPAN_NAME,
