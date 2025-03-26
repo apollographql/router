@@ -65,13 +65,16 @@ pub(crate) enum SpecError {
 }
 
 pub(crate) const GRAPHQL_PARSE_FAILURE_ERROR_KEY: &str = "# # GraphQLParseFailure\n";
-pub(crate) const GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY: &str = "# # GraphQLUnknownOperationName\n";
+pub(crate) const GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY: &str =
+    "# # GraphQLUnknownOperationName\n";
 pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "# # GraphQLValidationFailure\n";
 
 impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
         match self {
-            SpecError::TransformError(_) | SpecError::ParseError(_) => GRAPHQL_PARSE_FAILURE_ERROR_KEY,
+            SpecError::TransformError(_) | SpecError::ParseError(_) => {
+                GRAPHQL_PARSE_FAILURE_ERROR_KEY
+            }
             SpecError::UnknownOperation(_) => GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY,
             _ => GRAPHQL_VALIDATION_FAILURE_ERROR_KEY,
         }
