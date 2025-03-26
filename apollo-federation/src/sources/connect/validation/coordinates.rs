@@ -9,8 +9,8 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::ObjectType;
 
 use super::DirectiveName;
+use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::id::ConnectedElement;
-use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -39,12 +39,12 @@ impl Display for ConnectDirectiveCoordinate<'_> {
 
 #[derive(Clone, Copy)]
 pub(super) struct SelectionCoordinate<'a> {
-    pub(crate) connect_directive_coordinate: ConnectDirectiveCoordinate<'a>,
+    pub(crate) connect: ConnectDirectiveCoordinate<'a>,
 }
 
 impl Display for SelectionCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let ConnectDirectiveCoordinate { directive, element } = self.connect_directive_coordinate;
+        let ConnectDirectiveCoordinate { directive, element } = self.connect;
         write!(
             f,
             "`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{element}`",
@@ -56,7 +56,7 @@ impl Display for SelectionCoordinate<'_> {
 impl<'a> From<ConnectDirectiveCoordinate<'a>> for SelectionCoordinate<'a> {
     fn from(connect_directive_coordinate: ConnectDirectiveCoordinate<'a>) -> Self {
         Self {
-            connect_directive_coordinate,
+            connect: connect_directive_coordinate,
         }
     }
 }
@@ -89,7 +89,7 @@ impl<'a> From<ConnectDirectiveCoordinate<'a>> for ConnectHTTPCoordinate<'a> {
 #[derive(Clone, Copy)]
 pub(super) struct HttpMethodCoordinate<'a> {
     pub(crate) connect: ConnectDirectiveCoordinate<'a>,
-    pub(crate) http_method: &'a Name,
+    pub(crate) method: HTTPMethod,
     pub(crate) node: &'a Node<Value>,
 }
 
@@ -97,12 +97,12 @@ impl Display for HttpMethodCoordinate<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let Self {
             connect: ConnectDirectiveCoordinate { directive, element },
-            http_method,
+            method,
             node: _node,
         } = self;
         write!(
             f,
-            "`{http_method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{element}`",
+            "`{method}` in `@{connect_directive_name}({HTTP_ARGUMENT_NAME}:)` on `{element}`",
             connect_directive_name = directive.name,
         )
     }
@@ -126,16 +126,6 @@ impl Display for BaseUrlCoordinate<'_> {
     }
 }
 
-pub(super) fn connect_directive_http_body_coordinate(
-    connect: &ConnectDirectiveCoordinate,
-) -> String {
-    format!(
-        "`@{connect_directive_name}({HTTP_ARGUMENT_NAME}: {{{CONNECT_BODY_ARGUMENT_NAME}:}})` on `{element}`",
-        connect_directive_name = connect.directive.name,
-        element = connect.element
-    )
-}
-
 pub(super) fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
     format!("`@{source_directive_name}({HTTP_ARGUMENT_NAME}:)`")
 }
@@ -154,11 +144,11 @@ pub(super) fn source_name_value_coordinate(
 pub(super) fn connect_directive_name_coordinate(
     connect_directive_name: &Name,
     source: &Node<Value>,
-    object_name: &Name,
-    field_name: &Name,
+    coordinate: &ConnectDirectiveCoordinate,
 ) -> String {
     format!(
-        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field_name}`"
+        "`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{element}`",
+        element = coordinate.element
     )
 }
 

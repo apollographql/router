@@ -58,8 +58,7 @@ snapshot = ["axum-server", "serde_regex"]
 [dependencies]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=2.0.0" }
-async-channel = "1.9.0"
+apollo-federation = { path = "../apollo-federation", version = "=2.0.0", features = ["connect_v0.2"] }
 async-compression = { version = "0.4.6", features = [
     "tokio",
     "brotli",
@@ -68,8 +67,8 @@ async-compression = { version = "0.4.6", features = [
 ] }
 async-trait.workspace = true
 axum = { version = "0.8.1", features = ["http2"] }
-axum-extra = { version = "0.10.0", features = [ "typed-header" ] }
-axum-server = {  version = "0.7.1", optional = true }
+axum-extra = { version = "0.10.0", features = ["typed-header"] }
+axum-server = { version = "0.7.1", optional = true }
 base64 = "0.22.0"
 bloomfilter = "1.0.13"
 buildstructor = "0.6.0"
@@ -100,7 +99,7 @@ hex.workspace = true
 http.workspace = true
 http-0_2 = { version = "0.2.12", package = "http" }
 http-body = "1.0.1"
-http-body-util = {version = "0.1.2" }
+http-body-util = { version = "0.1.2" }
 heck = "0.5.0"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"

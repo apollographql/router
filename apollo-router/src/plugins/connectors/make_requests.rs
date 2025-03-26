@@ -34,7 +34,7 @@ const TYPENAME: &str = "__typename";
 pub(crate) struct RequestInputs {
     args: Map<ByteString, Value>,
     this: Map<ByteString, Value>,
-    batch: Vec<Map<ByteString, Value>>,
+    pub(crate) batch: Vec<Map<ByteString, Value>>,
 }
 
 impl RequestInputs {
@@ -143,7 +143,6 @@ pub(crate) enum ResponseKey {
     },
     BatchEntity {
         selection: Arc<JSONSelection>,
-        #[allow(unused)]
         keys: Valid<FieldSet>,
         inputs: RequestInputs,
     },
@@ -260,16 +259,13 @@ pub(crate) fn make_requests(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<Vec<Request>, MakeRequestError> {
     let request_params = match connector.entity_resolver {
-        Some(EntityResolver::Explicit) => entities_from_request(connector.clone(), &request),
+        Some(EntityResolver::Explicit) | Some(EntityResolver::TypeSingle) => {
+            entities_from_request(connector.clone(), &request)
+        }
         Some(EntityResolver::Implicit) => {
             entities_with_fields_from_request(connector.clone(), &request)
         }
         Some(EntityResolver::TypeBatch) => batch_entities_from_request(connector.clone(), &request),
-        Some(EntityResolver::TypeSingle) => {
-            return Err(MakeRequestError::UnsupportedOperation(
-                "single entity resolvers on types are not supported".into(),
-            ));
-        }
         None => root_fields(connector.clone(), &request),
     }?;
 
@@ -466,14 +462,30 @@ fn entities_from_request(
         .iter()
         .enumerate()
         .map(|(i, rep)| {
-            let request_inputs = RequestInputs {
-                args: rep
-                    .as_object()
-                    .ok_or_else(|| {
-                        InvalidRepresentations("representation is not an object".into())
-                    })?
-                    .clone(),
-                ..Default::default()
+            let request_inputs = match connector.entity_resolver {
+                Some(EntityResolver::Explicit) => RequestInputs {
+                    args: rep
+                        .as_object()
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
+                        .clone(),
+                    ..Default::default()
+                },
+                Some(EntityResolver::TypeSingle) => RequestInputs {
+                    this: rep
+                        .as_object()
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
+                        .clone(),
+                    ..Default::default()
+                },
+                _ => {
+                    return Err(InvalidRepresentations(
+                        "entity resolver not supported for this connector".into(),
+                    ));
+                }
             };
 
             Ok(ResponseKey::Entity {
@@ -1823,7 +1835,7 @@ mod tests {
         let keys = FieldSet::parse_and_validate(&subgraph_schema, name!(Entity), "id", "").unwrap();
 
         let req = crate::services::connect::Request::builder()
-            .service_name("subgraph_Query_entity_0".into())
+            .service_name("subgraph_Entity_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -1867,11 +1879,10 @@ mod tests {
 
         let connector = Connector {
             spec: ConnectSpec::V0_1,
-            id: ConnectId::new(
+            id: ConnectId::new_on_object(
                 "subgraph_name".into(),
                 None,
-                name!(Query),
-                name!(entity),
+                name!(Entity),
                 0,
                 "test label",
             ),
@@ -1899,6 +1910,128 @@ mod tests {
                     args: {},
                     this: {},
                     batch: [{"__typename":"Entity","id":"1"},{"__typename":"Entity","id":"2"}]
+                },
+            },
+        ]
+        "#);
+    }
+
+    #[test]
+    fn entities_from_request_on_type() {
+        let partial_sdl = r#"
+        type Query {
+          entity(id: ID!): Entity
+        }
+
+        type Entity {
+          id: ID!
+          field: String
+        }
+        "#;
+
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
+
+        let keys = FieldSet::parse_and_validate(&subgraph_schema, name!(Entity), "id", "").unwrap();
+
+        let req = crate::services::connect::Request::builder()
+            .service_name("subgraph_Entity_0".into())
+            .context(Context::default())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field
+                            alias: field
+                        }
+                    }
+                }
+                "#
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
+            .and_keys(Some(keys))
+            .build();
+
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(Entity),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path?id={$this.id}".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("id field").unwrap(),
+            entity_resolver: Some(super::EntityResolver::TypeSingle),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        };
+
+        assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
+        [
+            Entity {
+                index: 0,
+                selection: "field\nalias: field",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {"__typename":"Entity","id":"1"},
+                    batch: []
+                },
+            },
+            Entity {
+                index: 1,
+                selection: "field\nalias: field",
+                inputs: RequestInputs {
+                    args: {},
+                    this: {"__typename":"Entity","id":"2"},
+                    batch: []
                 },
             },
         ]
