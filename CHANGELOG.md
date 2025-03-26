@@ -6,57 +6,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Add metric to measure cardinality overflow frequency ([PR #6998](https://github.com/apollographql/router/pull/6998))
-
-Adds a new counter metric, `apollo.router.telemetry.metrics.cardinality_overflow`, that is incremented when the [cardinality overflow log](https://github.com/open-telemetry/opentelemetry-rust/blob/d583695d30681ee1bd910156de27d91be3711822/opentelemetry-sdk/src/metrics/internal/mod.rs#L134) from [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust) occurs. This log means that a metric in a batch has reached a cardinality of > 2000 and that any excess attributes will be ignored.
-
-By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/6998
-
-### Introduce PQ manifest `hot_reload` option for local manifests ([PR #6987](https://github.com/apollographql/router/pull/6987))
-
-This change introduces a [`persisted_queries.hot_reload` configuration option](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#hot_reload) to allow the router to hot reload local PQ manifest changes.
-
-If you configure `local_manifests`, you can set `hot_reload` to `true` to automatically reload manifest files whenever they change. This lets you update local manifest files without restarting the router.
-
-```yaml
-persisted_queries:
-  enabled: true
-  local_manifests:
-    - ./path/to/persisted-query-manifest.json
-  hot_reload: true
-```
-
-Note: This change explicitly does _not_ piggyback on the existing `--hot-reload` flag.
-
-By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/6987
-
-### Add metrics for value completion errors ([PR #6905](https://github.com/apollographql/router/pull/6905))
-
-When the router encounters a value completion error, it is not included in the GraphQL errors array, making it harder to observe. To surface this issue in a more obvious way, router now counts value completion error metrics via the metric instruments `apollo.router.graphql.error` and `apollo.router.operations.error`, distinguishable via the `code` attribute with value `RESPONSE_VALIDATION_FAILED`.
-
-By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6905
-
-### Changes to experimental error metrics ([PR #6966](https://github.com/apollographql/router/pull/6966))
-
-In 2.0.0, an experimental metric `telemetry.apollo.errors.experimental_otlp_error_metrics` was introduced to track errors with additional attributes. A few related changes are included here:
-
-- Sending these metrics now also respects the subgraph's `send` flag e.g. `telemetry.apollo.errors.subgraph.[all|(subgraph name)].send`.
-- A new configuration option `telemetry.apollo.errors.subgraph.[all|(subgraph name)].redaction_policy` has been added. This flag only applies when `redact` is set to `true`. When set to `ErrorRedactionPolicy.Strict`, error redaction will behave as it has in the past. Setting this to `ErrorRedactionPolicy.Extended` will allow the `extensions.code` value from subgraph errors to pass through redaction and be sent to Studio.
-- A warning about incompatibility of error telemetry with connectors will be suppressed when this feature is enabled, since it _does_ support connectors when using the new mode.
-
-By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6966
-
-### Add router config validate subcommand ([PR #7016](https://github.com/apollographql/router/pull/7016))
-
-Adds new `router config validate` subcommand to allow validation of a router config file without fully starting up the Router.
-
-```
-./router config validate <path-to-config-file.yaml>
-```
-
-By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7016
-
-### Support traffic shaping for connectors ([PR #6737](https://github.com/apollographql/router/pull/6737))
+### Connectors: support for traffic shaping ([PR #6737](https://github.com/apollographql/router/pull/6737))
 
 Traffic shaping is now supported for connectors. To target a specific source, use the `subgraph_name.source_name` under the new `connector.sources` property of `traffic_shaping`. Settings under `connector.all` will apply to all connectors. `deduplicate_query` is not supported at this time.
 
@@ -78,26 +28,29 @@ traffic_shaping:
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6737
 
-### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+### Connectors: Support TLS configuration ([PR #6995](https://github.com/apollographql/router/pull/6995))
 
-When the router reloads, either via schema change or config change, a new request pipeline is created.
-Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests that do not finish, such as Subscriptions.
+Connectors now supports TLS configuration for using custom certificate authorities and utilizing client certificate authentication.
 
-To enable debugging when request pipelines are being kept around, a new gauge metric has been added:
+```
+tls:
+  connector:
+    sources:
+      connector-graph.random_person_api:
+        certificate_authorities:
+        client_authentication:
+          certificate_chain:
+          key:
+```
 
-- `apollo.router.pipelines` - The number of request pipelines active in the router
-    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
-    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
-    - `config.hash` - The hash of the configuration
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6995
 
 ### Update JWT handling ([PR #6930](https://github.com/apollographql/router/pull/6930))
 
 This PR updates JWT-handling in the `AuthenticationPlugin`;
 
 - Users may now set a new config option `config.authentication.router.jwt.on_error`.
-  - When set to the default `Error`, JWT-related errors will be returned to users (the current behavior). 
+  - When set to the default `Error`, JWT-related errors will be returned to users (the current behavior).
   - When set to `Continue`, JWT errors will instead be ignored, and JWT claims will not be set in the request context.
 - When JWTs are processed, whether processing succeeds or fails, the request context will contain a new variable `apollo::authentication::jwt_status` which notes the result of processing.
 
@@ -105,7 +58,7 @@ By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router
 
 ### Add support to get/set URI scheme in Rhai ([Issue #6897](https://github.com/apollographql/router/issues/6897))
 
-This adds support to read and write the scheme from the `request.uri.scheme`/`request.subgraph.uri.scheme` functions in Rhai, 
+This adds support to read and write the scheme from the `request.uri.scheme`/`request.subgraph.uri.scheme` functions in Rhai,
 enabling the ability to switch between `http` and `https` for subgraph fetches. For example:
 
 ```rs
@@ -125,6 +78,59 @@ fn subgraph_service(service, subgraph){
 ```
 By [@starJammer](https://github.com/starJammer) in https://github.com/apollographql/router/pull/6906
 
+### Add `router config validate` subcommand ([PR #7016](https://github.com/apollographql/router/pull/7016))
+
+Adds new `router config validate` subcommand to allow validation of a router config file without fully starting up the Router.
+
+```
+./router config validate <path-to-config-file.yaml>
+```
+
+By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7016
+
+### Enable remote proxy downloads of the Router
+
+This enables users without direct download access to specify a remote proxy mirror location for the GitHub download of
+the Apollo Router releases.
+
+By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apollographql/router/pull/6667
+
+### Add metric to measure cardinality overflow frequency ([PR #6998](https://github.com/apollographql/router/pull/6998))
+
+Adds a new counter metric, `apollo.router.telemetry.metrics.cardinality_overflow`, that is incremented when the [cardinality overflow log](https://github.com/open-telemetry/opentelemetry-rust/blob/d583695d30681ee1bd910156de27d91be3711822/opentelemetry-sdk/src/metrics/internal/mod.rs#L134) from [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust) occurs. This log means that a metric in a batch has reached a cardinality of > 2000 and that any excess attributes will be ignored.
+
+By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/6998
+
+### Add metrics for value completion errors ([PR #6905](https://github.com/apollographql/router/pull/6905))
+
+When the router encounters a value completion error, it is not included in the GraphQL errors array, making it harder to observe. To surface this issue in a more obvious way, router now counts value completion error metrics via the metric instruments `apollo.router.graphql.error` and `apollo.router.operations.error`, distinguishable via the `code` attribute with value `RESPONSE_VALIDATION_FAILED`.
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6905
+
+### Changes to experimental error metrics ([PR #6966](https://github.com/apollographql/router/pull/6966))
+
+In 2.0.0, an experimental metric `telemetry.apollo.errors.experimental_otlp_error_metrics` was introduced to track errors with additional attributes. A few related changes are included here:
+
+- Sending these metrics now also respects the subgraph's `send` flag e.g. `telemetry.apollo.errors.subgraph.[all|(subgraph name)].send`.
+- A new configuration option `telemetry.apollo.errors.subgraph.[all|(subgraph name)].redaction_policy` has been added. This flag only applies when `redact` is set to `true`. When set to `ErrorRedactionPolicy.Strict`, error redaction will behave as it has in the past. Setting this to `ErrorRedactionPolicy.Extended` will allow the `extensions.code` value from subgraph errors to pass through redaction and be sent to Studio.
+- A warning about incompatibility of error telemetry with connectors will be suppressed when this feature is enabled, since it _does_ support connectors when using the new mode.
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6966
+
+### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+
+When the router reloads, either via schema change or config change, a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests that do not finish, such as Subscriptions.
+
+To enable debugging when request pipelines are being kept around, a new gauge metric has been added:
+
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
+
 ### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
 
 To help users to diagnose when connections are keeping pipelines hanging around, the following metric has been added:
@@ -136,7 +142,7 @@ To help users to diagnose when connections are keeping pipelines hanging around,
     - `server.port` - The port that the router is listening on if not a unix socket.
     - `http.connection.state` - Either `active` or `terminating`.
 
-You can use this metric to monitor when connections are open via long running requests or keepalive messages. 
+You can use this metric to monitor when connections are open via long running requests or keepalive messages.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7023
 
@@ -165,30 +171,6 @@ If the number of queries provided exceeds the maximum batch size, the entire bat
 ```
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
-
-### Support TLS configuration for connectors ([PR #6995](https://github.com/apollographql/router/pull/6995))
-
-Connectors now supports TLS configuration for using custom certificate authorities and utilizing client certificate authentication.
-
-```
-tls:
-  connector:
-    sources:
-      connector-graph.random_person_api:
-        certificate_authorities: 
-        client_authentication:
-          certificate_chain: 
-          key: 
-```
-
-By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6995
-
-### Enable remote proxy downloads of the Router
-
-This enables users without direct download access to specify a remote proxy mirror location for the GitHub download of
-the Apollo Router releases.
-
-By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apollographql/router/pull/6667
 
 ### Add span events to error spans for connectors and demand control plugin ([PR #6727](https://github.com/apollographql/router/pull/6727))
 
