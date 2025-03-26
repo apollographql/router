@@ -72,8 +72,23 @@ subgraphs:
     schema:
       sdl: |
         extend schema
-          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key"])
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@context", "@fromContext"])
         type T @key(fields: "id") {
           id: ID!
           overridden: String
+        }
+
+        type Query {
+          z: Z
+        }
+
+        type Z @key(fields: "id") @context(name: "ctx") {
+          id: ID!
+          y: String
+          x: X
+        }
+
+        type X @key(fields: "id") {
+          id: ID!
+          w(z: String @fromContext(field: "$$ctx { y }")): String
         }
