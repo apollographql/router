@@ -6,13 +6,13 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Metric to Measure Cardinality Overflow Frequency ([PR #6998](https://github.com/apollographql/router/pull/6998))
+### Add metric to measure cardinality overflow frequency ([PR #6998](https://github.com/apollographql/router/pull/6998))
 
 Adds a new counter metric, `apollo.router.telemetry.metrics.cardinality_overflow`, that is incremented when the [cardinality overflow log](https://github.com/open-telemetry/opentelemetry-rust/blob/d583695d30681ee1bd910156de27d91be3711822/opentelemetry-sdk/src/metrics/internal/mod.rs#L134) from [opentelemetry-rust](https://github.com/open-telemetry/opentelemetry-rust) occurs. This log means that a metric in a batch has reached a cardinality of > 2000 and that any excess attributes will be ignored.
 
 By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/6998
 
-### feat: Introduce PQ Manifest `hot_reload` option for local manifests ([PR #6987](https://github.com/apollographql/router/pull/6987))
+### Introduce PQ manifest `hot_reload` option for local manifests ([PR #6987](https://github.com/apollographql/router/pull/6987))
 
 This change introduces a [`persisted_queries.hot_reload` configuration option](https://www.apollographql.com/docs/graphos/routing/security/persisted-queries#hot_reload) to allow the router to hot reload local PQ manifest changes.
 
@@ -30,9 +30,9 @@ Note: This change explicitly does _not_ piggyback on the existing `--hot-reload`
 
 By [@trevor-scheer](https://github.com/trevor-scheer) in https://github.com/apollographql/router/pull/6987
 
-### Metrics for value completion errors ([PR #6905](https://github.com/apollographql/router/pull/6905))
+### Add metrics for value completion errors ([PR #6905](https://github.com/apollographql/router/pull/6905))
 
-When Router encounters a value completion error, it is not included in the GraphQL errors array, making it harder to observe. To surface this issue in a more obvious way, Router now counts value completion error metrics via the metric instruments `apollo.router.graphql.error` and `apollo.router.operations.error`, distinguishable via the `code` attribute with value `RESPONSE_VALIDATION_FAILED`.
+When the router encounters a value completion error, it is not included in the GraphQL errors array, making it harder to observe. To surface this issue in a more obvious way, router now counts value completion error metrics via the metric instruments `apollo.router.graphql.error` and `apollo.router.operations.error`, distinguishable via the `code` attribute with value `RESPONSE_VALIDATION_FAILED`.
 
 By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/6905
 
@@ -48,7 +48,7 @@ By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographq
 
 ### Add router config validate subcommand ([PR #7016](https://github.com/apollographql/router/pull/7016))
 
-Added new `router config validate` subcommand to allow validation of a Router config file without fully starting up the Router.
+Adds new `router config validate` subcommand to allow validation of a router config file without fully starting up the Router.
 
 ```
 ./router config validate <path-to-config-file.yaml>
@@ -56,7 +56,7 @@ Added new `router config validate` subcommand to allow validation of a Router co
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/7016
 
-### Traffic shaping for connectors ([PR #6737](https://github.com/apollographql/router/pull/6737))
+### Support traffic shaping for connectors ([PR #6737](https://github.com/apollographql/router/pull/6737))
 
 Traffic shaping is now supported for connectors. To target a specific source, use the `subgraph_name.source_name` under the new `connector.sources` property of `traffic_shaping`. Settings under `connector.all` will apply to all connectors. `deduplicate_query` is not supported at this time.
 
@@ -78,13 +78,12 @@ traffic_shaping:
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6737
 
-### Add apollo.router.pipelines metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
 
-When the Router reloads either via schema change or config change a new request pipeline is created.
-Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests 
-such as Subscriptions that do not finish.
+When the router reloads, either via schema change or config change, a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests that do not finish, such as Subscriptions.
 
-To enable debugging when request pipelines are being kept around a new gauge metric has been added:
+To enable debugging when request pipelines are being kept around, a new gauge metric has been added:
 
 - `apollo.router.pipelines` - The number of request pipelines active in the router
     - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
@@ -104,15 +103,15 @@ This PR updates JWT-handling in the `AuthenticationPlugin`;
 
 By [@Velfi](https://github.com/Velfi) in https://github.com/apollographql/router/pull/6930
 
-### Support to get/set URI scheme in Rhai ([Issue #6897](https://github.com/apollographql/router/issues/6897))
+### Add support to get/set URI scheme in Rhai ([Issue #6897](https://github.com/apollographql/router/issues/6897))
 
-This adds support to read the scheme from the `request.uri.scheme`/`request.subgraph.uri.scheme` functions in Rhai, 
-enabling the ability to switch between http and https for subgraph fetches. For example:
+This adds support to read and write the scheme from the `request.uri.scheme`/`request.subgraph.uri.scheme` functions in Rhai, 
+enabling the ability to switch between `http` and `https` for subgraph fetches. For example:
 
 ```rs
 fn subgraph_service(service, subgraph){
     service.map_request(|request|{
-        log_info(``);
+        log_info(`${request.subgraph.uri.scheme}`);
         if request.subgraph.uri.scheme == {} {
             log_info("Scheme is not explicitly set");
         }
@@ -128,7 +127,7 @@ By [@starJammer](https://github.com/starJammer) in https://github.com/apollograp
 
 ### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
 
-To help users to diagnose when connections are keeping pipelines hanging around the following metric has been added:
+To help users to diagnose when connections are keeping pipelines hanging around, the following metric has been added:
 - `apollo.router.open_connections` - The number of request pipelines active in the router
     - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
     - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
@@ -137,11 +136,11 @@ To help users to diagnose when connections are keeping pipelines hanging around 
     - `server.port` - The port that the router is listening on if not a unix socket.
     - `http.connection.state` - Either `active` or `terminating`.
 
-Connections can be held open by clients via keepalive or even just a long-running request, so it's useful to know when this is happening.
+You can use this metric to monitor when connections are open via long running requests or keepalive messages. 
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7023
 
-### Add configuration option to limit maximum batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
 
 Add an optional `maximum_size` parameter to the batching configuration.
 
@@ -167,7 +166,7 @@ If the number of queries provided exceeds the maximum batch size, the entire bat
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
 
-### TLS configuration for connectors ([PR #6995](https://github.com/apollographql/router/pull/6995))
+### Support TLS configuration for connectors ([PR #6995](https://github.com/apollographql/router/pull/6995))
 
 Connectors now supports TLS configuration for using custom certificate authorities and utilizing client certificate authentication.
 
@@ -184,36 +183,34 @@ tls:
 
 By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/apollographql/router/pull/6995
 
-### Enable Remote Proxy Downloads
+### Enable remote proxy downloads of the Router
 
-This enables users without direct download access to specify a remote proxy mirror location for the github download of
+This enables users without direct download access to specify a remote proxy mirror location for the GitHub download of
 the Apollo Router releases.
 
 By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apollographql/router/pull/6667
 
-### Span events for traces containing errors ([PR #6727](https://github.com/apollographql/router/pull/6727))
+### Add span events to error spans for connectors and demand control plugin ([PR #6727](https://github.com/apollographql/router/pull/6727))
 
-We have added new span events to trace spans that include some errors. These span events include the GraphQL error code that relates to the error. So far this only includes errors generated by connectors and the demand control plugin.
+New span events have been added to trace spans which include errors. These span events include the GraphQL error code that relates to the error. So far, this only includes errors generated by connectors and the demand control plugin.
 
 By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/6727
 
 ## 🐛 Fixes
 
-### fix: export gauge instruments ([Issue #6859](https://github.com/apollographql/router/issues/6859))
+### Export gauge instruments ([Issue #6859](https://github.com/apollographql/router/issues/6859))
 
-In router 2.x, you can use the router's OTel `meter_provider()` to report metrics from Rust plugins.
-
-Gauge instruments, such as those created using `.u64_gauge()`, were previously not exported. Now they are.
+Previously in router 2.x, when using the router's OTel `meter_provider()` to report metrics from Rust plugins, gauge instruments such as those created using `.u64_gauge()` weren't exported. The router now exports these instruments.
 
 By [@yanns](https://github.com/yanns) in https://github.com/apollographql/router/pull/6865
 
-### Use batch_processor config for Apollo metrics PeriodicReader ([PR #7024](https://github.com/apollographql/router/pull/7024))
+### Use `batch_processor` config for Apollo metrics `PeriodicReader` ([PR #7024](https://github.com/apollographql/router/pull/7024))
 
-The Apollo otlp `batch_processor` configurations `telemetry.apollo.batch_processor.scheduled_delay` and `telemetry.apollo.batch_processor.max_export_timeout` now also control the Apollo otlp `PeriodicReader` export interval and timeout respectively. This brings parity between Apollo otlp metrics and [non-Apollo otlp Exporter metrics](https://github.com/apollographql/router/blob/0f88850e0b164d12c14b1f05b0043076f21a3b28/apollo-router/src/plugins/telemetry/metrics/otlp.rs#L37-L40)
+The Apollo OTLP `batch_processor` configurations `telemetry.apollo.batch_processor.scheduled_delay` and `telemetry.apollo.batch_processor.max_export_timeout` now also control the Apollo OTLP `PeriodicReader` export interval and timeout, respectively. This update brings parity between Apollo OTLP metrics and [non-Apollo OTLP exporter metrics](https://github.com/apollographql/router/blob/0f88850e0b164d12c14b1f05b0043076f21a3b28/apollo-router/src/plugins/telemetry/metrics/otlp.rs#L37-L40).
 
 By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/7024
 
-### Reduce Brotli compression level ([Issue #6857](https://github.com/apollographql/router/issues/6857))
+### Reduce Brotli encoding compression level ([Issue #6857](https://github.com/apollographql/router/issues/6857))
 
 The current Brotli compression level used is `11`, which is the highest quality (and slowest). The value has been
 changed to `4`
@@ -222,17 +219,15 @@ workloads.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7007
 
-### Fix CPU Count for cgroup environments
+### CPU count inference improvements for `cgroup` environments ([PR #6787](https://github.com/apollographql/router/pull/6787))
 
-This fixes an issue where the fleet_detector plugin would not infer correctly the CPU limits for a system used cgroup2 or cgroup.
+This fixes an issue where the `fleet_detector` plugin would not correctly infer the CPU limits for a system which used `cgroup` or `cgroup2`.
 
 By [@nmoutschen](https://github.com/nmoutschen) in https://github.com/apollographql/router/pull/6787
 
 ### Do not include other fields from representation variable than the entity keys for entity cache([Issue #6673](https://github.com/apollographql/router/issues/6673))
 
-Separate entity keys and representation variable value in the cache key to avoid issues with `@requires` for example.
-
-close #6673
+This fix separates the entity keys and representation variable values in the cache key, to avoid issues with `@requires` for example.
 
 > [!IMPORTANT]
 >
@@ -240,7 +235,7 @@ close #6673
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6888
 
-### Replace Rhai specific hot-reload functionality with general hot-reload ([PR #6950](https://github.com/apollographql/router/pull/6950))
+### Replace Rhai-specific hot-reload functionality with general hot-reload ([PR #6950](https://github.com/apollographql/router/pull/6950))
 
 In Router 2.0 the rhai hot-reload capability was not working. The cause was the architectural improvements to the router which meant that the entire service stack is no longer re-created for each request.
 
