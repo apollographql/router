@@ -95,7 +95,7 @@ impl ErrorExtension for SpecError {
             SpecError::ParseError(_) => "PARSING_ERROR",
             SpecError::ValidationError(_) => "GRAPHQL_VALIDATION_FAILED",
             SpecError::UnknownOperation(_) => "GRAPHQL_UNKNOWN_OPERATION_NAME",
-            SpecError::MultipleOperationWithoutOperationName => "GRAPHQL_UNKNOWN_OPERATION_NAME",
+            SpecError::MultipleOperationWithoutOperationName => "GRAPHQL_VALIDATION_FAILED",
             SpecError::NoOperation => "GRAPHQL_VALIDATION_FAILED",
             SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
             SpecError::QueryHashing(_) => "QUERY_HASHING",

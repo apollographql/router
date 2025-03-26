@@ -1745,7 +1745,7 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
 // Planner errors return stats report key that start with `## `
 // while successful planning stats report key start with `# `
 fn licensed_operation_count(stats_report_key: &str) -> u64 {
-    if stats_report_key.starts_with("## ") {
+    if stats_report_key.starts_with("# # ") {
         0
     } else {
         1
