@@ -4,6 +4,96 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.1] - 2025-03-26
+
+## 🚀 Features
+
+### Add apollo.router.pipelines metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+
+When the Router reloads either via schema change or config change a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests 
+such as Subscriptions that do not finish.
+
+To enable debugging when request pipelines are being kept around a new gauge metric has been added:
+
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
+
+### Backport #7023 Add apollo.router.open_connections metric ([PR #7009](https://github.com/apollographql/router/pull/7009))
+
+To help users to diagnose when connections are keeping pipelines hanging around the following metric has been added:
+- `apollo.router.open_connections` - The number of request pipelines active in the router
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration.
+  - `server.address` - The address that the router is listening on.
+  - `server.port` - The port that the router is listening on if not a unix socket.
+  - `state` - Either `active` or `terminating`.
+
+Connections can be held open by clients via keepalive or even just a long running request, so it's useful to know when this is happening.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7009
+
+### Add configuration option to limit maximum batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+
+Add an optional `maximum_size` parameter to the batching configuration.
+
+* When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
+* When unspecified, the router performs no size checking (the current behavior).
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (
+`Unprocessable Content`). For example:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
+
+## 🐛 Fixes
+
+### Use correct default values on omitted OTLP endpoints ([PR #6931](https://github.com/apollographql/router/pull/6931))
+
+Previously, when the configuration didn't specify an OTLP endpoint, the Router would always default to `http://localhost:4318`. However, port `4318` is the correct default only for the HTTP protocol, while port `4317` should be used for gRPC.
+
+Additionally, all other telemetry defaults in the Router configuration consistently use `127.0.0.1` as the hostname rather than `localhost`.
+
+With this change, the Router now uses:
+* `http://127.0.0.1:4317` as the default for gRPC protocol
+* `http://127.0.0.1:4318` as the default for HTTP protocol
+
+This ensures protocol-appropriate port defaults and consistent hostname usage across all telemetry configurations.
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6931
+
+### Do not include other fields from representation variable than the entity keys for entity cache([Issue #6673](https://github.com/apollographql/router/issues/6673))
+
+Separate entity keys and representation variable value in the cache key to avoid issues with `@requires` for example.
+
+close #6673
+
+> [!IMPORTANT]
+>
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6888
+
+
+
 # [1.61.0] - 2025-02-25
 
 ## 🚀 Features
