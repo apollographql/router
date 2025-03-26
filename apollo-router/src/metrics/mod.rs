@@ -1307,9 +1307,9 @@ pub(crate) fn count_operation_errors(
             operation_id = stats_report_key_hash(stats_report_key.as_str());
 
             // If the operation name is empty, it's possible it's an error and we can populate the name by skipping the
-            // first two characters of the stats report key ("# ") and the last newline character. E.g. 
+            // first two characters of the stats report key ("# ") and the last newline character. E.g.
             // "# # GraphQLParseFailure\n" will turn into "# GraphQLParseFailure".
-            if operation_name.is_empty() { 
+            if operation_name.is_empty() {
                 operation_name = match stats_report_key.as_str() {
                     GRAPHQL_PARSE_FAILURE_ERROR_KEY
                     | GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
