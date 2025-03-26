@@ -6,7 +6,7 @@ expression: results
   {
     "request_id": "[REDACTED]",
     "stats": {
-      "## GraphQLParseFailure\n": {
+      "# # GraphQLParseFailure\n": {
         "stats_with_context": {
           "context": {
             "client_name": "test_client",
