@@ -140,21 +140,20 @@ impl QueryPlannerService {
             QUERY_PLANNER_SERVICE_WORKER_POOL_SPAN_NAME,
             "otel.kind" = "INTERNAL"
         );
-        let parent_cloned = worker_pool_span.clone();
+        // This span will indicate pure planning time.
+        // The difference between this one and its parent (worker_pool) is the time
+        // spent waiting in the queue.
+        //
+        // The span has to be entered only once the job begins to execute, in a
+        // closure below, but created here, as we need a reference to the parent
+        // span in order to keep the order across multiple threads.
+        let internal_planning_span = tracing::info_span!(
+            parent: &worker_pool_span,
+            QUERY_PLANNER_SERVICE_PLAN_SPAN_NAME,
+            "otel.kind" = "INTERNAL"
+        );
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             // Enter the span created above for pure planning time.
-            // This span will indicate pure planning time.
-            // The difference between this one and its parent (worker_pool) is the time
-            // spent waiting in the queue.
-            //
-            // The span has to be entered only once the job begins to execute, in a
-            // closure below, but created here, as we need a reference to the parent
-            // span in order to keep the order across multiple threads.
-            let internal_planning_span = tracing::info_span!(
-                parent: &parent_cloned,
-                QUERY_PLANNER_SERVICE_PLAN_SPAN_NAME,
-                "otel.kind" = "INTERNAL"
-            );
             let guard = internal_planning_span.entered();
             let start = Instant::now();
 
