@@ -485,8 +485,8 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 return if ignore_other_prefixes {
                     None
                 } else {
-                    Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed.to_owned(),
+                    Some(Err(AuthenticationError::InvalidJWTPrefix(
+                        name.to_owned(),
                         value_prefix.to_owned(),
                     )))
                 };
@@ -496,8 +496,8 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 // check for whitespace — we've already trimmed, so this means the request has a
                 // prefix that shouldn't exist
                 if jwt_value.contains(' ') {
-                    return Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed.to_owned(),
+                    return Some(Err(AuthenticationError::InvalidJWTPrefix(
+                        name.to_owned(),
                         value_prefix.to_owned(),
                     )));
                 }
@@ -508,7 +508,10 @@ pub(super) fn extract_jwt<'a, 'b: 'a>(
                 // Otherwise, we need to split our string in (at most 2) sections.
                 let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                 if jwt_parts.len() != 2 {
-                    return Some(Err(AuthenticationError::MissingJWT(jwt_value.to_owned())));
+                    return Some(Err(AuthenticationError::MissingJWTToken(
+                        name.to_owned(),
+                        value_prefix.to_owned(),
+                    )));
                 }
 
                 // We have our jwt
