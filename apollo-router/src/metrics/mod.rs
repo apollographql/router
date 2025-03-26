@@ -27,6 +27,9 @@ use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::query_planner::stats_report_key_hash;
+use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
+use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
@@ -1289,7 +1292,7 @@ pub(crate) fn count_operation_errors(
     };
 
     let mut operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
-    let operation_name = unwrap_context_string(OPERATION_NAME);
+    let mut operation_name = unwrap_context_string(OPERATION_NAME);
     let operation_kind = unwrap_context_string(OPERATION_KIND);
     let client_name = unwrap_context_string(CLIENT_NAME);
     let client_version = unwrap_context_string(CLIENT_VERSION);
@@ -1302,6 +1305,22 @@ pub(crate) fn count_operation_errors(
         });
         if let Some(stats_report_key) = maybe_stats_report_key {
             operation_id = stats_report_key_hash(stats_report_key.as_str());
+
+            // If the operation name is empty, it's possible it's an error and we can populate the name by skipping the
+            // first two characters of the stats report key ("# ") and the last newline character. E.g. 
+            // "# # GraphQLParseFailure\n" will turn into "# GraphQLParseFailure".
+            if operation_name.is_empty() { 
+                operation_name = match stats_report_key.as_str() {
+                    GRAPHQL_PARSE_FAILURE_ERROR_KEY
+                    | GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
+                    | GRAPHQL_VALIDATION_FAILURE_ERROR_KEY => stats_report_key
+                        .chars()
+                        .skip(2)
+                        .take(stats_report_key.len() - 3)
+                        .collect(),
+                    _ => "".to_string(),
+                }
+            }
         }
     }
 
