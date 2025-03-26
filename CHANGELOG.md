@@ -212,10 +212,7 @@ By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographq
 
 ### Reduce Brotli encoding compression level ([Issue #6857](https://github.com/apollographql/router/issues/6857))
 
-The current Brotli compression level used is `11`, which is the highest quality (and slowest). The value has been
-changed to `4`
-to mimic the other compression algorithms' `fast` setting; it is also a much more reasonable value for dynamic
-workloads.
+The Brotli encoding compression level has been changed from `11` to `4` to improve performance and mimic other compression algorithms' `fast` setting. This value is also a much more reasonable value for dynamic workloads.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7007
 
@@ -237,7 +234,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Replace Rhai-specific hot-reload functionality with general hot-reload ([PR #6950](https://github.com/apollographql/router/pull/6950))
 
-In Router 2.0 the rhai hot-reload capability was not working. The cause was the architectural improvements to the router which meant that the entire service stack is no longer re-created for each request.
+In Router 2.0 the rhai hot-reload capability was not working. This was because of architectural improvements to the router which meant that the entire service stack was no longer re-created for each request.
 
 The fix adds the rhai source files into the primary list of elements, configuration, schema, etc..., watched by the router and removes the old Rhai-specific file watching logic.
 
