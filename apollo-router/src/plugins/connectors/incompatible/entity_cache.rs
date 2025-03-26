@@ -38,7 +38,8 @@ impl IncompatiblePlugin for EntityCacheIncompatPlugin {
                 .partition_map(|(name, sub)| match sub.enabled {
                     Some(true) => Either::Left(name),
                     Some(false) => Either::Right(name),
-                    None => Either::Right(name),
+                    // Because default value of sub.enabled is true, we can assume that None means true
+                    None => Either::Left(name),
                 });
 
         super::ConfiguredSubgraphs { enabled, disabled }
