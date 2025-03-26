@@ -6,15 +6,18 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.61.1] - 2025-03-26
 
+> [!IMPORTANT]
+>
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
 ## 🚀 Features
 
-### Add apollo.router.pipelines metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
 
-When the Router reloads either via schema change or config change a new request pipeline is created.
-Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests 
-such as Subscriptions that do not finish.
+When the router reloads, either via schema change or config change, a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests that do not finish, such as Subscriptions.
 
-To enable debugging when request pipelines are being kept around a new gauge metric has been added:
+To enable debugging when request pipelines are being kept around, a new gauge metric has been added:
 
 - `apollo.router.pipelines` - The number of request pipelines active in the router
     - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
@@ -23,9 +26,9 @@ To enable debugging when request pipelines are being kept around a new gauge met
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
 
-### Backport #7023 Add apollo.router.open_connections metric ([PR #7009](https://github.com/apollographql/router/pull/7009))
+### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
 
-To help users to diagnose when connections are keeping pipelines hanging around the following metric has been added:
+To help users to diagnose when connections are keeping pipelines hanging around, the following metric has been added:
 - `apollo.router.open_connections` - The number of request pipelines active in the router
   - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
   - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
@@ -34,19 +37,18 @@ To help users to diagnose when connections are keeping pipelines hanging around 
   - `server.port` - The port that the router is listening on if not a unix socket.
   - `state` - Either `active` or `terminating`.
 
-Connections can be held open by clients via keepalive or even just a long running request, so it's useful to know when this is happening.
+You can use this metric to monitor when connections are open via long running requests or keepalive messages.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7009
 
-### Add configuration option to limit maximum batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
 
 Add an optional `maximum_size` parameter to the batching configuration.
 
 * When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
 * When unspecified, the router performs no size checking (the current behavior).
 
-If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (
-`Unprocessable Content`). For example:
+If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (`Unprocessable Content`). For example:
 
 ```json
 {
@@ -80,19 +82,11 @@ This ensures protocol-appropriate port defaults and consistent hostname usage ac
 
 By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6931
 
-### Do not include other fields from representation variable than the entity keys for entity cache([Issue #6673](https://github.com/apollographql/router/issues/6673))
+### Separate entity keys and representation variables in entity cache key ([Issue #6673](https://github.com/apollographql/router/issues/6673))
 
-Separate entity keys and representation variable value in the cache key to avoid issues with `@requires` for example.
-
-close #6673
-
-> [!IMPORTANT]
->
-> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+This fix separates the entity keys and representation variable values in the cache key, to avoid issues with `@requires` for example.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6888
-
-
 
 # [1.61.0] - 2025-02-25
 
@@ -121,11 +115,11 @@ By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apol
 
 ## 🐛 Fixes
 
-### Query Planning: fix `__typename` selections in sibling typename optimization 
+### Query Planning: fix `__typename` selections in sibling typename optimization
 
-The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. 
+The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately.
 
-Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection. 
+Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection.
 
 Now, the query planner favors the one with a `__typename` attached without losing the `__typename` selection.
 
