@@ -1,4 +1,4 @@
-//! Validations for the `@connect(entity:)` argument.
+//! Validations for `@connect` on types/the `@connect(entity:)` argument.
 
 use std::fmt;
 use std::fmt::Display;

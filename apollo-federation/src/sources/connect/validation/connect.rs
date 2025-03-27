@@ -7,6 +7,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use hashbrown::HashSet;
 use itertools::Itertools;
 use multi_try::MultiTry;
 
@@ -19,6 +20,7 @@ use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -89,6 +91,21 @@ impl<'schema> Connect<'schema> {
     ) -> Result<Self, Vec<Message>> {
         let coordinate = ConnectDirectiveCoordinate { directive, element };
 
+        if element.is_root_type(schema) {
+            return Err(vec![Message {
+                code: Code::ConnectOnRoot,
+                message: format!(
+                    "Cannot use `@{connect_directive_name}` on root types like `{object_name}`",
+                    object_name = coordinate.element.base_type_name(),
+                    connect_directive_name = schema.connect_directive_name(),
+                ),
+                locations: directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
+        }
+
         let (selection, http) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(
@@ -108,6 +125,27 @@ impl<'schema> Connect<'schema> {
 
     fn type_check(self) -> Result<Vec<ResolvedField>, Vec<Message>> {
         let mut messages = Vec::new();
+
+        let all_variables = self
+            .selection
+            .variables()
+            .chain(self.http.variables())
+            .collect::<HashSet<_>>();
+        if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
+            messages.push(Message {
+                code: Code::ConnectBatchAndThis,
+                message: format!(
+                    "In {}: connectors cannot use both $this and $batch",
+                    self.coordinate
+                ),
+                locations: self
+                    .coordinate
+                    .directive
+                    .line_column_range(&self.schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
 
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
         messages.extend(
@@ -132,6 +170,7 @@ impl<'schema> Connect<'schema> {
                 return Err(messages);
             }
         };
+
         if messages.is_empty() {
             Ok(seen)
         } else {
@@ -183,6 +222,7 @@ fn fields_seen_by_connectors_on_types(
 
     for directive in connect_directives {
         let element = ConnectedElement::Type { type_def: object };
+
         let connect = match Connect::parse(directive, element, schema, source_names) {
             Ok(connect) => connect,
             Err(errs) => {

@@ -11,6 +11,7 @@ use shape::Shape;
 
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::JSONSelection;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::URLTemplate;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -126,6 +127,15 @@ impl<'schema> Http<'schema> {
         } else {
             Err(errors)
         }
+    }
+
+    pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+        self.transport
+            .url
+            .expressions()
+            .map(|e| e.expression.external_variables())
+            .chain(self.body.as_ref().map(|b| b.selection.external_variables()))
+            .flatten()
     }
 }
 
