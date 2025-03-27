@@ -1,14 +1,11 @@
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::collections::HashMap;
 
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::OperationType;
-use apollo_compiler::name;
 use apollo_compiler::ty;
-use std::collections::HashMap;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -28,6 +25,9 @@ use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
+use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
+use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 
 #[allow(dead_code)]
 struct CoreFeature {
@@ -102,7 +102,7 @@ impl FederationBlueprint {
                     operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
                     if schema.try_get_type(default_name.clone()).is_some() {
                         error_collector.push(
-                            SingleFederationError::already_used(
+                            SingleFederationError::root_already_used(
                                 op_type,
                                 default_name,
                                 op_name.name.clone(),
@@ -113,9 +113,7 @@ impl FederationBlueprint {
                 }
             }
             for (current_name, new_name) in operation_types_to_rename {
-                println!("Renaming {current_name} to {new_name}");
-                let pos = schema.get_type(current_name)?;
-                pos.rename(schema, new_name)?;
+                schema.get_type(current_name)?.rename(schema, new_name)?;
             }
         }
 
@@ -226,35 +224,11 @@ impl FederationBlueprint {
     }
 }
 
-// TODO: Hoist this to subgraph module
-/// Currently, this is making up for the fact that we don't have an equivalent of `addSubgraphToErrors`.
-/// In JS, that manipulates the underlying `GraphQLError` message to prepend the subgraph name. In Rust,
-/// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
-/// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
-/// for missing error codes and the like.
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-struct SubgraphError {
-    subgraph: Name,
-    error: FederationError,
-}
-
-impl Display for SubgraphError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}] {}", self.subgraph, self.error)
-    }
-}
-
-// TODO: Move these to a common place
-const QUERY_OPERATION_NAME: Name = name!("Query");
-const MUTATION_OPERATION_NAME: Name = name!("Mutation");
-const SUBSCRIPTION_OPERATION_NAME: Name = name!("Subscription");
-
 fn default_operation_name(op_type: &OperationType) -> Name {
     match op_type {
-        OperationType::Query => QUERY_OPERATION_NAME,
-        OperationType::Mutation => MUTATION_OPERATION_NAME,
-        OperationType::Subscription => SUBSCRIPTION_OPERATION_NAME,
+        OperationType::Query => GRAPHQL_QUERY_TYPE_NAME,
+        OperationType::Mutation => GRAPHQL_MUTATION_TYPE_NAME,
+        OperationType::Subscription => GRAPHQL_SUBSCRIPTION_TYPE_NAME,
     }
 }
 
@@ -269,6 +243,7 @@ mod tests {
     use crate::error::FederationError;
     use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
+    use crate::subgraph::SubgraphError;
 
     #[test]
     fn detects_federation_1_subgraphs_correctly() {

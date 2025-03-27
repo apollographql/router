@@ -516,7 +516,7 @@ impl SingleFederationError {
         }
     }
 
-    pub(crate) fn already_used(
+    pub(crate) fn root_already_used(
         operation_type: OperationType,
         expected_name: Name,
         found_name: Name,
