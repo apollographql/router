@@ -93,7 +93,7 @@ type R @join__type(graph: ONE_T_R_0) {
 
 type X @join__type(graph: TWO, key: "id") {
   id: ID! @join__field(graph: TWO, type: "ID!")
-  w(z: String): String @join__field(graph: TWO, type: "String", contextArguments: [{context: "two__ctx", name: "z", type: "String", selection: " { y }"}])
+  w: String @join__field(graph: TWO, type: "String", contextArguments: [{context: "two__ctx", name: "z", type: "String", selection: " { y }"}])
 }
 
 type Z @join__type(graph: TWO, key: "id") @context(name: "two__ctx") {

@@ -3,6 +3,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::name;
 
 use crate::error::FederationError;
@@ -349,12 +350,50 @@ pub(super) fn carryover_directives(
                 .ok_or_else(|| {
                     FederationError::internal("Cannot find matching directive in new supergraph")
                 })?;
+
+            let argument_names = argument
+                .value
+                .as_list()
+                .map(|list| list.iter().flat_map(|v| v.as_object()).flatten())
+                .map(|pairs| {
+                    pairs
+                        .filter(|(name, _)| name == &name!("name"))
+                        .flat_map(|(_, value)| value.as_str())
+                        .flat_map(|s| Name::new(s).ok())
+                        .collect::<HashSet<_>>()
+                })
+                .ok_or_else(|| {
+                    FederationError::internal("Cannot find `name` argument in `contextArguments`")
+                })?;
+
             ObjectOrInterfaceFieldDirectivePosition {
                 field: pos.clone(),
                 directive_name: name!("join__field"),
                 directive_index,
             }
             .add_argument(to, argument)?;
+
+            for argument_name in argument_names {
+                // Remove the argument now that it's handled by `@join__field(contextArguments:)`
+                match &pos {
+                    ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
+                        ObjectFieldArgumentDefinitionPosition {
+                            type_name: pos.type_name.clone(),
+                            field_name: pos.field_name.clone(),
+                            argument_name,
+                        }
+                        .remove(to)?;
+                    }
+                    ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
+                        InterfaceFieldArgumentDefinitionPosition {
+                            type_name: pos.type_name.clone(),
+                            field_name: pos.field_name.clone(),
+                            argument_name,
+                        }
+                        .remove(to)?;
+                    }
+                }
+            }
         }
     };
 
