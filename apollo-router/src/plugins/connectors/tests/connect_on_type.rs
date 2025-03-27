@@ -5,6 +5,7 @@ use wiremock::matchers::method;
 use wiremock::matchers::path;
 
 use super::req_asserts::Matcher;
+use super::req_asserts::Plan;
 
 #[tokio::test]
 async fn basic_batch() {
@@ -160,13 +161,13 @@ async fn connect_on_type() {
     }
     "#);
 
-    super::req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users"),
-            Matcher::new().method("GET").path("/users/3"),
+    Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+            Matcher::new().method("GET").path("/users/3"),
+        ]),
+    ])
+    .assert_matches(&mock_server.received_requests().await.unwrap());
 }
