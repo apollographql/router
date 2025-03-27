@@ -9,7 +9,6 @@ use futures::StreamExt;
 use futures::future::ready;
 use futures::stream::once;
 use http::StatusCode;
-use parking_lot::Mutex;
 use rhai::AST;
 use rhai::Dynamic;
 use rhai::Engine;
@@ -34,6 +33,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
 use crate::register_plugin;
+use crate::synchronization::Mutex;
 
 mod engine;
 

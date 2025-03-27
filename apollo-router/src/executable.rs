@@ -18,7 +18,6 @@ use clap::Subcommand;
 use clap::builder::FalseyValueParser;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
-use parking_lot::Mutex;
 use regex::Captures;
 use regex::Regex;
 use url::ParseError;
@@ -37,6 +36,7 @@ use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
+use crate::synchronization::Mutex;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 

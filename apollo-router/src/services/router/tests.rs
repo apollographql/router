@@ -10,7 +10,6 @@ use http::header::CONTENT_TYPE;
 use http::header::VARY;
 use mime::APPLICATION_JSON;
 use opentelemetry::KeyValue;
-use parking_lot::Mutex;
 use serde_json_bytes::json;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -36,6 +35,7 @@ use crate::services::router::service::process_vary_header;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
+use crate::synchronization::Mutex;
 use crate::test_harness::make_fake_batch;
 
 // Test Vary processing

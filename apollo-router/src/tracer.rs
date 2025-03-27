@@ -86,12 +86,12 @@ impl From<[u8; 16]> for TraceId {
 mod test {
     use once_cell::sync::Lazy;
     use opentelemetry::trace::TracerProvider;
-    use parking_lot::Mutex;
     use tracing_subscriber::Registry;
     use tracing_subscriber::layer::SubscriberExt;
 
     use super::TraceId;
     use crate::plugins::telemetry::otel;
+    use crate::synchronization::Mutex;
 
     // If we try to run more than one test concurrently which relies on the existence of a pipeline,
     // then the tests will fail due to manipulation of global state in the opentelemetry crates.

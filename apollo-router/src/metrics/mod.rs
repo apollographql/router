@@ -832,13 +832,13 @@ macro_rules! metric {
                 let cache_callsite = true;
 
                 if cache_callsite {
-                    static INSTRUMENT_CACHE: std::sync::OnceLock<parking_lot::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
+                    static INSTRUMENT_CACHE: std::sync::OnceLock<crate::synchronization::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
 
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
                             let meter_provider = crate::metrics::meter_provider_internal();
                             let instrument_ref = meter_provider.create_registered_instrument(|p| p.meter("apollo/router").[<$ty _ $instrument>]($name).with_description($description).init());
-                            parking_lot::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
+                            crate::synchronization::Mutex::new(std::sync::Arc::downgrade(&instrument_ref))
                         })
                         .lock();
                     let instrument = if let Some(instrument) = instrument_guard.upgrade() {

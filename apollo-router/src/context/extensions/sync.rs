@@ -1,3 +1,4 @@
+use crate::synchronization::Mutex;
 use std::sync::Arc;
 
 /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.
@@ -9,7 +10,7 @@ use std::sync::Arc;
 /// `context.extensions().lock().insert::<MyData>(data);`
 #[derive(Default, Clone, Debug)]
 pub struct ExtensionsMutex {
-    extensions: Arc<parking_lot::Mutex<super::Extensions>>,
+    extensions: Arc<Mutex<super::Extensions>>,
 }
 
 impl ExtensionsMutex {

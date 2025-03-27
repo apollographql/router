@@ -272,8 +272,6 @@ mod tests {
     use apollo_federation::sources::connect::URLTemplate;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
-    use parking_lot::Mutex;
-    use parking_lot::MutexGuard;
     use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
@@ -304,6 +302,8 @@ mod tests {
     use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::supergraph;
+    use crate::synchronization::Mutex;
+    use crate::synchronization::MutexGuard;
 
     const EVENT_CONFIGURATION: &str = r#"
 router:

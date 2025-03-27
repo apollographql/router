@@ -1123,12 +1123,12 @@ mod tests {
     use opentelemetry::StringValue;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::noop;
-    use parking_lot::Mutex;
     use tracing_subscriber::prelude::*;
 
     use super::*;
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+    use crate::synchronization::Mutex;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);

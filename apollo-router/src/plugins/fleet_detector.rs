@@ -11,7 +11,6 @@ use http_body_util::BodyExt as _;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sysinfo::System;
@@ -27,6 +26,7 @@ use crate::plugin::PluginPrivate;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
+use crate::synchronization::Mutex;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;

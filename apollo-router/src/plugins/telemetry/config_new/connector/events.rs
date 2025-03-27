@@ -1,6 +1,5 @@
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -20,6 +19,7 @@ use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
+use crate::synchronization::Mutex;
 
 #[derive(Clone)]
 pub(crate) struct ConnectorEventRequest(pub(crate) StandardEvent<ConnectorSelector>);

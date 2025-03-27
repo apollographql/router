@@ -28,7 +28,6 @@ use jsonwebtoken::jwk::KeyAlgorithm;
 use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use mime::APPLICATION_JSON;
-use parking_lot::RwLock;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use tower::BoxError;
@@ -42,6 +41,7 @@ use super::Header;
 use super::Source;
 use crate::Context;
 use crate::plugins::authentication::error::AuthenticationError;
+use crate::synchronization::RwLock;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {

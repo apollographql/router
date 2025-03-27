@@ -638,7 +638,6 @@ mod tests {
     use mockall::Sequence;
     use mockall::mock;
     use multimap::MultiMap;
-    use parking_lot::Mutex;
     use serde_json::json;
     use test_log::test;
     use tower::BoxError;
@@ -655,6 +654,7 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineRef;
+    use crate::synchronization::Mutex;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;

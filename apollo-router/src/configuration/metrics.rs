@@ -7,12 +7,12 @@ use jsonpath_rust::JsonPathInst;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use paste::paste;
 use serde_json::Value;
 
 use crate::Configuration;
 use crate::metrics::meter_provider;
+use crate::synchronization::Mutex;
 use crate::uplink::license_enforcement::LicenseState;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;

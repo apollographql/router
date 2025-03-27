@@ -17,7 +17,6 @@ use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
 use opentelemetry::ExportError;
-use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
@@ -31,6 +30,7 @@ use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::synchronization::Mutex;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";

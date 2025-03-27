@@ -16,7 +16,6 @@ use aws_types::region::Region;
 use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
-use parking_lot::RwLock;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -29,6 +28,7 @@ use tower::ServiceExt;
 use crate::services::SubgraphRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
+use crate::synchronization::RwLock;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.

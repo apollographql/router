@@ -55,6 +55,9 @@ ci = []
 # Enables the HTTP snapshot server for testing
 snapshot = ["axum-server", "serde_regex"]
 
+# Replaces `parking_lot::{Mutex, RwLock}` with implementations from `no_deadlocks`
+no_deadlocks = ["dep:no_deadlocks"]
+
 [dependencies]
 anyhow = "1.0.86"
 apollo-compiler.workspace = true
@@ -122,6 +125,7 @@ mockall = "0.13.0"
 mime = "0.3.17"
 multer = "3.1.0"
 multimap = "0.9.1" # Warning: part of the public API
+no_deadlocks = { version = "1.3.2", optional = true }
 # To avoid tokio issues
 notify = { version = "6.1.1", default-features = false, features = [
     "macos_kqueue",

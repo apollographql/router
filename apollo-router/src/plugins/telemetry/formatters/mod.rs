@@ -11,7 +11,6 @@ use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry_sdk::Resource;
-use parking_lot::Mutex;
 use serde_json::Number;
 use tracing::Subscriber;
 use tracing_core::callsite::Identifier;
@@ -26,6 +25,7 @@ use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use super::reload::SampledSpan;
 use crate::plugins::telemetry::otel::OtelData;
+use crate::synchronization::Mutex;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.

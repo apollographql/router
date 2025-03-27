@@ -12,7 +12,6 @@ use http::HeaderValue;
 use indexmap::IndexMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
@@ -45,6 +44,7 @@ use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
+use crate::synchronization::Mutex;
 
 pub(crate) mod transport;
 

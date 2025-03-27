@@ -8,7 +8,6 @@ use console::style;
 use http::Method;
 use http::Uri;
 use multimap::MultiMap;
-use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -28,6 +27,7 @@ use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::synchronization::Mutex;
 
 #[derive(Debug)]
 pub(crate) struct Replay {

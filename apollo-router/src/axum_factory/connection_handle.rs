@@ -2,11 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use parking_lot::Mutex;
-use parking_lot::MutexGuard;
-
 use crate::ListenAddr;
 use crate::services::router::pipeline_handle::PipelineRef;
+use crate::synchronization::Mutex;
+use crate::synchronization::MutexGuard;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ConnectionState {

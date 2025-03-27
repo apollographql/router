@@ -16,7 +16,6 @@ use futures::future::BoxFuture;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::Service;
 
@@ -54,6 +53,7 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::spec::operation_limits::OperationLimits;
+use crate::synchronization::Mutex;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";

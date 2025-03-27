@@ -76,7 +76,6 @@ use http::header::UPGRADE;
 use hyper::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use indexmap::IndexMap;
-use parking_lot::Mutex;
 use regex::Regex;
 use serde::Deserialize;
 use serde::Serialize;
@@ -93,6 +92,7 @@ use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
+use crate::synchronization::Mutex;
 
 /// Headers that will not be passed on to the upstream API
 static FILTERED_HEADERS: [HeaderName; 6] = [

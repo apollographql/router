@@ -3,7 +3,6 @@ use std::fmt::Debug;
 use std::mem;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
@@ -24,6 +23,7 @@ use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::synchronization::Mutex;
 
 /// The state of the conditional.
 #[derive(Debug, Default)]

@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::time::Instant;
@@ -32,6 +31,7 @@ use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::synchronization::Mutex;
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]

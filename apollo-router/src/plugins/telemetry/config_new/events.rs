@@ -7,7 +7,6 @@ use http::HeaderValue;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -44,6 +43,7 @@ use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::synchronization::Mutex;
 
 #[derive(Default, Clone)]
 pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);

@@ -8,7 +8,6 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use parking_lot::Mutex;
 use rhai::Engine;
 use rhai::EvalAltResult;
 use serde_json::Value;
@@ -44,6 +43,7 @@ use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::synchronization::Mutex;
 
 // There is a lot of repetition in these tests, so I've tried to reduce that with these two
 // functions. The repetition could probably be reduced further, but ...

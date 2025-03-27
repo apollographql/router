@@ -7,7 +7,6 @@ use once_cell::sync::Lazy;
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::metrics::View;
-use parking_lot::Mutex;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -25,6 +24,7 @@ use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
+use crate::synchronization::Mutex;
 
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

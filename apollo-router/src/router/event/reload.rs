@@ -3,10 +3,10 @@ use std::task::Poll;
 use std::time::Duration;
 
 use futures::prelude::*;
-use parking_lot::Mutex;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
+use crate::synchronization::Mutex;
 
 #[derive(Default)]
 struct ReloadSourceInner {

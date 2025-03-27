@@ -13,7 +13,6 @@ use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
 use opentelemetry_semantic_conventions::trace::SERVER_PORT;
 use opentelemetry_semantic_conventions::trace::URL_SCHEME;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
@@ -67,6 +66,7 @@ use crate::services::router::pipeline_handle::PIPELINE_METRIC;
 use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::synchronization::Mutex;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 

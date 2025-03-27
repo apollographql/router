@@ -7,7 +7,6 @@ use axum::body::HttpBody;
 use http::header::CONTENT_LENGTH;
 use itertools::Itertools;
 use opentelemetry::KeyValue;
-use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use tracing::Span;
@@ -38,6 +37,7 @@ use crate::services::connector::request_service::TransportResponse;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
+use crate::synchronization::Mutex;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";

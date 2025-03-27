@@ -11,7 +11,6 @@ use http::HeaderName;
 use http::HeaderValue;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
@@ -26,6 +25,7 @@ use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::transport::http::HttpRequest;
+use crate::synchronization::Mutex;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,

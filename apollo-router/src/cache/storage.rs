@@ -57,8 +57,8 @@ pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     cache_size: Arc<AtomicI64>,
     cache_estimated_storage: Arc<AtomicI64>,
     // It's OK for these to be mutexes as they are only initialized once
-    cache_size_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
-    cache_estimated_storage_gauge: Arc<parking_lot::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_size_gauge: Arc<crate::synchronization::Mutex<Option<ObservableGauge<i64>>>>,
+    cache_estimated_storage_gauge: Arc<crate::synchronization::Mutex<Option<ObservableGauge<i64>>>>,
 }
 
 impl<K, V> CacheStorage<K, V>

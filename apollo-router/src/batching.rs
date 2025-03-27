@@ -10,7 +10,6 @@ use std::sync::atomic::Ordering;
 
 use opentelemetry::Context as otelContext;
 use opentelemetry::trace::TraceContextExt;
-use parking_lot::Mutex as PMutex;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -32,6 +31,7 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::spec::QueryHash;
+use crate::synchronization::Mutex as PMutex;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart

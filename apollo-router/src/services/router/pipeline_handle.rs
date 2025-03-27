@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use parking_lot::Mutex;
-use parking_lot::MutexGuard;
+use crate::synchronization::Mutex;
+use crate::synchronization::MutexGuard;
 
 /// A pipeline is used to keep track of how many pipelines we have active. It's associated with an instance of RouterCreator
 /// The telemetry plugin has a gauge to expose this data

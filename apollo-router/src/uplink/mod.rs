@@ -507,7 +507,6 @@ mod test {
     use graphql_client::GraphQLQuery;
     use http_0_2::StatusCode;
     use insta::assert_yaml_snapshot;
-    use parking_lot::Mutex;
     use serde_json::json;
     use test_query::FetchErrorCode;
     use test_query::TestQueryUplinkQuery;
@@ -520,6 +519,7 @@ mod test {
     use wiremock::matchers::method;
     use wiremock::matchers::path;
 
+    use crate::synchronization::Mutex;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
     use crate::uplink::UplinkConfig;

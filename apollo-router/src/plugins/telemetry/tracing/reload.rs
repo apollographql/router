@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use opentelemetry::trace::SpanBuilder;
 use opentelemetry::trace::Tracer;
-use parking_lot::RwLock;
 
 use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::otel::PreSampledTracer;
+use crate::synchronization::RwLock;
 
 #[derive(Clone)]
 pub(crate) struct ReloadTracer<S> {

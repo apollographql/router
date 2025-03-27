@@ -276,8 +276,6 @@ where
 mod test {
     use std::sync::Arc;
 
-    use parking_lot::Mutex;
-
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
     use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
@@ -292,6 +290,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+    use crate::synchronization::Mutex;
 
     #[test]
     fn test_extendable_serde() {

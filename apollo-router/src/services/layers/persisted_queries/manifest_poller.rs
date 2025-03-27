@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast;
 use futures::prelude::*;
-use parking_lot::RwLock;
 use reqwest::Client;
 use tokio::fs::read_to_string;
 use tokio::sync::mpsc;
@@ -19,6 +18,7 @@ use super::manifest::FullPersistedQueryOperationId;
 use super::manifest::PersistedQueryManifest;
 use super::manifest::SignedUrlChunk;
 use crate::Configuration;
+use crate::synchronization::RwLock;
 use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;

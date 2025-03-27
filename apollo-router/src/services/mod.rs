@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-
 pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
@@ -28,6 +26,7 @@ pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 pub(crate) use crate::services::supergraph::service::SupergraphCreator;
+use crate::synchronization::Mutex;
 
 pub(crate) mod connect;
 pub(crate) mod connector;

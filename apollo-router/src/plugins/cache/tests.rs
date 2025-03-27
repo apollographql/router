@@ -10,7 +10,6 @@ use fred::prelude::RedisError;
 use fred::prelude::RedisValue;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
-use parking_lot::Mutex;
 use tower::Service;
 use tower::ServiceExt;
 
@@ -27,6 +26,7 @@ use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::synchronization::Mutex;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");

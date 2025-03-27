@@ -141,7 +141,6 @@ mod test {
     use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
     use opentelemetry_semantic_conventions::trace::URL_PATH;
     use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
-    use parking_lot::Mutex;
     use serde_json_bytes::path::JsonPathInst;
 
     use crate::Context;
@@ -169,6 +168,7 @@ mod test {
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
+    use crate::synchronization::Mutex;
 
     #[test]
     fn test_router_spans_level_none() {
