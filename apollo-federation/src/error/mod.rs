@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
@@ -512,6 +513,27 @@ impl SingleFederationError {
                 ErrorCode::QueryPlanComplexityExceededError
             }
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
+        }
+    }
+
+    pub(crate) fn already_used(
+        operation_type: OperationType,
+        expected_name: Name,
+        found_name: Name,
+    ) -> Self {
+        match operation_type {
+            OperationType::Query => Self::RootQueryUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Mutation => Self::RootMutationUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Subscription => Self::RootSubscriptionUsed {
+                expected_name,
+                found_name,
+            },
         }
     }
 }

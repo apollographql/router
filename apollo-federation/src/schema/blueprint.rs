@@ -8,6 +8,7 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::name;
 use apollo_compiler::ty;
+use std::collections::HashMap;
 
 use crate::bail;
 use crate::error::FederationError;
@@ -91,35 +92,30 @@ impl FederationBlueprint {
         todo!()
     }
 
-    fn on_validation(&self, schema: &FederationSchema) -> Result<(), FederationError> {
+    fn on_validation(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
         if self.with_root_type_renaming {
+            let mut operation_types_to_rename = HashMap::new();
             for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
                 let default_name = default_operation_name(&op_type);
-                if op_name.name != default_name && schema.get_type(default_name.clone()).is_ok() {
-                    let err = match op_type {
-                        OperationType::Query => SingleFederationError::RootQueryUsed {
-                            expected_name: default_name,
-                            found_name: op_name.name.clone(),
-                        },
-                        OperationType::Mutation => SingleFederationError::RootMutationUsed {
-                            expected_name: default_name,
-                            found_name: op_name.name.clone(),
-                        },
-                        OperationType::Subscription => {
-                            SingleFederationError::RootSubscriptionUsed {
-                                expected_name: default_name,
-                                found_name: op_name.name.clone(),
-                            }
-                        }
-                    };
-                    error_collector.push(err.into());
-
-                    // PORT_NOTE: At this point, the JS code renames the non-default operation name to the default name.
-                    // If there were errors, we'll bail anyway, but we still need to handle the case where the subgraph
-                    // uses a non-default name for the root operation type. However, we should not be modifying the
-                    // document during validation.
+                if op_name.name != default_name {
+                    operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+                    if schema.try_get_type(default_name.clone()).is_some() {
+                        error_collector.push(
+                            SingleFederationError::already_used(
+                                op_type,
+                                default_name,
+                                op_name.name.clone(),
+                            )
+                            .into(),
+                        );
+                    }
                 }
+            }
+            for (current_name, new_name) in operation_types_to_rename {
+                println!("Renaming {current_name} to {new_name}");
+                let pos = schema.get_type(current_name)?;
+                pos.rename(schema, new_name)?;
             }
         }
 
@@ -576,6 +572,92 @@ mod tests {
         );
     }
 
+    #[test]
+    fn renames_root_operations_to_default_names() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+                subscription: MySubscription
+            }
+
+            type MyQuery {
+                f: Int
+            }
+
+            type MyMutation {
+                g: Int
+            }
+
+            type MySubscription {
+                h: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
+
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Query),
+            Some(name!("Query")).as_ref()
+        );
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Mutation),
+            Some(name!("Mutation")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .schema()
+                .root_operation(OperationType::Subscription),
+            Some(name!("Subscription")).as_ref()
+        );
+    }
+
+    #[test]
+    fn does_not_rename_root_operations_when_disabled() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+                subscription: MySubscription
+            }
+    
+            type MyQuery {
+                f: Int
+            }
+    
+            type MyMutation {
+                g: Int
+            }
+    
+            type MySubscription {
+                h: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let subgraph = build_subgraph("S", &schema, false).expect("builds subgraph");
+
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Query),
+            Some(name!("MyQuery")).as_ref()
+        );
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Mutation),
+            Some(name!("MyMutation")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .schema()
+                .root_operation(OperationType::Subscription),
+            Some(name!("MySubscription")).as_ref()
+        );
+    }
+
     fn build_subgraph(
         name: &str,
         source: &Schema,
@@ -655,7 +737,7 @@ mod tests {
 
         // TODO: This should really happen inside `FederationSchema::validate_or_return_self`, but that code is running in the
         // production QP. Once we have validation tests ported over from JS, this can move to the correct location.
-        blueprint.on_validation(&federation_schema)?;
+        blueprint.on_validation(&mut federation_schema)?;
 
         Ok(federation_schema)
     }

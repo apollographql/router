@@ -242,6 +242,51 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::InputObject(type_) => type_.insert_directive(schema, directive),
         }
     }
+
+    pub(crate) fn rename(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Object(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Interface(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Union(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Enum(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::InputObject(type_) => type_.rename(schema, new_name.clone())?,
+        }
+
+        // Rename map keys inside the compiler schema
+        if let Some(existing_type) = schema.schema.types.swap_remove(self.type_name()) {
+            schema.schema.types.insert(new_name.clone(), existing_type);
+        }
+
+        // If this type is a root operation, update the schema definition
+        if let Some(query) = schema.schema.schema_definition.make_mut().query.as_mut() {
+            if query.name == *self.type_name() {
+                query.name = new_name.clone();
+            }
+        }
+        if let Some(mutation) = schema.schema.schema_definition.make_mut().mutation.as_mut() {
+            if mutation.name == *self.type_name() {
+                mutation.name = new_name.clone();
+            }
+        }
+        if let Some(subscription) = schema
+            .schema
+            .schema_definition
+            .make_mut()
+            .subscription
+            .as_mut()
+        {
+            if subscription.name == *self.type_name() {
+                subscription.name = new_name.clone();
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
@@ -1249,6 +1294,21 @@ impl ScalarTypeDefinitionPosition {
         };
         directive_referencers.scalar_types.shift_remove(self);
     }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(scalar_type_referencers) =
+            schema.referencers.scalar_types.swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .scalar_types
+                .insert(new_name, scalar_type_referencers);
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for ScalarTypeDefinitionPosition {
@@ -1701,6 +1761,21 @@ impl ObjectTypeDefinitionPosition {
         if let Some(field) = introspection_type_field.try_get(schema) {
             introspection_type_field.remove_references(field, referencers, true)?;
         }
+        Ok(())
+    }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(object_type_referencers) =
+            schema.referencers.object_types.swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .object_types
+                .insert(new_name, object_type_referencers);
+        }
+
         Ok(())
     }
 }
@@ -2712,6 +2787,23 @@ impl InterfaceTypeDefinitionPosition {
             .interface_types
             .shift_remove(self);
     }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(interface_type_referencers) = schema
+            .referencers
+            .interface_types
+            .swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .interface_types
+                .insert(new_name, interface_type_referencers);
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
@@ -3634,6 +3726,21 @@ impl UnionTypeDefinitionPosition {
         };
         object_type_referencers.union_types.shift_remove(self);
     }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(union_type_referencers) =
+            schema.referencers.union_types.swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .union_types
+                .insert(new_name, union_type_referencers);
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for UnionTypeDefinitionPosition {
@@ -3966,6 +4073,21 @@ impl EnumTypeDefinitionPosition {
             return;
         };
         directive_referencers.enum_types.shift_remove(self);
+    }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(enum_type_referencers) =
+            schema.referencers.enum_types.swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .enum_types
+                .insert(new_name, enum_type_referencers);
+        }
+
+        Ok(())
     }
 }
 
@@ -4448,6 +4570,23 @@ impl InputObjectTypeDefinitionPosition {
             return;
         };
         directive_referencers.input_object_types.shift_remove(self);
+    }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(input_object_type_referencers) = schema
+            .referencers
+            .input_object_types
+            .swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .input_object_types
+                .insert(new_name, input_object_type_referencers);
+        }
+
+        Ok(())
     }
 }
 
