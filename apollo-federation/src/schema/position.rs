@@ -7,6 +7,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -2415,6 +2416,51 @@ pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
     pub(crate) field: ObjectOrInterfaceFieldDefinitionPosition,
     pub(crate) directive_name: Name,
     pub(crate) directive_index: usize,
+}
+
+impl ObjectOrInterfaceFieldDirectivePosition {
+    // NOTE: this is used only for connectors "expansion" code and can be
+    // deleted after connectors switches to use the composition port
+    pub(crate) fn add_argument(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<Argument>,
+    ) -> Result<(), FederationError> {
+        let directive = match self.field {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(ref field) => {
+                let field = field.make_mut(&mut schema.schema)?;
+
+                field
+                    .make_mut()
+                    .directives
+                    .get_mut(self.directive_index)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Object field \"{}\"'s directive application at index {} does not exist",
+                            self.field, self.directive_index,
+                        ),
+                    })?
+            }
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(ref field) => {
+                let field = field.make_mut(&mut schema.schema)?;
+
+                field
+                    .make_mut()
+                    .directives
+                    .get_mut(self.directive_index)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Interface field \"{}\"'s directive application at index {} does not exist",
+                            self.field, self.directive_index,
+                        ),
+                    })?
+            }
+        };
+
+        directive.make_mut().arguments.push(argument);
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]

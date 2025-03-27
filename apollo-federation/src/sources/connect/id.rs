@@ -138,6 +138,7 @@ impl ConnectorPosition {
     pub(super) fn on_root_type(&self, schema: &Schema) -> bool {
         self.on_query_type(schema) || self.on_mutation_type(schema)
     }
+
     fn on_query_type(&self, schema: &Schema) -> bool {
         schema
             .schema_definition
@@ -172,6 +173,41 @@ pub(crate) enum ConnectedElement<'schema> {
     Type {
         type_def: &'schema Node<ObjectType>,
     },
+}
+
+impl ConnectedElement<'_> {
+    pub(super) fn base_type_name(&self) -> NamedType {
+        match self {
+            ConnectedElement::Field { field_def, .. } => field_def.ty.inner_named_type().clone(),
+            ConnectedElement::Type { type_def } => type_def.name.clone(),
+        }
+    }
+
+    pub(super) fn is_root_type(&self, schema: &Schema) -> bool {
+        self.is_query_type(schema) || self.is_mutation_type(schema)
+    }
+
+    fn is_query_type(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .query
+            .as_ref()
+            .is_some_and(|query| match self {
+                ConnectedElement::Field { .. } => false,
+                ConnectedElement::Type { type_def } => type_def.name == query.name,
+            })
+    }
+
+    fn is_mutation_type(&self, schema: &Schema) -> bool {
+        schema
+            .schema_definition
+            .mutation
+            .as_ref()
+            .is_some_and(|mutation| match self {
+                ConnectedElement::Field { .. } => false,
+                ConnectedElement::Type { type_def } => type_def.name == mutation.name,
+            })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

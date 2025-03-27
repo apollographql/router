@@ -7,7 +7,9 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use hashbrown::HashSet;
 use itertools::Itertools;
+use multi_try::MultiTry;
 
 use self::entity::validate_entity_arg;
 use self::selection::Selection;
@@ -18,6 +20,7 @@ use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
@@ -69,6 +72,17 @@ struct Connect<'schema> {
 }
 
 impl<'schema> Connect<'schema> {
+    /// Parse the `@connect` directive and run just enough checks to be able to use it at runtime.
+    /// More advanced checks are done in [`Self::type_check`].
+    ///
+    /// Three sub-pieces are parsed:
+    /// 1. `@connect(http:)` with [`Http::parse`]
+    /// 2. `@connect(source:)` with [`validate_source_name`]
+    /// 3. `@connect(selection:)` with [`Selection::parse`]
+    ///
+    /// `selection` and `source` are _always_ checked and their errors are returned.
+    /// The order these two run in doesn't matter.
+    /// `http` can't be validated without knowing whether a `source` was set, so it's only checked if `source` is valid.
     fn parse(
         directive: &'schema Node<Directive>,
         element: ConnectedElement<'schema>,
@@ -77,12 +91,29 @@ impl<'schema> Connect<'schema> {
     ) -> Result<Self, Vec<Message>> {
         let coordinate = ConnectDirectiveCoordinate { directive, element };
 
-        // TODO: don't return early, collect all errors
-        let selection = Selection::parse(coordinate, schema).map_err(|err| vec![err])?;
+        if element.is_root_type(schema) {
+            return Err(vec![Message {
+                code: Code::ConnectOnRoot,
+                message: format!(
+                    "Cannot use `@{connect_directive_name}` on root types like `{object_name}`",
+                    object_name = coordinate.element.base_type_name(),
+                    connect_directive_name = schema.connect_directive_name(),
+                ),
+                locations: directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
+        }
 
-        let source_name = validate_source_name(directive, &coordinate, source_names, schema)
-            .map_err(|err| vec![err])?;
-        let http = Http::parse(coordinate, source_name, schema)?;
+        let (selection, http) = Selection::parse(coordinate, schema)
+            .map_err(|err| vec![err])
+            .and_try(
+                validate_source_name(directive, &coordinate, source_names, schema)
+                    .map_err(|err| vec![err])
+                    .and_then(|source_name| Http::parse(coordinate, source_name, schema)),
+            )
+            .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
         Ok(Self {
             selection,
@@ -94,6 +125,27 @@ impl<'schema> Connect<'schema> {
 
     fn type_check(self) -> Result<Vec<ResolvedField>, Vec<Message>> {
         let mut messages = Vec::new();
+
+        let all_variables = self
+            .selection
+            .variables()
+            .chain(self.http.variables())
+            .collect::<HashSet<_>>();
+        if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
+            messages.push(Message {
+                code: Code::ConnectBatchAndThis,
+                message: format!(
+                    "In {}: connectors cannot use both $this and $batch",
+                    self.coordinate
+                ),
+                locations: self
+                    .coordinate
+                    .directive
+                    .line_column_range(&self.schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
 
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
         messages.extend(
@@ -118,6 +170,7 @@ impl<'schema> Connect<'schema> {
                 return Err(messages);
             }
         };
+
         if messages.is_empty() {
             Ok(seen)
         } else {
@@ -169,6 +222,7 @@ fn fields_seen_by_connectors_on_types(
 
     for directive in connect_directives {
         let element = ConnectedElement::Type { type_def: object };
+
         let connect = match Connect::parse(directive, element, schema, source_names) {
             Ok(connect) => connect,
             Err(errs) => {
