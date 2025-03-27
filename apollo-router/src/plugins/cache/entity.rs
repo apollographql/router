@@ -514,12 +514,17 @@ impl EntityCache {
 
     // Returns boolean to know if cache is enabled for this subgraph
     fn subgraph_enabled(&self, subgraph_name: &str) -> bool {
-        self.enabled
-            // If subgraphs.all is set but there's no override for the subgraph
-            && ((self.subgraphs.all.enabled.unwrap_or(true) // Because enabled is true by default
-                && matches!(self.subgraphs.get(subgraph_name).enabled, Some(true) | None))
-                // It overrides subgraphs.all
-                || (self.subgraphs.all.enabled == Some(false) && matches!(self.subgraphs.get(subgraph_name).enabled, Some(true))))
+        if !self.enabled {
+            return false;
+        }
+        match (
+            self.subgraphs.all.enabled,
+            self.subgraphs.get(subgraph_name).enabled,
+        ) {
+            (_, Some(x)) => x, // explicit per-subgraph setting overrides the `all` default
+            (Some(true) | None, None) => true, // unset defaults to true
+            (Some(false), None) => false,
+        }
     }
 
     // Returns the configured ttl for this subgraph
@@ -1784,7 +1789,8 @@ impl Ord for CacheKeyStatus {
 
 #[cfg(test)]
 mod tests {
-    use crate::plugins::cache::tests::{MockStore, SCHEMA};
+    use crate::plugins::cache::tests::MockStore;
+    use crate::plugins::cache::tests::SCHEMA;
 
     use super::*;
 
@@ -1794,56 +1800,39 @@ mod tests {
         let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
             .await
             .unwrap();
-        let map = [
-            (
-                "user".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: None,
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-            (
-                "orga".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: Some(true),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-            (
-                "archive".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: Some(false),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-        ]
-        .into_iter()
-        .collect();
-        let mut entity_cache =
-            EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
-                .await
-                .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
+
+        let mut entity_cache = EntityCache::with_mocks(
+            redis_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+        )
+        .await
+        .unwrap();
 
         assert!(entity_cache.subgraph_enabled("user"));
         assert!(!entity_cache.subgraph_enabled("archive"));
-        entity_cache.subgraphs = Arc::new(SubgraphConfiguration {
-            all: Subgraph {
-                enabled: Some(false),
-                ..Default::default()
+        let subgraph_config = serde_json::json!({
+            "all": {
+                "enabled": false
             },
-            subgraphs: entity_cache.subgraphs.subgraphs.clone(),
+            "subgraphs": entity_cache.subgraphs.subgraphs.clone()
         });
+        entity_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
         assert!(!entity_cache.subgraph_enabled("archive"));
-        assert!(!entity_cache.subgraph_enabled("user"));
+        assert!(entity_cache.subgraph_enabled("user"));
         assert!(entity_cache.subgraph_enabled("orga"));
     }
 
@@ -1853,44 +1842,29 @@ mod tests {
         let mut redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
             .await
             .unwrap();
-        let map = [
-            (
-                "user".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: None,
-                    ttl: Some(Ttl(Duration::from_secs(2))),
-                    ..Default::default()
-                },
-            ),
-            (
-                "orga".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: Some(true),
-                    ttl: None,
-                    ..Default::default()
-                },
-            ),
-            (
-                "archive".to_string(),
-                Subgraph {
-                    redis: None,
-                    private_id: Some("sub".to_string()),
-                    enabled: Some(false),
-                    ttl: Some(Ttl(Duration::from_millis(5000))),
-                    ..Default::default()
-                },
-            ),
-        ]
-        .into_iter()
-        .collect();
-        let mut entity_cache =
-            EntityCache::with_mocks(redis_cache.clone(), map, valid_schema.clone())
-                .await
-                .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub",
+                "ttl": "2s"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false,
+                "ttl": "5000ms"
+            }
+        });
+
+        let mut entity_cache = EntityCache::with_mocks(
+            redis_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(
             entity_cache.subgraph_ttl("user", &redis_cache),
