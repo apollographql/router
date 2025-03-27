@@ -99,6 +99,8 @@ impl From<&FieldSpecification> for FieldDefinition {
 // Type Specifications
 
 pub(crate) trait TypeAndDirectiveSpecification {
+    fn name(&self) -> &Name;
+
     // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
     // - The JS version only sets it `true` for GraphQL built-in types and directives.
     fn check_or_add(
@@ -125,6 +127,10 @@ pub(crate) struct ScalarTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -158,6 +164,10 @@ pub(crate) struct ObjectTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -217,6 +227,10 @@ impl<F> TypeAndDirectiveSpecification for UnionTypeSpecification<F>
 where
     F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
 {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -291,6 +305,10 @@ pub(crate) struct EnumTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for EnumTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -508,6 +526,10 @@ fn directive_argument_merger(
 }
 
 impl TypeAndDirectiveSpecification for DirectiveSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
