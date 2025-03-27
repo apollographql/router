@@ -168,7 +168,7 @@ impl Plan {
                 }
             }
             Plan::Parallel(mut matchers) => {
-                // These can be received in any order, so we need to make sure _one_ of the sub-plans
+                // These can be received in any order, so we need to make sure _one_ of the matchers
                 // matches each request.
                 'requests: for (request_index, request) in received.iter().enumerate() {
                     for (matcher_index, matcher) in matchers.iter().enumerate() {
