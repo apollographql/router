@@ -168,7 +168,7 @@ mod test {
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     #[test]
     fn test_router_spans_level_none() {

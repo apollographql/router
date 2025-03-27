@@ -31,7 +31,7 @@ use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::services::subgraph::SubgraphRequestId;
 use crate::spec::QueryHash;
-use crate::synchronization::Mutex as PMutex;
+use crate::sync::Mutex as PMutex;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart

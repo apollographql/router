@@ -302,8 +302,8 @@ mod tests {
     use crate::services::router::body;
     use crate::services::subgraph;
     use crate::services::supergraph;
-    use crate::synchronization::Mutex;
-    use crate::synchronization::MutexGuard;
+    use crate::sync::Mutex;
+    use crate::sync::MutexGuard;
 
     const EVENT_CONFIGURATION: &str = r#"
 router:

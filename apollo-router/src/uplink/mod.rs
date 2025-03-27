@@ -519,7 +519,7 @@ mod test {
     use wiremock::matchers::method;
     use wiremock::matchers::path;
 
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
     use crate::uplink::UplinkConfig;

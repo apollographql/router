@@ -25,7 +25,7 @@ use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::transport::http::HttpRequest;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,

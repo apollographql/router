@@ -27,7 +27,7 @@ use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::UpDownCounter;
 
 use crate::metrics::filter::FilterMeterProvider;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 // This meter provider enables us to combine multiple meter providers. The reasons we need this are:
 // 1. Prometheus meters are special. To dispose a meter is to dispose the entire registry. This means we need to make a best effort to keep them around.

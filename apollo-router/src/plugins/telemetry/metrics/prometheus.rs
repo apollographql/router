@@ -24,7 +24,7 @@ use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

@@ -25,7 +25,7 @@ use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
 use super::reload::SampledSpan;
 use crate::plugins::telemetry::otel::OtelData;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) const APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 // FIXME: this is a temporary solution to avoid exposing hardcoded attributes in connector spans instead of using the custom telemetry features.

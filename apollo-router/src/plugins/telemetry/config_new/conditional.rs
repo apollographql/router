@@ -23,7 +23,7 @@ use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 /// The state of the conditional.
 #[derive(Debug, Default)]

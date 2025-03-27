@@ -44,7 +44,7 @@ use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::router;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) mod transport;
 

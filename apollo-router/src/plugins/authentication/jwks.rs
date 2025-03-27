@@ -41,7 +41,7 @@ use super::Header;
 use super::Source;
 use crate::Context;
 use crate::plugins::authentication::error::AuthenticationError;
-use crate::synchronization::RwLock;
+use crate::sync::RwLock;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {

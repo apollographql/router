@@ -18,7 +18,7 @@ use super::manifest::FullPersistedQueryOperationId;
 use super::manifest::PersistedQueryManifest;
 use super::manifest::SignedUrlChunk;
 use crate::Configuration;
-use crate::synchronization::RwLock;
+use crate::sync::RwLock;
 use crate::uplink::UplinkConfig;
 use crate::uplink::persisted_queries_manifest_stream::MaybePersistedQueriesManifestChunks;
 use crate::uplink::persisted_queries_manifest_stream::PersistedQueriesManifestChunk;

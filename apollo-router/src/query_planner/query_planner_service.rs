@@ -53,7 +53,7 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::spec::operation_limits::OperationLimits;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";

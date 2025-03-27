@@ -1,4 +1,4 @@
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 use std::sync::Arc;
 
 /// You can use `Extensions` to pass data between plugins that is not serializable. Such data is not accessible from Rhai or co-processoers.

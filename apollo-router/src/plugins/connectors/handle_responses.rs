@@ -37,7 +37,7 @@ use crate::services::connector::request_service::TransportResponse;
 use crate::services::connector::request_service::transport::http::HttpResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::router;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";

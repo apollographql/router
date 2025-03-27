@@ -26,7 +26,7 @@ use crate::plugin::PluginPrivate;
 use crate::services::http::HttpRequest;
 use crate::services::http::HttpResponse;
 use crate::services::router;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const COMPUTE_DETECTOR_THRESHOLD: u16 = 24576;

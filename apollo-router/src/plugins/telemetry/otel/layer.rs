@@ -1128,7 +1128,7 @@ mod tests {
     use super::*;
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);

@@ -36,7 +36,7 @@ use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
 

@@ -28,7 +28,7 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
     Key::from_static_str("apollo_private.cost.estimated");

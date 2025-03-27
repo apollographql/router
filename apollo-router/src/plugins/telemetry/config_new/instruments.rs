@@ -66,7 +66,7 @@ use crate::services::router::pipeline_handle::PIPELINE_METRIC;
 use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 

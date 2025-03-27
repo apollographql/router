@@ -6,7 +6,7 @@ use futures::prelude::*;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 #[derive(Default)]
 struct ReloadSourceInner {

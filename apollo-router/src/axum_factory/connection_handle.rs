@@ -4,8 +4,8 @@ use std::sync::OnceLock;
 
 use crate::ListenAddr;
 use crate::services::router::pipeline_handle::PipelineRef;
-use crate::synchronization::Mutex;
-use crate::synchronization::MutexGuard;
+use crate::sync::Mutex;
+use crate::sync::MutexGuard;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ConnectionState {

@@ -19,7 +19,7 @@ use super::entity::hash_vary_headers;
 use crate::layers::ServiceBuilderExt;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
     "apollo::router::entity_cache_info_subgraph";

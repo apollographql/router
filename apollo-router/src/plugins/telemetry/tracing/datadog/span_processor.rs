@@ -67,7 +67,7 @@ mod tests {
     use opentelemetry_sdk::trace::SpanProcessor;
 
     use super::*;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     #[derive(Debug, Clone)]
     struct MockSpanProcessor {

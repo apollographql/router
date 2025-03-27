@@ -290,7 +290,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     #[test]
     fn test_extendable_serde() {

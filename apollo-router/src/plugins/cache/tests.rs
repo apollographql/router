@@ -26,7 +26,7 @@ use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");

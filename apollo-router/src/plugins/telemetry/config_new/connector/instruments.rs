@@ -31,7 +31,7 @@ use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 use crate::plugins::telemetry::config_new::instruments::StaticInstrument;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]

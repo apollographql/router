@@ -28,7 +28,7 @@ use tower::ServiceExt;
 use crate::services::SubgraphRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::synchronization::RwLock;
+use crate::sync::RwLock;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.

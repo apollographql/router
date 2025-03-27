@@ -33,7 +33,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::rhai::engine::OptionDance;
 use crate::register_plugin;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 mod engine;
 

@@ -91,7 +91,7 @@ mod test {
 
     use super::TraceId;
     use crate::plugins::telemetry::otel;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     // If we try to run more than one test concurrently which relies on the existence of a pipeline,
     // then the tests will fail due to manipulation of global state in the opentelemetry crates.

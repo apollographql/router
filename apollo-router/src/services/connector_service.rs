@@ -30,7 +30,7 @@ use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::services::connector::request_service::ConnectorRequestServiceFactory;
 use crate::spec::Schema;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
 pub(crate) const APOLLO_CONNECTOR_DETAIL: Key = Key::from_static_str("apollo.connector.detail");

@@ -12,7 +12,7 @@ use serde_json::Value;
 
 use crate::Configuration;
 use crate::metrics::meter_provider;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 use crate::uplink::license_enforcement::LicenseState;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;

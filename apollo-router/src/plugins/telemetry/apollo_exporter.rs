@@ -30,7 +30,7 @@ use super::apollo::Report;
 use super::apollo::SingleReport;
 use super::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";

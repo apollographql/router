@@ -142,8 +142,8 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::operation_limits::OperationLimits;
-use crate::synchronization::Mutex;
-use crate::synchronization::RwLock;
+use crate::sync::Mutex;
+use crate::sync::RwLock;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;

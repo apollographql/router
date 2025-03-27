@@ -43,7 +43,7 @@ use crate::services::connector::request_service::Response;
 use crate::services::http::service::Compression;
 use crate::services::router;
 use crate::services::subgraph;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";

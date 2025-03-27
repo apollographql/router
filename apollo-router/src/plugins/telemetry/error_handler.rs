@@ -120,7 +120,7 @@ mod tests {
 
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::error_handler::handle_error_with_map;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     #[tokio::test]
     async fn test_handle_error_throttling() {

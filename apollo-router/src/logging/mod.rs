@@ -41,7 +41,7 @@ pub(crate) mod test {
     use tracing_subscriber::layer::SubscriberExt;
 
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
 
     pub(crate) struct SnapshotSubscriber {
         buffer: Arc<Mutex<Vec<u8>>>,

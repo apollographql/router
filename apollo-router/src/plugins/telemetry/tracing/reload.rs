@@ -6,7 +6,7 @@ use opentelemetry::trace::Tracer;
 
 use crate::plugins::telemetry::otel::OtelData;
 use crate::plugins::telemetry::otel::PreSampledTracer;
-use crate::synchronization::RwLock;
+use crate::sync::RwLock;
 
 #[derive(Clone)]
 pub(crate) struct ReloadTracer<S> {

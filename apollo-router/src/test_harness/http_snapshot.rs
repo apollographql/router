@@ -92,7 +92,7 @@ use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 /// Headers that will not be passed on to the upstream API
 static FILTERED_HEADERS: [HeaderName; 6] = [

@@ -43,7 +43,7 @@ use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 #[derive(Default, Clone)]
 pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);

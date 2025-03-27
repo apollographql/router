@@ -23,7 +23,7 @@ use crate::register_plugin;
 use crate::services::connector_service::ConnectorSourceRef;
 use crate::services::execution;
 use crate::services::supergraph;
-use crate::synchronization::Mutex;
+use crate::sync::Mutex;
 
 const CONNECTORS_DEBUG_HEADER_NAME: &str = "Apollo-Connectors-Debugging";
 const CONNECTORS_DEBUG_ENV: &str = "APOLLO_CONNECTORS_DEBUGGING";

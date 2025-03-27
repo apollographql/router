@@ -654,7 +654,7 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
     use crate::services::router::pipeline_handle::PipelineRef;
-    use crate::synchronization::Mutex;
+    use crate::sync::Mutex;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
