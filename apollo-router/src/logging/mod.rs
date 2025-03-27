@@ -34,6 +34,7 @@ macro_rules! assert_snapshot_subscriber {
 #[cfg(test)]
 pub(crate) mod test {
     use std::sync::Arc;
+    use std::sync::Mutex;
 
     use serde_json::Value;
     use tracing_core::LevelFilter;
@@ -41,7 +42,6 @@ pub(crate) mod test {
     use tracing_subscriber::layer::SubscriberExt;
 
     use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
-    use crate::sync::Mutex;
 
     pub(crate) struct SnapshotSubscriber {
         buffer: Arc<Mutex<Vec<u8>>>,

@@ -7,8 +7,9 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use crate::sync::Mutex;
 use apollo_federation::sources::connect::ConnectId;
+
+use crate::sync::Mutex;
 
 /// Key to access request limits for a connector
 #[derive(Eq, Hash, PartialEq)]
