@@ -19,6 +19,7 @@ use super::coordinates::source_name_value_coordinate;
 use super::source::SourceName;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::validation::connect::http::Http;
 use crate::sources::connect::validation::graphql::SchemaInfo;
@@ -40,22 +41,12 @@ pub(super) fn fields_seen_by_all_connects(
         .filter(|ty| !ty.is_built_in())
         .for_each(|extended_type| {
             if let ExtendedType::Object(node) = extended_type {
-                match fields_seen_by_connectors_on_types(
-                    extended_type,
-                    node,
-                    schema,
-                    all_source_names,
-                ) {
+                match fields_seen_by_connectors_on_types(node, schema, all_source_names) {
                     Ok(fields) => seen_fields.extend(fields),
                     Err(errs) => messages.extend(errs),
                 }
 
-                match fields_seen_by_connectors_on_fields(
-                    extended_type,
-                    node,
-                    schema,
-                    all_source_names,
-                ) {
+                match fields_seen_by_connectors_on_fields(node, schema, all_source_names) {
                     Ok(fields) => seen_fields.extend(fields),
                     Err(errs) => messages.extend(errs),
                 }
@@ -69,16 +60,80 @@ pub(super) fn fields_seen_by_all_connects(
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ObjectCategory {
-    Query,
-    Mutation,
-    Other,
+/// A parsed `@connect` directive
+struct Connect<'schema> {
+    selection: Selection<'schema>,
+    http: Http<'schema>,
+    coordinate: ConnectDirectiveCoordinate<'schema>,
+    schema: &'schema SchemaInfo<'schema>,
+}
+
+impl<'schema> Connect<'schema> {
+    fn parse(
+        directive: &'schema Node<Directive>,
+        element: ConnectedElement<'schema>,
+        schema: &'schema SchemaInfo,
+        source_names: &'schema [SourceName],
+    ) -> Result<Self, Vec<Message>> {
+        let coordinate = ConnectDirectiveCoordinate { directive, element };
+
+        // TODO: don't return early, collect all errors
+        let selection = Selection::parse(coordinate, schema).map_err(|err| vec![err])?;
+
+        let source_name = validate_source_name(directive, &coordinate, source_names, schema)
+            .map_err(|err| vec![err])?;
+        let http = Http::parse(coordinate, source_name, schema)?;
+
+        Ok(Self {
+            selection,
+            http,
+            coordinate,
+            schema,
+        })
+    }
+
+    fn type_check(self) -> Result<Vec<ResolvedField>, Vec<Message>> {
+        let mut messages = Vec::new();
+
+        messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
+        messages.extend(
+            self.http
+                .type_check(self.schema)
+                .err()
+                .into_iter()
+                .flatten(),
+        );
+
+        let seen = match self.selection.type_check(self.schema) {
+            // TODO: use ResolvedField struct at all levels
+            Ok(seen) => seen
+                .into_iter()
+                .map(|(object_name, field_name)| ResolvedField {
+                    object_name,
+                    field_name,
+                })
+                .collect(),
+            Err(message) => {
+                messages.push(message);
+                return Err(messages);
+            }
+        };
+        if messages.is_empty() {
+            Ok(seen)
+        } else {
+            Err(messages)
+        }
+    }
+}
+
+/// A field that is resolved by a connect directive
+pub(super) struct ResolvedField {
+    pub object_name: Name,
+    pub field_name: Name,
 }
 
 /// Make sure that any `@connect` directives on types are valid
 fn fields_seen_by_connectors_on_types(
-    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
@@ -112,46 +167,24 @@ fn fields_seen_by_connectors_on_types(
     let mut messages = Vec::new();
     let mut seen_fields = Vec::new();
 
-    for connect_directive in connect_directives {
-        let coordinate = ConnectDirectiveCoordinate {
-            directive: connect_directive,
-            element: ConnectedElement::Type {
-                type_def: extended_type,
-            },
-        };
-
-        let selection = match Selection::parse(coordinate, schema) {
-            Ok(selection) => selection,
-            Err(err) => {
-                messages.push(err);
-                continue;
-            }
-        };
-        match selection.type_check(schema) {
-            Ok(seen) => seen_fields.extend(seen),
-            Err(error) => messages.push(error),
-        }
-
-        // TODO: validate batch/this arguments as key fields
-
-        let source_name =
-            match validate_source_name(connect_directive, &coordinate, source_names, schema) {
-                Ok(source_name) => source_name,
-                Err(err) => {
-                    messages.push(err);
-                    continue;
-                }
-            };
-
-        // TODO: Do all parsing in one stage, then all type checking in a later stage
-        let http = match Http::parse(coordinate, source_name, schema) {
-            Ok(http) => http,
+    for directive in connect_directives {
+        let element = ConnectedElement::Type { type_def: object };
+        let connect = match Connect::parse(directive, element, schema, source_names) {
+            Ok(connect) => connect,
             Err(errs) => {
                 messages.extend(errs);
                 continue;
             }
         };
-        messages.extend(http.type_check(schema).err().into_iter().flatten());
+
+        match connect.type_check() {
+            Ok(resolved) => seen_fields.extend(
+                resolved
+                    .into_iter()
+                    .map(|resolved| (resolved.object_name, resolved.field_name)),
+            ),
+            Err(errs) => messages.extend(errs),
+        }
     }
 
     if messages.is_empty() {
@@ -163,7 +196,6 @@ fn fields_seen_by_connectors_on_types(
 
 /// Make sure that any `@connect` directives on object fields are valid
 fn fields_seen_by_connectors_on_fields(
-    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
@@ -188,14 +220,7 @@ fn fields_seen_by_connectors_on_fields(
     let mut seen_fields = Vec::new();
     let mut messages = Vec::new();
     for field in object.fields.values() {
-        match fields_seen_by_connector(
-            field,
-            object_category,
-            source_names,
-            extended_type,
-            object,
-            schema,
-        ) {
+        match fields_seen_by_connector(field, object_category, source_names, object, schema) {
             Ok(fields) => seen_fields.extend(fields),
             Err(errs) => messages.extend(errs),
         }
@@ -211,12 +236,11 @@ fn fields_seen_by_connector(
     field: &Component<FieldDefinition>,
     category: ObjectCategory,
     source_names: &[SourceName],
-    extended_type: &ExtendedType,
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let source_map = &schema.sources;
-    let mut errors = Vec::new();
+    let mut messages = Vec::new();
     let connect_directives = field
         .directives
         .iter()
@@ -231,8 +255,8 @@ fn fields_seen_by_connector(
     let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
 
     // direct recursion isn't allowed, like a connector on User.friends: [User]
-    if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
-        errors.push(Message {
+    if &object.name == field.ty.inner_named_type() {
+        messages.push(Message {
             code: Code::CircularReference,
             message: format!(
                 "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
@@ -244,58 +268,37 @@ fn fields_seen_by_connector(
         });
     }
 
-    for connect_directive in connect_directives {
-        let coordinate = ConnectDirectiveCoordinate {
-            directive: connect_directive,
-            element: ConnectedElement::Field {
-                parent_type: extended_type,
-                field_def: field,
-            },
+    for directive in connect_directives {
+        let element = ConnectedElement::Field {
+            parent_type: object,
+            parent_category: category,
+            field_def: field,
         };
-
-        let selection = match Selection::parse(coordinate, schema) {
-            Ok(selection) => selection,
-            Err(err) => {
-                errors.push(err);
-                continue;
-            }
-        };
-        match selection.type_check(schema) {
-            Ok(seen) => seen_fields.extend(seen),
-            Err(error) => errors.push(error),
-        }
-
-        errors
-            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
-
-        let source_name =
-            match validate_source_name(connect_directive, &coordinate, source_names, schema) {
-                Ok(source_name) => source_name,
-                Err(err) => {
-                    errors.push(err);
-                    continue;
-                }
-            };
-
-        // TODO: Do all parsing in one stage, then all type checking in a later stage
-        let http = match Http::parse(coordinate, source_name, schema) {
-            Ok(http) => http,
+        let connect = match Connect::parse(directive, element, schema, source_names) {
+            Ok(connect) => connect,
             Err(errs) => {
-                errors.extend(errs);
+                messages.extend(errs);
                 continue;
             }
         };
-        errors.extend(http.type_check(schema).err().into_iter().flatten());
+        match connect.type_check() {
+            Ok(resolved) => seen_fields.extend(
+                resolved
+                    .into_iter()
+                    .map(|resolved| (resolved.object_name, resolved.field_name)),
+            ),
+            Err(errs) => messages.extend(errs),
+        }
     }
 
-    if errors.is_empty() {
+    if messages.is_empty() {
         Ok(seen_fields)
     } else {
-        Err(errors)
+        Err(messages)
     }
 }
 
-pub(super) fn validate_source_name<'schema>(
+fn validate_source_name<'schema>(
     directive: &Node<Directive>,
     coordinate: &ConnectDirectiveCoordinate,
     source_names: &'schema [SourceName],

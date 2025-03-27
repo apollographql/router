@@ -118,22 +118,8 @@ impl<'schema> Selection<'schema> {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
+                ..
             } => {
-                let parent_type = match parent_type {
-                    ExtendedType::Object(node) => node,
-                    _ => {
-                        return Err(Message {
-                            code: Code::GraphQLError,
-                            message: format!("{coordinate} is valid only on object types"),
-                            locations: coordinate
-                                .directive
-                                .line_column_range(&schema.sources)
-                                .into_iter()
-                                .collect(),
-                        });
-                    }
-                };
-
                 let Some(return_type) = schema.get_object(field_def.ty.inner_named_type()) else {
                     // TODO: Validate scalar return types
                     return Ok(Vec::new());
@@ -159,21 +145,6 @@ impl<'schema> Selection<'schema> {
                 .map(|validator| validator.seen_fields)
             }
             ConnectedElement::Type { type_def } => {
-                let base_type = match type_def {
-                    ExtendedType::Object(node) => node,
-                    _ => {
-                        return Err(Message {
-                            code: Code::GraphQLError,
-                            message: format!("{coordinate} is valid only on object types"),
-                            locations: coordinate
-                                .directive
-                                .line_column_range(&schema.sources)
-                                .into_iter()
-                                .collect(),
-                        });
-                    }
-                };
-
                 let Some(sub_selection) = self.parsed.next_subselection() else {
                     // TODO: Validate scalar selections
                     return Ok(Vec::new());
@@ -181,13 +152,13 @@ impl<'schema> Selection<'schema> {
 
                 let group = Group {
                     selection: sub_selection,
-                    ty: base_type,
+                    ty: type_def,
                     definition: None,
                 };
 
                 SelectionValidator::new(
                     schema,
-                    PathPart::Root(base_type),
+                    PathPart::Root(type_def),
                     self.string,
                     self.coordinate,
                 )

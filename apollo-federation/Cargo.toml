@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "2.0.0"
+version = "2.1.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2024"
 description = "Apollo Federation"
@@ -17,6 +17,7 @@ autotests = false                                      # Integration tests are m
 snapshot_tracing = ["ron"]
 # `correctness` feature enables the `correctness` module.
 correctness = []
+"connect_v0.2" = []
 
 [dependencies]
 apollo-compiler.workspace = true

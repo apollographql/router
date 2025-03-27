@@ -262,6 +262,8 @@ pub enum Code {
     UnknownConnectorsVersion,
     /// Feature unavailable
     FeatureUnavailable,
+    /// When `@connect` is applied to a type, `entity` can't be set to `false`
+    ConnectOnTypeMustBeEntity,
 }
 
 impl Code {
