@@ -6,6 +6,7 @@ use std::str::FromStr;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use multi_try::MultiTry;
 use shape::Shape;
 
 use crate::sources::connect::HTTPMethod;
@@ -41,6 +42,16 @@ pub(super) struct Http<'schema> {
 }
 
 impl<'schema> Http<'schema> {
+    /// Parse the `@connect(http:)` argument and run just enough checks to be able to use the
+    /// argument at runtime. More advanced checks are done in [`Self::type_check`].
+    ///
+    /// Three sub-pieces are always parsed, and the errors from _all_ of those pieces are returned
+    /// together in the event of failure:
+    /// 1. `http.body` with [`Body::parse`]
+    /// 2. `http.headers` with [`Headers::parse`]
+    /// 3. `http.<METHOD>` (for example, `http.GET`) with [`Transport::parse`]
+    ///
+    /// The order these pieces run in doesn't matter and shouldn't affect the output.
     pub(super) fn parse(
         coordinate: ConnectDirectiveCoordinate<'schema>,
         source_name: Option<&'schema SourceName>,
@@ -62,31 +73,37 @@ impl<'schema> Http<'schema> {
             }]);
         };
 
-        let body = Body::parse(http_arg, coordinate, schema).map_err(|err| vec![err])?;
-        let headers = Headers::parse(
-            http_arg,
-            HttpHeadersCoordinate::Connect {
-                connect: coordinate,
-            },
-            schema,
-        )?;
-        let transport = Transport::parse(
-            http_arg,
-            ConnectHTTPCoordinate::from(coordinate),
-            http_arg_node,
-            source_name,
-            schema,
-        )
-        .map_err(|err| vec![err])?;
-
-        Ok(Self {
-            transport,
-            body,
-            headers,
-        })
+        Body::parse(http_arg, coordinate, schema)
+            .map_err(|err| vec![err])
+            .and_try(Headers::parse(
+                http_arg,
+                HttpHeadersCoordinate::Connect {
+                    connect: coordinate,
+                },
+                schema,
+            ))
+            .and_try(
+                Transport::parse(
+                    http_arg,
+                    ConnectHTTPCoordinate::from(coordinate),
+                    http_arg_node,
+                    source_name,
+                    schema,
+                )
+                .map_err(|err| vec![err]),
+            )
+            .map_err(|nested| nested.into_iter().flatten().collect())
+            .map(|(body, headers, transport)| Self {
+                body,
+                headers,
+                transport,
+            })
     }
 
     /// Type-check the `@connect(http:)` directive.
+    ///
+    /// Does things like ensuring that every accessed variable actually exists and that expressions
+    /// used in the URL and headers result in scalars.
     ///
     /// TODO: Return some type checking results, like extracted keys?
     pub(super) fn type_check(self, schema: &SchemaInfo) -> Result<(), Vec<Message>> {
