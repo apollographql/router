@@ -193,12 +193,27 @@ pub enum SingleFederationError {
     RequiresInvalidFields { message: String },
     #[error("{message}")]
     KeyFieldsSelectInvalidType { message: String },
-    #[error("{message}")]
-    RootQueryUsed { message: String },
-    #[error("{message}")]
-    RootMutationUsed { message: String },
-    #[error("{message}")]
-    RootSubscriptionUsed { message: String },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootQueryUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the mutation root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootMutationUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the subscription root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootSubscriptionUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
     #[error("{message}")]
     InvalidSubgraphName { message: String },
     #[error("{message}")]
