@@ -13,6 +13,43 @@
 //! ## Compatibility
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
 //! API-stable, we may update it in a minor version, which may require code changes to plugins.
+//!
+//!
+//! # Examples
+//! ```ignore
+//! // Count a thing:
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1
+//! );
+//! // Count a thing with attributes:
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1,
+//!     frobbles.color = "blue"
+//! );
+//! // Count a thing with dynamic attributes:
+//! let attributes = vec![];
+//! if (frobbled) {
+//!     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
+//! }
+//! u64_counter!(
+//!     "apollo.router.operations.frobbles",
+//!     "The amount of frobbles we've operated on",
+//!     1,
+//!     attributes
+//! );
+//! // Measure a thing with units:
+//! f64_histogram_with_unit!(
+//!     "apollo.router.operation.frobbles.time",
+//!     "Duration to operate on frobbles",
+//!     "s",
+//!     1.0,
+//!     frobbles.color = "red"
+//! );
+//! ```
 
 #[cfg(test)]
 use std::future::Future;
@@ -549,36 +586,10 @@ macro_rules! parse_attributes {
 }
 
 /// Get or create a `u64` monotonic counter metric and add a value to it.
+/// The metric must include a description.
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
-///
-/// # Examples
-/// ```ignore
-/// // Count a thing:
-/// u64_counter!(
-///     "apollo.router.operations.frobbles",
-///     "The amount of frobbles we've operated on",
-///     1
-/// );
-/// // Count a thing with attributes:
-/// u64_counter!(
-///     "apollo.router.operations.frobbles",
-///     "The amount of frobbles we've operated on",
-///     1,
-///     frobbles.color = "blue"
-/// );
-/// // Count a thing with dynamic attributes:
-/// let attributes = vec![];
-/// if (frobbled) {
-///     attributes.push(opentelemetry::KeyValue::new("frobbles.color".to_string(), "blue".into()));
-/// }
-/// u64_counter!(
-///     "apollo.router.operations.frobbles",
-///     "The amount of frobbles we've operated on",
-///     1,
-///     attributes
-/// );
-/// ```
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
 macro_rules! u64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -594,9 +605,33 @@ macro_rules! u64_counter {
     }
 }
 
-/// Get or create a f64 monotonic counter metric and add a value to it.
+/// Get or create a u64 monotonic counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+macro_rules! u64_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(u64, counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create a f64 monotonic counter metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
 macro_rules! f64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -612,9 +647,33 @@ macro_rules! f64_counter {
     }
 }
 
-/// Get or create an i64 up down counter metric and add a value to it.
+/// Get or create an f64 monotonic counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+macro_rules! f64_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(f64, counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create an i64 up down counter metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -630,9 +689,33 @@ macro_rules! i64_up_down_counter {
     };
 }
 
-/// Get or create an f64 up down counter metric and add a value to it.
+/// Get or create an i64 up down counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+macro_rules! i64_up_down_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(i64, up_down_counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(i64, up_down_counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create an f64 up down counter metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -648,9 +731,33 @@ macro_rules! f64_up_down_counter {
     };
 }
 
-/// Get or create an f64 histogram metric and add a value to it.
+/// Get or create an f64 up down counter metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+macro_rules! f64_up_down_counter_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(f64, up_down_counter, add, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(f64, up_down_counter, add, $name, $description, $unit, $value, []);
+    }
+}
+
+/// Get or create an f64 histogram metric and add a value to it.
+/// The metric must include a description.
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
 macro_rules! f64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -666,24 +773,18 @@ macro_rules! f64_histogram {
     };
 }
 
-/// Get or create an f64 histogram metric and add a value to it. The metric must contain
-/// both a description and a unit.
+/// Get or create an f64 histogram metric and add a value to it.
+/// The metric must include a description and a unit.
 ///
 /// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
-///
-/// ## Examples
-///
-/// ```ignore
-/// f64_histogram_with_unit!("metric.duration", "Duration for test to run", "s", 1.0, test.name = "hello_world");
-/// f64_histogram_with_unit!("errors", "Errors observed by function", "{error}", 1.0, "fn_name" = "example");
-/// ```
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 ///
 /// ## Caveat
 ///
-/// Two metrics with the same name but different descriptions and/or units _will_ be created as
-/// separate metrics.
+/// Two metrics with the same name but different descriptions and/or units will be created as
+/// _separate_ metrics.
 ///
 /// ```ignore
 /// f64_histogram_with_unit!("test", "test description", "s", 1.0, "attr" = "val");
@@ -707,9 +808,11 @@ macro_rules! f64_histogram_with_unit {
     };
 }
 
-/// Get or create an u64 histogram metric and add a value to it.
+/// Get or create a u64 histogram metric and add a value to it.
+/// The metric must include a description.
 ///
-/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
 #[allow(unused_macros)]
 macro_rules! u64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -722,6 +825,28 @@ macro_rules! u64_histogram {
 
     ($name:literal, $description:literal, $value: expr) => {
         metric!(u64, histogram, record, $name, $description, $value, []);
+    };
+}
+
+/// Get or create a u64 histogram metric and add a value to it.
+/// The metric must include a description and a unit.
+///
+/// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
+/// behind this API.
+#[allow(unused_macros)]
+macro_rules! u64_histogram_with_unit {
+    ($($name:ident).+, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, stringify!($($name).+), $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr, $($attrs:tt)*) => {
+        metric!(u64, histogram, record, $name, $description, $unit, $value, parse_attributes!($($attrs)*));
+    };
+
+    ($name:literal, $description:literal, $unit:literal, $value: expr) => {
+        metric!(u64, histogram, record, $name, $description, $unit, $value, []);
     };
 }
 
