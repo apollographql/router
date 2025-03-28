@@ -24,6 +24,7 @@ use tracing_core::span::Record;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::registry::SpanRef;
 
 use super::OtelData;
 use super::PreSampledTracer;
@@ -705,6 +706,21 @@ where
         // - there's no parent span (it's the root), so we make the sampling decision
         true
     }
+
+    /// Check whether this span should be sampled by looking at `SampledSpan` in the span's
+    /// extensions.
+    ///
+    /// # Panics
+    ///
+    /// This function takes (and then drops) a read lock on `Extensions`. Be careful with using it,
+    /// since if you're already holding a write lock on `Extensions` the code can deadlock.
+    fn sampled(span: &SpanRef<S>) -> bool {
+        let extensions = span.extensions();
+        extensions
+            .get::<SampledSpan>()
+            .map(|s| matches!(s, SampledSpan::Sampled(_, _)))
+            .unwrap_or(false)
+    }
 }
 
 impl<S, T> Layer<S> for OpenTelemetryLayer<S, T>
@@ -809,16 +825,11 @@ where
         }
 
         if let Some(span) = ctx.span(id) {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
 
+            let mut extensions = span.extensions_mut();
             if let Some(timings) = extensions.get_mut::<Timings>() {
                 let now = Instant::now();
                 timings.idle += (now - timings.last).as_nanos() as i64;
@@ -835,16 +846,11 @@ where
         }
 
         if let Some(span) = ctx.span(id) {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
 
+            let mut extensions = span.extensions_mut();
             if let Some(timings) = extensions.get_mut::<Timings>() {
                 let now = Instant::now();
                 timings.busy += (now - timings.last).as_nanos() as i64;
@@ -860,16 +866,11 @@ where
     /// [`attributes`]: opentelemetry::trace::SpanBuilder::attributes
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
 
+            let mut extensions = span.extensions_mut();
             if let Some(data) = extensions.get_mut::<OtelData>() {
                 values.record(&mut SpanAttributeVisitor {
                     span_builder: &mut data.builder,
@@ -883,16 +884,12 @@ where
 
     fn on_follows_from(&self, id: &Id, follows: &Id, ctx: Context<S>) {
         if let (Some(span), Some(follows_span)) = (ctx.span(id), ctx.span(follows)) {
-            if span
-                .extensions()
-                .get::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
 
+            // NB: inside block so that `follows_span.extensions_mut()` will be dropped before
+            // `span.extensions_mut()` is called later.
             let follows_link = {
                 let mut follows_extensions = follows_span.extensions_mut();
                 let follows_data = follows_extensions
@@ -934,15 +931,10 @@ where
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         // Ignore events that are not in the context of a span
         if let Some(span) = ctx.lookup_current() {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
+
             // Performing read operations before getting a write lock to avoid a deadlock
             // See https://github.com/tokio-rs/tracing/issues/763
             let meta = event.metadata();
@@ -950,6 +942,7 @@ where
 
             let target = target.string(meta.target());
 
+            let mut extensions = span.extensions_mut();
             let mut otel_data = extensions.get_mut::<OtelData>();
             let span_builder = otel_data.as_mut().map(|o| &mut o.builder);
 
@@ -979,6 +972,10 @@ where
                     )
                 }
             }
+
+            // explicit drop for otel_data - probably not necessary, but since it's accessed again
+            // below it seems like it's better to be safe
+            drop(otel_data);
 
             if let Some(OtelData { builder, .. }) = extensions.get_mut::<OtelData>() {
                 if builder.status == otel::Status::Unset
@@ -1024,16 +1021,11 @@ where
     /// [`Span`]: opentelemetry::trace::Span
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(&id) {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
-                .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-                .unwrap_or(true)
-            {
-                // It's not sampled
+            if !Self::sampled(&span) {
                 return;
             }
 
+            let mut extensions = span.extensions_mut();
             if let Some(OtelData {
                 mut builder,
                 parent_cx,
