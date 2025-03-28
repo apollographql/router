@@ -1,12 +1,12 @@
 use apollo_compiler::collections::IndexSet;
-use nom::character::complete::multispace0;
 use nom::Slice;
+use nom::character::complete::multispace0;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
 
+use super::ParseResult;
 use super::location::Span;
 use super::location::WithRange;
-use super::ParseResult;
 
 // This macro is handy for tests, but it absolutely should never be used with
 // dynamic input at runtime, since it panics if the selection string fails to

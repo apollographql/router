@@ -184,13 +184,12 @@ traffic_shaping:
 
 ### Ordering
 
-Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour. Declaration order in the configuration will not affect the runtime order:
+Traffic shaping always executes these steps in the same order, to ensure a consistent behavior. Declaration order in the configuration will not affect the runtime order:
 
 - preparing the subgraph request
 - variable deduplication
 - query deduplication
 - timeout
-- request retry
 - rate limiting
 - compression
 - sending the request to the subgraph

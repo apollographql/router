@@ -3,7 +3,11 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Deref;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -20,9 +24,6 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::schema::UnionType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use either::Either;
 use serde::Serialize;
 use strum::IntoEnumIterator;
@@ -32,6 +33,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::spec_definition::SpecDefinition;
+use crate::schema::FederationSchema;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
 use crate::schema::referencer::InputObjectTypeReferencers;
@@ -40,12 +42,6 @@ use crate::schema::referencer::ObjectTypeReferencers;
 use crate::schema::referencer::Referencers;
 use crate::schema::referencer::ScalarTypeReferencers;
 use crate::schema::referencer::UnionTypeReferencers;
-use crate::schema::FederationSchema;
-
-// This is the "captures" trick for dealing with return position impl trait (RPIT), as noted in
-// https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html#the-captures-trick
-pub(crate) trait Captures<U> {}
-impl<T: ?Sized, U> Captures<U> for T {}
 
 /// A zero-allocation error representation for position lookups,
 /// because many of these errors are actually immediately discarded.
@@ -517,10 +513,8 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     pub(crate) fn fields<'a>(
         &'a self,
         schema: &'a Schema,
-    ) -> Result<
-        impl Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> + Captures<&'a ()>,
-        FederationError,
-    > {
+    ) -> Result<impl Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition>, FederationError>
+    {
         match self {
             ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => Ok(Either::Left(
                 type_.fields(schema)?.map(|field| field.into()),
@@ -825,6 +819,67 @@ impl SchemaDefinitionPosition {
             }
             None => false,
         })
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum TagDirectiveTargetPosition {
+    ObjectField(ObjectFieldDefinitionPosition),
+    InterfaceField(InterfaceFieldDefinitionPosition),
+    UnionField(UnionTypenameFieldDefinitionPosition),
+    Object(ObjectTypeDefinitionPosition),
+    Interface(InterfaceTypeDefinitionPosition),
+    Union(UnionTypeDefinitionPosition),
+    ArgumentDefinition(DirectiveArgumentDefinitionPosition),
+    Scalar(ScalarTypeDefinitionPosition),
+    Enum(EnumTypeDefinitionPosition),
+    EnumValue(EnumValueDefinitionPosition),
+    InputObject(InputObjectTypeDefinitionPosition),
+    InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
+}
+
+impl Debug for TagDirectiveTargetPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ObjectField(p) => write!(f, "ObjectField({p})"),
+            Self::InterfaceField(p) => write!(f, "InterfaceField({p})"),
+            Self::UnionField(p) => write!(f, "UnionField({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+            Self::ArgumentDefinition(p) => write!(f, "ArgumentDefinition({p})"),
+            Self::Scalar(p) => write!(f, "Scalar({p})"),
+            Self::Enum(p) => write!(f, "Enum({p})"),
+            Self::EnumValue(p) => write!(f, "EnumValue({p})"),
+            Self::InputObject(p) => write!(f, "InputObject({p})"),
+            Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
+        }
+    }
+}
+
+fallible_conversions!(TagDirectiveTargetPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::InputObject -> InputObjectTypeDefinitionPosition);
+
+impl TryFrom<TagDirectiveTargetPosition> for FieldDefinitionPosition {
+    type Error = &'static str;
+
+    fn try_from(dl: TagDirectiveTargetPosition) -> Result<Self, Self::Error> {
+        match dl {
+            TagDirectiveTargetPosition::ObjectField(field) => {
+                Ok(FieldDefinitionPosition::Object(field))
+            }
+            TagDirectiveTargetPosition::InterfaceField(field) => {
+                Ok(FieldDefinitionPosition::Interface(field))
+            }
+            TagDirectiveTargetPosition::UnionField(field) => {
+                Ok(FieldDefinitionPosition::Union(field))
+            }
+            _ => Err("No valid conversion"),
+        }
     }
 }
 
@@ -1295,16 +1350,10 @@ impl ObjectTypeDefinitionPosition {
         self.field(name!("__type"))
     }
 
-    // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
-    // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
-    // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
     pub(crate) fn fields<'a>(
         &'a self,
         schema: &'a Schema,
-    ) -> Result<
-        impl Iterator<Item = ObjectFieldDefinitionPosition> + Captures<&'a ()>,
-        FederationError,
-    > {
+    ) -> Result<impl Iterator<Item = ObjectFieldDefinitionPosition>, FederationError> {
         Ok(self
             .get(schema)?
             .fields
@@ -1730,6 +1779,21 @@ impl Debug for ObjectTypeDefinitionPosition {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum FieldArgumentDefinitionPosition {
+    Interface(InterfaceFieldArgumentDefinitionPosition),
+    Object(ObjectFieldArgumentDefinitionPosition),
+}
+
+impl Debug for FieldArgumentDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct ObjectFieldDefinitionPosition {
     pub(crate) type_name: Name,
@@ -2023,15 +2087,11 @@ impl ObjectFieldDefinitionPosition {
         {
             enum_type_referencers.object_fields.insert(self.clone());
         } else {
-            return Err(
-                FederationError::internal(
-                    format!(
-                        "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                        self,
-                        output_type_reference.deref(),
-                    )
-                )
-            );
+            return Err(FederationError::internal(format!(
+                "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
+                self,
+                output_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -2344,6 +2404,51 @@ pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
     pub(crate) directive_index: usize,
 }
 
+impl ObjectOrInterfaceFieldDirectivePosition {
+    // NOTE: this is used only for connectors "expansion" code and can be
+    // deleted after connectors switches to use the composition port
+    pub(crate) fn add_argument(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<Argument>,
+    ) -> Result<(), FederationError> {
+        let directive = match self.field {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(ref field) => {
+                let field = field.make_mut(&mut schema.schema)?;
+
+                field
+                    .make_mut()
+                    .directives
+                    .get_mut(self.directive_index)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Object field \"{}\"'s directive application at index {} does not exist",
+                            self.field, self.directive_index,
+                        ),
+                    })?
+            }
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(ref field) => {
+                let field = field.make_mut(&mut schema.schema)?;
+
+                field
+                    .make_mut()
+                    .directives
+                    .get_mut(self.directive_index)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Interface field \"{}\"'s directive application at index {} does not exist",
+                            self.field, self.directive_index,
+                        ),
+                    })?
+            }
+        };
+
+        directive.make_mut().arguments.push(argument);
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct InterfaceTypeDefinitionPosition {
     pub(crate) type_name: Name,
@@ -2351,6 +2456,10 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 
 impl InterfaceTypeDefinitionPosition {
     const EXPECTED: &'static str = "an interface type";
+
+    pub(crate) fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
 
     pub(crate) fn field(&self, field_name: Name) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
@@ -2363,16 +2472,10 @@ impl InterfaceTypeDefinitionPosition {
         self.field(INTROSPECTION_TYPENAME_FIELD_NAME.clone())
     }
 
-    // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
-    // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
-    // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
     pub(crate) fn fields<'a>(
         &'a self,
         schema: &'a Schema,
-    ) -> Result<
-        impl Iterator<Item = InterfaceFieldDefinitionPosition> + Captures<&'a ()>,
-        FederationError,
-    > {
+    ) -> Result<impl Iterator<Item = InterfaceFieldDefinitionPosition>, FederationError> {
         Ok(self
             .get(schema)?
             .fields
@@ -3025,13 +3128,11 @@ impl InterfaceFieldDefinitionPosition {
         {
             enum_type_referencers.interface_fields.insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                    self,
-                    output_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
+                self,
+                output_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -3283,13 +3384,11 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 .interface_field_arguments
                 .insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                    self,
-                    input_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -4709,13 +4808,11 @@ impl InputObjectFieldDefinitionPosition {
                 .input_object_fields
                 .insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                    self,
-                    input_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -5132,13 +5229,11 @@ impl DirectiveArgumentDefinitionPosition {
                 .directive_arguments
                 .insert(self.clone());
         } else {
-            return Err(FederationError::internal(
-                format!(
-                    "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                    self,
-                    input_type_reference.deref(),
-                )
-            ));
+            return Err(FederationError::internal(format!(
+                "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -5253,110 +5348,132 @@ impl FederationSchema {
     ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
-    pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
-        let metadata = links_metadata(&schema)?;
-        let mut referencers: Referencers = Default::default();
+    pub(crate) fn new(schema: Schema) -> Result<Self, FederationError> {
+        let mut schema = Self::new_uninitialized(schema)?;
+        schema.collect_links_metadata()?;
+        schema.collect_shallow_references();
+        schema.collect_deep_references()?;
+        Ok(schema)
+    }
 
-        // Shallow pass to populate referencers for types/directives.
-        for (type_name, type_) in schema.types.iter() {
+    pub(crate) fn new_uninitialized(schema: Schema) -> Result<FederationSchema, FederationError> {
+        Ok(Self {
+            schema,
+            referencers: Default::default(),
+            links_metadata: None,
+            subgraph_metadata: None,
+        })
+    }
+
+    pub(crate) fn collect_links_metadata(&mut self) -> Result<(), FederationError> {
+        self.links_metadata = links_metadata(self.schema())?.map(Box::new);
+        Ok(())
+    }
+
+    pub(crate) fn collect_shallow_references(&mut self) {
+        for (type_name, type_) in self.schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(_) => {
-                    referencers
+                    self.referencers
                         .scalar_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Object(_) => {
-                    referencers
+                    self.referencers
                         .object_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Interface(_) => {
-                    referencers
+                    self.referencers
                         .interface_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Union(_) => {
-                    referencers
+                    self.referencers
                         .union_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Enum(_) => {
-                    referencers
+                    self.referencers
                         .enum_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::InputObject(_) => {
-                    referencers
+                    self.referencers
                         .input_object_types
                         .insert(type_name.clone(), Default::default());
                 }
             }
         }
-        for directive_name in schema.directive_definitions.keys() {
-            referencers
+
+        for directive_name in self.schema.directive_definitions.keys() {
+            self.referencers
                 .directives
                 .insert(directive_name.clone(), Default::default());
         }
+    }
 
-        // Deep pass to find references.
+    pub(crate) fn collect_deep_references(&mut self) -> Result<(), FederationError> {
         SchemaDefinitionPosition.insert_references(
-            &schema.schema_definition,
-            &schema,
-            &mut referencers,
+            &self.schema.schema_definition,
+            &self.schema,
+            &mut self.referencers,
         )?;
-        for (type_name, type_) in schema.types.iter() {
+        for (type_name, type_) in self.schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(type_) => {
                     ScalarTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::Object(type_) => {
                     ObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
                 ExtendedType::Interface(type_) => {
                     InterfaceTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
                 ExtendedType::Union(type_) => {
                     UnionTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::Enum(type_) => {
                     EnumTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::InputObject(type_) => {
                     InputObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
             }
         }
-        for (directive_name, directive) in schema.directive_definitions.iter() {
+        for (directive_name, directive) in self.schema.directive_definitions.iter() {
             DirectiveDefinitionPosition {
                 directive_name: directive_name.clone(),
             }
-            .insert_references(directive, &mut referencers)?;
+            .insert_references(directive, &mut self.referencers)?;
         }
-
-        Ok(FederationSchema {
-            schema,
-            referencers,
-            links_metadata: metadata.map(Box::new),
-            subgraph_metadata: None,
-        })
+        Ok(())
     }
 }
 

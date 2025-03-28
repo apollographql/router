@@ -20,8 +20,8 @@ The rest of this reference lists the available standard router instruments.
 
 ### GraphQL
 
-- `apollo.router.graphql_error` - counts GraphQL errors in responses, attributes:
-  - `code`: error code
+- `apollo.router.graphql_error` - counts GraphQL errors in responses. Also counts errors which occur during the response validation phase, which are represented in client responses as `extensions.valueCompletion` instead of actual GraphQL errors. Attributes:
+  - `code`: error code, including `RESPONSE_VALIDATION_FAILED` in the case of a value completion error.
 
 ### Session
 
@@ -120,4 +120,23 @@ The initial call to Uplink during router startup is not reflected in metrics.
 
 - `apollo.router.telemetry.batch_processor.errors` - The number of errors encountered by exporter batch processors.
   - `name`: One of `apollo-tracing`, `datadog-tracing`, `jaeger-collector`, `otlp-tracing`, `zipkin-tracing`.
-  - `error` = One of `channel closed`, `channel full`.
+  - `error`: One of `channel closed`, `channel full`.
+
+- `apollo.router.telemetry.metrics.cardinality_overflow` - A count of how often a telemetry metric hit otel's hard cardinality limit.
+
+### Internals
+
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration
+
+### Server
+
+- `apollo.router.open_connections` - The number of open connections to the Router.
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration.
+  - `server.address` - The address that the router is listening on.
+  - `server.port` - The port that the router is listening on if not a unix socket.
+  - `http.connection.state` - Either `active` or `terminating`.

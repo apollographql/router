@@ -1,0 +1,10 @@
+telemetry:
+  exporters:
+    metrics:
+      prometheus:
+        listen: 127.0.0.1:4000
+        enabled: true
+        path: /metrics
+supergraph:
+  early_cancel: true
+  connection_shutdown_timeout: 2ms

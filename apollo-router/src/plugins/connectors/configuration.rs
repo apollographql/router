@@ -1,17 +1,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::CustomConfiguration;
+use apollo_federation::sources::connect::expand::Connectors;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
 use super::incompatible::warn_incompatible_plugins;
+use crate::Configuration;
 use crate::plugins::connectors::plugin::PLUGIN_NAME;
 use crate::services::connector_service::ConnectorSourceRef;
-use crate::Configuration;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -47,6 +47,11 @@ pub(crate) struct ConnectorsConfig {
     /// ```
     #[serde(default)]
     pub(crate) expose_sources_in_context: bool,
+
+    /// Feature gate for connect spec v0.2. Set to `true` to enable the using
+    /// the v0.2 spec during the preview phase.
+    #[serde(default)]
+    pub(crate) preview_connect_v0_2: Option<bool>,
 }
 
 // TODO: remove this after deprecation period

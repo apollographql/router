@@ -8,6 +8,8 @@ use std::ops::Not;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
@@ -32,8 +34,6 @@ use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 use time::OffsetDateTime;
 
@@ -47,9 +47,9 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::context_spec_definition::ContextSpecDefinition;
 use crate::link::cost_spec_definition::CostSpecDefinition;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::join_spec_definition::ContextArgument;
 use crate::link::join_spec_definition::FieldDirectiveArguments;
 use crate::link::join_spec_definition::JoinSpecDefinition;
@@ -57,8 +57,8 @@ use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::schema::FederationSchema;
 use crate::schema::field_set::parse_field_set_without_normalization;
-use crate::schema::position::is_graphql_reserved_name;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -74,12 +74,12 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::is_graphql_reserved_name;
 use crate::schema::type_and_directive_specification::FieldSpecification;
 use crate::schema::type_and_directive_specification::ObjectTypeSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::schema::type_and_directive_specification::UnionTypeSpecification;
-use crate::schema::FederationSchema;
 use crate::utils::FallibleIterator;
 
 /// Assumes the given schema has been validated.
@@ -111,10 +111,11 @@ pub(crate) fn extract_subgraphs_from_supergraph(
         })
         .try_collect()?;
     if is_fed_1 {
-        let unsupported =
-            SingleFederationError::UnsupportedFederationVersion {
-                message: String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater")
-            };
+        let unsupported = SingleFederationError::UnsupportedFederationVersion {
+            message: String::from(
+                "Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater",
+            ),
+        };
         return Err(unsupported.into());
     } else {
         extract_subgraphs_from_fed_2_supergraph(
@@ -150,17 +151,18 @@ pub(crate) fn extract_subgraphs_from_supergraph(
                 Err((schema, error)) => {
                     subgraph.schema = schema;
                     if is_fed_1 {
-                        let message =
-                                String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater");
+                        let message = String::from(
+                            "Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater",
+                        );
                         return Err(SingleFederationError::UnsupportedFederationVersion {
                             message,
                         }
                         .into());
                     } else {
                         let mut message = format!(
-                                    "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{error}",
-                                    subgraph.name,
-                                    );
+                            "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{error}",
+                            subgraph.name,
+                        );
                         maybe_dump_subgraph_schema(subgraph, &mut message);
                         return Err(
                             SingleFederationError::InvalidFederationSupergraph { message }.into(),
@@ -1709,8 +1711,8 @@ fn add_federation_operations(
     federation_spec_definition: &'static FederationSpecDefinition,
 ) -> Result<(), FederationError> {
     // the `_Any` and `_Service` Type
-    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
-    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
+    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
 
     // the `_Entity` Type
     let key_directive_definition =
@@ -1722,7 +1724,7 @@ fn add_federation_operations(
             name: FEDERATION_ENTITY_TYPE_NAME,
             members: |_| entity_members.clone(),
         }
-        .check_or_add(&mut subgraph.schema)?;
+        .check_or_add(&mut subgraph.schema, None)?;
     }
 
     // the `Query` Type
@@ -1730,7 +1732,7 @@ fn add_federation_operations(
         root_kind: SchemaRootDefinitionKind::Query,
     };
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
-        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
         query_root_pos.insert(
             &mut subgraph.schema,
             ComponentName::from(QUERY_TYPE_SPEC.name),
@@ -2109,12 +2111,12 @@ fn maybe_dump_subgraph_schema(subgraph: FederationSubgraph, message: &mut String
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
     use insta::assert_snapshot;
 
-    use crate::schema::FederationSchema;
     use crate::ValidFederationSubgraphs;
+    use crate::schema::FederationSchema;
 
     // JS PORT NOTE: these tests were ported from
     // https://github.com/apollographql/federation/blob/3e2c845c74407a136b9e0066e44c1ad1467d3013/internals-js/src/__tests__/extractSubgraphsFromSupergraph.test.ts
@@ -2729,7 +2731,7 @@ mod tests {
         let supergraph = r###"schema
                 @link(url: "https://specs.apollo.dev/link/v1.0")
                 @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-                @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"]})
+                @join__directive(graphs: [SUBGRAPH], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"]})
             {
                 query: Query
             }
@@ -2785,6 +2787,15 @@ mod tests {
                 @join__type(graph: SUBGRAPH)
             {
                 f: String
+                    @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/"}, selection: "$"})
+            }
+
+            type T
+                @join__type(graph: SUBGRAPH)
+                @join__directive(graphs: [SUBGRAPH], name: "connect", args: {http: {GET: "http://localhost/{$batch.id}"}, selection: "$"})
+            {
+                id: ID!
+                f: String
             }
         "###;
 
@@ -2796,6 +2807,8 @@ mod tests {
         .unwrap();
 
         let subgraph = subgraphs.get("subgraph").unwrap();
-        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r###" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9") @link(url: "https://specs.apollo.dev/hello/v0.1", import: ["@hello"])"###);
+        assert_snapshot!(subgraph.schema.schema().schema_definition.directives, @r#" @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.9") @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])"#);
+        assert_snapshot!(subgraph.schema.schema().type_field("Query", "f").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/"}, selection: "$")"#);
+        assert_snapshot!(subgraph.schema.schema().get_object("T").unwrap().directives, @r#" @connect(http: {GET: "http://localhost/{$batch.id}"}, selection: "$")"#);
     }
 }

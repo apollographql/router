@@ -2,16 +2,15 @@ use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::validation::WithErrors;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use itertools::Itertools;
 
 use super::VariableReference;
-use crate::sources::connect::EntityResolver;
 use crate::sources::connect::Namespace;
 
 /// Given the variables relevant to entity fetching, synthesize a FieldSet
@@ -20,14 +19,11 @@ pub(crate) fn make_key_field_set_from_variables<'a>(
     schema: &Schema,
     object_type_name: &Name,
     variables: impl Iterator<Item = VariableReference<'a, Namespace>>,
-    resolver: EntityResolver,
+    namespace: Namespace,
 ) -> Result<Option<Valid<FieldSet>>, WithErrors<FieldSet>> {
     // TODO: does this work with subselections like $this { something }?
     let params = variables
-        .filter(|var| match resolver {
-            EntityResolver::Explicit => var.namespace.namespace == Namespace::Args,
-            EntityResolver::Implicit => var.namespace.namespace == Namespace::This,
-        })
+        .filter(|var| var.namespace.namespace == namespace)
         .unique()
         .collect_vec();
 
@@ -78,11 +74,12 @@ impl Display for TrieNode {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::name;
     use apollo_compiler::Schema;
+    use apollo_compiler::name;
 
-    use super::make_key_field_set_from_variables;
     use super::TrieNode;
+    use super::make_key_field_set_from_variables;
+    use crate::sources::connect::Namespace;
     use crate::sources::connect::PathSelection;
 
     #[test]
@@ -110,7 +107,7 @@ mod tests {
                 PathSelection::parse("$args.a.d".into()).unwrap().1.variable_reference().unwrap(),
                 PathSelection::parse("$args.b".into()).unwrap().1.variable_reference().unwrap(),
             ].into_iter(),
-            super::EntityResolver::Explicit,
+            Namespace::Args,
         )
         .unwrap()
         .unwrap();

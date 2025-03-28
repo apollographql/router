@@ -31,6 +31,7 @@ fn some_name() {
 }
 */
 
+mod cancel;
 mod context;
 mod debug_max_evaluated_plans_configuration;
 mod defer;

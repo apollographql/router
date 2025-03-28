@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
+use crate::Context;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request as GraphQLRequest;
@@ -16,7 +17,6 @@ use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Variables;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::SubscriptionNode;
-use crate::Context;
 
 const FETCH_SUBGRAPH_NAME_EXTENSION_KEY: &str = "fetch_subgraph_name";
 
@@ -77,7 +77,6 @@ impl SubscriptionRequest {
     /// This is the constructor (or builder) to use when constructing a subscription Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         context: Context,

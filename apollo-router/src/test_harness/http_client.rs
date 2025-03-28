@@ -102,10 +102,10 @@ pub(crate) fn defer_spec_20220824_multipart<InnerService, RequestBody>(
 >
 where
     InnerService: Service<
-        http::Request<RequestBody>,
-        Response = http::Response<Pin<Box<dyn AsyncRead + Send>>>,
-        Error = BoxError,
-    >,
+            http::Request<RequestBody>,
+            Response = http::Response<Pin<Box<dyn AsyncRead + Send>>>,
+            Error = BoxError,
+        >,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<RequestBody>| {
@@ -244,10 +244,10 @@ pub(crate) fn json<InnerService>(
 >
 where
     InnerService: Service<
-        http::Request<RouterBody>,
-        Response = http::Response<MaybeMultipart<Vec<u8>>>,
-        Error = BoxError,
-    >,
+            http::Request<RouterBody>,
+            Response = http::Response<MaybeMultipart<Vec<u8>>>,
+            Error = BoxError,
+        >,
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<serde_json::Value>| {

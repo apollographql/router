@@ -2,15 +2,16 @@
 
 use std::sync::Arc;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::executable::FieldSet;
+use apollo_compiler::validation::Valid;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::Context;
 use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::query_planner::fetch::Variables;
-use crate::Context;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
@@ -21,6 +22,7 @@ pub(crate) struct Request {
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
+    pub(crate) keys: Option<Valid<FieldSet>>,
 }
 
 assert_impl_all!(Response: Send);
@@ -42,6 +44,7 @@ impl Request {
         operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
+        keys: Option<Valid<FieldSet>>,
     ) -> Self {
         Self {
             service_name,
@@ -49,6 +52,7 @@ impl Request {
             operation,
             supergraph_request,
             variables,
+            keys,
         }
     }
 }

@@ -5,6 +5,9 @@ use std::fmt::Formatter;
 use std::iter;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
@@ -31,15 +34,15 @@ use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
 use indexmap::map::Iter;
 use itertools::Itertools;
 
+use crate::ValidFederationSubgraph;
+use crate::ValidFederationSubgraphs;
 use crate::error::FederationError;
+use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
@@ -49,17 +52,14 @@ use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
-use crate::ValidFederationSubgraph;
-use crate::ValidFederationSubgraphs;
 
 type MergeWarning = String;
 type MergeError = String;
@@ -1367,6 +1367,77 @@ fn add_core_feature_join(
         .types
         .insert(join_field_set_name, join_field_set_scalar);
 
+    // scalar join__FieldValue
+    let join_field_value_name = name!("join__FieldValue");
+    let join_field_value_scalar = ExtendedType::Scalar(Node::new(ScalarType {
+        directives: Default::default(),
+        name: join_field_value_name.clone(),
+        description: None,
+    }));
+    supergraph
+        .types
+        .insert(join_field_value_name, join_field_value_scalar);
+
+    // input join__ContextArgument {
+    //   name: String!
+    //   type: String!
+    //   context: String!
+    //   selection: join__FieldValue!
+    // }
+    let join_context_argument_name = name!("join__ContextArgument");
+    let join_context_argument_input = ExtendedType::InputObject(Node::new(InputObjectType {
+        description: None,
+        name: join_context_argument_name.clone(),
+        directives: Default::default(),
+        fields: vec![
+            (
+                name!("name"),
+                Component::new(InputValueDefinition {
+                    name: name!("name"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("type"),
+                Component::new(InputValueDefinition {
+                    name: name!("type"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("context"),
+                Component::new(InputValueDefinition {
+                    name: name!("context"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("selection"),
+                Component::new(InputValueDefinition {
+                    name: name!("selection"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(join__FieldValue!).into(),
+                    default_value: None,
+                }),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    }));
+    supergraph
+        .types
+        .insert(join_context_argument_name, join_context_argument_input);
+
     let join_graph_directive_definition = join_graph_directive_definition();
     supergraph.directive_definitions.insert(
         join_graph_directive_definition.name.clone(),
@@ -1550,6 +1621,13 @@ fn join_field_directive_definition() -> DirectiveDefinition {
                 ty: ty!(Boolean).into(),
                 default_value: None,
             }),
+            Node::new(InputValueDefinition {
+                name: name!("contextArguments"),
+                description: None,
+                directives: Default::default(),
+                ty: ty!([join__ContextArgument!]).into(),
+                default_value: None,
+            }),
         ],
         locations: vec![
             DirectiveLocation::FieldDefinition,
@@ -1559,6 +1637,9 @@ fn join_field_directive_definition() -> DirectiveDefinition {
     }
 }
 
+// NOTE: the logic for constructing the contextArguments argument
+// is not trivial and is not implemented here. For connectors "expansion",
+// it's handled in carryover.rs.
 fn join_field_applied_directive(
     subgraph_name: &EnumValue,
     requires: Option<&str>,

@@ -7,18 +7,20 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
-use crate::apollo_studio_interop::generate_extended_references;
+use crate::Configuration;
+use crate::Context;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job;
 use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
@@ -33,13 +35,11 @@ use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
-use crate::Configuration;
-use crate::Context;
 
 /// A layer-like type that handles several aspects of query parsing and analysis.
 ///
@@ -94,12 +94,11 @@ impl QueryAnalysisLayer {
         let schema = self.schema.clone();
         let conf = self.configuration.clone();
 
-        // Must be created *outside* of the spawn_blocking or the span is not connected to the
-        // parent
+        // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
         let priority = compute_job::Priority::P4; // Medium priority
-        let job = move || {
+        compute_job::execute(priority, move |_| {
             span.in_scope(|| {
                 Query::parse_document(
                     &query,
@@ -108,19 +107,10 @@ impl QueryAnalysisLayer {
                     conf.as_ref(),
                 )
             })
-        };
-        // TODO: is this correct?
-        let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
-            .map_err(MaybeBackPressureError::TemporaryError)?
-            .await
-            // `expect()` propagates any panic that potentially happens in the closure, but:
-            //
-            // * We try to avoid such panics in the first place and consider them bugs
-            // * The panic handler in `apollo-router/src/executable.rs` exits the process
-            //   so this error case should never be reached.
-            .expect("Query::parse_document panicked")
-            .map_err(MaybeBackPressureError::PermanentError)
+        })
+        .map_err(MaybeBackPressureError::TemporaryError)?
+        .await
+        .map_err(MaybeBackPressureError::PermanentError)
     }
 
     /// Parses the GraphQL in the supergraph request and computes Apollo usage references.
@@ -144,10 +134,12 @@ impl QueryAnalysisLayer {
         let query = request.supergraph_request.body().query.as_ref();
 
         if query.is_none() || query.unwrap().trim().is_empty() {
-            let errors = vec![crate::error::Error::builder()
-                .message("Must provide query string.".to_string())
-                .extension_code("MISSING_QUERY_STRING")
-                .build()];
+            let errors = vec![
+                crate::error::Error::builder()
+                    .message("Must provide query string.".to_string())
+                    .extension_code("MISSING_QUERY_STRING")
+                    .build(),
+            ];
             return Err(SupergraphResponse::builder()
                 .errors(errors)
                 .status_code(StatusCode::BAD_REQUEST)
@@ -260,10 +252,12 @@ impl QueryAnalysisLayer {
                 });
                 let errors = match errors.into_graphql_errors() {
                     Ok(v) => v,
-                    Err(errors) => vec![Error::builder()
-                        .message(errors.to_string())
-                        .extension_code(errors.extension_code())
-                        .build()],
+                    Err(errors) => vec![
+                        Error::builder()
+                            .message(errors.to_string())
+                            .extension_code(errors.extension_code())
+                            .build(),
+                    ],
                 };
                 Err(SupergraphResponse::builder()
                     .errors(errors)

@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::panic::UnwindSafe;
+use std::ops::ControlFlow;
 use std::sync::OnceLock;
 
 use opentelemetry::metrics::MeterProvider as _;
@@ -29,6 +29,28 @@ fn thread_pool_size() -> usize {
         std::thread::available_parallelism()
             .expect("available_parallelism() failed")
             .get()
+    }
+}
+
+pub(crate) struct JobStatus<'a, T> {
+    result_sender: &'a oneshot::Sender<std::thread::Result<T>>,
+}
+
+impl<T> JobStatus<'_, T> {
+    /// Checks whether the oneshot receiver for the result of the job was dropped,
+    /// which means nothing is expecting the result anymore.
+    ///
+    /// This can happen if the Tokio task owning it is cancelled,
+    /// such as if a supergraph client disconnects or if a request times out.
+    ///
+    /// In this case, a long-running job should try to cancel itself
+    /// to avoid needless resource consumption.
+    pub(crate) fn check_for_cooperative_cancellation(&self) -> ControlFlow<()> {
+        if self.result_sender.is_closed() {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
     }
 }
 
@@ -99,18 +121,27 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 pub(crate) fn execute<T, F>(
     priority: Priority,
     job: F,
-) -> Result<impl Future<Output = std::thread::Result<T>>, ComputeBackPressureError>
+) -> Result<impl Future<Output = T>, ComputeBackPressureError>
 where
-    F: FnOnce() -> T + Send + UnwindSafe + 'static,
+    F: FnOnce(JobStatus<'_, T>) -> T + Send + 'static,
     T: Send + 'static,
 {
     let (tx, rx) = oneshot::channel();
-    let job = Box::new(move || {
-        // Ignore the error if the oneshot receiver was dropped
-        let _ = tx.send(std::panic::catch_unwind(job));
+    let wrapped_job = Box::new(move || {
+        let status = JobStatus { result_sender: &tx };
+        // `AssertUnwindSafe` here is correct because this `catch_unwind`
+        // is paired with `resume_unwind` below, so the overall effect on unwind safety
+        // is the same as if the caller had executed `job` directly without a thread pool.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || job(status)));
+        match tx.send(result) {
+            Ok(()) => {}
+            Err(_) => {
+                // `rx` was dropped: `result` is no longer needed and we can safely drop it
+            }
+        }
     });
     let queue = queue();
-    queue.send(priority, job).map_err(|e| match e {
+    queue.send(priority, wrapped_job).map_err(|e| match e {
         SendError::QueueIsFull => {
             u64_counter!(
                 "apollo.router.compute_jobs.queue_is_full",
@@ -123,15 +154,37 @@ where
             // This never panics because this channel can never be disconnect:
             // the receiver is owned by `queue` which we can access here:
             let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
-            unreachable!()
+            unreachable!("compute thread pool queue is disconnected")
         }
     })?;
     Ok(async move {
-        // This `expect` never panics because this oneshot channel can never be disconnect:
-        // the sender is owned by `job` which, if we reach here, was successfully sent to the queue.
-        // The queue or thread pool never drop a job without executing it.
-        // When executing, `catch_unwind` ensures that the sender cannot be dropped without sending.
-        rx.await.expect("channel disconnected")
+        match rx.await {
+            Ok(Ok(value)) => value,
+            Ok(Err(panic_payload)) => {
+                // The `job` callback panicked.
+                //
+                // We try to to avoid this (by returning errors instead) and consider this a bug.
+                // But if it does happen, propagating the panic to the caller from here
+                // has the same effect as if they had executed `job` directly
+                // without a thread pool.
+                //
+                // Additionally we have a panic handler in `apollo-router/src/executable.rs`
+                // that exits the process,
+                // so in practice a Router thread should never start unwinding
+                // an this code path should be unreachable.
+                std::panic::resume_unwind(panic_payload)
+            }
+            Err(e) => {
+                let _: tokio::sync::oneshot::error::RecvError = e;
+                // This should never happen because this oneshot channel can never be disconnect:
+                // the sender is owned by `job` which, if we reach here,
+                // was successfully sent to the queue.
+                // The queue or thread pool never drop a job without executing it.
+                // When executing, `catch_unwind` ensures that
+                // the sender cannot be dropped without sending.
+                unreachable!("compute result oneshot channel is disconnected")
+            }
+        }
     })
 }
 
@@ -156,10 +209,9 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, || std::thread::current().id())
+        let job_thread = execute(Priority::P4, |_| std::thread::current().id())
             .unwrap()
-            .await
-            .unwrap();
+            .await;
         assert_ne!(job_thread, test_thread)
     }
 
@@ -169,20 +221,42 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, || {
+        let one = execute(Priority::P8, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         })
         .unwrap();
-        let two = execute(Priority::P8, || {
+        let two = execute(Priority::P8, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         })
         .unwrap();
         tokio::time::sleep(Duration::from_millis(500)).await;
-        assert_eq!(one.await.unwrap(), 1);
-        assert_eq!(two.await.unwrap(), 2);
+        assert_eq!(one.await, 1);
+        assert_eq!(two.await, 2);
         // Evidence of fearless parallel sleep:
         assert!(start.elapsed() < Duration::from_millis(1_400));
+    }
+
+    #[tokio::test]
+    async fn test_cancel() {
+        let (side_channel_sender, side_channel_receiver) = oneshot::channel();
+        let queue_receiver = execute(Priority::P1, move |status| {
+            // We expect the first iteration to succeed,
+            // but let’s add lots of margin for CI machines with super-busy CPU cores
+            for _ in 0..1_000 {
+                std::thread::sleep(Duration::from_millis(10));
+                if status.check_for_cooperative_cancellation().is_break() {
+                    side_channel_sender.send(Ok(())).unwrap();
+                    return;
+                }
+            }
+            side_channel_sender.send(Err(())).unwrap();
+        });
+        drop(queue_receiver);
+        match side_channel_receiver.await {
+            Ok(Ok(())) => {}
+            e => panic!("job did not cancel as expected: {e:?}"),
+        };
     }
 }

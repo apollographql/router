@@ -9,12 +9,6 @@ redirectFrom:
   - /technotes/TN0004-router-authentication/
 ---
 
-<EnterpriseFeature>
-
-Self-hosting the GraphOS Router is limited to [GraphOS Enterprise plans](https://www.apollographql.com/pricing). Other plan types use [managed cloud routing with GraphOS](/graphos/cloud-routing). Check out the [pricing page](https://www.apollographql.com/pricing#graphos-router) to learn more.
-
-</EnterpriseFeature>
-
 <Tip>
 
 If you're an enterprise customer looking for more material on this topic, try the [Enterprise best practices: Router extensibility](https://www.apollographql.com/tutorials/router-extensibility) course on Odyssey.
@@ -113,7 +107,7 @@ headers:
 
 As of router v1.13, you can use the [JWT Authentication plugin](/router/configuration/authn-jwt) to validate JWT-based authentication tokens in your supergraph.
 
-<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PremiumFeature />
 
 ```mermaid
 sequenceDiagram
@@ -131,11 +125,12 @@ authentication:
   jwt:
     jwks:
       - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+    on_error: Error
 ```
 
 Pros:
 
-- The router prevents unauthenticated requests from reaching your subgraphs.
+- The router prevents unauthenticated requests from reaching your subgraphs (except when `on_error` is set to `Continue`.)
 - The router can extract claims from the JWT and pass them to your subgraphs as headers, reducing logic needed in your subgraphs.
 
 Cons:
@@ -152,7 +147,7 @@ You can use the Apollo Solutions [router JWKS generator](https://github.com/apol
 
 If you have a custom authentication strategy, you can use a [coprocessor](/graphos/routing/customization/coprocessor) to implement it.
 
-<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+<PremiumFeature />
 
 ```mermaid
 sequenceDiagram

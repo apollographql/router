@@ -6,22 +6,23 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
-use apollo_compiler::ast;
 use apollo_compiler::Name;
+use apollo_compiler::ast;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanOptions;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use tower::Service;
 
 use super::PlanNode;
 use super::QueryKey;
+use crate::Configuration;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
 use crate::compute_job::MaybeBackPressureError;
@@ -43,17 +44,16 @@ use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::fetch::SubgraphSchema;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::layers::query_analysis::ParsedDocumentInner;
-use crate::services::query_planner::PlanOptions;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::operation_limits::OperationLimits;
+use crate::services::layers::query_analysis::ParsedDocument;
+use crate::services::layers::query_analysis::ParsedDocumentInner;
+use crate::services::query_planner::PlanOptions;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::Configuration;
+use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
@@ -132,11 +132,13 @@ impl QueryPlannerService {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
         let priority = compute_job::Priority::P8; // High priority
-        let job = move || -> Result<_, QueryPlannerError> {
+        let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
+            let check = move || status.check_for_cooperative_cancellation();
             let query_plan_options = QueryPlanOptions {
                 override_conditions: plan_options.override_conditions,
+                check_for_cooperative_cancellation: Some(&check),
             };
 
             let result = operation
@@ -167,13 +169,7 @@ impl QueryPlannerService {
         };
         let (plan, mut root_node) = compute_job::execute(priority, job)
             .map_err(MaybeBackPressureError::TemporaryError)?
-            .await
-            // `expect()` propagates any panic that potentially happens in the closure, but:
-            //
-            // * We try to avoid such panics in the first place and consider them bugs
-            // * The panic handler in `apollo-router/src/executable.rs` exits the process
-            //   so this error case should never be reached.
-            .expect("query planner panicked")?;
+            .await?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
@@ -382,7 +378,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
                     return Err(QueryPlannerError::SpecError(SpecError::TransformError(
                         e.to_string(),
                     ))
-                    .into())
+                    .into());
                 }
                 Ok(modified_query) => {
                     let executable_document = modified_query
@@ -477,7 +473,7 @@ impl QueryPlannerService {
             ControlFlow::Break(result) => {
                 return Ok(QueryPlannerContent::CachedIntrospectionResponse {
                     response: Box::new(result.map_err(MaybeBackPressureError::TemporaryError)?),
-                })
+                });
             }
         }
 
@@ -648,7 +644,10 @@ mod tests {
             .await
             .err()
             .expect("expected error for fed1 supergraph");
-        assert_eq!(error.to_string(), "failed to initialize the query planner: Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater");
+        assert_eq!(
+            error.to_string(),
+            "failed to initialize the query planner: Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater"
+        );
 
         async {
             let sdl = include_str!("../testdata/minimal_supergraph.graphql");

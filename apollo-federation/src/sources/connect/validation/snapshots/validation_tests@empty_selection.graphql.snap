@@ -6,14 +6,14 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/empty_sel
 [
     Message {
         code: InvalidSelection,
-        message: "`@connect(selection:)` on `Query.resources` is empty",
+        message: "`@connect(selection:)` on `Query.emptySelection` is empty",
         locations: [
             13:18..13:29,
         ],
     },
     Message {
         code: InvalidBody,
-        message: "`@connect(http: {body:})` on `Query.resources` is empty",
+        message: "`@connect(http: {body:})` on `Query.emptySelection` is empty",
         locations: [
             12:41..12:45,
         ],

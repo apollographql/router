@@ -59,14 +59,14 @@ Sequence {
                                                             Field {
                                                                 alias: None,
                                                                 name: "__typename",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "isbn",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                     ],
@@ -122,28 +122,28 @@ Sequence {
                                                             Field {
                                                                 alias: None,
                                                                 name: "__typename",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "isbn",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "title",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "year",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                     ],
@@ -198,14 +198,14 @@ Sequence {
                                                             Field {
                                                                 alias: None,
                                                                 name: "__typename",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "isbn",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                     ],
@@ -256,28 +256,28 @@ Sequence {
                                                             Field {
                                                                 alias: None,
                                                                 name: "__typename",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "isbn",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "title",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                         Field(
                                                             Field {
                                                                 alias: None,
                                                                 name: "year",
-                                                                selections: None,
+                                                                selections: [],
                                                             },
                                                         ),
                                                     ],
