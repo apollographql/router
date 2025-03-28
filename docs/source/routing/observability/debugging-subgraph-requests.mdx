@@ -15,9 +15,11 @@ Each client request goes through a process called [query planning](/graphos/expl
 
 ## Output query plans with headers
 
-With router v0.16.0+ and `@apollo/gateway` v2.5.4+, you can pass the following headers to return the query plans in the GraphQL response extensions:
+With router v0.16.0 and later, and `@apollo/gateway` v2.5.4 and later, you can pass the following headers to return the query plans in the GraphQL response extensions:
 
-- Including the `Apollo-Query-Plan-Experimental` header returns the query plan in the response extensions
+- Including the `Apollo-Expose-Query-Plan` header with the following supported options:
+  - A value of `true` both returns the query plan in the response and executes it
+  - In router v1.61.0 and later, a value of `dry-run` returns the query plan in the response but doesn't execute it
 - Additionally, including the `Apollo-Query-Plan-Experimental-Format` header with one of the supported options changes the output format:
   - A value of `prettified` returns a human-readable string of the query plan
   - A value of `internal` returns a JSON representation of the query plan
