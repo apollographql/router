@@ -607,6 +607,7 @@ macro_rules! parse_attributes {
 /// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
 /// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `u64_counter_with_unit` instead")]
 macro_rules! u64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(u64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
@@ -649,6 +650,7 @@ macro_rules! u64_counter_with_unit {
 /// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
 /// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_counter_with_unit` instead")]
 macro_rules! f64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(f64, counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
@@ -691,6 +693,7 @@ macro_rules! f64_counter_with_unit {
 /// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
 /// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `i64_up_down_counter_with_unit` instead")]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(i64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
@@ -733,6 +736,7 @@ macro_rules! i64_up_down_counter_with_unit {
 /// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
 /// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_up_down_counter_with_unit` instead")]
 macro_rules! f64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(f64, up_down_counter, add, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
@@ -775,6 +779,7 @@ macro_rules! f64_up_down_counter_with_unit {
 /// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
 /// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `f64_histogram_with_unit` instead")]
 macro_rules! f64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(f64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
@@ -830,6 +835,7 @@ macro_rules! f64_histogram_with_unit {
 /// See the [module-level documentation](crate::metrics) for examples and details on the reasoning
 /// behind this API.
 #[allow(unused_macros)]
+#[deprecated(since = "TBD", note = "use `u64_histogram_with_unit` instead")]
 macro_rules! u64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
         metric!(u64, histogram, record, stringify!($($name).+), $description, $value, parse_attributes!($($attrs)*));
