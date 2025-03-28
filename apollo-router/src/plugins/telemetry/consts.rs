@@ -28,7 +28,6 @@ pub(crate) const WAITING_TO_RECEIVE_CACHE_SPAN_NAME: &str = "waiting_for_cache";
 pub(crate) const CACHING_QUERY_PLANNER_DELEGATE_SERVICE_SPAN_NAME: &str = "delegate_service";
 pub(crate) const CACHING_QUERY_PLANNER_DELEGATE_SERVICE_ERROR_SPAN_NAME: &str =
     "insert_service_error";
-pub(crate) const CACHING_QUERY_PLANNER_SPAN_NAME: &str = "caching_query_planner_wrapper";
 pub(crate) const CACHING_QUERY_PLANNER_INSERT_RESPONSE_SPAN_NAME: &str = "insert_query_plan";
 pub(crate) const CACHING_QUERY_PLANNER_SEND_RESPONSE_SPAN_NAME: &str = "send_query_plan";
 pub(crate) const CACHING_QUERY_PLANNER_WRITE_TO_CONTEXT_PLAN_SPAN_NAME: &str =
