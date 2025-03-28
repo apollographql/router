@@ -113,6 +113,33 @@ meter_provider()
   .init();
 ```
 
+### Units
+
+When adding new metrics, the `_with_unit` variant macros should be used. Units should conform to the
+[OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units),
+some of which has been copied here for reference:
+
+* Instruments that measure a count of something should use annotations with curly braces to
+  give additional meaning. For example, use `{packet}`, `{error}`, `{request}`, etc., not `packet`,
+  `error`, `request`, etc.
+* Other instrument units should be specified using the UCUM case-sensitive (`c/s`) variant. For
+  example, `Cel` for the unit with full name "degree Celsius".
+* When instruments are measuring durations, seconds (i.e. `s`) should be used.
+* Instruments should use non-prefixed units (i.e. `By` instead of `MiBy`) unless there is good
+  technical reason to not do so.
+
+We have not yet modified the existing metrics because some metric exporters (notably
+Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
+change for customers. Ideally this will be accomplished in router 3.
+
+Examples of Prometheus metric renaming; note that annotations are not appended to the metric names:
+
+```rust
+u64_counter!("apollo.test", "test description", 1); // apollo_test
+u64_counter_with_unit!("apollo.test.requests", "test description", "{request}", 1); // apollo_test_requests
+f64_counter_with_unit!("apollo.test.total_duration", "test description", "s", 1); // apollo_test_total_duration_seconds
+```
+
 ### Testing
 When using the macro in a test you will need a different pattern depending on if you are writing a sync or async test.
 
