@@ -587,7 +587,7 @@ impl FederationSpecDefinition {
         DirectiveArgumentSpecification {
             base_spec: ArgumentSpecification {
                 name: FEDERATION_FIELDS_ARGUMENT_NAME,
-                get_type: |schema, _| Ok(Type::non_null(field_set_type(schema)?)),
+                get_type: |schema, _| field_set_type(schema),
                 default_value: None,
             },
             composition_strategy: None,
