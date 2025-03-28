@@ -734,6 +734,8 @@ where
     /// [tracing `Span`]: tracing::Span
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
+            // NB: order matters here! `parent_context` will temporarily lock `extensions` and we
+            // need to make sure that there isn't a lock already in place.
             let parent_cx = self.parent_context(attrs, &ctx);
             let mut extensions = span.extensions_mut();
 
