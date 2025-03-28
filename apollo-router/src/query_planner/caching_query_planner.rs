@@ -528,113 +528,104 @@ where
             // so we execute it in a task that can continue even after the request was canceled and
             // the join handle was dropped. That way, the next similar query will use the cache instead
             // of restarting the query planner until another timeout
-            tokio::task::spawn(
-                async move {
-                    let service = match self
-                        .delegate
-                        .ready()
+            tokio::task::spawn(async move {
+                let service = match self
+                    .delegate
+                    .ready()
+                    .instrument(tracing::info_span!(
+                        CACHING_QUERY_PLANNER_DELEGATE_SERVICE_SPAN_NAME,
+                        "otel.kind" = "INTERNAL",
+                    ))
+                    .await
+                {
+                    Ok(service) => service,
+                    Err(error) => {
+                        let e = Arc::new(error);
+                        let err = e.clone();
+                        tokio::spawn(async move {
+                            entry.insert(Err(err)).await;
+                        })
                         .instrument(tracing::info_span!(
-                            CACHING_QUERY_PLANNER_DELEGATE_SERVICE_SPAN_NAME,
+                            CACHING_QUERY_PLANNER_DELEGATE_SERVICE_ERROR_SPAN_NAME,
                             "otel.kind" = "INTERNAL",
-                        ))
-                        .await
-                    {
-                        Ok(service) => service,
-                        Err(error) => {
-                            let e = Arc::new(error);
-                            let err = e.clone();
-                            tokio::spawn(async move {
-                                entry.insert(Err(err)).await;
-                            })
-                            .instrument(tracing::info_span!(
-                                CACHING_QUERY_PLANNER_DELEGATE_SERVICE_ERROR_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                            ));
-                            return Err(CacheResolverError::RetrievalError(e));
-                        }
-                    };
+                        ));
+                        return Err(CacheResolverError::RetrievalError(e));
+                    }
+                };
 
-                    let res = service.call(request).await;
+                let res = service.call(request).await;
 
-                    match res {
-                        Ok(QueryPlannerResponse { content, errors }) => {
-                            if let Some(content) = content.clone() {
-                                let can_cache = match &content {
-                                    // Already cached in an introspection-specific, small-size,
-                                    // in-memory-only cache.
-                                    QueryPlannerContent::CachedIntrospectionResponse { .. } => {
-                                        false
-                                    }
-                                    _ => true,
-                                };
+                match res {
+                    Ok(QueryPlannerResponse { content, errors }) => {
+                        if let Some(content) = content.clone() {
+                            let can_cache = match &content {
+                                // Already cached in an introspection-specific, small-size,
+                                // in-memory-only cache.
+                                QueryPlannerContent::CachedIntrospectionResponse { .. } => false,
+                                _ => true,
+                            };
 
-                                if can_cache {
-                                    tokio::spawn(async move {
-                                        entry.insert(Ok(content)).await;
-                                    })
-                                    .instrument(
-                                        tracing::info_span!(
-                                            CACHING_QUERY_PLANNER_INSERT_RESPONSE_SPAN_NAME,
-                                            "otel.kind" = "INTERNAL",
-                                        ),
-                                    );
-                                } else {
-                                    tokio::spawn(async move {
-                                        entry.send(Ok(content)).await;
-                                    })
-                                    .instrument(
-                                        tracing::info_span!(
-                                            CACHING_QUERY_PLANNER_SEND_RESPONSE_SPAN_NAME,
-                                            "otel.kind" = "INTERNAL",
-                                        ),
-                                    );
-                                }
+                            if can_cache {
+                                tokio::spawn(async move {
+                                    entry.insert(Ok(content)).await;
+                                })
+                                .instrument(tracing::info_span!(
+                                    CACHING_QUERY_PLANNER_INSERT_RESPONSE_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL",
+                                ));
+                            } else {
+                                tokio::spawn(async move {
+                                    entry.send(Ok(content)).await;
+                                })
+                                .instrument(tracing::info_span!(
+                                    CACHING_QUERY_PLANNER_SEND_RESPONSE_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL",
+                                ));
                             }
-
-                            // This will be overridden by the Rust usage reporting implementation
-                            if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                                let write_to_context_span = tracing::info_span!(
-                                    CACHING_QUERY_PLANNER_WRITE_TO_CONTEXT_PLAN_SPAN_NAME,
-                                    "otel.kind" = "INTERNAL"
-                                )
-                                .or_current();
-                                let guard = write_to_context_span.enter();
-                                context.extensions().with_lock(|mut lock| {
-                                    lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
-                                });
-                                drop(guard);
-                            }
-                            Ok(QueryPlannerResponse { content, errors })
                         }
-                        Err(error) => {
-                            let e = Arc::new(error);
-                            let err = e.clone();
-                            tokio::spawn(async move {
-                                entry.insert(Err(err)).await;
-                            })
-                            .instrument(tracing::info_span!(
-                                CACHING_QUERY_PLANNER_DELEGATE_SERVICE_ERROR_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                            ));
 
-                            if let Some(usage_reporting) = e.usage_reporting() {
-                                let write_to_context_span = tracing::info_span!(
-                                    CACHING_QUERY_PLANNER_WRITE_TO_CONTEXT_ERROR_SPAN_NAME,
-                                    "otel.kind" = "INTERNAL"
-                                )
-                                .or_current();
-                                let guard = write_to_context_span.enter();
-                                context.extensions().with_lock(|mut lock| {
-                                    lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
-                                });
-                                drop(guard);
-                            }
-                            Err(CacheResolverError::RetrievalError(e))
+                        // This will be overridden by the Rust usage reporting implementation
+                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                            let write_to_context_span = tracing::info_span!(
+                                CACHING_QUERY_PLANNER_WRITE_TO_CONTEXT_PLAN_SPAN_NAME,
+                                "otel.kind" = "INTERNAL"
+                            )
+                            .or_current();
+                            let guard = write_to_context_span.enter();
+                            context.extensions().with_lock(|mut lock| {
+                                lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
+                            });
+                            drop(guard);
                         }
+                        Ok(QueryPlannerResponse { content, errors })
+                    }
+                    Err(error) => {
+                        let e = Arc::new(error);
+                        let err = e.clone();
+                        tokio::spawn(async move {
+                            entry.insert(Err(err)).await;
+                        })
+                        .instrument(tracing::info_span!(
+                            CACHING_QUERY_PLANNER_DELEGATE_SERVICE_ERROR_SPAN_NAME,
+                            "otel.kind" = "INTERNAL",
+                        ));
+
+                        if let Some(usage_reporting) = e.usage_reporting() {
+                            let write_to_context_span = tracing::info_span!(
+                                CACHING_QUERY_PLANNER_WRITE_TO_CONTEXT_ERROR_SPAN_NAME,
+                                "otel.kind" = "INTERNAL"
+                            )
+                            .or_current();
+                            let guard = write_to_context_span.enter();
+                            context.extensions().with_lock(|mut lock| {
+                                lock.insert::<Arc<UsageReporting>>(Arc::new(usage_reporting));
+                            });
+                            drop(guard);
+                        }
+                        Err(CacheResolverError::RetrievalError(e))
                     }
                 }
-                .in_current_span(),
-            )
+            })
             .instrument(tracing::info_span!(
                 CACHING_QUERY_PLANNER_SPAN_NAME,
                 "otel.kind" = "INTERNAL",
