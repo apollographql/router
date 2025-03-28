@@ -88,11 +88,24 @@ impl FilterMeterProvider {
         }
     }
 
+    pub(crate) fn private_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
+        FilterMeterProvider::builder()
+            .delegate(delegate)
+            .allow(
+                Regex::new(
+                    r"apollo\.router\.operations\.error",
+                )
+                .expect("regex should have been valid"),
+            )
+            .build()
+    }
+
     pub(crate) fn private<T: Into<MeterProvider>>(delegate: T) -> Self {
         FilterMeterProvider::builder()
             .delegate(delegate)
             .allow(
                 Regex::new(
+                    // TODO(tim): do we need to make sure this excludes the values in the realtime filter?
                     r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
