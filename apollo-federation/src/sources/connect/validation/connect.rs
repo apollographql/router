@@ -2,34 +2,33 @@
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use hashbrown::HashSet;
 use itertools::Itertools;
+use multi_try::MultiTry;
 
 use self::entity::validate_entity_arg;
-use self::selection::get_seen_fields_from_selection;
-use self::selection::validate_body_selection;
+use self::selection::Selection;
 use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
-use super::coordinates::ConnectHTTPCoordinate;
-use super::coordinates::FieldCoordinate;
-use super::coordinates::HttpHeadersCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
-use super::http::headers;
-use super::http::method;
 use super::source::SourceName;
-use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
+use crate::sources::connect::ConnectSpec;
+use crate::sources::connect::Namespace;
+use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
+use crate::sources::connect::validation::connect::http::Http;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 mod entity;
+mod http;
 mod selection;
 
 pub(super) fn fields_seen_by_all_connects(
@@ -39,23 +38,24 @@ pub(super) fn fields_seen_by_all_connects(
     let mut messages = Vec::new();
     let mut seen_fields = Vec::new();
 
-    for object in schema
+    schema
         .types
         .values()
-        .filter_map(|extended_type| {
+        .filter(|ty| !ty.is_built_in())
+        .for_each(|extended_type| {
             if let ExtendedType::Object(node) = extended_type {
-                Some(node)
-            } else {
-                None
+                match fields_seen_by_connectors_on_types(node, schema, all_source_names) {
+                    Ok(fields) => seen_fields.extend(fields),
+                    Err(errs) => messages.extend(errs),
+                }
+
+                match fields_seen_by_connectors_on_fields(node, schema, all_source_names) {
+                    Ok(fields) => seen_fields.extend(fields),
+                    Err(errs) => messages.extend(errs),
+                }
             }
-        })
-        .filter(|object| !object.is_built_in())
-    {
-        match fields_seen_by_object_connectors(object, schema, all_source_names) {
-            Ok(fields) => seen_fields.extend(fields),
-            Err(errs) => messages.extend(errs),
-        }
-    }
+        });
+
     if messages.is_empty() {
         Ok(seen_fields)
     } else {
@@ -63,36 +63,197 @@ pub(super) fn fields_seen_by_all_connects(
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ObjectCategory {
-    Query,
-    Mutation,
-    Other,
+/// A parsed `@connect` directive
+struct Connect<'schema> {
+    selection: Selection<'schema>,
+    http: Http<'schema>,
+    coordinate: ConnectDirectiveCoordinate<'schema>,
+    schema: &'schema SchemaInfo<'schema>,
 }
 
-/// Make sure that any `@connect` directives on object fields are valid
-fn fields_seen_by_object_connectors(
+impl<'schema> Connect<'schema> {
+    /// Parse the `@connect` directive and run just enough checks to be able to use it at runtime.
+    /// More advanced checks are done in [`Self::type_check`].
+    ///
+    /// Three sub-pieces are parsed:
+    /// 1. `@connect(http:)` with [`Http::parse`]
+    /// 2. `@connect(source:)` with [`validate_source_name`]
+    /// 3. `@connect(selection:)` with [`Selection::parse`]
+    ///
+    /// `selection` and `source` are _always_ checked and their errors are returned.
+    /// The order these two run in doesn't matter.
+    /// `http` can't be validated without knowing whether a `source` was set, so it's only checked if `source` is valid.
+    fn parse(
+        directive: &'schema Node<Directive>,
+        element: ConnectedElement<'schema>,
+        schema: &'schema SchemaInfo,
+        source_names: &'schema [SourceName],
+    ) -> Result<Self, Vec<Message>> {
+        let coordinate = ConnectDirectiveCoordinate { directive, element };
+
+        if element.is_root_type(schema) {
+            return Err(vec![Message {
+                code: Code::ConnectOnRoot,
+                message: format!(
+                    "Cannot use `@{connect_directive_name}` on root types like `{object_name}`",
+                    object_name = coordinate.element.base_type_name(),
+                    connect_directive_name = schema.connect_directive_name(),
+                ),
+                locations: directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
+        }
+
+        let (selection, http) = Selection::parse(coordinate, schema)
+            .map_err(|err| vec![err])
+            .and_try(
+                validate_source_name(directive, &coordinate, source_names, schema)
+                    .map_err(|err| vec![err])
+                    .and_then(|source_name| Http::parse(coordinate, source_name, schema)),
+            )
+            .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
+
+        Ok(Self {
+            selection,
+            http,
+            coordinate,
+            schema,
+        })
+    }
+
+    fn type_check(self) -> Result<Vec<ResolvedField>, Vec<Message>> {
+        let mut messages = Vec::new();
+
+        let all_variables = self
+            .selection
+            .variables()
+            .chain(self.http.variables())
+            .collect::<HashSet<_>>();
+        if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
+            messages.push(Message {
+                code: Code::ConnectBatchAndThis,
+                message: format!(
+                    "In {}: connectors cannot use both $this and $batch",
+                    self.coordinate
+                ),
+                locations: self
+                    .coordinate
+                    .directive
+                    .line_column_range(&self.schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+
+        messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
+        messages.extend(
+            self.http
+                .type_check(self.schema)
+                .err()
+                .into_iter()
+                .flatten(),
+        );
+
+        let seen = match self.selection.type_check(self.schema) {
+            // TODO: use ResolvedField struct at all levels
+            Ok(seen) => seen
+                .into_iter()
+                .map(|(object_name, field_name)| ResolvedField {
+                    object_name,
+                    field_name,
+                })
+                .collect(),
+            Err(message) => {
+                messages.push(message);
+                return Err(messages);
+            }
+        };
+
+        if messages.is_empty() {
+            Ok(seen)
+        } else {
+            Err(messages)
+        }
+    }
+}
+
+/// A field that is resolved by a connect directive
+pub(super) struct ResolvedField {
+    pub object_name: Name,
+    pub field_name: Name,
+}
+
+/// Make sure that any `@connect` directives on types are valid
+fn fields_seen_by_connectors_on_types(
     object: &Node<ObjectType>,
     schema: &SchemaInfo,
     source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let source_map = &schema.sources;
-    let is_subscription = schema
-        .schema_definition
-        .subscription
-        .as_ref()
-        .is_some_and(|sub| sub.name == object.name);
-    if is_subscription {
+    let connect_directives = object
+        .directives
+        .iter()
+        .filter(|directive| directive.name == *schema.connect_directive_name())
+        .collect_vec();
+
+    if connect_directives.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // TODO: find a better place for feature gates like this
+    if schema.connect_link.spec == ConnectSpec::V0_1 {
         return Err(vec![Message {
-            code: Code::SubscriptionInConnectors,
+            code: Code::FeatureUnavailable,
             message: format!(
-                "A subscription root type is not supported when using `@{connect_directive_name}`.",
+                "Using `@{connect_directive_name}` on `type {object_name}` requires connectors v0.2. Learn more at https://go.apollo.dev/connectors/changelog.",
+                object_name = object.name,
                 connect_directive_name = schema.connect_directive_name(),
             ),
-            locations: object.line_column_range(source_map).into_iter().collect(),
+            locations: object
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
         }]);
     }
 
+    let mut messages = Vec::new();
+    let mut seen_fields = Vec::new();
+
+    for directive in connect_directives {
+        let element = ConnectedElement::Type { type_def: object };
+
+        let connect = match Connect::parse(directive, element, schema, source_names) {
+            Ok(connect) => connect,
+            Err(errs) => {
+                messages.extend(errs);
+                continue;
+            }
+        };
+
+        match connect.type_check() {
+            Ok(resolved) => seen_fields.extend(
+                resolved
+                    .into_iter()
+                    .map(|resolved| (resolved.object_name, resolved.field_name)),
+            ),
+            Err(errs) => messages.extend(errs),
+        }
+    }
+
+    if messages.is_empty() {
+        Ok(seen_fields)
+    } else {
+        Err(messages)
+    }
+}
+
+/// Make sure that any `@connect` directives on object fields are valid
+fn fields_seen_by_connectors_on_fields(
+    object: &Node<ObjectType>,
+    schema: &SchemaInfo,
+    source_names: &[SourceName],
+) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let object_category = if schema
         .schema_definition
         .query
@@ -133,7 +294,7 @@ fn fields_seen_by_connector(
     schema: &SchemaInfo,
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let source_map = &schema.sources;
-    let mut errors = Vec::new();
+    let mut messages = Vec::new();
     let connect_directives = field
         .directives
         .iter()
@@ -141,33 +302,15 @@ fn fields_seen_by_connector(
         .collect_vec();
 
     if connect_directives.is_empty() {
-        match category {
-            ObjectCategory::Query => errors.push(get_missing_connect_directive_message(
-                Code::QueryFieldMissingConnect,
-                field,
-                object,
-                source_map,
-                schema.connect_directive_name(),
-            )),
-            ObjectCategory::Mutation => errors.push(get_missing_connect_directive_message(
-                Code::MutationFieldMissingConnect,
-                field,
-                object,
-                source_map,
-                schema.connect_directive_name(),
-            )),
-            _ => (),
-        }
-
-        return Err(errors);
-    };
+        return Ok(Vec::new());
+    }
 
     // mark the field with a @connect directive as seen
     let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
 
     // direct recursion isn't allowed, like a connector on User.friends: [User]
-    if matches!(category, ObjectCategory::Other) && &object.name == field.ty.inner_named_type() {
-        errors.push(Message {
+    if &object.name == field.ty.inner_named_type() {
+        messages.push(Message {
             code: Code::CircularReference,
             message: format!(
                 "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
@@ -179,182 +322,90 @@ fn fields_seen_by_connector(
         });
     }
 
-    for connect_directive in connect_directives {
-        let field_coordinate = FieldCoordinate { object, field };
-        let connect_coordinate = ConnectDirectiveCoordinate {
-            directive: connect_directive,
-            field_coordinate,
+    for directive in connect_directives {
+        let element = ConnectedElement::Field {
+            parent_type: object,
+            parent_category: category,
+            field_def: field,
         };
-
-        match get_seen_fields_from_selection(connect_coordinate, schema) {
-            Ok(seen) => seen_fields.extend(seen),
-            Err(error) => errors.push(error),
-        }
-
-        errors
-            .extend(validate_entity_arg(field, connect_directive, object, schema, category).err());
-
-        let Some((http_arg, http_arg_node)) = connect_directive
-            .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
-            .and_then(|arg| Some((arg.as_object()?, arg)))
-        else {
-            errors.push(Message {
-                code: Code::GraphQLError,
-                message: format!(
-                    "{connect_coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument."
-                ),
-                locations: connect_directive
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
-            return Err(errors);
-        };
-
-        let url_template = match method::validate(
-            http_arg,
-            ConnectHTTPCoordinate::from(connect_coordinate),
-            http_arg_node,
-            schema,
-        ) {
-            Ok(method) => Some(method),
+        let connect = match Connect::parse(directive, element, schema, source_names) {
+            Ok(connect) => connect,
             Err(errs) => {
-                errors.extend(errs);
-                None
+                messages.extend(errs);
+                continue;
             }
         };
-
-        if let Some((_, body)) = http_arg
-            .iter()
-            .find(|(name, _)| name == &CONNECT_BODY_ARGUMENT_NAME)
-        {
-            errors.extend(validate_body_selection(
-                connect_directive,
-                connect_coordinate,
-                object,
-                field,
-                schema,
-                body,
-            ));
+        match connect.type_check() {
+            Ok(resolved) => seen_fields.extend(
+                resolved
+                    .into_iter()
+                    .map(|resolved| (resolved.object_name, resolved.field_name)),
+            ),
+            Err(errs) => messages.extend(errs),
         }
-
-        if let Some(source_name) = connect_directive
-            .arguments
-            .iter()
-            .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
-        {
-            errors.extend(validate_source_name_arg(
-                &field.name,
-                &object.name,
-                source_name,
-                source_names,
-                schema,
-            ));
-
-            if let Some((template, coordinate)) = url_template {
-                if template.base.is_some() {
-                    errors.push(Message {
-                        code: Code::AbsoluteConnectUrlWithSource,
-                        message: format!(
-                            "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                            raw_value = coordinate.node
-                        ),
-                        locations: coordinate.node.line_column_range(source_map)
-                            .into_iter()
-                            .collect(),
-                    })
-                }
-            }
-        } else if let Some((template, coordinate)) = url_template {
-            if template.base.is_none() {
-                errors.push(Message {
-                    code: Code::RelativeConnectUrlWithoutSource,
-                    message: format!(
-                        "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
-                        raw_value = coordinate.node,
-                        source_directive_name = schema.source_directive_name(),
-                    ),
-                    locations: coordinate.node.line_column_range(source_map).into_iter().collect()
-                })
-            }
-        }
-
-        errors.extend(headers::validate_arg(
-            http_arg,
-            HttpHeadersCoordinate::Connect {
-                connect: connect_coordinate,
-                object: &object.name,
-                field: &field.name,
-            },
-            schema,
-        ));
     }
-    if errors.is_empty() {
+
+    if messages.is_empty() {
         Ok(seen_fields)
     } else {
-        Err(errors)
+        Err(messages)
     }
 }
 
-fn get_missing_connect_directive_message(
-    code: Code,
-    field: &Component<FieldDefinition>,
-    object: &Node<ObjectType>,
-    source_map: &SourceMap,
-    connect_directive_name: &Name,
-) -> Message {
-    Message {
-        code,
-        message: format!(
-            "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
-            field = field.name,
-            object_name = object.name,
-        ),
-        locations: field.line_column_range(source_map).into_iter().collect(),
-    }
-}
-
-pub(super) fn validate_source_name_arg(
-    field_name: &Name,
-    object_name: &Name,
-    source_name: &Node<Argument>,
-    source_names: &[SourceName],
+fn validate_source_name<'schema>(
+    directive: &Node<Directive>,
+    coordinate: &ConnectDirectiveCoordinate,
+    source_names: &'schema [SourceName],
     schema: &SchemaInfo,
-) -> Vec<Message> {
-    let mut messages = vec![];
+) -> Result<Option<&'schema SourceName<'schema>>, Message> {
+    let Some(source_name_arg) = directive
+        .arguments
+        .iter()
+        .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
+    else {
+        return Ok(None);
+    };
 
-    if source_names.iter().all(|name| name != &source_name.value) {
-        // TODO: Pick a suggestion that's not just the first defined source
-        let qualified_directive = connect_directive_name_coordinate(
-            schema.connect_directive_name(),
-            &source_name.value,
-            object_name,
-            field_name,
-        );
-        if let Some(first_source_name) = source_names.first() {
-            messages.push(Message {
-                code: Code::SourceNameMismatch,
-                message: format!(
-                    "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
-                    first_source_name = first_source_name.as_str(),
-                ),
-                locations: source_name.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        } else {
-            messages.push(Message {
-                code: Code::NoSourcesDefined,
-                message: format!(
-                    "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
-                    coordinate = source_name_value_coordinate(schema.source_directive_name(), &source_name.value),
-                ),
-                locations: source_name.line_column_range(&schema.sources)
-                    .into_iter()
-                    .collect(),
-            });
-        }
+    let resolved_source_name = source_names
+        .iter()
+        .find(|name| **name == source_name_arg.value);
+
+    if let Some(source_name) = resolved_source_name {
+        return Ok(Some(source_name));
     }
-
-    messages
+    // A source name was set but doesn't match a defined source
+    // TODO: Pick a suggestion that's not just the first defined source
+    let qualified_directive = connect_directive_name_coordinate(
+        schema.connect_directive_name(),
+        &source_name_arg.value,
+        coordinate,
+    );
+    if let Some(first_source_name) = source_names.first() {
+        Err(Message {
+            code: Code::SourceNameMismatch,
+            message: format!(
+                "{qualified_directive} does not match any defined sources. Did you mean \"{first_source_name}\"?",
+                first_source_name = first_source_name.as_str(),
+            ),
+            locations: source_name_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+    } else {
+        Err(Message {
+            code: Code::NoSourcesDefined,
+            message: format!(
+                "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
+                coordinate = source_name_value_coordinate(
+                    schema.source_directive_name(),
+                    &source_name_arg.value
+                ),
+            ),
+            locations: source_name_arg
+                .line_column_range(&schema.sources)
+                .into_iter()
+                .collect(),
+        })
+    }
 }

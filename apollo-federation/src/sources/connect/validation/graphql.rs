@@ -11,6 +11,7 @@ mod strings;
 
 pub(super) use strings::GraphQLString;
 
+use crate::sources::connect::spec::versions::VersionInfo;
 use crate::sources::connect::validation::link::ConnectLink;
 
 pub(super) struct SchemaInfo<'schema> {
@@ -18,6 +19,7 @@ pub(super) struct SchemaInfo<'schema> {
     len: usize,
     lookup: LineColLookup<'schema>,
     pub(crate) connect_link: ConnectLink<'schema>,
+    pub(crate) version_info: VersionInfo,
     /// A lookup map for the Shapes computed from GraphQL types.
     pub(crate) shape_lookup: IndexMap<&'schema str, Shape>,
 }
@@ -28,11 +30,13 @@ impl<'schema> SchemaInfo<'schema> {
         src: &'schema str,
         connect_link: ConnectLink<'schema>,
     ) -> Self {
+        let version_info = connect_link.spec.into();
         Self {
             schema,
             len: src.len(),
             lookup: LineColLookup::new(src),
             connect_link,
+            version_info,
             shape_lookup: shape::graphql::shapes_for_schema(schema),
         }
     }

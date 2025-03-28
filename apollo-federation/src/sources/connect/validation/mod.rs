@@ -22,7 +22,6 @@ mod http;
 mod link;
 mod schema;
 mod source;
-mod variable;
 
 use std::fmt::Display;
 use std::ops::Range;
@@ -31,7 +30,6 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Value;
-use apollo_compiler::name;
 use apollo_compiler::parser::LineColumn;
 use apollo_compiler::schema::SchemaBuilder;
 use itertools::Itertools;
@@ -39,17 +37,12 @@ use strum_macros::Display;
 use strum_macros::IntoStaticStr;
 use url::Url;
 
-use crate::link::Import;
-use crate::link::Link;
-use crate::link::spec::Identity;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::validation::connect::fields_seen_by_all_connects;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::link::ConnectLink;
 use crate::sources::connect::validation::source::SourceDirective;
-use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
-use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 
 /// The result of a validation pass on a subgraph
 #[derive(Debug)]
@@ -93,12 +86,9 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
         }
         Some(Ok(link)) => link,
     };
-    let mut messages = check_conflicting_directives(&schema);
-
     let schema_info = SchemaInfo::new(&schema, source_text, link);
 
-    let (source_directives, source_messages) = SourceDirective::find(&schema_info);
-    messages.extend(source_messages);
+    let (source_directives, mut messages) = SourceDirective::find(&schema_info);
     let all_source_names = source_directives
         .into_iter()
         .map(|directive| directive.name)
@@ -137,48 +127,6 @@ pub fn validate(source_text: &str, file_name: &str) -> ValidationResult {
         has_connectors: true,
         schema,
     }
-}
-
-fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
-    let Some((fed_link, fed_link_directive)) =
-        Link::for_identity(schema, &Identity::federation_identity())
-    else {
-        return Vec::new();
-    };
-
-    // TODO: make the `Link` code retain locations directly instead of reparsing stuff for validation
-    let imports = fed_link_directive
-        .specified_argument_by_name(&name!("import"))
-        .and_then(|arg| arg.as_list())
-        .into_iter()
-        .flatten()
-        .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
-        .collect_vec();
-
-    let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
-    fed_link
-        .imports
-        .into_iter()
-        .filter_map(|import| {
-            disallowed_imports
-                .contains(&import.element)
-                .then(|| Message {
-                    code: Code::ConnectorsUnsupportedFederationDirective,
-                    message: format!(
-                        "The directive `@{import}` is not supported when using connectors.",
-                        import = import.alias.as_ref().unwrap_or(&import.element)
-                    ),
-                    locations: imports
-                        .iter()
-                        .find_map(|(value, reparsed)| {
-                            (*reparsed == *import).then(|| value.line_column_range(&schema.sources))
-                        })
-                        .flatten()
-                        .into_iter()
-                        .collect(),
-                })
-        })
-        .collect()
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
@@ -254,10 +202,6 @@ pub enum Code {
     SourceNameMismatch,
     /// Connectors currently don't support subscription operations.
     SubscriptionInConnectors,
-    /// A query field is missing the `@connect` directive.
-    QueryFieldMissingConnect,
-    /// A mutation field is missing the `@connect` directive.
-    MutationFieldMissingConnect,
     /// The `@connect` is using a `source`, but the URL is absolute. This is not allowed because
     /// the `@source` URL will be joined with the `@connect` URL, so the `@connect` URL should
     /// only be a path.
@@ -316,6 +260,14 @@ pub enum Code {
     NullabilityMismatch,
     /// The version set in the connectors `@link` URL is not recognized.
     UnknownConnectorsVersion,
+    /// Feature unavailable
+    FeatureUnavailable,
+    /// When `@connect` is applied to a type, `entity` can't be set to `false`
+    ConnectOnTypeMustBeEntity,
+    /// `@connect` cannot be applied to a query, mutation, or subscription root type
+    ConnectOnRoot,
+    /// Using both `$batch` and `$this` is not allowed
+    ConnectBatchAndThis,
 }
 
 impl Code {

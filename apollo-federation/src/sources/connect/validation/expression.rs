@@ -15,6 +15,8 @@ use shape::location::Location;
 use shape::location::SourceId;
 
 use crate::sources::connect::Namespace;
+use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -41,36 +43,48 @@ impl<'schema> Context<'schema> {
         source: &'schema GraphQLString,
         code: Code,
     ) -> Self {
-        let object_type = coordinate.field_coordinate.object;
-        let is_root_type = schema
-            .schema_definition
-            .query
-            .as_ref()
-            .is_some_and(|query| query.name == object_type.name)
-            || schema
-                .schema_definition
-                .mutation
-                .as_ref()
-                .is_some_and(|mutation| mutation.name == object_type.name);
-        let mut var_lookup: IndexMap<Namespace, Shape> = [
-            (
-                Namespace::Args,
-                shape_for_arguments(coordinate.field_coordinate.field),
-            ),
-            (Namespace::Config, Shape::unknown([])),
-            (Namespace::Context, Shape::unknown([])),
-        ]
-        .into_iter()
-        .collect();
-        if !is_root_type {
-            var_lookup.insert(Namespace::This, Shape::from(object_type));
-        }
+        match coordinate.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+                parent_category,
+            } => {
+                let mut var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                ]
+                .into_iter()
+                .collect();
 
-        Self {
-            schema,
-            var_lookup,
-            source,
-            code,
+                if matches!(parent_category, ObjectCategory::Other) {
+                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                }
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
         }
     }
 
@@ -340,7 +354,6 @@ mod tests {
 
     use super::*;
     use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::validation::coordinates::FieldCoordinate;
     use crate::sources::connect::validation::link::ConnectLink;
 
     fn expression(selection: &str) -> Expression {
@@ -414,7 +427,11 @@ mod tests {
         )
         .unwrap();
         let coordinate = ConnectDirectiveCoordinate {
-            field_coordinate: FieldCoordinate { field, object },
+            element: ConnectedElement::Field {
+                parent_type: object,
+                field_def: field,
+                parent_category: ObjectCategory::Query,
+            },
             directive,
         };
         let context =

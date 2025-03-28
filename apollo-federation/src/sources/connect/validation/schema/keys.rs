@@ -121,7 +121,7 @@ impl fmt::Debug for EntityKeyChecker<'_> {
 
 pub(crate) fn field_set_error(
     variables: &[VariableReference<Namespace>],
-    type_name: &Name,
+    type_name: &str,
 ) -> Message {
     Message {
         code: Code::GraphQLError,
