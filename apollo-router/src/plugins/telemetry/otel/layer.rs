@@ -975,11 +975,7 @@ where
                 }
             }
 
-            // explicit drop for otel_data - probably not necessary, but since it's accessed again
-            // below it seems like it's better to be safe
-            drop(otel_data);
-
-            if let Some(OtelData { builder, .. }) = extensions.get_mut::<OtelData>() {
+            if let Some(builder) = otel_data.map(|o| &mut o.builder) {
                 if builder.status == otel::Status::Unset
                     && *meta.level() == tracing_core::Level::ERROR
                 {
