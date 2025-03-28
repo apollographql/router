@@ -444,6 +444,7 @@ impl FederationSchema {
         Ok(applications)
     }
 
+    // TODO: This currently only returns targets for object_fields and interface_fields
     pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
         let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
         let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
@@ -464,6 +465,27 @@ impl FederationSchema {
                         applications.push(arguments.map(|args| TagDirective {
                             arguments: args,
                             target: TagDirectiveTargetPosition::ObjectField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for field_definition_position in &tag_directive_referencers.interface_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InterfaceField(
                                 field_definition_position.clone(),
                             ),
                             directive: tag_directive_application,
