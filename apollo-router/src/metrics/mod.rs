@@ -1413,6 +1413,12 @@ mod test {
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
 
+    fn assert_unit(name: &str, unit: &str) {
+        let collected_metrics = crate::metrics::collect_metrics();
+        let metric = collected_metrics.find(name).unwrap();
+        assert_eq!(metric.unit, unit);
+    }
+
     #[test]
     fn test_gauge() {
         // Observables are cleaned up when they dropped, so keep this around.
@@ -1670,10 +1676,7 @@ mod test {
         async {
             u64_counter_with_unit!("test", "test description", "Hz", 1, attr = "val");
             assert_counter!("test", 1, "attr" = "val");
-
-            let collected_metrics = crate::metrics::collect_metrics();
-            let metric = collected_metrics.find("test").unwrap();
-            assert_eq!(metric.unit, "Hz");
+            assert_unit("test", "Hz");
         }
         .with_metrics()
         .await;
@@ -1684,6 +1687,7 @@ mod test {
         async {
             f64_counter_with_unit!("test", "test description", "s", 1.5, "attr" = "val");
             assert_counter!("test", 1.5, "attr" = "val");
+            assert_unit("test", "s");
         }
         .with_metrics()
         .await;
@@ -1692,14 +1696,9 @@ mod test {
     #[tokio::test]
     async fn test_i64_up_down_counter_with_unit() {
         async {
-            i64_up_down_counter_with_unit!(
-                "test",
-                "test description",
-                "{request}",
-                1,
-                "attr" = "val"
-            );
+            i64_up_down_counter_with_unit!("test", "test description", "{request}", 1);
             assert_up_down_counter!("test", 1, "attr" = "val");
+            assert_unit("test", "{request}");
         }
         .with_metrics()
         .await;
@@ -1710,6 +1709,7 @@ mod test {
         async {
             f64_up_down_counter_with_unit!("test", "test description", "kg", 1.5, "attr" = "val");
             assert_up_down_counter!("test", 1.5, "attr" = "val");
+            assert_unit("test", "kg");
         }
         .with_metrics()
         .await;
@@ -1720,6 +1720,7 @@ mod test {
         async {
             u64_histogram_with_unit!("test", "test description", "{packet}", 1, "attr" = "val");
             assert_histogram_sum!("test", 1, "attr" = "val");
+            assert_unit("test", "{packet}");
         }
         .with_metrics()
         .await;
