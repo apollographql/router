@@ -93,7 +93,7 @@ impl FederationBlueprint {
         directive: &Directive,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
-            // TODO: pass `alias` and `imports`
+            // TODO (FED-428): pass `alias` and `imports`
             link_spec_latest().add_definitions_to_schema(schema, /*alias*/ None)?;
             Ok(schema.get_directive_definition(&directive.name))
         } else {

@@ -7,6 +7,7 @@ use apollo_compiler::Node;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
 
+use crate::ensure;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
@@ -136,9 +137,9 @@ pub(crate) trait SpecDefinition {
 
     fn add_elements_to_schema(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let link = self.link_in_schema(schema)?;
-        assert!(
+        ensure!(
             link.is_some(),
-            "The ${self_url} specification should have been added to the schema before this is called",
+            "The {self_url} specification should have been added to the schema before this is called",
             self_url = self.url()
         );
         let mut errors = MultipleFederationErrors { errors: vec![] };

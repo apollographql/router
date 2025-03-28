@@ -119,7 +119,8 @@ impl LinkSpecDefinition {
     ) -> Result<(), FederationError> {
         self.add_definitions_to_schema(schema, alias)?;
 
-        // TODO: port `SchemaDefinition::hasExtensionElements/hasNonExtensionElements`
+        // TODO: complete porting - used by `onDirectiveDefinitionAndSchemaParsed` in JS (FED-428)
+        // - need to port`SchemaDefinition::hasExtensionElements/hasNonExtensionElements`
         Ok(())
     }
 
@@ -127,7 +128,7 @@ impl LinkSpecDefinition {
         &self,
         schema: &mut FederationSchema,
         alias: Option<Name>,
-        // imports: Vec<Import>, // TODO
+        // imports: Vec<Import>, // Used by `onMissingDirectiveDefinition` in JS (FED-428)
     ) -> Result<(), FederationError> {
         if let Some(metadata) = schema.metadata() {
             let link_spec_def = metadata.link_spec_definition()?;
@@ -138,7 +139,8 @@ impl LinkSpecDefinition {
             let self_fmt = format!("{}/{}", self.identity(), self.version());
             return Err(SingleFederationError::InvalidLinkDirectiveUsage {
                 message: format!(
-                    "Cannot add feature {self_fmt} to the schema, it already uses (unknown/TODO)",
+                    "Cannot add feature {self_fmt} to the schema, it already uses {existing_def}",
+                    existing_def = link_spec_def.url
                 ),
             }
             .into());
@@ -152,7 +154,7 @@ impl LinkSpecDefinition {
         let mock_link = Arc::new(Link {
             url: self.url.clone(),
             spec_alias: alias,
-            imports: vec![], // TODO
+            imports: vec![], // TODO (FED-428)
             purpose: None,
         });
         Ok(())
