@@ -80,16 +80,18 @@ then look at `apollo.router.schema.loading.time` and `apollo.router.query_planni
 
 If the router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
 
+<MinVersion version="1.61.0">
+
 #### Cache warm-up with headers
 
-With [the Apollo Router Core](https://github.com/apollographql/router) v1.61.0+  or v2.x+, you can pass the following header to return the query plans in the GraphQL response extensions:
+</MinVersion>
 
-- The header `Apollo-Expose-Query-Plan` must be set with one of the following options:
-  - A value of `true` returns a human-readable string and JSON blob of the query plan
-  - A value of `dry-run` will generate the query plan and then abort execution. This can be helpful if you want to warm up any internal or external query plan caches as after generation it will save it to your configured cache locations as normal.
+With router v1.61.0+  and v2.x+, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
 
-This will allow you to warm up cache instances with real, mirrored, or similar to production operations that you direct to the Router before you move traffic to new instances.
+- `true`: Returns a human-readable string and JSON blob of the query plan.
+- `dry-run`: Generates the query plan without executing the query.  After generation, query plans are saved to your configured cache locations, making it useful for pre-warming internal or external caches.
 
+This lets you warm up query plan caches with real, mirrored, or similar to production operations before transitioning traffic to new router instances.
 ## Caching automatic persisted queries (APQ)
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
