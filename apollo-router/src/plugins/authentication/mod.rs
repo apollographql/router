@@ -70,11 +70,11 @@ pub(crate) enum AuthenticationError<'a> {
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
-    /// Header Value: '{0}' is not correctly formatted. prefix should be '{1}'
-    InvalidPrefix(&'a str, &'a str),
+    /// Value of '{0}' JWT header should be prefixed with '{1}'
+    InvalidJWTPrefix(&'a str, &'a str),
 
-    /// Header Value: '{0}' is not correctly formatted. Missing JWT
-    MissingJWT(&'a str),
+    /// Value of '{0}' JWT header has only '{1}' prefix but no JWT token
+    MissingJWTToken(&'a str, &'a str),
 
     /// '{0}' is not a valid JWT header: {1}
     InvalidHeader(&'a str, JWTError),
@@ -725,8 +725,8 @@ fn extract_jwt<'a, 'b: 'a>(
                 if ignore_other_prefixes {
                     return None;
                 } else {
-                    return Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed,
+                    return Some(Err(AuthenticationError::InvalidJWTPrefix(
+                        name,
                         value_prefix,
                     )));
                 }
@@ -735,8 +735,8 @@ fn extract_jwt<'a, 'b: 'a>(
             let jwt = if value_prefix.is_empty() {
                 // check for whitespace- we've already trimmed, so this means the request has a prefix that shouldn't exist
                 if jwt_value.contains(' ') {
-                    return Some(Err(AuthenticationError::InvalidPrefix(
-                        jwt_value_untrimmed,
+                    return Some(Err(AuthenticationError::InvalidJWTPrefix(
+                        name,
                         value_prefix,
                     )));
                 }
@@ -747,7 +747,10 @@ fn extract_jwt<'a, 'b: 'a>(
                 // Otherwise, we need to split our string in (at most 2) sections.
                 let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                 if jwt_parts.len() != 2 {
-                    return Some(Err(AuthenticationError::MissingJWT(jwt_value)));
+                    return Some(Err(AuthenticationError::MissingJWTToken(
+                        name,
+                        value_prefix,
+                    )));
                 }
 
                 // We have our jwt
