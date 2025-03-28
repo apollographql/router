@@ -718,8 +718,8 @@ where
     /// [tracing `Span`]: tracing::Span
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
         if let Some(span) = ctx.span(id) {
-            let mut extensions = span.extensions_mut();
             let parent_cx = self.parent_context(attrs, &ctx);
+            let mut extensions = span.extensions_mut();
 
             // Record new trace id if there is no active parent span
             let trace_id = if parent_cx.span().span_context().trace_id()
@@ -883,9 +883,9 @@ where
 
     fn on_follows_from(&self, id: &Id, follows: &Id, ctx: Context<S>) {
         if let (Some(span), Some(follows_span)) = (ctx.span(id), ctx.span(follows)) {
-            let mut extensions = span.extensions_mut();
-            if extensions
-                .get_mut::<SampledSpan>()
+            if span
+                .extensions()
+                .get::<SampledSpan>()
                 .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
                 .unwrap_or(true)
             {
@@ -893,22 +893,26 @@ where
                 return;
             }
 
+            let follows_link = {
+                let mut follows_extensions = follows_span.extensions_mut();
+                let follows_data = follows_extensions
+                    .get_mut::<OtelData>()
+                    .expect("Missing otel data span extensions");
+
+                let follows_context = self
+                    .tracer
+                    .sampled_context(follows_data)
+                    .span()
+                    .span_context()
+                    .clone();
+                otel::Link::new(follows_context, Vec::new(), 0)
+            };
+
+            let mut extensions = span.extensions_mut();
             let data = extensions
                 .get_mut::<OtelData>()
                 .expect("Missing otel data span extensions");
 
-            let mut follows_extensions = follows_span.extensions_mut();
-            let follows_data = follows_extensions
-                .get_mut::<OtelData>()
-                .expect("Missing otel data span extensions");
-
-            let follows_context = self
-                .tracer
-                .sampled_context(follows_data)
-                .span()
-                .span_context()
-                .clone();
-            let follows_link = otel::Link::new(follows_context, Vec::new(), 0);
             if let Some(ref mut links) = data.builder.links {
                 links.push(follows_link);
             } else {
