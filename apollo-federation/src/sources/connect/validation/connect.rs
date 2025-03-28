@@ -2,9 +2,6 @@
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use hashbrown::HashSet;
@@ -36,25 +33,33 @@ pub(super) fn fields_seen_by_all_connects(
     all_source_names: &[SourceName],
 ) -> Result<Vec<(Name, Name)>, Vec<Message>> {
     let mut messages = Vec::new();
+    let mut connects = Vec::new();
+
+    for extended_type in schema.types.values().filter(|ty| !ty.is_built_in()) {
+        let ExtendedType::Object(node) = extended_type else {
+            continue;
+        };
+        let (connects_for_type, messages_for_type) =
+            Connect::find_on_type(node, schema, all_source_names);
+        connects.extend(connects_for_type);
+        messages.extend(messages_for_type);
+    }
+
     let mut seen_fields = Vec::new();
-
-    schema
-        .types
-        .values()
-        .filter(|ty| !ty.is_built_in())
-        .for_each(|extended_type| {
-            if let ExtendedType::Object(node) = extended_type {
-                match fields_seen_by_connectors_on_types(node, schema, all_source_names) {
-                    Ok(fields) => seen_fields.extend(fields),
-                    Err(errs) => messages.extend(errs),
-                }
-
-                match fields_seen_by_connectors_on_fields(node, schema, all_source_names) {
-                    Ok(fields) => seen_fields.extend(fields),
-                    Err(errs) => messages.extend(errs),
-                }
+    for connect in connects {
+        match connect.type_check() {
+            Ok(seen_fields_for_connect) => {
+                seen_fields.extend(
+                    seen_fields_for_connect
+                        .into_iter()
+                        .map(|field| (field.object_name, field.field_name)),
+                );
             }
-        });
+            Err(messages_for_connect) => {
+                messages.extend(messages_for_connect);
+            }
+        }
+    }
 
     if messages.is_empty() {
         Ok(seen_fields)
@@ -72,6 +77,83 @@ struct Connect<'schema> {
 }
 
 impl<'schema> Connect<'schema> {
+    /// Find and parse any `@connect` directives on this type or its fields.
+    fn find_on_type(
+        object: &'schema Node<ObjectType>,
+        schema: &'schema SchemaInfo,
+        source_names: &'schema [SourceName],
+    ) -> (Vec<Self>, Vec<Message>) {
+        let object_category = if schema
+            .schema_definition
+            .query
+            .as_ref()
+            .is_some_and(|query| query.name == object.name)
+        {
+            ObjectCategory::Query
+        } else if schema
+            .schema_definition
+            .mutation
+            .as_ref()
+            .is_some_and(|mutation| mutation.name == object.name)
+        {
+            ObjectCategory::Mutation
+        } else {
+            ObjectCategory::Other
+        };
+
+        let directives_on_type = object
+            .directives
+            .iter()
+            .filter(|directive| directive.name == *schema.connect_directive_name())
+            .map(|directive| ConnectDirectiveCoordinate {
+                directive,
+                element: ConnectedElement::Type { type_def: object },
+            });
+
+        let directives_on_fields = object.fields.values().flat_map(|field| {
+            field
+                .directives
+                .iter()
+                .filter(|directive| directive.name == *schema.connect_directive_name())
+                .map(|directive| ConnectDirectiveCoordinate {
+                    directive,
+                    element: ConnectedElement::Field {
+                        parent_type: object,
+                        parent_category: object_category,
+                        field_def: field,
+                    },
+                })
+        });
+
+        let (connects, messages): (Vec<Connect>, Vec<Vec<Message>>) = directives_on_type
+            .chain(directives_on_fields)
+            .map(|coordinate| Self::parse(coordinate, schema, source_names))
+            .partition_result();
+
+        let mut messages: Vec<Message> = messages.into_iter().flatten().collect();
+
+        // TODO: find a better place for feature gates like this
+        if schema.connect_link.spec == ConnectSpec::V0_1
+            && connects
+                .iter()
+                .any(|connect| matches!(connect.coordinate.element, ConnectedElement::Type { .. }))
+        {
+            messages.push(Message {
+                code: Code::FeatureUnavailable,
+                message: format!(
+                    "Using `@{connect_directive_name}` on `type {object_name}` requires connectors v0.2. Learn more at https://go.apollo.dev/connectors/changelog.",
+                    object_name = object.name,
+                    connect_directive_name = schema.connect_directive_name(),
+                ),
+                locations: object
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+        (connects, messages)
+    }
+
     /// Parse the `@connect` directive and run just enough checks to be able to use it at runtime.
     /// More advanced checks are done in [`Self::type_check`].
     ///
@@ -84,14 +166,11 @@ impl<'schema> Connect<'schema> {
     /// The order these two run in doesn't matter.
     /// `http` can't be validated without knowing whether a `source` was set, so it's only checked if `source` is valid.
     fn parse(
-        directive: &'schema Node<Directive>,
-        element: ConnectedElement<'schema>,
+        coordinate: ConnectDirectiveCoordinate<'schema>,
         schema: &'schema SchemaInfo,
         source_names: &'schema [SourceName],
     ) -> Result<Self, Vec<Message>> {
-        let coordinate = ConnectDirectiveCoordinate { directive, element };
-
-        if element.is_root_type(schema) {
+        if coordinate.element.is_root_type(schema) {
             return Err(vec![Message {
                 code: Code::ConnectOnRoot,
                 message: format!(
@@ -99,7 +178,8 @@ impl<'schema> Connect<'schema> {
                     object_name = coordinate.element.base_type_name(),
                     connect_directive_name = schema.connect_directive_name(),
                 ),
-                locations: directive
+                locations: coordinate
+                    .directive
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
@@ -109,7 +189,7 @@ impl<'schema> Connect<'schema> {
         let (selection, http) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(
-                validate_source_name(directive, &coordinate, source_names, schema)
+                validate_source_name(&coordinate, source_names, schema)
                     .map_err(|err| vec![err])
                     .and_then(|source_name| Http::parse(coordinate, source_name, schema)),
             )
@@ -156,7 +236,7 @@ impl<'schema> Connect<'schema> {
                 .flatten(),
         );
 
-        let seen = match self.selection.type_check(self.schema) {
+        let mut seen: Vec<ResolvedField> = match self.selection.type_check(self.schema) {
             // TODO: use ResolvedField struct at all levels
             Ok(seen) => seen
                 .into_iter()
@@ -170,6 +250,32 @@ impl<'schema> Connect<'schema> {
                 return Err(messages);
             }
         };
+
+        if let ConnectedElement::Field {
+            parent_type,
+            field_def,
+            ..
+        } = self.coordinate.element
+        {
+            // mark the field with a @connect directive as seen
+            seen.push(ResolvedField {
+                object_name: parent_type.name.clone(),
+                field_name: field_def.name.clone(),
+            });
+            // direct recursion isn't allowed, like a connector on User.friends: [User]
+            if &parent_type.name == field_def.ty.inner_named_type() {
+                messages.push(Message {
+                    code: Code::CircularReference,
+                    message: format!(
+                        "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
+                        parent_type.name,
+                        field_def.name,
+                        field_def.ty
+                    ),
+                    locations: field_def.line_column_range(&self.schema.sources).into_iter().collect(),
+                });
+            }
+        }
 
         if messages.is_empty() {
             Ok(seen)
@@ -185,180 +291,13 @@ pub(super) struct ResolvedField {
     pub field_name: Name,
 }
 
-/// Make sure that any `@connect` directives on types are valid
-fn fields_seen_by_connectors_on_types(
-    object: &Node<ObjectType>,
-    schema: &SchemaInfo,
-    source_names: &[SourceName],
-) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let connect_directives = object
-        .directives
-        .iter()
-        .filter(|directive| directive.name == *schema.connect_directive_name())
-        .collect_vec();
-
-    if connect_directives.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // TODO: find a better place for feature gates like this
-    if schema.connect_link.spec == ConnectSpec::V0_1 {
-        return Err(vec![Message {
-            code: Code::FeatureUnavailable,
-            message: format!(
-                "Using `@{connect_directive_name}` on `type {object_name}` requires connectors v0.2. Learn more at https://go.apollo.dev/connectors/changelog.",
-                object_name = object.name,
-                connect_directive_name = schema.connect_directive_name(),
-            ),
-            locations: object
-                .line_column_range(&schema.sources)
-                .into_iter()
-                .collect(),
-        }]);
-    }
-
-    let mut messages = Vec::new();
-    let mut seen_fields = Vec::new();
-
-    for directive in connect_directives {
-        let element = ConnectedElement::Type { type_def: object };
-
-        let connect = match Connect::parse(directive, element, schema, source_names) {
-            Ok(connect) => connect,
-            Err(errs) => {
-                messages.extend(errs);
-                continue;
-            }
-        };
-
-        match connect.type_check() {
-            Ok(resolved) => seen_fields.extend(
-                resolved
-                    .into_iter()
-                    .map(|resolved| (resolved.object_name, resolved.field_name)),
-            ),
-            Err(errs) => messages.extend(errs),
-        }
-    }
-
-    if messages.is_empty() {
-        Ok(seen_fields)
-    } else {
-        Err(messages)
-    }
-}
-
-/// Make sure that any `@connect` directives on object fields are valid
-fn fields_seen_by_connectors_on_fields(
-    object: &Node<ObjectType>,
-    schema: &SchemaInfo,
-    source_names: &[SourceName],
-) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let object_category = if schema
-        .schema_definition
-        .query
-        .as_ref()
-        .is_some_and(|query| query.name == object.name)
-    {
-        ObjectCategory::Query
-    } else if schema
-        .schema_definition
-        .mutation
-        .as_ref()
-        .is_some_and(|mutation| mutation.name == object.name)
-    {
-        ObjectCategory::Mutation
-    } else {
-        ObjectCategory::Other
-    };
-    let mut seen_fields = Vec::new();
-    let mut messages = Vec::new();
-    for field in object.fields.values() {
-        match fields_seen_by_connector(field, object_category, source_names, object, schema) {
-            Ok(fields) => seen_fields.extend(fields),
-            Err(errs) => messages.extend(errs),
-        }
-    }
-    if messages.is_empty() {
-        Ok(seen_fields)
-    } else {
-        Err(messages)
-    }
-}
-
-fn fields_seen_by_connector(
-    field: &Component<FieldDefinition>,
-    category: ObjectCategory,
-    source_names: &[SourceName],
-    object: &Node<ObjectType>,
-    schema: &SchemaInfo,
-) -> Result<Vec<(Name, Name)>, Vec<Message>> {
-    let source_map = &schema.sources;
-    let mut messages = Vec::new();
-    let connect_directives = field
-        .directives
-        .iter()
-        .filter(|directive| directive.name == *schema.connect_directive_name())
-        .collect_vec();
-
-    if connect_directives.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    // mark the field with a @connect directive as seen
-    let mut seen_fields = vec![(object.name.clone(), field.name.clone())];
-
-    // direct recursion isn't allowed, like a connector on User.friends: [User]
-    if &object.name == field.ty.inner_named_type() {
-        messages.push(Message {
-            code: Code::CircularReference,
-            message: format!(
-                "Direct circular reference detected in `{}.{}: {}`. For more information, see https://go.apollo.dev/connectors/limitations#circular-references",
-                object.name,
-                field.name,
-                field.ty
-            ),
-            locations: field.line_column_range(source_map).into_iter().collect(),
-        });
-    }
-
-    for directive in connect_directives {
-        let element = ConnectedElement::Field {
-            parent_type: object,
-            parent_category: category,
-            field_def: field,
-        };
-        let connect = match Connect::parse(directive, element, schema, source_names) {
-            Ok(connect) => connect,
-            Err(errs) => {
-                messages.extend(errs);
-                continue;
-            }
-        };
-        match connect.type_check() {
-            Ok(resolved) => seen_fields.extend(
-                resolved
-                    .into_iter()
-                    .map(|resolved| (resolved.object_name, resolved.field_name)),
-            ),
-            Err(errs) => messages.extend(errs),
-        }
-    }
-
-    if messages.is_empty() {
-        Ok(seen_fields)
-    } else {
-        Err(messages)
-    }
-}
-
 fn validate_source_name<'schema>(
-    directive: &Node<Directive>,
     coordinate: &ConnectDirectiveCoordinate,
     source_names: &'schema [SourceName],
     schema: &SchemaInfo,
 ) -> Result<Option<&'schema SourceName<'schema>>, Message> {
-    let Some(source_name_arg) = directive
+    let Some(source_name_arg) = coordinate
+        .directive
         .arguments
         .iter()
         .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
