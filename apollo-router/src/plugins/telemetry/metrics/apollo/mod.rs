@@ -179,7 +179,7 @@ impl Config {
             .apollo_meter_provider_builder
             .with_reader(default_reader)
             .with_resource(resource.clone());
-        
+
         builder.apollo_realtime_meter_provider_builder = builder
             .apollo_realtime_meter_provider_builder
             .with_reader(realtime_reader)

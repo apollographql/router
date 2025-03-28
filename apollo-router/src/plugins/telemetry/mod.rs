@@ -320,7 +320,9 @@ impl PluginPrivate for Telemetry {
                     metrics_builder.apollo_meter_provider_builder.build(),
                 )),
                 private_realtime_meter_provider: Some(FilterMeterProvider::private_realtime(
-                    metrics_builder.apollo_realtime_meter_provider_builder.build(),
+                    metrics_builder
+                        .apollo_realtime_meter_provider_builder
+                        .build(),
                 )),
                 public_prometheus_meter_provider: metrics_builder
                     .prometheus_meter_provider
