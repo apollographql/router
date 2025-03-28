@@ -10,6 +10,22 @@
 //!
 //! New metrics should be added using these macros.
 //!
+//! Prefer using `_with_unit` types for all new macros. Units should conform to the
+//! [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units),
+//! some of which has been copied here for reference:
+//! * Instruments that measure a count of something should only use annotations with curly braces to
+//!   give additional meaning. For example, use `{packet}`, `{error}`, `{fault}`, etc., not `packet`,
+//!   `error`, `fault`, etc.
+//! * Other instrument units should be specified using the UCUM case sensitive (“c/s”) variant. For
+//!   example, “Cel” for the unit with full name “degree Celsius”.
+//! * When instruments are measuring durations, seconds (i.e. s) should be used.
+//! * Instruments should use non-prefixed units (i.e. By instead of MiBy) unless there is good
+//!   technical reason to not do so.
+//!
+//! NB: we have not yet modified the existing metrics because some metric exporters (notably
+//! Prometheus) include the unit in the metric name, and changing the metric name will be a breaking
+//! change for customers.
+//!
 //! ## Compatibility
 //! This module uses types from the [opentelemetry] crates. Since OpenTelemetry for Rust is not yet
 //! API-stable, we may update it in a minor version, which may require code changes to plugins.
