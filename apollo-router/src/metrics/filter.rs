@@ -105,8 +105,11 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    // TODO(tim): do we need to make sure this excludes the values in the realtime filter?
-                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
+                    // TODO(tim): We could make this regex work, but looks like it would require the fancy_regex crate.
+                    // Maybe it would be cleaner to use a different namespace like apollo.realtime.*.
+                    // Another alternative would be to change our allow / deny logic such that a deny can override an allow, then we could
+                    // just put r"apollo\.router\.operations\.error" in the deny section.
+                    r"(?!apollo\.router\.operations\.errors)apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
             )
