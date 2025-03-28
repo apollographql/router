@@ -38,6 +38,7 @@ use crate::context::context_key_from_deprecated;
 use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
+use crate::json_ext;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugin::Plugin;
@@ -1094,7 +1095,7 @@ where
 
     let body_to_send = request_config
         .body
-        .then(|| serde_json::to_value(&body))
+        .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
     let context_to_send = request_config.context.get_context(&request.context);
     let uri = request_config.uri.then(|| parts.uri.to_string());
@@ -1138,16 +1139,16 @@ where
 
         let res = {
             let graphql_response: crate::graphql::Response =
-                match co_processor_output.body.unwrap_or(serde_json::Value::Null) {
-                    serde_json::Value::String(s) => crate::graphql::Response::builder()
+                match co_processor_output.body.unwrap_or(json_ext::Value::Null) {
+                    json_ext::Value::String(s) => crate::graphql::Response::builder()
                         .errors(vec![
                             Error::builder()
-                                .message(s)
+                                .message(s.as_str().to_owned())
                                 .extension_code(COPROCESSOR_ERROR_EXTENSION)
                                 .build(),
                         ])
                         .build(),
-                    value => serde_json::from_value(value).unwrap_or_else(|error| {
+                    value => serde_json_bytes::from_value(value).unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
                             .errors(vec![
                                 Error::builder()
@@ -1198,7 +1199,7 @@ where
     // are present in our co_processor_output.
 
     let new_body: crate::graphql::Request = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
+        Some(value) => serde_json_bytes::from_value(value)?,
         None => body,
     };
 
@@ -1265,7 +1266,7 @@ where
 
     let body_to_send = response_config
         .body
-        .then(|| serde_json::to_value(&body))
+        .then(|| serde_json_bytes::to_value(&body))
         .transpose()?;
     let context_to_send = response_config.context.get_context(&response.context);
     let service_name = response_config.service_name.then_some(service_name);
@@ -1377,17 +1378,17 @@ pub(super) fn internalize_header_map(
 
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
-    copro_response_body: Option<serde_json::Value>,
+    copro_response_body: Option<json_ext::Value>,
 ) -> Result<graphql::Response, BoxError> {
     let new_body: graphql::Response = match copro_response_body {
         Some(value) => {
-            let mut new_body: graphql::Response = serde_json::from_value(value)?;
+            let mut new_body = graphql::Response::from_value(value)?;
             // Needs to take back these 2 fields because it's skipped by serde
             new_body.subscribed = original_response_body.subscribed;
             new_body.created_at = original_response_body.created_at;
             // Required because for subscription if data is Some(Null) it won't cut the subscription
             // And in some languages they don't have any differences between Some(Null) and Null
-            if original_response_body.data == Some(serde_json_bytes::Value::Null)
+            if original_response_body.data == Some(json_ext::Value::Null)
                 && new_body.data.is_none()
                 && new_body.subscribed == Some(true)
             {

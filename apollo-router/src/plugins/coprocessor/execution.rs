@@ -362,7 +362,7 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| serde_json::to_value(&first).expect("serialization will not fail"));
+        .then(|| serde_json_bytes::to_value(&first).expect("serialization will not fail"));
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.get_context(&response.context);
     let sdl_to_send = response_config.sdl.then(|| sdl.clone().to_string());
@@ -433,7 +433,8 @@ where
 
             async move {
                 let body_to_send = response_config.body.then(|| {
-                    serde_json::to_value(&deferred_response).expect("serialization will not fail")
+                    serde_json_bytes::to_value(&deferred_response)
+                        .expect("serialization will not fail")
                 });
                 let context_to_send = response_config_context.get_context(&generator_map_context);
 

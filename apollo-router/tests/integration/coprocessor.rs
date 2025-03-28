@@ -274,3 +274,51 @@ async fn test_coprocessor_demand_control_access() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_coprocessor_proxying_error_response() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
+    let mock_coprocessor = wiremock::MockServer::start().await;
+    let coprocessor_address = mock_coprocessor.uri();
+
+    Mock::given(method("POST"))
+        .and(path("/"))
+        .respond_with(|req: &wiremock::Request| {
+            let body = req.body_json::<serde_json::Value>().expect("body");
+            ResponseTemplate::new(200).set_body_json(body)
+        })
+        .mount(&mock_coprocessor)
+        .await;
+
+    let mut router = IntegrationTest::builder()
+        .config(
+            include_str!("fixtures/coprocessor.router.yaml")
+                .replace("<replace>", &coprocessor_address),
+        )
+        .responder(ResponseTemplate::new(200).set_body_json(json!({
+            "errors": [{ "message": "subgraph error", "path": [] }],
+            "data": null
+        })))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let (_trace_id, response) = router.execute_default_query().await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        response.json::<serde_json::Value>().await?,
+        json!({
+            "errors": [{ "message": "Subgraph errors redacted", "path": [] }],
+            "data": null
+        })
+    );
+
+    router.graceful_shutdown().await;
+
+    Ok(())
+}
