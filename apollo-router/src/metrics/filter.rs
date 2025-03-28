@@ -89,8 +89,7 @@ impl FilterMeterProvider {
     }
 
     fn get_private_realtime_regex() -> Regex {
-        return Regex::new(r"apollo\.router\.operations\.error")
-            .expect("regex should have been valid");
+        Regex::new(r"apollo\.router\.operations\.error").expect("regex should have been valid")
     }
 
     pub(crate) fn private_realtime<T: Into<MeterProvider>>(delegate: T) -> Self {
@@ -105,13 +104,7 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    // TODO(tim): We are currently double-counting error categorization metrics for both this and the new "private_realtime" meter.
-                    // We could make this regex work, but looks like it would require the fancy_regex crate.
-                    // Maybe it would be cleaner to use a different namespace like apollo.realtime.*.
-                    // Another alternative would be to change our allow / deny logic such that a deny can override an allow, then we could
-                    // just put r"apollo\.router\.operations\.error" in the deny section.
-                    // A possible but not working regex: r"(?!apollo\.router\.operations\.errors)apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
-                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
+                  r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning|telemetry|instance|graphql_error))(\..*|$)|apollo_router_uplink_fetch_count_total|apollo_router_uplink_fetch_duration_seconds",
                 )
                 .expect("regex should have been valid"),
             )
