@@ -16,6 +16,7 @@ use shape::location::SourceId;
 
 use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -42,12 +43,11 @@ impl<'schema> Context<'schema> {
         source: &'schema GraphQLString,
         code: Code,
     ) -> Self {
-        let on_root_type = coordinate.element.on_root_type(schema.schema);
-
         match coordinate.element {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
+                parent_category,
             } => {
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
@@ -57,7 +57,7 @@ impl<'schema> Context<'schema> {
                 .into_iter()
                 .collect();
 
-                if !on_root_type {
+                if matches!(parent_category, ObjectCategory::Other) {
                     var_lookup.insert(Namespace::This, Shape::from(parent_type));
                 }
 
@@ -68,12 +68,23 @@ impl<'schema> Context<'schema> {
                     code,
                 }
             }
-            ConnectedElement::Type { .. } => Self {
-                schema,
-                var_lookup: Default::default(), // TODO: $batch
-                source,
-                code,
-            },
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
         }
     }
 
@@ -398,7 +409,6 @@ mod tests {
     fn validate_with_context(selection: &str, expected: Shape) -> Result<(), Message> {
         let schema_str = schema_for(selection);
         let schema = Schema::parse(&schema_str, "schema").unwrap();
-        let parent_type = schema.types.get("Query").unwrap();
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
@@ -418,8 +428,9 @@ mod tests {
         .unwrap();
         let coordinate = ConnectDirectiveCoordinate {
             element: ConnectedElement::Field {
-                parent_type,
+                parent_type: object,
                 field_def: field,
+                parent_category: ObjectCategory::Query,
             },
             directive,
         };
