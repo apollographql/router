@@ -1566,20 +1566,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_f64_histogram_with_unit() {
-        async {
-            f64_histogram_with_unit!("test", "test description", "Hz", 1.0, "attr" = "val");
-            assert_histogram_sum!("test", 1, "attr" = "val");
-
-            let collected_metrics = crate::metrics::collect_metrics();
-            let metric = collected_metrics.find("test").unwrap();
-            assert_eq!(metric.unit, "Hz");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
     #[should_panic]
     async fn test_type_histogram() {
         async {
@@ -1677,5 +1663,75 @@ mod test {
         // Fast path
         test();
         assert_eq!(meter_provider_internal().registered_instruments(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_u64_counter_with_unit() {
+        async {
+            u64_counter_with_unit!("test", "test description", "Hz", 1, attr = "val");
+            assert_counter!("test", 1, "attr" = "val");
+
+            let collected_metrics = crate::metrics::collect_metrics();
+            let metric = collected_metrics.find("test").unwrap();
+            assert_eq!(metric.unit, "Hz");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_f64_counter_with_unit() {
+        async {
+            f64_counter_with_unit!("test", "test description", "s", 1.5, "attr" = "val");
+            assert_counter!("test", 1.5, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_i64_up_down_counter_with_unit() {
+        async {
+            i64_up_down_counter_with_unit!(
+                "test",
+                "test description",
+                "{request}",
+                1,
+                "attr" = "val"
+            );
+            assert_up_down_counter!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_f64_up_down_counter_with_unit() {
+        async {
+            f64_up_down_counter_with_unit!("test", "test description", "kg", 1.5, "attr" = "val");
+            assert_up_down_counter!("test", 1.5, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_u64_histogram_with_unit() {
+        async {
+            u64_histogram_with_unit!("test", "test description", "{packet}", 1, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_f64_histogram_with_unit() {
+        async {
+            f64_histogram_with_unit!("test", "test description", "m/s", 1.0, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
+        }
+        .with_metrics()
+        .await;
     }
 }
