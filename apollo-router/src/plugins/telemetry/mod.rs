@@ -1689,7 +1689,7 @@ impl TelemetryActivation {
         );
 
         old_meter_providers[2] = meter_provider.set(
-            MeterProviderType::Apollo,
+            MeterProviderType::ApolloRealtime,
             self.private_realtime_meter_provider.take(),
         );
 
