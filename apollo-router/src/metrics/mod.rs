@@ -550,16 +550,7 @@ macro_rules! parse_attributes {
 
 /// Get or create a `u64` monotonic counter metric and add a value to it.
 ///
-/// Each metric needs a description.
-///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 ///
 /// # Examples
 /// ```ignore
@@ -603,16 +594,9 @@ macro_rules! u64_counter {
     }
 }
 
-/// Get or create a f64 monotonic counter metric and add a value to it
+/// Get or create a f64 monotonic counter metric and add a value to it.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 #[allow(unused_macros)]
 macro_rules! f64_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -628,16 +612,9 @@ macro_rules! f64_counter {
     }
 }
 
-/// Get or create an i64 up down counter metric and add a value to it
+/// Get or create an i64 up down counter metric and add a value to it.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 #[allow(unused_macros)]
 macro_rules! i64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -653,16 +630,9 @@ macro_rules! i64_up_down_counter {
     };
 }
 
-/// Get or create an f64 up down counter metric and add a value to it
+/// Get or create an f64 up down counter metric and add a value to it.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 #[allow(unused_macros)]
 macro_rules! f64_up_down_counter {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -678,16 +648,9 @@ macro_rules! f64_up_down_counter {
     };
 }
 
-/// Get or create an f64 histogram metric and add a value to it
+/// Get or create an f64 histogram metric and add a value to it.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 #[allow(unused_macros)]
 macro_rules! f64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
@@ -707,6 +670,8 @@ macro_rules! f64_histogram {
 /// both a description and a unit.
 ///
 /// The units should conform to the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/#units).
+///
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 ///
 /// ## Examples
 ///
@@ -742,16 +707,9 @@ macro_rules! f64_histogram_with_unit {
     };
 }
 
-/// Get or create an u64 histogram metric and add a value to it
+/// Get or create an u64 histogram metric and add a value to it.
 ///
-/// This macro is a replacement for the telemetry crate's MetricsLayer. We will eventually convert all metrics to use these macros and deprecate the MetricsLayer.
-/// The reason for this is that the MetricsLayer has:
-///
-/// * No support for dynamic attributes
-/// * No support dynamic metrics.
-/// * Imperfect mapping to metrics API that can only be checked at runtime.
-///
-/// New metrics should be added using these macros.
+/// See the [module-level documentation](crate::metrics) for details on the reasoning behind this API.
 #[allow(unused_macros)]
 macro_rules! u64_histogram {
     ($($name:ident).+, $description:literal, $value: expr, $($attrs:tt)*) => {
