@@ -16,6 +16,7 @@ use shape::location::SourceId;
 
 use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
@@ -46,9 +47,8 @@ impl<'schema> Context<'schema> {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
+                parent_category,
             } => {
-                let on_root_type = coordinate.element.on_root_type(schema.schema);
-
                 let mut var_lookup: IndexMap<Namespace, Shape> = [
                     (Namespace::Args, shape_for_arguments(field_def)),
                     (Namespace::Config, Shape::unknown([])),
@@ -57,7 +57,7 @@ impl<'schema> Context<'schema> {
                 .into_iter()
                 .collect();
 
-                if !on_root_type {
+                if matches!(parent_category, ObjectCategory::Other) {
                     var_lookup.insert(Namespace::This, Shape::from(parent_type));
                 }
 
@@ -430,6 +430,7 @@ mod tests {
             element: ConnectedElement::Field {
                 parent_type: object,
                 field_def: field,
+                parent_category: ObjectCategory::Query,
             },
             directive,
         };

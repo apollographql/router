@@ -16,6 +16,7 @@ use super::Code;
 use super::Message;
 use super::Name;
 use crate::sources::connect::JSONSelection;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 use crate::sources::connect::expand::visitors::FieldVisitor;
@@ -118,6 +119,7 @@ impl<'schema> Selection<'schema> {
             ConnectedElement::Field {
                 parent_type,
                 field_def,
+                ..
             } => {
                 let Some(return_type) = schema.get_object(field_def.ty.inner_named_type()) else {
                     // TODO: Validate scalar return types
@@ -165,6 +167,10 @@ impl<'schema> Selection<'schema> {
                 .map(|validator| validator.seen_fields)
             }
         }
+    }
+
+    pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+        self.parsed.external_variables()
     }
 }
 

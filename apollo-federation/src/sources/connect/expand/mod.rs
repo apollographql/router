@@ -341,6 +341,7 @@ mod helpers {
                 ConnectedElement::Field {
                     field_def,
                     parent_type,
+                    ..
                 } => {
                     let field_type = self
                         .original_schema
