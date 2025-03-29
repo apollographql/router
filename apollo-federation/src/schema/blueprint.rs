@@ -1,30 +1,21 @@
-use std::sync::Arc;
-
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
-use apollo_compiler::name;
 use apollo_compiler::ty;
 
 use crate::bail;
 use crate::error::FederationError;
-use crate::error::MultiTry;
-use crate::error::MultiTryAll;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
-use crate::link::Link;
 use crate::link::Purpose;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::link_spec_definition::link_spec_latest;
-use crate::link::spec::Identity;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Url;
-use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
@@ -43,43 +34,6 @@ struct FederationBlueprint {
     with_root_type_renaming: bool,
 }
 
-// PORT_NOTE: From `FAKE_FED1_CORE_FEATURE_TO_RENAME_TYPES` in JS
-/**
- * Federation 1 has that specificity that it wasn't using @link to name-space federation elements,
- * and so to "distinguish" the few federation type names, it prefixed those with a `_`. That is,
- * the `FieldSet` type was named `_FieldSet` in federation1. To handle this without too much effort,
- * we use a fake `CoreFeature` with imports for all the fed1 types to use those specific "aliases"
- * and we pass it when adding those types. This allows to reuse the same `TypeSpecification` objects
- * for both fed1 and fed2. Note that in the object below, all that is used is the imports, the rest
- * is just filling the blanks.
- */
-fn fake_fed1_link_to_rename_types(fed_spec_def: &FederationSpecDefinition) -> Arc<Link> {
-    let fed1_types = fed_spec_def.type_specs();
-    let imports = fed1_types
-        .iter()
-        .map(|type_spec| {
-            Arc::new(Import {
-                element: type_spec.name().clone(),
-                is_directive: false,
-                alias: Some(Name::new_unchecked(&format!("_{}", type_spec.name()))),
-            })
-        })
-        .collect();
-    // PORT_NOTE: `Link` has no fields to save a directive, while JS version saves a fake one.
-    Arc::new(Link {
-        url: Url {
-            identity: Identity {
-                domain: "<fed1>".to_string(),
-                name: name!("fed1"),
-            },
-            version: Version { major: 0, minor: 1 },
-        },
-        spec_alias: Some(name!("fed1")),
-        imports,
-        purpose: None,
-    })
-}
-
 #[allow(dead_code)]
 impl FederationBlueprint {
     fn new(with_root_type_renaming: bool) -> Self {
@@ -94,7 +48,7 @@ impl FederationBlueprint {
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
             // TODO (FED-428): pass `alias` and `imports`
-            link_spec_latest().add_definitions_to_schema(schema, /*alias*/ None)?;
+            LinkSpecDefinition::latest().add_definitions_to_schema(schema, /*alias*/ None)?;
             Ok(schema.get_directive_definition(&directive.name))
         } else {
             Ok(None)
@@ -104,32 +58,12 @@ impl FederationBlueprint {
     fn on_directive_definition_and_schema_parsed(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        // PORT_NOTE: Mirrors a part of `completeSubgraphSchema`
         let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
         if federation_spec.is_fed1() {
-            // PORT_NOTE: Mirrors a part of `completeFed1SubgraphSchema`
             Self::remove_federation_definitions_broken_in_known_ways(schema)?;
-            let fed1_types = federation_spec.type_specs();
-            let fed1_directives = federation_spec.directive_specs();
-            let fake_fed1_link = fake_fed1_link_to_rename_types(federation_spec);
-            Ok(())
-                .and_try(
-                    fed1_types.iter().try_for_all(|type_spec| {
-                        type_spec.check_or_add(schema, Some(&fake_fed1_link))
-                    }),
-                )
-                .and_try(
-                    fed1_directives
-                        .iter()
-                        .try_for_all(|directive_spec| directive_spec.check_or_add(schema, None)),
-                )?;
-            Self::expand_known_features(schema)
-        } else {
-            link_spec_latest().add_to_schema(schema, /*alias*/ None)?;
-            // PORT_NOTE: Mirrors a part of `completeFed2SubgraphSchema`?
-            federation_spec.add_elements_to_schema(schema)?;
-            Self::expand_known_features(schema)
         }
+        federation_spec.add_elements_to_schema(schema)?;
+        Self::expand_known_features(schema)
     }
 
     fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
@@ -249,14 +183,10 @@ impl FederationBlueprint {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::Node;
-    use apollo_compiler::ast::Argument;
     use apollo_compiler::name;
-    use apollo_compiler::schema::Component;
 
     use super::*;
-    use crate::error::FederationError;
-    use crate::schema::FederationSchema;
+    use crate::link::federation_spec_definition::add_fed1_link_to_schema;
     use crate::schema::ValidFederationSchema;
 
     #[test]
@@ -316,6 +246,7 @@ mod tests {
         assert_eq!(
             defined_directive_names,
             vec![
+                name!("core"),
                 name!("deprecated"),
                 name!("extends"),
                 name!("external"),
@@ -512,26 +443,20 @@ mod tests {
         }
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-        // TODO: We may need to do the same for `@core` on Fed 1 schemas.
         if federation_schema
             .get_directive_definition(&name!("link"))
             .is_some()
         {
-            federation_schema
-                .schema
-                .schema_definition
-                .make_mut()
-                .directives
-                .insert(
-                    0,
-                    Component::new(Directive {
-                        name: name!("link"),
-                        arguments: vec![Node::new(Argument {
-                            name: name!("url"),
-                            value: "https://specs.apollo.dev/link/v1.0".into(),
-                        })],
-                    }),
-                );
+            LinkSpecDefinition::latest()
+                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+        } else {
+            // This must be a Fed 1 schema.
+            LinkSpecDefinition::fed1_latest()
+                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+
+            // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
+            //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
+            add_fed1_link_to_schema(&mut federation_schema)?;
         }
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.

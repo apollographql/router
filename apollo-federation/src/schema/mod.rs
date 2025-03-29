@@ -20,6 +20,7 @@ use crate::link::Link;
 use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
@@ -38,7 +39,6 @@ use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
-use crate::subgraph::spec::FIELDSET_SCALAR_NAME;
 
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod blueprint;
@@ -232,7 +232,8 @@ impl FederationSchema {
 
     // PORT_NOTE: Corresponds to `FederationMetadata.fieldSetType` in JS.
     pub(crate) fn field_set_type(&self) -> Result<ScalarTypeDefinitionPosition, FederationError> {
-        let name_in_schema = self.federation_type_name_in_schema(FIELDSET_SCALAR_NAME)?;
+        let name_in_schema =
+            self.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
         match self.schema.types.get(&name_in_schema) {
             Some(ExtendedType::Scalar(_)) => Ok(ScalarTypeDefinitionPosition {
                 type_name: name_in_schema,
@@ -240,7 +241,9 @@ impl FederationSchema {
             Some(_) => bail!(
                 "Unexpected type found for federation spec's `{name_in_schema}` type definition"
             ),
-            None => bail!("Unexpected: type not found for federation spec's `{name_in_schema}`"),
+            None => {
+                bail!("Unexpected: type not found for federation spec's `{name_in_schema}`")
+            }
         }
     }
 

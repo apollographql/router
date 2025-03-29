@@ -99,6 +99,7 @@ impl From<&FieldSpecification> for FieldDefinition {
 // Type Specifications
 
 pub(crate) trait TypeAndDirectiveSpecification {
+    /// Returns the spec name (not the name in the schema).
     fn name(&self) -> &Name;
 
     // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.

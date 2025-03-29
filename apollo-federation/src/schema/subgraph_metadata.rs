@@ -51,7 +51,13 @@ impl SubgraphMetadata {
         let key_fields = Self::collect_key_fields(schema)?;
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
-        let shareable_fields = Self::collect_shareable_fields(schema, federation_spec_definition)?;
+        let shareable_fields = if federation_spec_definition.is_fed1() {
+            // TODO (FED-428): Currently, `@shareable` is not used in Fed 1 schemas. But, the
+            // comments in the `collect_shareable_fields` function suggests that it may be used.
+            Default::default()
+        } else {
+            Self::collect_shareable_fields(schema, federation_spec_definition)?
+        };
 
         Ok(Self {
             federation_spec_definition,
