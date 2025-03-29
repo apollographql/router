@@ -131,6 +131,8 @@ impl ResponseShape {
 // - They take the `state` parameter that represents everything that has been fetched so far,
 //   which is used to check the soundness property of the query plan.
 
+/// The common data used by `interpret_query_plan` function and its subroutines.
+/// - Contains the supergraph schema and all subgraph schemas.
 pub struct AnalysisContext<'a> {
     supergraph_schema: ValidFederationSchema,
     subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
@@ -170,6 +172,8 @@ fn format_federation_error(e: FederationError) -> String {
     }
 }
 
+/// Computes the overall ResponseShape of the query plan while checking the soundness of each
+/// entity fetch.
 pub fn interpret_query_plan(
     context: &AnalysisContext,
     root_type: &Name,
@@ -233,10 +237,10 @@ fn interpret_plan_node(
     }
 }
 
-// `type_filter`: The type condition to apply to the response shape.
-// - This is from the previous path elements.
-// - It can be empty if there is no type conditions.
-// - Also, multiple type conditions can be accumulated (meaning the conjunction of them).
+/// `type_filter`: The type condition to apply to the response shape.
+/// - This is from the previous path elements.
+/// - It can be empty if there is no type conditions.
+/// - Also, multiple type conditions can be accumulated (meaning the conjunction of them).
 fn rename_at_path(
     schema: &ValidFederationSchema,
     response: &ResponseShape,
@@ -426,6 +430,7 @@ fn interpret_fetch_node(
             )?;
 
         // Soundness check
+        // TODO: also check `context_rewrites` requirements.
         let subgraph_name = &fetch.subgraph_name;
         let Some(subgraph_schema) = context.get_subgraph_schema(subgraph_name) else {
             return Err(format!(

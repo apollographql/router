@@ -213,24 +213,24 @@ fn collect_require_condition(
         federation_spec_definition.requires_directive_definition(subgraph_schema)?;
     let parent_type = response_shape.default_type_condition();
     let mut result = ResponseShape::new(parent_type.clone());
-    for (_key, defs) in response_shape.iter() {
-        for (_type_cond, defs_per_type_cond) in defs.iter() {
-            for variant in defs_per_type_cond.conditional_variants() {
-                let field_def = &variant.representative_field().definition;
-                for directive in field_def
-                    .directives
-                    .get_all(&requires_directive_definition.name)
-                {
-                    let requires_application =
-                        federation_spec_definition.requires_directive_arguments(directive)?;
-                    let rs = compute_response_shape_for_field_set(
-                        supergraph_schema,
-                        parent_type.clone(),
-                        requires_application.fields,
-                    )?;
-                    result.merge_with(&rs.add_boolean_conditions(variant.boolean_clause()))?;
-                }
-            }
+    let all_variants = response_shape
+        .iter()
+        .flat_map(|(_key, defs)| defs.iter())
+        .flat_map(|(_, per_type_cond)| per_type_cond.conditional_variants());
+    for variant in all_variants {
+        let field_def = &variant.representative_field().definition;
+        for directive in field_def
+            .directives
+            .get_all(&requires_directive_definition.name)
+        {
+            let requires_application =
+                federation_spec_definition.requires_directive_arguments(directive)?;
+            let rs = compute_response_shape_for_field_set(
+                supergraph_schema,
+                parent_type.clone(),
+                requires_application.fields,
+            )?;
+            result.merge_with(&rs.add_boolean_conditions(variant.boolean_clause()))?;
         }
     }
     Ok(result)
