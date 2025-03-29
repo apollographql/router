@@ -105,6 +105,21 @@ impl FederationSpecDefinition {
         }
     }
 
+    // PORT_NOTE: a port of `federationSpec` from JS
+    pub(crate) fn for_version(version: &Version) -> Result<&'static Self, FederationError> {
+        FEDERATION_VERSIONS
+            .find(version)
+            .ok_or_else(|| internal_error!("Unknown Federation spec version: {version}"))
+    }
+
+    // PORT_NOTE: a port of `latestFederationSpec`, which is defined as `federationSpec()` in JS.
+    pub(crate) fn latest() -> &'static Self {
+        // Note: The `unwrap()` calls won't panic, since `FEDERATION_VERSIONS` will always have at
+        // least one version.
+        let latest_version = FEDERATION_VERSIONS.versions().last().unwrap();
+        Self::for_version(latest_version).unwrap()
+    }
+
     pub(crate) fn is_fed1(&self) -> bool {
         self.version().satisfies(&Version { major: 1, minor: 0 })
     }
@@ -870,23 +885,6 @@ pub(crate) static FEDERATION_VERSIONS: LazyLock<SpecDefinitions<FederationSpecDe
         definitions
     });
 
-// PORT_NOTE: a port of `federationSpec` from JS
-pub(crate) fn federation_spec(
-    version: &Version,
-) -> Result<&'static FederationSpecDefinition, FederationError> {
-    FEDERATION_VERSIONS
-        .find(version)
-        .ok_or_else(|| internal_error!("Unknown Federation spec version: {version}"))
-}
-
-// PORT_NOTE: a port of `latestFederationSpec`, which is defined as `federationSpec()` in JS.
-pub(crate) fn federation_spec_latest() -> &'static FederationSpecDefinition {
-    // Note: The `unwrap()` calls won't panic, since `FEDERATION_VERSIONS` will always have at
-    // least one version.
-    let latest_version = FEDERATION_VERSIONS.versions().last().unwrap();
-    federation_spec(latest_version).unwrap()
-}
-
 pub(crate) fn get_federation_spec_definition_from_subgraph(
     schema: &FederationSchema,
 ) -> Result<&'static FederationSpecDefinition, FederationError> {
@@ -910,7 +908,7 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
     }
 }
 
-/// Adds a bootstrap fed 1.0 link to the schema.
+/// Adds a bootstrap fed 1 link directive to the schema.
 #[allow(dead_code)]
 pub(crate) fn add_fed1_link_to_schema(
     schema: &mut FederationSchema,
@@ -930,7 +928,7 @@ pub(crate) fn add_fed1_link_to_schema(
     )
 }
 
-/// Creates a fake imports for fed 1.0 link.
+/// Creates a fake imports for fed 1 link directive.
 /// - Fed 1 does not support `import` argument, but we use it to simulate fed 1 behavior.
 // PORT_NOTE: From `FAKE_FED1_CORE_FEATURE_TO_RENAME_TYPES` in JS
 // Federation 1 has that specificity that it wasn't using @link to name-space federation elements,

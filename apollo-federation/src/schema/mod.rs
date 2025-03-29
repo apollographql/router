@@ -24,12 +24,12 @@ use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
 use crate::link::federation_spec_definition::TagDirectiveArguments;
-use crate::link::federation_spec_definition::federation_spec_latest;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
@@ -247,7 +247,7 @@ impl FederationSchema {
         self.metadata().and_then(|metadata| {
             metadata
                 .by_identity
-                .get(federation_spec_latest().identity())
+                .get(FederationSpecDefinition::latest().identity())
         })
     }
 
@@ -291,9 +291,11 @@ impl FederationSchema {
             let Some(links) = self.metadata() else {
                 bail!("Schema should be a core schema")
             };
-            let Some(federation_link) = links.by_identity.get(federation_spec_latest().identity())
+            let Some(federation_link) = links
+                .by_identity
+                .get(FederationSpecDefinition::latest().identity())
             else {
-                bail!("Schema should have the federation feature")
+                bail!("Schema should have the latest federation link")
             };
             Ok(federation_link.type_name_in_schema(&name))
         } else {

@@ -194,7 +194,7 @@ impl LinkSpecDefinition {
             let self_fmt = format!("{}/{}", self.identity(), self.version());
             return Err(SingleFederationError::InvalidLinkDirectiveUsage {
                 message: format!(
-                    "Cannot add feature {self_fmt} to the schema, it already uses {existing_def}",
+                    "Cannot add link spec {self_fmt} to the schema, it already has {existing_def}",
                     existing_def = link_spec_def.url
                 ),
             }
