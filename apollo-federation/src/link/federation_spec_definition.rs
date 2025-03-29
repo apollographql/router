@@ -47,6 +47,7 @@ pub(crate) const FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC: Name = name!("shar
 pub(crate) const FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC: Name = name!("override");
 pub(crate) const FEDERATION_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
 pub(crate) const FEDERATION_FROM_CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("fromContext");
+pub(crate) const FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 pub(crate) const FEDERATION_COMPOSEDIRECTIVE_DIRECTIVE_NAME_IN_SPEC: Name =
     name!("composeDirective");
 
@@ -66,6 +67,10 @@ pub(crate) struct KeyDirectiveArguments<'doc> {
 
 pub(crate) struct RequiresDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
+}
+
+pub(crate) struct TagDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
 }
 
 pub(crate) struct ProvidesDirectiveArguments<'doc> {
@@ -286,6 +291,42 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn tag_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                SingleFederationError::Internal {
+                    message: format!(
+                        "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                        FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC
+                    ),
+                }.into()
+            })
+    }
+
+    #[allow(unused)]
+    pub(crate) fn tag_directive(
+        &self,
+        schema: &FederationSchema,
+        name: String,
+    ) -> Result<Directive, FederationError> {
+        let name_in_schema = self
+            .directive_name_in_schema(schema, &FEDERATION_TAG_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| SingleFederationError::Internal {
+                message: "Unexpectedly could not find federation spec in schema".to_owned(),
+            })?;
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_NAME_ARGUMENT_NAME,
+            value: Node::new(Value::String(name)),
+        })];
+        Ok(Directive {
+            name: name_in_schema,
+            arguments,
+        })
+    }
+
     pub(crate) fn requires_directive_definition<'schema>(
         &self,
         schema: &'schema FederationSchema,
@@ -299,6 +340,18 @@ impl FederationSpecDefinition {
                     ),
                 }.into()
             })
+    }
+
+    pub(crate) fn tag_directive_arguments<'doc>(
+        &self,
+        application: &'doc Node<Directive>,
+    ) -> Result<TagDirectiveArguments<'doc>, FederationError> {
+        Ok(TagDirectiveArguments {
+            name: directive_required_string_argument(
+                application,
+                &FEDERATION_FIELDS_ARGUMENT_NAME,
+            )?,
+        })
     }
 
     pub(crate) fn requires_directive(

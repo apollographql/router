@@ -264,6 +264,10 @@ pub enum Code {
     FeatureUnavailable,
     /// When `@connect` is applied to a type, `entity` can't be set to `false`
     ConnectOnTypeMustBeEntity,
+    /// `@connect` cannot be applied to a query, mutation, or subscription root type
+    ConnectOnRoot,
+    /// Using both `$batch` and `$this` is not allowed
+    ConnectBatchAndThis,
 }
 
 impl Code {
