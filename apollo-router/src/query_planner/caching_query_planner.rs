@@ -637,8 +637,16 @@ where
 }
 
 pub(crate) fn stats_report_key_hash(stats_report_key: &str) -> String {
+    // To match the logic of Apollo's error key handling, we need to change the "##"" prefix on errors to "# #".
+    // So for example, "## GraphQLParseFailure\n" changes to "# # GraphQLParseFailure\n"
+    let modified_stats_report_key = if let Some(stripped) = stats_report_key.strip_prefix("##") {
+        format!("# #{}", stripped)
+    } else {
+        stats_report_key.to_string()
+    };
+
     let mut hasher = sha1::Sha1::new();
-    hasher.update(stats_report_key.as_bytes());
+    hasher.update(modified_stats_report_key.as_bytes());
     let result = hasher.finalize();
     hex::encode(result)
 }
@@ -943,6 +951,22 @@ mod tests {
         assert_eq!(
             "d1554552698157b05c2a462827fb4367a4548ee5",
             stats_report_key_hash("# IgnitionMeQuery\nquery IgnitionMeQuery{me{id}}")
+        );
+    }
+
+    #[test]
+    fn apollo_error_operation_id_hash() {
+        assert_eq!(
+            "ea4f152696abedca148b016d72df48842b713697",
+            stats_report_key_hash("## GraphQLValidationFailure\n")
+        );
+        assert_eq!(
+            "3f410834f13153f401ffe73f7e454aa500d10bf7",
+            stats_report_key_hash("## GraphQLParseFailure\n")
+        );
+        assert_eq!(
+            "7486043da2085fed407d942508a572ef88dc8120",
+            stats_report_key_hash("## GraphQLUnknownOperationName\n")
         );
     }
 

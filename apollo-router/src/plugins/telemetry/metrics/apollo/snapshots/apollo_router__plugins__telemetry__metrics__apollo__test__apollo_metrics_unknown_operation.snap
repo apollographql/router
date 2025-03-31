@@ -7,7 +7,7 @@ snapshot_kind: text
   {
     "request_id": "[REDACTED]",
     "stats": {
-      "# # GraphQLUnknownOperationName\n": {
+      "## GraphQLUnknownOperationName\n": {
         "stats_with_context": {
           "context": {
             "client_name": "test_client",

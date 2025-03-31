@@ -1080,7 +1080,7 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), parse_failure).await;
     assert!(
-        // "# # GraphQLParseFailure\n"
+        // "## GraphQLParseFailure\n"
         response
             .context
             .get::<_, String>("apollo::supergraph::operation_id")
@@ -1104,7 +1104,7 @@ async fn query_operation_id() {
         .unwrap();
 
     let response = http_query_with_router(router.clone(), unknown_operation_name).await;
-    // "# # GraphQLUnknownOperationName\n"
+    // "## GraphQLUnknownOperationName\n"
     assert!(
         response
             .context
@@ -1129,7 +1129,7 @@ async fn query_operation_id() {
         .unwrap();
 
     let response = http_query_with_router(router, validation_error).await;
-    // "# # GraphQLValidationFailure\n"
+    // "## GraphQLValidationFailure\n"
     assert!(
         response
             .context
