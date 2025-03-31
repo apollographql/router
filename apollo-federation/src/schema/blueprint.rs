@@ -19,7 +19,7 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
@@ -55,11 +55,12 @@ impl FederationBlueprint {
         directive: &Directive,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
-            let latest_version = LINK_VERSIONS.versions().last().unwrap();
-            let link_spec = LINK_VERSIONS.find(latest_version).unwrap();
-            link_spec.add_elements_to_schema(schema)?;
+            // TODO (FED-428): pass `alias` and `imports`
+            LinkSpecDefinition::latest().add_definitions_to_schema(schema, /*alias*/ None)?;
+            Ok(schema.get_directive_definition(&directive.name))
+        } else {
+            Ok(None)
         }
-        Ok(schema.get_directive_definition(&DEFAULT_LINK_NAME))
     }
 
     fn on_directive_definition_and_schema_parsed(
@@ -234,14 +235,10 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::Node;
-    use apollo_compiler::ast::Argument;
     use apollo_compiler::name;
-    use apollo_compiler::schema::Component;
 
     use super::*;
-    use crate::error::FederationError;
-    use crate::schema::FederationSchema;
+    use crate::link::federation_spec_definition::add_fed1_link_to_schema;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::SubgraphError;
 
@@ -261,7 +258,6 @@ mod tests {
         assert!(!metadata.is_fed_2_schema());
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn detects_federation_2_subgraphs_correctly() {
         let schema = Schema::parse(
@@ -303,6 +299,7 @@ mod tests {
         assert_eq!(
             defined_directive_names,
             vec![
+                name!("core"),
                 name!("deprecated"),
                 name!("extends"),
                 name!("external"),
@@ -316,7 +313,6 @@ mod tests {
         );
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn injects_missing_directive_definitions_fed_2_0() {
         let schema = Schema::parse(
@@ -343,21 +339,20 @@ mod tests {
             defined_directive_names,
             vec![
                 name!("deprecated"),
-                name!("external"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
                 name!("include"),
-                name!("key"),
                 name!("link"),
-                name!("override"),
-                name!("provides"),
-                name!("requires"),
-                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
         );
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn injects_missing_directive_definitions_fed_2_1() {
         let schema = Schema::parse(
@@ -383,16 +378,16 @@ mod tests {
         assert_eq!(
             defined_directive_names,
             vec![
-                name!("composeDirective"),
                 name!("deprecated"),
-                name!("external"),
+                name!("federation__composeDirective"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
                 name!("include"),
-                name!("key"),
                 name!("link"),
-                name!("override"),
-                name!("provides"),
-                name!("requires"),
-                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -430,7 +425,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
         assert!(
             key_definition
@@ -450,7 +445,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
 
         let requires_definition = subgraph
@@ -465,7 +460,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
     }
 
@@ -674,26 +669,20 @@ mod tests {
         }
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-        // TODO: We may need to do the same for `@core` on Fed 1 schemas.
         if federation_schema
             .get_directive_definition(&name!("link"))
             .is_some()
         {
-            federation_schema
-                .schema
-                .schema_definition
-                .make_mut()
-                .directives
-                .insert(
-                    0,
-                    Component::new(Directive {
-                        name: name!("link"),
-                        arguments: vec![Node::new(Argument {
-                            name: name!("url"),
-                            value: "https://specs.apollo.dev/link/v1.0".into(),
-                        })],
-                    }),
-                );
+            LinkSpecDefinition::latest()
+                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+        } else {
+            // This must be a Fed 1 schema.
+            LinkSpecDefinition::fed1_latest()
+                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+
+            // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
+            //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
+            add_fed1_link_to_schema(&mut federation_schema)?;
         }
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.

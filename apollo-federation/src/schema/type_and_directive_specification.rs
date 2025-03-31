@@ -46,7 +46,8 @@ use crate::schema::position::UnionTypeDefinitionPosition;
 pub(crate) struct ArgumentSpecification {
     pub(crate) name: Name,
     // PORT_NOTE: In TS, get_type returns `InputType`.
-    pub(crate) get_type: fn(schema: &FederationSchema) -> Result<Type, SingleFederationError>,
+    pub(crate) get_type:
+        fn(schema: &FederationSchema, link: Option<&Arc<Link>>) -> Result<Type, FederationError>,
     pub(crate) default_value: Option<Value>,
 }
 
@@ -98,6 +99,9 @@ impl From<&FieldSpecification> for FieldDefinition {
 // Type Specifications
 
 pub(crate) trait TypeAndDirectiveSpecification {
+    /// Returns the spec name (not the name in the schema).
+    fn name(&self) -> &Name;
+
     // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
     // - The JS version only sets it `true` for GraphQL built-in types and directives.
     fn check_or_add(
@@ -124,6 +128,10 @@ pub(crate) struct ScalarTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ScalarTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -157,6 +165,10 @@ pub(crate) struct ObjectTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for ObjectTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -216,6 +228,10 @@ impl<F> TypeAndDirectiveSpecification for UnionTypeSpecification<F>
 where
     F: Fn(&FederationSchema) -> IndexSet<ComponentName>,
 {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -290,6 +306,10 @@ pub(crate) struct EnumTypeSpecification {
 }
 
 impl TypeAndDirectiveSpecification for EnumTypeSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -378,7 +398,7 @@ pub(crate) struct ArgumentMerger {
 }
 
 type ArgumentMergerFactory =
-    dyn Fn(&FederationSchema) -> Result<ArgumentMerger, SingleFederationError>;
+    dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
 
 pub(crate) struct DirectiveCompositionSpecification {
     pub(crate) supergraph_specification:
@@ -440,44 +460,11 @@ impl DirectiveSpecification {
                     arg_strategies.len() == args.len(),
                     "Invalid directive specification for @{name}: not all arguments define a composition strategy"
                 );
-                let name_capture = name.clone();
-                let args_capture = args.to_vec();
-                argument_merger = Some(Box::new(move |schema: &FederationSchema| -> Result<ArgumentMerger, SingleFederationError> {
-                    for arg in args_capture.iter() {
-                        let strategy = arg.composition_strategy.as_ref().unwrap();
-                        let arg_name = &arg.base_spec.name;
-                        let arg_type = (arg.base_spec.get_type)(schema)?;
-                        assert!(!arg_type.is_list(), "Should have gotten error getting type for @{name_capture}({arg_name}:), but got {arg_type}");
-                        strategy.is_type_supported(schema, &arg_type).map_err(|support_msg| {
-                            let strategy_name = strategy.name();
-                            SingleFederationError::DirectiveDefinitionInvalid {
-                                message: format!("Invalid composition strategy {strategy_name} for argument @{name_capture}({arg_name}:) of type {arg_type}; {strategy_name} only supports ${support_msg}")
-                            }
-                        })?;
-                    }
-                    let arg_strategies_capture = arg_strategies.clone();
-                    let arg_strategies_capture2 = arg_strategies.clone();
-                    Ok(ArgumentMerger {
-                        merge: Box::new(move |arg_name: &str, values: &[Value]| {
-                            let Some(strategy) = arg_strategies_capture.get(arg_name) else {
-                                panic!("`Should have a strategy for {arg_name}")
-                            };
-                            strategy.merge_values(values)
-                        }),
-                        to_string: Box::new(move || {
-                            if arg_strategies_capture2.is_empty() {
-                                "<none>".to_string()
-                            }
-                            else {
-                                let arg_strategy_strings: Vec<String> = arg_strategies_capture2
-                                    .iter()
-                                    .map(|(arg_name, strategy)| format!("{arg_name}: {}", strategy.name()))
-                                    .collect();
-                                format!("{{ {} }}", arg_strategy_strings.join(", "))
-                            }
-                        }),
-                    })
-                }));
+                argument_merger = Some(directive_argument_merger(
+                    name.clone(),
+                    args.to_vec(),
+                    arg_strategies,
+                ));
             }
             composition = Some(DirectiveCompositionSpecification {
                 supergraph_specification: supergraph_specification.unwrap(),
@@ -494,7 +481,56 @@ impl DirectiveSpecification {
     }
 }
 
+fn directive_argument_merger(
+    directive_name: Name,
+    arg_specs: Vec<DirectiveArgumentSpecification>,
+    arg_strategies: IndexMap<String, ArgumentCompositionStrategy>,
+) -> Box<ArgumentMergerFactory> {
+    Box::new(move |schema, link| {
+        for arg in arg_specs.iter() {
+            let strategy = arg.composition_strategy.as_ref().unwrap();
+            let arg_name = &arg.base_spec.name;
+            let arg_type = (arg.base_spec.get_type)(schema, link)?;
+            assert!(
+                !arg_type.is_list(),
+                "Should have gotten error getting type for @{directive_name}({arg_name}:), but got {arg_type}"
+            );
+            strategy.is_type_supported(schema, &arg_type).map_err(|support_msg| {
+                let strategy_name = strategy.name();
+                SingleFederationError::DirectiveDefinitionInvalid {
+                    message: format!("Invalid composition strategy {strategy_name} for argument @{directive_name}({arg_name}:) of type {arg_type}; {strategy_name} only supports ${support_msg}")
+                }
+            })?;
+        }
+        let arg_strategies_capture = arg_strategies.clone();
+        let arg_strategies_capture2 = arg_strategies.clone();
+        Ok(ArgumentMerger {
+            merge: Box::new(move |arg_name: &str, values: &[Value]| {
+                let Some(strategy) = arg_strategies_capture.get(arg_name) else {
+                    panic!("`Should have a strategy for {arg_name}")
+                };
+                strategy.merge_values(values)
+            }),
+            to_string: Box::new(move || {
+                if arg_strategies_capture2.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    let arg_strategy_strings: Vec<String> = arg_strategies_capture2
+                        .iter()
+                        .map(|(arg_name, strategy)| format!("{arg_name}: {}", strategy.name()))
+                        .collect();
+                    format!("{{ {} }}", arg_strategy_strings.join(", "))
+                }
+            }),
+        })
+    })
+}
+
 impl TypeAndDirectiveSpecification for DirectiveSpecification {
+    fn name(&self) -> &Name {
+        &self.name
+    }
+
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -504,7 +540,7 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
         let mut resolved_args = Vec::new();
         let mut errors = MultipleFederationErrors { errors: vec![] };
         for arg in self.args.iter() {
-            match (arg.base_spec.get_type)(schema) {
+            match (arg.base_spec.get_type)(schema, link) {
                 Ok(arg_type) => {
                     resolved_args.push(ResolvedArgumentSpecification {
                         name: arg.base_spec.name.clone(),
@@ -513,7 +549,7 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
                     });
                 }
                 Err(err) => {
-                    errors.errors.push(err);
+                    errors.push(err);
                 }
             };
         }
@@ -831,7 +867,6 @@ mod tests {
 
     use super::ArgumentSpecification;
     use super::DirectiveArgumentSpecification;
-    use crate::error::SingleFederationError;
     use crate::link::link_spec_definition::LinkSpecDefinition;
     use crate::link::spec::Identity;
     use crate::link::spec::Version;
@@ -876,10 +911,9 @@ mod tests {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: name!("v1"),
-                        get_type:
-                            move |_schema: &FederationSchema| -> Result<Type, SingleFederationError> {
-                                Ok(Type::Named(name!("Int")))
-                            },
+                        get_type: move |_schema: &FederationSchema, _link| {
+                            Ok(Type::Named(name!("Int")))
+                        },
                         default_value: None,
                     },
                     composition_strategy: Some(ArgumentCompositionStrategy::Max),
@@ -887,10 +921,9 @@ mod tests {
                 DirectiveArgumentSpecification {
                     base_spec: ArgumentSpecification {
                         name: name!("v2"),
-                        get_type:
-                            move |_schema: &FederationSchema| -> Result<Type, SingleFederationError> {
-                                Ok(Type::Named(name!("Int")))
-                            },
+                        get_type: move |_schema: &FederationSchema, _link| {
+                            Ok(Type::Named(name!("Int")))
+                        },
                         default_value: None,
                     },
                     composition_strategy: None,
@@ -899,7 +932,7 @@ mod tests {
             false,
             &[DirectiveLocation::Object],
             true,
-            Some(link_spec)
+            Some(link_spec),
         );
     }
 
@@ -923,10 +956,7 @@ mod tests {
             &[DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: name!("v"),
-                    get_type:
-                        move |_schema: &FederationSchema| -> Result<Type, SingleFederationError> {
-                            Ok(Type::Named(name!("Int")))
-                        },
+                    get_type: move |_schema, _link| Ok(Type::Named(name!("Int"))),
                     default_value: None,
                 },
                 composition_strategy: Some(ArgumentCompositionStrategy::Max),
