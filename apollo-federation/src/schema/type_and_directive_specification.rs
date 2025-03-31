@@ -24,11 +24,14 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
+use itertools::Itertools;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::Link;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -37,6 +40,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::supergraph::ValidFederationSubgraph;
 
 //////////////////////////////////////////////////////////////////////////////
 // Field and Argument Specifications
@@ -104,6 +108,8 @@ pub(crate) trait TypeAndDirectiveSpecification {
 
     // PORT_NOTE: The JS version takes additional optional argument `asBuiltIn`.
     // - The JS version only sets it `true` for GraphQL built-in types and directives.
+    // - In Rust, GraphQL built-in definitions are added by `collect_shallow_references`, which
+    //   copies `apollo-compiler`'s Schema definitions. So, `asBuiltIn` is not needed.
     fn check_or_add(
         &self,
         schema: &mut FederationSchema,
@@ -239,6 +245,8 @@ where
     ) -> Result<(), FederationError> {
         let actual_name = actual_type_name(&self.name, link);
         let members = (self.members)(schema);
+        // PORT_NOTE: The JS version sorts the members by name.
+        // TODO(ROUTER-1223): Sort members here. Currently, doing it breaks `plugins::cache` tests.
         let existing = schema.try_get_type(actual_name.clone());
 
         // ensure new union has at least one member
@@ -258,10 +266,13 @@ where
             let existing_type = existing.get(schema.schema())?;
             let ExtendedType::Union(existing_union_type) = existing_type else {
                 return Err(FederationError::internal(format!(
-                    "Expected ExtendedType::Object but got {}",
+                    "Expected ExtendedType::Union but got {}",
                     TypeKind::from(existing_type)
                 )));
             };
+            // This is kind of fragile in a core schema world where members may have been renamed,
+            // but we currently only use this one for the _Entity type where that shouldn't be an
+            // issue.
             if existing_union_type.members != members {
                 let union_type_name = &self.name;
                 let expected_member_names: Vec<String> = existing_union_type
@@ -338,10 +349,12 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                 let enum_type_name = &self.name;
                 let expected_value_names: Vec<String> = existing_value_set
                     .iter()
+                    .sorted_by(|a, b| a.cmp(b))
                     .map(|name| name.to_string())
                     .collect();
                 let actual_value_names: Vec<String> = actual_value_set
                     .iter()
+                    .sorted_by(|a, b| a.cmp(b))
                     .map(|name| name.to_string())
                     .collect();
                 return Err(SingleFederationError::TypeDefinitionInvalid {
@@ -365,6 +378,8 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                 values: self
                     .values
                     .iter()
+                    // PORT_NOTE: The JS version sorts the enum values by name.
+                    // TODO(ROUTER-1223): Sort enum values here. (Also, see the union type above.)
                     .map(|val| {
                         (
                             val.name.clone(),
@@ -397,16 +412,21 @@ pub(crate) struct ArgumentMerger {
     pub(crate) to_string: Box<dyn Fn() -> String>,
 }
 
+/// Returns the version of directive spec definition required for the given Federation version to
+/// be used in the supergraph.
+type SupergraphSpecification = dyn Fn(Version) -> Box<dyn SpecDefinition>;
+
 type ArgumentMergerFactory =
     dyn Fn(&FederationSchema, Option<&Arc<Link>>) -> Result<ArgumentMerger, FederationError>;
 
+type StaticArgumentsTransform =
+    dyn Fn(&ValidFederationSubgraph, IndexMap<Name, Value>) -> IndexMap<Name, Value>;
+
 pub(crate) struct DirectiveCompositionSpecification {
-    pub(crate) supergraph_specification:
-        fn(
-            federation_version: crate::link::spec::Version,
-        ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
+    pub(crate) supergraph_specification: Box<SupergraphSpecification>,
     /// Factory function returning an actual argument merger for given federation schema.
     pub(crate) argument_merger: Option<Box<ArgumentMergerFactory>>,
+    pub(crate) static_argument_transform: Option<Box<StaticArgumentsTransform>>,
 }
 
 pub(crate) struct DirectiveSpecification {
@@ -427,28 +447,20 @@ impl DirectiveSpecification {
         repeatable: bool,
         locations: &[DirectiveLocation],
         composes: bool,
-        supergraph_specification: Option<
-            fn(
-                federation_version: crate::link::spec::Version,
-            ) -> Box<dyn crate::link::spec_definition::SpecDefinition>,
-        >,
+        supergraph_specification: Option<Box<SupergraphSpecification>>,
+        static_argument_transform: Option<Box<StaticArgumentsTransform>>,
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
         if composes {
-            assert!(
-                supergraph_specification.is_some(),
-                "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
-            );
+            let Some(supergraph_specification) = supergraph_specification else {
+                panic!(
+                    "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
+                );
+            };
             let mut argument_merger: Option<Box<ArgumentMergerFactory>> = None;
-            let arg_strategies_iter = args
-                .iter()
-                .filter(|arg| arg.composition_strategy.is_some())
-                .map(|arg| {
-                    (
-                        arg.base_spec.name.to_string(),
-                        arg.composition_strategy.unwrap(),
-                    )
-                });
+            let arg_strategies_iter = args.iter().filter_map(|arg| {
+                Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
+            });
             let arg_strategies: IndexMap<String, ArgumentCompositionStrategy> =
                 IndexMap::from_iter(arg_strategies_iter);
             if !arg_strategies.is_empty() {
@@ -467,8 +479,9 @@ impl DirectiveSpecification {
                 ));
             }
             composition = Some(DirectiveCompositionSpecification {
-                supergraph_specification: supergraph_specification.unwrap(),
+                supergraph_specification,
                 argument_merger,
+                static_argument_transform,
             })
         }
         Self {
@@ -589,6 +602,12 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
 
 //////////////////////////////////////////////////////////////////////////////
 // Helper functions for TypeSpecification implementations
+// Argument naming conventions:
+// - `expected`: the expected definition either by the Federation assumption or the existing
+//               definition in the schema.
+// - `actual`: the definition from the TypeAndDirectiveSpecification, which is being checked.
+// PORT_NOTE: The JS code uses the terms `actual`, `expected` and `existing` slightly differently.
+//            But, the new convention seems easier to understand.
 
 // TODO: Consider moving this to the schema module.
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::Display)]
@@ -701,7 +720,7 @@ fn ensure_same_arguments(
     // ensure expected arguments are a subset of actual arguments.
     for expected_arg in expected {
         let actual_arg = actual.iter().find(|x| x.name == expected_arg.name);
-        if actual_arg.is_none() {
+        let Some(actual_arg) = actual_arg else {
             // Not declaring an optional argument is ok: that means you won't be able to pass a non-default value in your schema, but we allow you that.
             // But missing a required argument it not ok.
             if expected_arg.ty.is_non_null() && expected_arg.default_value.is_none() {
@@ -711,10 +730,9 @@ fn ensure_same_arguments(
                     )));
             }
             continue;
-        }
+        };
 
         // ensure expected argument and actual argument have the same type.
-        let actual_arg = actual_arg.unwrap();
         // TODO: Make it easy to get a cloned (inner) type from a Node<Type>.
         let mut actual_type = actual_arg.ty.clone();
         if actual_type.is_non_null() && !expected_arg.ty.is_non_null() {
@@ -772,7 +790,7 @@ fn ensure_same_fields(
     for actual_field_def in actual_fields {
         let actual_field_name = &actual_field_def.name;
         let expected_field = existing_obj_type.fields.get(actual_field_name);
-        if expected_field.is_none() {
+        let Some(expected_field) = expected_field else {
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!(
                     "Invalid definition of type {}: missing field {}",
@@ -780,12 +798,17 @@ fn ensure_same_fields(
                 ),
             });
             continue;
-        }
+        };
 
         // ensure field types are as expected
-        let expected_field = expected_field.unwrap();
-        if actual_field_def.ty != expected_field.ty {
-            let expected_field_type = &expected_field.ty;
+        // We allow adding non-nullability because we've seen redefinition of the federation
+        // _Service type with type String! for the `sdl` field and we don't want to break backward
+        // compatibility as this doesn't feel too harmful.
+        let mut expected_field_type = expected_field.ty.clone();
+        if !actual_field_def.ty.is_non_null() && expected_field_type.is_non_null() {
+            expected_field_type = expected_field_type.nullable();
+        }
+        if actual_field_def.ty != expected_field_type {
             let actual_field_type = &actual_field_def.ty;
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!("Invalid definition for field {actual_field_name} of type {obj_type_name}: should have type {expected_field_type} but found type {actual_field_type}")
@@ -887,6 +910,7 @@ mod tests {
             &[DirectiveLocation::Object],
             true,
             None,
+            None,
         );
     }
 
@@ -932,7 +956,8 @@ mod tests {
             false,
             &[DirectiveLocation::Object],
             true,
-            Some(link_spec),
+            Some(Box::new(link_spec)),
+            None,
         );
     }
 
@@ -964,7 +989,8 @@ mod tests {
             true,
             &[DirectiveLocation::Object],
             true,
-            Some(link_spec),
+            Some(Box::new(link_spec)),
+            None,
         );
     }
 }

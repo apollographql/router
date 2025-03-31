@@ -653,6 +653,7 @@ impl FederationSpecDefinition {
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
             false,
             None,
+            None,
         )
     }
 
@@ -686,6 +687,7 @@ impl FederationSpecDefinition {
             &[DirectiveLocation::FieldDefinition],
             false,
             None,
+            None,
         )
     }
 
@@ -696,6 +698,7 @@ impl FederationSpecDefinition {
             false,
             &[DirectiveLocation::FieldDefinition],
             false,
+            None,
             None,
         )
     }
@@ -715,6 +718,7 @@ impl FederationSpecDefinition {
             &[DirectiveLocation::FieldDefinition],
             false,
             None,
+            None,
         )
     }
 
@@ -725,6 +729,7 @@ impl FederationSpecDefinition {
             false,
             &[DirectiveLocation::Object, DirectiveLocation::Interface],
             false,
+            None,
             None,
         )
     }
@@ -739,6 +744,7 @@ impl FederationSpecDefinition {
                 DirectiveLocation::Object,
             ],
             false,
+            None,
             None,
         )
     }
@@ -769,6 +775,7 @@ impl FederationSpecDefinition {
             &[DirectiveLocation::FieldDefinition],
             false,
             None,
+            None,
         )
     }
 
@@ -786,6 +793,7 @@ impl FederationSpecDefinition {
             true,
             &[DirectiveLocation::Schema],
             false,
+            None,
             None,
         )
     }

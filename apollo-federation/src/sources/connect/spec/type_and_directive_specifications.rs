@@ -255,6 +255,7 @@ pub(super) fn check_or_add(
         spec.connect_directive_locations(),
         false,
         None,
+        None,
     );
 
     // -------------------------------------------------------------------------
@@ -336,6 +337,7 @@ pub(super) fn check_or_add(
         true,
         &[DirectiveLocation::Schema],
         false,
+        None,
         None,
     );
 
