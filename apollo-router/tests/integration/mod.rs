@@ -6,6 +6,7 @@ pub(crate) use common::IntegrationTest;
 mod connectors;
 mod coprocessor;
 mod docs;
+mod entity_cache;
 mod file_upload;
 mod introspection;
 mod lifecycle;
