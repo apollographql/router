@@ -251,6 +251,7 @@ impl SpecDefinition for LinkSpecDefinition {
             &[DirectiveLocation::Schema],
             false,
             None,
+            None,
         ))]
     }
 
