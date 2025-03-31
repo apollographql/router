@@ -143,6 +143,9 @@ use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
+use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
@@ -516,10 +519,10 @@ impl PluginPrivate for Telemetry {
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
                                     .map(|u| {
-                                        u.stats_report_key == "## GraphQLValidationFailure\n"
-                                            || u.stats_report_key == "## GraphQLParseFailure\n"
+                                        u.stats_report_key == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
+                                            || u.stats_report_key == GRAPHQL_PARSE_FAILURE_ERROR_KEY
                                             || u.stats_report_key
-                                                == "## GraphQLUnknownOperationName\n"
+                                                == GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
                                     })
                                     .unwrap_or(false)
                             }) {
