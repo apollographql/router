@@ -397,7 +397,7 @@ impl<S> HeadersService<S> {
         let mut already_propagated: HashSet<String> = HashSet::new();
 
         let TransportRequest::Http(ref mut http_request) = req.transport_request;
-        let body_to_value = serde_json_bytes::value::to_value(http_request.inner.body()).ok();
+        let body_to_value = serde_json::from_str(http_request.inner.body()).ok();
         let supergraph_headers = req.supergraph_request.headers();
         let context = &req.context;
         let headers_mut = http_request.inner.headers_mut();
@@ -590,18 +590,30 @@ mod test {
     use std::str::FromStr;
     use std::sync::Arc;
 
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
+    use serde_json::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
+    use url::Url;
 
     use super::*;
     use crate::Context;
     use crate::graphql;
     use crate::graphql::Request;
+    use crate::plugin::test::MockConnectorService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::test::PluginTestHarness;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
+    use crate::services::connector::request_service::transport::http::HttpRequest;
 
     #[test]
     fn test_subgraph_config() {
@@ -741,6 +753,37 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_connector_insert_static() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("c", "d"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::Static(
+            InsertStatic {
+                name: "c".try_into()?,
+                value: "d".try_into()?,
+            },
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_insert_from_context() -> Result<(), BoxError> {
         let mut mock = MockSubgraphService::new();
         mock.expect_call()
@@ -764,6 +807,37 @@ mod test {
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_insert_from_context() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_context", "my_value_from_context"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(
+            Insert::FromContext(InsertFromContext {
+                name: "header_from_context".try_into()?,
+                from_context: "my_key".to_string(),
+            }),
+        )]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -792,6 +866,38 @@ mod test {
         .layer(mock);
 
         service.ready().await?.call(example_request()).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_connector_insert_from_request_body() -> Result<(), BoxError> {
+        let mut mock = MockConnectorService::new();
+        mock.expect_call()
+            .times(1)
+            .withf(|request| {
+                request.assert_headers(vec![
+                    ("aa", "vaa"),
+                    ("ab", "vab"),
+                    ("ac", "vac"),
+                    ("header_from_request", "myCoolValue"),
+                ])
+            })
+            .returning(example_connector_response);
+
+        let mut service = HeadersLayer::new(Arc::new(vec![Operation::Insert(Insert::FromBody(
+            InsertFromBody {
+                name: "header_from_request".try_into()?,
+                path: JsonPathInst::from_str("$.myCoolField").unwrap(),
+                default: None,
+            },
+        ))]))
+        .layer(mock);
+
+        service
+            .ready()
+            .await?
+            .call(example_connector_request())
+            .await?;
         Ok(())
     }
 
@@ -1150,6 +1256,48 @@ mod test {
         ))
     }
 
+    fn example_connector_response(
+        _req: connector::request_service::Request,
+    ) -> Result<connector::request_service::Response, BoxError> {
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(a),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("f").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        };
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        Ok(connector::request_service::Response::test_builder()
+            .context(Context::new())
+            .connector(Arc::new(connector))
+            .response_key(key)
+            .problems(Default::default())
+            .data(json!(""))
+            .build())
+    }
+
     fn example_request() -> SubgraphRequest {
         let ctx = Context::new();
         ctx.insert("my_key", "my_value_from_context".to_string())
@@ -1193,6 +1341,87 @@ mod test {
         }
     }
 
+    fn example_connector_request() -> connector::request_service::Request {
+        let ctx = Context::new();
+        ctx.insert("my_key", "my_value_from_context".to_string())
+            .unwrap();
+        let connector = Connector {
+            spec: ConnectSpec::V0_1,
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                None,
+                name!(Query),
+                name!(a),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
+            selection: JSONSelection::parse("f").unwrap(),
+            entity_resolver: None,
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+        };
+        let key = ResponseKey::RootField {
+            name: "hello".to_string(),
+            inputs: Default::default(),
+            selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+        };
+
+        let request = http::Request::builder()
+            .header("aa", "vaa")
+            .header("ab", "vab")
+            .header("ac", "vac")
+            .header(HOST, "rhost")
+            .header(CONTENT_LENGTH, "22")
+            .header(CONTENT_TYPE, "graphql")
+            .body(
+                json!({
+                    "myCoolField": "myCoolValue"
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+        let http_request = HttpRequest {
+            inner: request,
+            debug: None,
+        };
+
+        connector::request_service::Request {
+            context: ctx,
+            connector: Arc::new(connector),
+            service_name: String::from("test"),
+            transport_request: http_request.into(),
+            key,
+            mapping_problems: Default::default(),
+            supergraph_request: Arc::new(
+                http::Request::builder()
+                    .header("da", "vda")
+                    .header("db", "vdb")
+                    .header("db", "vdb")
+                    .header("db", "vdb2")
+                    .header(HOST, "host")
+                    .header(CONTENT_LENGTH, "2")
+                    .header(CONTENT_TYPE, "graphql")
+                    .body(
+                        Request::builder()
+                            .query("query")
+                            .operation_name("my_operation_name")
+                            .build(),
+                    )
+                    .expect("expecting valid request"),
+            ),
+        }
+    }
+
     impl SubgraphRequest {
         fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
             let mut headers = headers.clone();
@@ -1201,6 +1430,25 @@ mod test {
             headers.push((CONTENT_TYPE.as_str(), "graphql"));
             let actual_headers = self
                 .subgraph_request
+                .headers()
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
+                .collect::<HashSet<_>>();
+            assert_eq!(actual_headers, headers.into_iter().collect::<HashSet<_>>());
+
+            true
+        }
+    }
+
+    impl connector::request_service::Request {
+        fn assert_headers(&self, headers: Vec<(&'static str, &'static str)>) -> bool {
+            let mut headers = headers.clone();
+            headers.push((HOST.as_str(), "rhost"));
+            headers.push((CONTENT_LENGTH.as_str(), "22"));
+            headers.push((CONTENT_TYPE.as_str(), "graphql"));
+            let TransportRequest::Http(ref http_request) = self.transport_request;
+            let actual_headers = http_request
+                .inner
                 .headers()
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))

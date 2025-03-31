@@ -57,7 +57,7 @@ assert_impl_all!(Response: Send);
 /// Request type for a single connector request
 #[derive(Debug)]
 #[non_exhaustive]
-pub(crate) struct Request {
+pub struct Request {
     /// The request context
     pub(crate) context: Context,
 
@@ -81,13 +81,13 @@ pub(crate) struct Request {
     pub(crate) mapping_problems: Vec<Problem>,
 
     /// Original request to the Router.
-    pub supergraph_request: Arc<http::Request<graphql::Request>>,
+    pub(crate) supergraph_request: Arc<http::Request<graphql::Request>>,
 }
 
 /// Response type for a connector
 #[derive(Debug)]
 #[non_exhaustive]
-pub(crate) struct Response {
+pub struct Response {
     /// The response context
     #[allow(dead_code)]
     pub(crate) context: Context,
