@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
@@ -350,6 +352,24 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
             url: value.url,
             schema: value.schema.schema().clone(),
         }
+    }
+}
+
+/// Currently, this is making up for the fact that we don't have an equivalent of `addSubgraphToErrors`.
+/// In JS, that manipulates the underlying `GraphQLError` message to prepend the subgraph name. In Rust,
+/// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
+/// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
+/// for missing error codes and the like.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub(crate) struct SubgraphError {
+    pub(crate) subgraph: Name,
+    pub(crate) error: FederationError,
+}
+
+impl Display for SubgraphError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.subgraph, self.error)
     }
 }
 
