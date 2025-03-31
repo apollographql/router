@@ -1,6 +1,6 @@
+use opentelemetry_api::Context;
 use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceResult;
-use opentelemetry_api::Context;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::trace::Span;
 use opentelemetry_sdk::trace::SpanProcessor;
@@ -53,11 +53,11 @@ mod tests {
     use std::sync::Mutex;
     use std::time::SystemTime;
 
+    use opentelemetry_api::Context;
     use opentelemetry_api::trace::SpanId;
     use opentelemetry_api::trace::SpanKind;
     use opentelemetry_api::trace::TraceFlags;
     use opentelemetry_api::trace::TraceId;
-    use opentelemetry_api::Context;
     use opentelemetry_sdk::trace::EvictedHashMap;
     use opentelemetry_sdk::trace::EvictedQueue;
     use opentelemetry_sdk::trace::SpanProcessor;

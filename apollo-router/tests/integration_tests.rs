@@ -2,13 +2,15 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use apollo_router::_private::create_test_service_factory_from_yaml;
+use apollo_router::Configuration;
+use apollo_router::Context;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -16,15 +18,13 @@ use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
-use apollo_router::Configuration;
-use apollo_router::Context;
 use futures::StreamExt;
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
 use serde_json_bytes::json;
@@ -971,11 +971,13 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), unknown_operation_name).await;
     // "## GraphQLUnknownOperationName\n"
-    assert!(response
-        .context
-        .get::<_, String>("apollo_operation_id".to_string())
-        .unwrap()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, String>("apollo_operation_id".to_string())
+            .unwrap()
+            .is_none()
+    );
 
     let validation_error: router::Request = supergraph::Request::fake_builder()
         .query(
@@ -994,11 +996,13 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router, validation_error).await;
     // "## GraphQLValidationFailure\n"
-    assert!(response
-        .context
-        .get::<_, String>("apollo_operation_id".to_string())
-        .unwrap()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, String>("apollo_operation_id".to_string())
+            .unwrap()
+            .is_none()
+    );
 }
 
 async fn http_query_rust(

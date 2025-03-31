@@ -10,6 +10,8 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
 
+use crate::Configuration;
+use crate::Notify;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -20,8 +22,6 @@ use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-use crate::Configuration;
-use crate::Notify;
 
 /// Test harness for plugins
 /// The difference between this and the regular TestHarness is that this is more suited for unit testing.
@@ -70,6 +70,7 @@ pub(crate) struct PluginTestHarness<T: Into<Box<dyn DynPlugin>>> {
 #[buildstructor::buildstructor]
 impl<T: Into<Box<dyn DynPlugin + 'static>> + 'static> PluginTestHarness<T> {
     #[builder]
+    #[allow(clippy::needless_lifetimes)] // needless in `new` but not in generated builder methods
     pub(crate) async fn new<'a, 'b>(config: Option<&'a str>, schema: Option<&'b str>) -> Self {
         let factory = crate::plugin::plugins()
             .find(|factory| factory.type_id == TypeId::of::<T>())

@@ -3,9 +3,9 @@ use std::time::SystemTime;
 use opentelemetry::trace::Status;
 use opentelemetry_sdk::export::trace::SpanData;
 
-use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::SAMPLING_PRIORITY_KEY;
 use crate::plugins::telemetry::tracing::datadog_exporter::Error;
 use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
+use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::SAMPLING_PRIORITY_KEY;
 
 pub(crate) fn encode<S, N, R>(
     model_config: &ModelConfig,

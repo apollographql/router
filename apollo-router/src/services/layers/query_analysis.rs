@@ -4,18 +4,20 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
 
-use crate::apollo_studio_interop::generate_extended_references;
+use crate::Configuration;
+use crate::Context;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -33,8 +35,6 @@ use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SpecError;
-use crate::Configuration;
-use crate::Context;
 
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
@@ -114,10 +114,12 @@ impl QueryAnalysisLayer {
         let query = request.supergraph_request.body().query.as_ref();
 
         if query.is_none() || query.unwrap().trim().is_empty() {
-            let errors = vec![crate::error::Error::builder()
-                .message("Must provide query string.".to_string())
-                .extension_code("MISSING_QUERY_STRING")
-                .build()];
+            let errors = vec![
+                crate::error::Error::builder()
+                    .message("Must provide query string.".to_string())
+                    .extension_code("MISSING_QUERY_STRING")
+                    .build(),
+            ];
             u64_counter!(
                 "apollo_router_http_requests_total",
                 "Total number of HTTP requests made. (deprecated)",
@@ -236,10 +238,12 @@ impl QueryAnalysisLayer {
                 });
                 let errors = match errors.into_graphql_errors() {
                     Ok(v) => v,
-                    Err(errors) => vec![Error::builder()
-                        .message(errors.to_string())
-                        .extension_code(errors.extension_code())
-                        .build()],
+                    Err(errors) => vec![
+                        Error::builder()
+                            .message(errors.to_string())
+                            .extension_code(errors.extension_code())
+                            .build(),
+                    ],
                 };
                 Err(SupergraphResponse::builder()
                     .errors(errors)

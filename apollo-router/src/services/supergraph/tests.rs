@@ -6,6 +6,10 @@ use http::HeaderValue;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::Configuration;
+use crate::Context;
+use crate::Notify;
+use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
@@ -13,10 +17,6 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::test_harness::MockedSubgraphs;
-use crate::Configuration;
-use crate::Context;
-use crate::Notify;
-use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
@@ -1132,13 +1132,12 @@ async fn subscription_callback_schema_reload() {
     // reload schema
     let schema = Schema::parse(&new_schema, &configuration).unwrap();
     notify.broadcast_schema(Arc::new(schema));
-    insta::assert_json_snapshot!(tokio::time::timeout(
-        Duration::from_secs(1),
-        stream.next_response()
-    )
-    .await
-    .unwrap()
-    .unwrap());
+    insta::assert_json_snapshot!(
+        tokio::time::timeout(Duration::from_secs(1), stream.next_response())
+            .await
+            .unwrap()
+            .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -3409,9 +3408,9 @@ async fn interface_object_typename() {
                         }
                     }
                   }"#,*/
-                  // this works too
-                  /*
-                  r#"{
+            // this works too
+            /*
+            r#"{
               searchContacts(name: "max") {
                   inner {
                     ...F
@@ -3421,7 +3420,7 @@ async fn interface_object_typename() {
             fragment F on Contact {
               country
             }"#,
-                   */
+             */
             // this does not
             r#"{
         searchContacts(name: "max") {

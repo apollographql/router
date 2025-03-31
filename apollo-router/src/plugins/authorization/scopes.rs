@@ -9,21 +9,21 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::spec::Schema;
+use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
-use crate::spec::Schema;
-use crate::spec::TYPENAME;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
@@ -644,8 +644,8 @@ mod tests {
     use std::collections::BTreeSet;
     use std::collections::HashSet;
 
-    use apollo_compiler::ast::Document;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
     use crate::plugins::authorization::scopes::ScopeExtractionVisitor;

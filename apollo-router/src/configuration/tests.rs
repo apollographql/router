@@ -104,7 +104,12 @@ fn bad_graphql_path_configuration_without_slash() {
         .supergraph(Supergraph::fake_builder().path("test").build())
         .build()
         .unwrap_err();
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            "invalid 'server.graphql_path' configuration: 'test' is invalid, it must be an absolute path and start with '/', you should try with '/test'"
+        )
+    );
 }
 
 #[test]
@@ -114,7 +119,12 @@ fn bad_graphql_path_configuration_with_wildcard_as_prefix() {
         .build()
         .unwrap_err();
 
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            "invalid 'server.graphql_path' configuration: '/*/test' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'"
+        )
+    );
 }
 
 #[test]
@@ -292,7 +302,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`"
+    );
 }
 
 #[test]
@@ -311,7 +324,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`"
+    );
 }
 
 #[test]
@@ -330,7 +346,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`"
+    );
 }
 
 #[test]
@@ -349,7 +368,10 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
+    assert_eq!(
+        error,
+        "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`"
+    );
 }
 
 #[test]
@@ -492,6 +514,7 @@ cors:
 
 #[test]
 fn line_precise_config_errors_with_errors_after_first_field_env_expansion() {
+    #[allow(clippy::literal_string_with_formatting_args)]
     let error = validate_yaml_configuration(
         r#"
 supergraph:
@@ -612,7 +635,9 @@ fn upgrade_old_configuration() {
                     });
                 }
                 Err(e) => {
-                    panic!("migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}")
+                    panic!(
+                        "migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}"
+                    )
                 }
             }
         }
@@ -711,10 +736,12 @@ fn test_configuration_validate_and_sanitize() {
         .unwrap();
     assert_eq!(&conf.supergraph.sanitized_path(), "/test");
 
-    assert!(Configuration::builder()
-        .supergraph(Supergraph::builder().path("/*/whatever").build())
-        .build()
-        .is_err());
+    assert!(
+        Configuration::builder()
+            .supergraph(Supergraph::builder().path("/*/whatever").build())
+            .build()
+            .is_err()
+    );
 }
 
 #[test]
@@ -1062,6 +1089,31 @@ fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
 
     assert!(!config.batch_include("anything"));
     assert!(config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_unspecified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, None);
+}
+
+#[test]
+fn it_processes_specified_maximum_batch_limit_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "maximum_size": 10
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert_eq!(config.maximum_size, Some(10));
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {

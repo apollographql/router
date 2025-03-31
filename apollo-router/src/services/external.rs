@@ -6,28 +6,28 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
 
 use super::subgraph::SubgraphRequestId;
+use crate::Context;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
-use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
-use crate::Context;
+use crate::services::router::body::get_body_bytes;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -113,11 +113,9 @@ impl<T> Externalizable<T>
 where
     T: Debug + DeserializeOwned + Serialize + Send + Sync,
 {
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Router
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn router_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -154,11 +152,9 @@ where
         }
     }
 
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Supergraph
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn supergraph_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -195,11 +191,9 @@ where
         }
     }
 
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing an Execution
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn execution_new(
         stage: PipelineStep,
         control: Option<Control>,
@@ -237,11 +231,9 @@ where
         }
     }
 
-    #[builder(visibility = "pub(crate)")]
     /// This is the constructor (or builder) to use when constructing a Subgraph
     /// `Externalizable`.
-    ///
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
+    #[builder(visibility = "pub(crate)")]
     fn subgraph_new(
         stage: PipelineStep,
         control: Option<Control>,

@@ -18,8 +18,8 @@ use clap::Parser;
 use tracing_subscriber::prelude::*;
 
 mod bench;
-use bench::run_bench;
 use bench::BenchOutput;
+use bench::run_bench;
 
 #[derive(Parser)]
 struct QueryPlannerArgs {

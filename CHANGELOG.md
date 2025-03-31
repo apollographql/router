@@ -4,6 +4,90 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.1] - 2025-03-26
+
+> [!IMPORTANT]
+>
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+## 🚀 Features
+
+### Add `apollo.router.pipelines` metrics ([PR #6967](https://github.com/apollographql/router/pull/6967))
+
+When the router reloads, either via schema change or config change, a new request pipeline is created.
+Existing request pipelines are closed once their requests finish. However, this may not happen if there are ongoing long requests that do not finish, such as Subscriptions.
+
+To enable debugging when request pipelines are being kept around, a new gauge metric has been added:
+
+- `apollo.router.pipelines` - The number of request pipelines active in the router
+    - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+    - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+    - `config.hash` - The hash of the configuration
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6967
+
+### Add `apollo.router.open_connections` metric ([PR #7023](https://github.com/apollographql/router/pull/7023))
+
+To help users to diagnose when connections are keeping pipelines hanging around, the following metric has been added:
+- `apollo.router.open_connections` - The number of request pipelines active in the router
+  - `schema.id` - The Apollo Studio schema hash associated with the pipeline.
+  - `launch.id` - The Apollo Studio launch id associated with the pipeline (optional).
+  - `config.hash` - The hash of the configuration.
+  - `server.address` - The address that the router is listening on.
+  - `server.port` - The port that the router is listening on if not a unix socket.
+  - `state` - Either `active` or `terminating`.
+
+You can use this metric to monitor when connections are open via long running requests or keepalive messages.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7009
+
+### Add `batching.maximum_size` configuration option to limit maximum client batch size ([PR #7005](https://github.com/apollographql/router/pull/7005))
+
+Add an optional `maximum_size` parameter to the batching configuration.
+
+* When specified, the router will reject requests which contain more than `maximum_size` queries in the client batch.
+* When unspecified, the router performs no size checking (the current behavior).
+
+If the number of queries provided exceeds the maximum batch size, the entire batch fails with error code 422 (`Unprocessable Content`). For example:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "Batch limits exceeded: you provided a batch with 3 entries, but the configured maximum router batch size is 2",
+        "code": "BATCH_LIMIT_EXCEEDED"
+      }
+    }
+  ]
+}
+```
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7005
+
+## 🐛 Fixes
+
+### Use correct default values on omitted OTLP endpoints ([PR #6931](https://github.com/apollographql/router/pull/6931))
+
+Previously, when the configuration didn't specify an OTLP endpoint, the Router would always default to `http://localhost:4318`. However, port `4318` is the correct default only for the HTTP protocol, while port `4317` should be used for gRPC.
+
+Additionally, all other telemetry defaults in the Router configuration consistently use `127.0.0.1` as the hostname rather than `localhost`.
+
+With this change, the Router now uses:
+* `http://127.0.0.1:4317` as the default for gRPC protocol
+* `http://127.0.0.1:4318` as the default for HTTP protocol
+
+This ensures protocol-appropriate port defaults and consistent hostname usage across all telemetry configurations.
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6931
+
+### Separate entity keys and representation variables in entity cache key ([Issue #6673](https://github.com/apollographql/router/issues/6673))
+
+This fix separates the entity keys and representation variable values in the cache key, to avoid issues with `@requires` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6888
+
 # [1.61.0] - 2025-02-25
 
 ## 🚀 Features
@@ -31,69 +115,11 @@ By [@LongLiveCHIEF](https://github.com/LongLiveCHIEF) in https://github.com/apol
 
 ## 🐛 Fixes
 
-### Header propagation rules passthrough ([PR #6690](https://github.com/apollographql/router/pull/6690))
+### Query Planning: fix `__typename` selections in sibling typename optimization
 
-Header propagation contains logic to prevent headers from being propagated more than once. This was broken
-in https://github.com/apollographql/router/pull/6281 which always considered a header propagated regardless if a rule
-actually matched.
+The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately.
 
-This PR alters the logic so that a header is marked as fixed only when it's populated.
-
-The following will now work again:
-
-```
-headers:
-  all:
-    request:
-      - propagate:
-          named: a
-          rename: b
-      - propagate:
-          named: b
-```
-
-Note that defaulting a header WILL populate it, so make sure to include your defaults last in your propagation
-rules.
-
-```
-headers:
-  all:
-    request:
-      - propagate:
-          named: a
-          rename: b
-          default: defaulted # This will prevent any further rule evaluation for header `b`
-      - propagate:
-          named: b
-```
-
-Instead, make sure that your headers are defaulted last:
-
-```
-headers:
-  all:
-    request:
-      - propagate:
-          named: a
-          rename: b
-      - propagate:
-          named: b
-          default: defaulted # OK
-```
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6690
-
-### Entity cache: fix directive conflicts in cache-control header ([Issue #6441](https://github.com/apollographql/router/issues/6441))
-
-Unnecessary cache-control directives are created in cache-control header.  The router will now filter out unnecessary values from the `cache-control` header when the request resolves. So if there's `max-age=10, no-cache, must-revalidate, no-store`, the expected value for the cache-control header would simply be `no-store`. Please see the MDN docs for justification of this reasoning: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control#preventing_storing
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/6543
-
-### Query Planning: fix `__typename` selections in sibling typename optimization 
-
-The query planner uses an optimization technique called "sibling typename", which attaches `__typename` selections to their sibling selections so the planner won't need to plan them separately. 
-
-Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection. 
+Previously, when there were multiple identical selections and one of them has a `__typename` attached, the query planner could pick the one without the attachment, effectively losing a `__typename` selection.
 
 Now, the query planner favors the one with a `__typename` attached without losing the `__typename` selection.
 
@@ -223,14 +249,6 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🐛 Fixes
 
-### Improve performance of query hashing by using a precomputed schema hash ([PR #6622](https://github.com/apollographql/router/pull/6622))
-
-The router now uses a simpler and faster query hashing algorithm with more predictable CPU and memory usage. This improvement is enabled by using a precomputed hash of the entire schema, rather than computing and hashing the subset of types and fields used by each query.
-
-For more details on why these design decisions were made, please see the [PR description](https://github.com/apollographql/router/pull/6622)
-
-By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/6622
-
 ### Truncate invalid error paths ([PR #6359](https://github.com/apollographql/router/pull/6359))
 
 This fix addresses an issue where the router was silently dropping subgraph errors that included invalid paths.
@@ -247,19 +265,6 @@ By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apol
 When subgraph operations are deserialized, typically from a query plan cache, they are not automatically parsed into a full document. Instead, each node needs to initialize its operation(s) prior to execution. With this change, the primary node inside SubscriptionNode is initialized in the same way as other nodes in the plan.
 
 By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/6509
-
-### Fix increased memory usage in `sysinfo` since Router 1.59.0 ([PR #6634](https://github.com/apollographql/router/pull/6634))
-
-In version 1.59.0, Apollo Router started using the `sysinfo` crate to gather metrics about available CPUs and RAM. By default, that crate uses `rayon` internally to parallelize its handling of system processes. In turn, rayon creates a pool of long-lived threads.
-
-In a particular benchmark on a 32-core Linux server, this caused resident memory use to increase by about 150 MB. This is likely a combination of stack space (which only gets freed when the thread terminates) and per-thread space reserved by the heap allocator to reduce cross-thread synchronization cost.
-
-This regression is now fixed by:
-
-* Disabling `sysinfo`’s use of `rayon`, so the thread pool is not created and system processes information is gathered in a sequential loop.
-* Making `sysinfo` not gather that information in the first place since Router does not use it.
-
-By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/6634
 
 ### Optimize demand control lookup ([PR #6450](https://github.com/apollographql/router/pull/6450))
 
@@ -416,6 +421,15 @@ This is now fixed and the router will correctly ignore any upstream sampling dec
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/6481
 
 # [1.59.0] - 2024-12-17
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
 
 > [!IMPORTANT]
 >
@@ -682,6 +696,14 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 # [1.58.1] - 2024-12-05
 
 > [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
+> [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 ## 🐛 Fixes
@@ -704,6 +726,14 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 
 # [1.58.0] - 2024-11-27
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release contains changes which necessarily alter the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
@@ -997,9 +1027,15 @@ The docs for [authorization directive composition](https://www.apollographql.com
 
 By [@Meschreiber](https://github.com/Meschreiber) in https://github.com/apollographql/router/pull/6216
 
-
-
 # [1.57.1] - 2024-10-31
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 ## 🐛 Fixes
 
@@ -1012,6 +1048,14 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 
 # [1.57.0] - 2024-10-22
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), updates to the query planner in this release will result in query plan caches being re-generated rather than re-used.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new query plans come into service.
@@ -1149,6 +1193,14 @@ By [@sachindshinde](https://github.com/sachindshinde) in https://github.com/apol
 # [1.56.0] - 2024-10-01
 
 > [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
+> [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 ## 🚀 Features
@@ -1226,6 +1278,14 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 
 # [1.55.0] - 2024-09-24
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
@@ -1392,6 +1452,14 @@ By [@glasser](https://github.com/glasser) in https://github.com/apollographql/ro
 
 # [1.54.0] - 2024-09-10
 
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
+
 ## 🚀 Features
 
 ### Add configurability of span attributes in logs ([Issue #5540](https://github.com/apollographql/router/issues/5540))
@@ -1491,6 +1559,14 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 
 # [1.53.0] - 2024-08-28
+
+> [!IMPORTANT]
+> Router version 1.53.0 through to 1.59.0 have an issue where users of the Datadog exporter will see all traces sampled at 100%. This is due to the Router incorrectly
+> setting the priority sampled flag on spans 100% of the time.
+> This will cause all traces that are sent to Datadog agent to be forwarded on to Datadog, potentially incurring costs.
+>
+> Update to [1.59.1](#enable-accurate-datadog-apm-metrics-pr-6017) to resolve this issue.
+> Datadog users may wish to enable [`preview_datadog_agent_sampling`](#enable-accurate-datadog-apm-metrics-pr-6017) to enable accurate APM metrics.
 
 > [!IMPORTANT]
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.

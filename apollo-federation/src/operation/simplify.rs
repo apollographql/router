@@ -3,7 +3,6 @@ use std::sync::Arc;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 
-use super::runtime_types_intersect;
 use super::DirectiveList;
 use super::Field;
 use super::FieldSelection;
@@ -13,10 +12,11 @@ use super::NamedFragments;
 use super::Selection;
 use super::SelectionMap;
 use super::SelectionSet;
+use super::runtime_types_intersect;
 use crate::ensure;
 use crate::error::FederationError;
-use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
 pub(crate) enum SelectionOrSet {
@@ -175,7 +175,7 @@ impl InlineFragmentSelection {
             // 2. if it's the same type as the current type: it's not restricting types further.
             // 3. if the current type is an object more generally: because in that case the condition
             //   cannot be restricting things further (it's typically a less precise interface/union).
-            let useless_fragment = this_condition.map_or(true, |type_condition| {
+            let useless_fragment = this_condition.is_none_or(|type_condition| {
                 self.inline_fragment.schema == *schema && type_condition == parent_type
             });
             if useless_fragment || parent_type.is_object_type() {

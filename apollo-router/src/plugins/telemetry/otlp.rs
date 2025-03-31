@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use http::uri::PathAndQuery;
 use http::Uri;
-use opentelemetry::sdk::metrics::reader::TemporalitySelector;
+use http::uri::PathAndQuery;
 use opentelemetry::sdk::metrics::InstrumentKind;
+use opentelemetry::sdk::metrics::reader::TemporalitySelector;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
@@ -190,7 +190,9 @@ impl GrpcExporter {
             (Some(domain), _) => Some(domain.as_str()),
             (None, endpoint) if endpoint.scheme() == "https" => endpoint.host_str(),
             (None, endpoint) if endpoint.port() == Some(443) && endpoint.scheme() != "http" => {
-                tracing::warn!("telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error");
+                tracing::warn!(
+                    "telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error"
+                );
                 None
             }
             _ => None,

@@ -3,14 +3,14 @@ use std::str::FromStr;
 
 use jsonpath_rust::JsonPathInst;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
 use opentelemetry_api::KeyValue;
+use opentelemetry_api::metrics::Meter;
 use paste::paste;
 use serde_json::Value;
 
+use crate::Configuration;
 use crate::metrics::meter_provider;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
 
 type InstrumentMap = HashMap<String, (u64, HashMap<String, opentelemetry::Value>)>;
 

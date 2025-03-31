@@ -2,9 +2,9 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::Stream;
+use futures::future::BoxFuture;
 use http_body::SizeHint;
 use hyper::body::HttpBody;
 use tower::BoxError;

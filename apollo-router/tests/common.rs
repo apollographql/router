@@ -18,25 +18,25 @@ use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use mediatype::MediaType;
+use mediatype::WriteParams;
 use mediatype::names::BOUNDARY;
 use mediatype::names::FORM_DATA;
 use mediatype::names::MULTIPART;
-use mediatype::MediaType;
-use mediatype::WriteParams;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::trace::config;
+use opentelemetry::sdk::Resource;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::sdk::Resource;
+use opentelemetry::sdk::trace::config;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry_api::Context;
+use opentelemetry_api::KeyValue;
 use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
-use opentelemetry_api::Context;
-use opentelemetry_api::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::Protocol;
 use opentelemetry_otlp::SpanExporterBuilder;
@@ -44,8 +44,8 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use regex::Regex;
 use reqwest::Request;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
@@ -59,15 +59,15 @@ use tracing_core::LevelFilter;
 use tracing_futures::Instrument;
 use tracing_futures::WithSubscriber;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
+use tracing_subscriber::layer::SubscriberExt;
 use uuid::Uuid;
-use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::Respond;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
 
 pub struct Query {
     traced: bool,
@@ -397,7 +397,6 @@ impl Telemetry {
 #[buildstructor]
 impl IntegrationTest {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub async fn new(
         config: String,
         telemetry: Option<Telemetry>,
@@ -569,7 +568,11 @@ impl IntegrationTest {
                         level: String,
                         message: String,
                     }
-                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    let Ok(log) = serde_json::from_str::<Log>(&line) else {
+                        panic!(
+                            "line: '{line}' isn't JSON, might you have some debug output in the logging?"
+                        );
+                    };
                     // Omit this message from snapshots since it depends on external environment
                     if !log.message.starts_with("RUST_BACKTRACE=full detected") {
                         collected.push(format!(
@@ -886,7 +889,21 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn assert_log_contained(&self, msg: &str) {
+    pub fn print_logs(&mut self) {
+        for line in &self.logs {
+            println!("{}", line);
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn read_logs(&mut self) {
+        while let Ok(line) = self.stdio_rx.try_recv() {
+            self.logs.push(line.to_string());
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn assert_log_contained(&mut self, msg: &str) {
         for line in &self.logs {
             if line.contains(msg) {
                 return;
@@ -911,9 +928,30 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_log_not_contained(&mut self, msg: &str) {
+        for line in &self.logs {
+            if line.contains(msg) {
+                panic!(
+                    "'{msg}' detected in logs. Log dump below:\n\n{logs}",
+                    logs = self.logs.join("\n")
+                );
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    /// Checks the metrics contain the supplied string in prometheus format.
+    /// To allow checking of metrics where the value is not stable the magic tag `<any>` can be used.
+    /// For example:
+    /// ```rust,ignore
+    /// router.assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
+    /// ```
+    /// Will allow the metric to be checked even if the config hash and schema id are fluid.
     pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
         let now = Instant::now();
         let mut last_metrics = String::new();
+        let text = regex::escape(text).replace("<any>", ".+");
+        let re = Regex::new(&format!("(?m)^{}", text)).expect("Invalid regex");
         while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
             if let Ok(metrics) = self
                 .get_metrics_response()
@@ -922,7 +960,7 @@ impl IntegrationTest {
                 .text()
                 .await
             {
-                if metrics.contains(text) {
+                if re.is_match(&metrics) {
                     return;
                 }
                 last_metrics = metrics;
@@ -1114,7 +1152,9 @@ impl IntegrationTest {
                         }
                     }
                 }
-                panic!("key {key} not found: {e}\n This may be caused by a number of things including federation version changes");
+                panic!(
+                    "key {key} not found: {e}\n This may be caused by a number of things including federation version changes"
+                );
             }
         };
 

@@ -360,6 +360,14 @@ snapshot_kind: text
           "description": "Activates Batching (disabled by default)",
           "type": "boolean"
         },
+        "maximum_size": {
+          "default": null,
+          "description": "Maximum size for a batch",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "mode": {
           "$ref": "#/definitions/BatchingMode",
           "description": "#/definitions/BatchingMode"
@@ -6671,6 +6679,14 @@ snapshot_kind: text
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
       "properties": {
+        "connection_shutdown_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "The timeout for shutting down connections during a router shutdown or a schema reload.",
+          "type": "string"
+        },
         "defer_support": {
           "default": true,
           "description": "Set to false to disable defer support",

@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::env;
 use std::time::Duration;
 
+use opentelemetry::KeyValue;
+use opentelemetry::sdk::Resource;
 use opentelemetry::sdk::resource::EnvResourceDetector;
 use opentelemetry::sdk::resource::ResourceDetector;
-use opentelemetry::sdk::Resource;
-use opentelemetry::KeyValue;
 
 use crate::plugins::telemetry::config::AttributeValue;
 const UNKNOWN_SERVICE: &str = "unknown_service";
@@ -179,24 +179,30 @@ mod test {
             resources: Default::default(),
         };
         let resource = test_config.to_resource();
-        assert!(resource
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
-            .unwrap()
-            .as_str()
-            .starts_with("unknown_service:apollo_router"));
-        assert!(resource
-            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE)
-            .is_none());
+        assert!(
+            resource
+                .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
+                .unwrap()
+                .as_str()
+                .starts_with("unknown_service:apollo_router")
+        );
+        assert!(
+            resource
+                .get(opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE)
+                .is_none()
+        );
         assert_eq!(
             resource.get(opentelemetry_semantic_conventions::resource::SERVICE_VERSION),
             Some(std::env!("CARGO_PKG_VERSION").into())
         );
 
-        assert!(resource
-            .get(opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME)
-            .expect("expected excutable name")
-            .as_str()
-            .contains("apollo"));
+        assert!(
+            resource
+                .get(opentelemetry_semantic_conventions::resource::PROCESS_EXECUTABLE_NAME)
+                .expect("expected excutable name")
+                .as_str()
+                .contains("apollo")
+        );
     }
 
     #[test]
@@ -265,16 +271,18 @@ mod test {
         // unknown_service:executable_name
         // unknown_service (Untested as it can't happen)
 
-        assert!(TestConfig {
-            service_name: None,
-            service_namespace: None,
-            resources: Default::default(),
-        }
-        .to_resource()
-        .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
-        .unwrap()
-        .as_str()
-        .starts_with("unknown_service:apollo_router"));
+        assert!(
+            TestConfig {
+                service_name: None,
+                service_namespace: None,
+                resources: Default::default(),
+            }
+            .to_resource()
+            .get(opentelemetry_semantic_conventions::resource::SERVICE_NAME)
+            .unwrap()
+            .as_str()
+            .starts_with("unknown_service:apollo_router")
+        );
 
         assert_eq!(
             TestConfig {

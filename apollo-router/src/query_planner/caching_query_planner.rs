@@ -16,11 +16,12 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
+use crate::Configuration;
 use crate::apollo_studio_interop::UsageReporting;
+use crate::cache::DeduplicatingCache;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
@@ -28,21 +29,20 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::QueryPlannerService;
+use crate::query_planner::fetch::SubgraphSchemas;
+use crate::services::QueryPlannerContent;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
 use crate::services::query_planner::PlanOptions;
-use crate::services::QueryPlannerContent;
-use crate::services::QueryPlannerRequest;
-use crate::services::QueryPlannerResponse;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
-use crate::Configuration;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -354,7 +354,9 @@ where
             }
         }
 
-        tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
+        tracing::debug!(
+            "warmed up the query planner cache with {count} queries planned and {reused} queries reused"
+        );
     }
 }
 
@@ -373,10 +375,10 @@ impl<T: Clone + Send + 'static> tower::Service<query_planner::CachingRequest>
     for CachingQueryPlanner<T>
 where
     T: tower::Service<
-        QueryPlannerRequest,
-        Response = QueryPlannerResponse,
-        Error = QueryPlannerError,
-    >,
+            QueryPlannerRequest,
+            Response = QueryPlannerResponse,
+            Error = QueryPlannerError,
+        >,
     <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
     type Response = QueryPlannerResponse;
@@ -699,13 +701,13 @@ mod tests {
     use tower::Service;
 
     use super::*;
+    use crate::Configuration;
+    use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
-    use crate::Configuration;
-    use crate::Context;
 
     mock! {
         #[derive(Debug)]
@@ -783,14 +785,16 @@ mod tests {
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
 
         for _ in 0..5 {
-            assert!(planner
-                .call(query_planner::CachingRequest::new(
-                    "query Me { me { username } }".to_string(),
-                    Some("".into()),
-                    context.clone()
-                ))
-                .await
-                .is_err());
+            assert!(
+                planner
+                    .call(query_planner::CachingRequest::new(
+                        "query Me { me { username } }".to_string(),
+                        Some("".into()),
+                        context.clone()
+                    ))
+                    .await
+                    .is_err()
+            );
         }
         let doc2 = Query::parse_document(
             "query Me { me { name { first } } }",
@@ -805,14 +809,16 @@ mod tests {
             .extensions()
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc2));
 
-        assert!(planner
-            .call(query_planner::CachingRequest::new(
-                "query Me { me { name { first } } }".to_string(),
-                Some("".into()),
-                context.clone()
-            ))
-            .await
-            .is_err());
+        assert!(
+            planner
+                .call(query_planner::CachingRequest::new(
+                    "query Me { me { name { first } } }".to_string(),
+                    Some("".into()),
+                    context.clone()
+                ))
+                .await
+                .is_err()
+        );
     }
 
     macro_rules! test_query_plan {
@@ -885,9 +891,11 @@ mod tests {
                 ))
                 .await
                 .unwrap();
-            assert!(context
-                .extensions()
-                .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>()));
+            assert!(
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
+            );
         }
     }
 
@@ -958,36 +966,40 @@ mod tests {
             .extensions()
             .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
 
-        assert!(planner
-            .call(query_planner::CachingRequest::new(
-                "{
+        assert!(
+            planner
+                .call(query_planner::CachingRequest::new(
+                    "{
                     __schema {
                         types {
                         name
                       }
                     }
                   }"
-                .to_string(),
-                Some("".into()),
-                context.clone(),
-            ))
-            .await
-            .is_ok());
+                    .to_string(),
+                    Some("".into()),
+                    context.clone(),
+                ))
+                .await
+                .is_ok()
+        );
 
-        assert!(planner
-            .call(query_planner::CachingRequest::new(
-                "{
+        assert!(
+            planner
+                .call(query_planner::CachingRequest::new(
+                    "{
                         __schema {
                             types {
                             name
                           }
                         }
                       }"
-                .to_string(),
-                Some("".into()),
-                context.clone(),
-            ))
-            .await
-            .is_ok());
+                    .to_string(),
+                    Some("".into()),
+                    context.clone(),
+                ))
+                .await
+                .is_ok()
+        );
     }
 }

@@ -13,9 +13,9 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::execution;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::services::execution;
 
 #[derive(Debug, Clone)]
 struct ForbidMutations {
@@ -78,11 +78,11 @@ mod forbid_http_get_mutations_tests {
     use crate::graphql;
     use crate::graphql::Response;
     use crate::http_ext::Request;
-    use crate::plugin::test::MockExecutionService;
     use crate::plugin::PluginInit;
-    use crate::query_planner::fetch::OperationKind;
+    use crate::plugin::test::MockExecutionService;
     use crate::query_planner::PlanNode;
     use crate::query_planner::QueryPlan;
+    use crate::query_planner::fetch::OperationKind;
 
     #[tokio::test]
     async fn it_lets_queries_pass_through() {

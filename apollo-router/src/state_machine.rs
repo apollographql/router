@@ -2,12 +2,6 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use futures::prelude::*;
-use tokio::sync::mpsc;
-#[cfg(test)]
-use tokio::sync::Notify;
-use tokio::sync::OwnedRwLockWriteGuard;
-use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
 use Event::NoMoreLicense;
@@ -18,6 +12,12 @@ use State::Errored;
 use State::Running;
 use State::Startup;
 use State::Stopped;
+use futures::prelude::*;
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
+use tokio::sync::mpsc;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -27,20 +27,20 @@ use super::router::ApolloRouterError::{self};
 use super::router::Event::UpdateConfiguration;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
-use crate::configuration::metrics::Metrics;
+use crate::ApolloRouterError::NoLicense;
 use crate::configuration::Configuration;
 use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
+use crate::configuration::metrics::Metrics;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
 use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
+use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::uplink::schema::SchemaState;
-use crate::ApolloRouterError::NoLicense;
 
 const STATE_CHANGE: &str = "state change";
 
@@ -330,24 +330,38 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 tracing::debug!("A valid Apollo license has been detected.");
             }
             LicenseState::LicensedWarn if report.uses_restricted_features() => {
-                tracing::error!("License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                tracing::error!(
+                    "License has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                    report
+                );
             }
             LicenseState::LicensedHalt if report.uses_restricted_features() => {
-                tracing::error!("License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                tracing::error!(
+                    "License has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                    report
+                );
             }
             LicenseState::Unlicensed if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
                 if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
                 {
-                    tracing::error!("License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                    tracing::error!(
+                        "License not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        report
+                    );
                 } else {
-                    tracing::error!("Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.", report);
+                    tracing::error!(
+                        "Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides a license for the following features:\n\n{}\n\nSee {LICENSE_EXPIRED_URL} for more information.",
+                        report
+                    );
                 }
 
                 return Err(ApolloRouterError::LicenseViolation);
             }
             _ => {
-                tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
+                tracing::debug!(
+                    "A valid Apollo license was not detected. However, no restricted features are in use."
+                );
             }
         }
 
@@ -601,9 +615,9 @@ mod tests {
     use std::sync::Mutex;
 
     use futures::channel::oneshot;
+    use mockall::Sequence;
     use mockall::mock;
     use mockall::predicate::eq;
-    use mockall::Sequence;
     use multimap::MultiMap;
     use serde_json::json;
     use test_log::test;
@@ -617,9 +631,10 @@ mod tests {
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
+    use crate::services::RouterRequest;
     use crate::services::new_service::ServiceFactory;
     use crate::services::router;
-    use crate::services::RouterRequest;
+    use crate::services::router::pipeline_handle::PipelineRef;
     use crate::uplink::schema::SchemaState;
 
     type SharedOneShotReceiver = Arc<Mutex<Vec<oneshot::Receiver<()>>>>;
@@ -1164,6 +1179,7 @@ mod tests {
             type RouterService = router::BoxService;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+            fn pipeline_ref(&self) -> Arc<PipelineRef>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = router::BoxService;

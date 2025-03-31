@@ -1,27 +1,27 @@
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
 use std::task::Poll;
 
 use bytes::Bytes;
-use futures::future::BoxFuture;
 use futures::StreamExt;
 use futures::TryFutureExt;
+use futures::future::BoxFuture;
+use http::HeaderValue;
+use http::Request;
+use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::response::Parts;
-use http::HeaderValue;
-use http::Request;
-use http::StatusCode;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
+use mediatype::MediaType;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
-use mediatype::MediaType;
 use mime::APPLICATION_JSON;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -32,23 +32,26 @@ use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
-use tracing::instrument;
+use tower::util::BoxService;
 use tracing::Instrument;
+use tracing::instrument;
 use uuid::Uuid;
 
+use super::Plugins;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::router::body::RouterBody;
 use super::subgraph::SubgraphRequestId;
-use super::Plugins;
-use crate::batching::assemble_batch;
+use crate::Configuration;
+use crate::Context;
+use crate::Notify;
 use crate::batching::BatchQuery;
 use crate::batching::BatchQueryInfo;
+use crate::batching::assemble_batch;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::configuration::TlsClientAuth;
@@ -58,27 +61,24 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
 use crate::plugins::file_uploads;
-use crate::plugins::subscription::create_verifier;
 use crate::plugins::subscription::CallbackMode;
+use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
-use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
-use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::events::SubgraphEventRequest;
-use crate::plugins::telemetry::config_new::events::SubgraphEventResponse;
-use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
+use crate::plugins::subscription::create_verifier;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
-use crate::protocols::websocket::convert_websocket_stream;
+use crate::plugins::telemetry::config_new::events::SubgraphEventRequest;
+use crate::plugins::telemetry::config_new::events::SubgraphEventResponse;
+use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::protocols::websocket::GraphqlWebSocket;
+use crate::protocols::websocket::convert_websocket_stream;
 use crate::query_planner::OperationKind;
-use crate::services::layers::apq;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-use crate::Configuration;
-use crate::Context;
-use crate::Notify;
+use crate::services::layers::apq;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -1733,43 +1733,43 @@ mod tests {
     use std::net::TcpListener;
     use std::str::FromStr;
 
-    use axum::extract::ws::Message;
-    use axum::extract::ConnectInfo;
-    use axum::extract::WebSocketUpgrade;
-    use axum::response::IntoResponse;
-    use axum::routing::get;
+    use SubgraphRequest;
     use axum::Router;
     use axum::Server;
+    use axum::extract::ConnectInfo;
+    use axum::extract::WebSocketUpgrade;
+    use axum::extract::ws::Message;
+    use axum::response::IntoResponse;
+    use axum::routing::get;
     use bytes::Buf;
     use futures::StreamExt;
-    use http::header::HOST;
     use http::StatusCode;
     use http::Uri;
-    use hyper::service::make_service_fn;
+    use http::header::HOST;
     use hyper::Body;
+    use hyper::service::make_service_fn;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
-    use tower::service_fn;
     use tower::ServiceExt;
+    use tower::service_fn;
     use url::Url;
-    use SubgraphRequest;
 
     use super::*;
+    use crate::Context;
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
     use crate::plugins::subscription::HeartbeatInterval;
+    use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
     use crate::plugins::subscription::SubscriptionModeConfig;
-    use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::protocols::websocket::ClientMessage;
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
     use crate::services::router::body::get_body_bytes;
-    use crate::Context;
 
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(listener: TcpListener) {
@@ -1779,10 +1779,12 @@ mod tests {
                 .status(StatusCode::BAD_REQUEST)
                 .body(
                     serde_json::to_string(&Response {
-                        errors: vec![Error::builder()
-                            .message("This went wrong")
-                            .extension_code("FETCH_ERROR")
-                            .build()],
+                        errors: vec![
+                            Error::builder()
+                                .message("This went wrong")
+                                .extension_code("FETCH_ERROR")
+                                .build(),
+                        ],
                         ..Response::default()
                     })
                     .expect("always valid")
@@ -1965,10 +1967,12 @@ mod tests {
                             .body(
                                 serde_json::to_string(&Response {
                                     data: Some(Value::String(ByteString::from("test"))),
-                                    errors: vec![Error::builder()
-                                        .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
-                                        .extension_code("Random code")
-                                        .build()],
+                                    errors: vec![
+                                        Error::builder()
+                                            .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
+                                            .extension_code("Random code")
+                                            .build(),
+                                    ],
                                     ..Response::default()
                                 })
                                 .expect("always valid")
@@ -2020,12 +2024,14 @@ mod tests {
                             .body(
                                 serde_json::to_string(&Response {
                                     data: Some(Value::String(ByteString::from("test"))),
-                                    errors: vec![Error::builder()
-                                        .message("Random message")
-                                        .extension_code(
-                                            PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE,
-                                        )
-                                        .build()],
+                                    errors: vec![
+                                        Error::builder()
+                                            .message("Random message")
+                                            .extension_code(
+                                                PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE,
+                                            )
+                                            .build(),
+                                    ],
                                     ..Response::default()
                                 })
                                 .expect("always valid")
@@ -2072,7 +2078,9 @@ mod tests {
             match graphql_request {
                 Ok(request) => {
                     if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
-                        panic!("Recieved request without persisted query in persisted_query_not_found test.")
+                        panic!(
+                            "Recieved request without persisted query in persisted_query_not_found test."
+                        )
                     }
 
                     if request.query.is_none() {
@@ -2082,10 +2090,12 @@ mod tests {
                             .body(
                                 serde_json::to_string(&Response {
                                     data: Some(Value::String(ByteString::from("test"))),
-                                    errors: vec![Error::builder()
-                                        .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
-                                        .extension_code("Random Code")
-                                        .build()],
+                                    errors: vec![
+                                        Error::builder()
+                                            .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
+                                            .extension_code("Random Code")
+                                            .build(),
+                                    ],
                                     ..Response::default()
                                 })
                                 .expect("always valid")
@@ -2132,7 +2142,9 @@ mod tests {
             match graphql_request {
                 Ok(request) => {
                     if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
-                        panic!("Recieved request without persisted query in persisted_query_not_found test.")
+                        panic!(
+                            "Recieved request without persisted query in persisted_query_not_found test."
+                        )
                     }
 
                     if request.query.is_none() {
@@ -2142,10 +2154,14 @@ mod tests {
                             .body(
                                 serde_json::to_string(&Response {
                                     data: Some(Value::String(ByteString::from("test"))),
-                                    errors: vec![Error::builder()
-                                        .message("Random message")
-                                        .extension_code(PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE)
-                                        .build()],
+                                    errors: vec![
+                                        Error::builder()
+                                            .message("Random message")
+                                            .extension_code(
+                                                PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE,
+                                            )
+                                            .build(),
+                                    ],
                                     ..Response::default()
                                 })
                                 .expect("always valid")
@@ -2332,11 +2348,13 @@ mod tests {
     async fn emulate_subgraph_with_callback_data(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (parts, body) = request.into_parts();
-            assert!(parts
-                .headers
-                .get_all(ACCEPT)
-                .iter()
-                .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
+            assert!(
+                parts
+                    .headers
+                    .get_all(ACCEPT)
+                    .iter()
+                    .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT)
+            );
             let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())

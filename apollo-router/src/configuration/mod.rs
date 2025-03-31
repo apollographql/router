@@ -1,5 +1,6 @@
 //! Logic for loading configuration in to an object model
 use std::fmt;
+use std::hash::Hash;
 use std::io;
 use std::io::BufReader;
 use std::iter;
@@ -23,19 +24,20 @@ use regex::Regex;
 use rustls::Certificate;
 use rustls::PrivateKey;
 use rustls::ServerConfig;
+use rustls_pemfile::Item;
 use rustls_pemfile::certs;
 use rustls_pemfile::read_one;
-use rustls_pemfile::Item;
+use schemars::JsonSchema;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
+use sha2::Digest;
 use thiserror::Error;
 
 use self::cors::Cors;
@@ -44,17 +46,17 @@ pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
+use crate::ApolloRouterError;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
 use crate::plugins::limits;
-use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::uplink::UplinkConfig;
-use crate::ApolloRouterError;
 
 pub(crate) mod cors;
 pub(crate) mod expansion;
@@ -118,7 +120,7 @@ pub enum ConfigurationError {
 #[derivative(Debug)]
 // We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
-    /// The raw configuration string.
+    /// The raw configuration value.
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
@@ -273,7 +275,6 @@ fn test_listen() -> ListenAddr {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -323,6 +324,18 @@ impl Configuration {
 }
 
 impl Configuration {
+    pub(crate) fn hash(&self) -> String {
+        let mut hasher = sha2::Sha256::new();
+        let defaulted_raw = self
+            .validated_yaml
+            .as_ref()
+            .map(|s| serde_yaml::to_string(s).expect("config was not serializable"))
+            .unwrap_or_default();
+        hasher.update(defaulted_raw);
+        let hash: String = format!("{:x}", hasher.finalize());
+        hash
+    }
+
     fn notify(
         apollo_plugins: &Map<String, Value>,
     ) -> Result<Notify<String, graphql::Response>, ConfigurationError> {
@@ -396,7 +409,6 @@ impl Default for Configuration {
 #[buildstructor::buildstructor]
 impl Configuration {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -470,13 +482,12 @@ impl Configuration {
         }
         if !self.supergraph.path.starts_with('/') {
             return Err(ConfigurationError::InvalidConfiguration {
-            message: "invalid 'server.graphql_path' configuration",
-            error: format!(
-                "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
-                self.supergraph.path,
-                self.supergraph.path
-            ),
-        });
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, it must be an absolute path and start with '/', you should try with '/{}'",
+                    self.supergraph.path, self.supergraph.path
+                ),
+            });
         }
         if self.supergraph.path.ends_with('*')
             && !self.supergraph.path.ends_with("/*")
@@ -491,15 +502,13 @@ impl Configuration {
             });
         }
         if self.supergraph.path.contains("/*/") {
-            return Err(
-                ConfigurationError::InvalidConfiguration {
-                    message: "invalid 'server.graphql_path' configuration",
-                    error: format!(
-                        "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
-                        self.supergraph.path
-                    ),
-                },
-            );
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "invalid 'server.graphql_path' configuration",
+                error: format!(
+                    "'{}' is invalid, if you need to set a path like '/*/graphql' then specify it as a path parameter with a name, for example '/:my_project_key/graphql'",
+                    self.supergraph.path
+                ),
+            });
         }
 
         // PQs.
@@ -629,6 +638,11 @@ pub(crate) struct Supergraph {
     /// Defaults to 127.0.0.1:4000
     pub(crate) listen: ListenAddr,
 
+    /// The timeout for shutting down connections during a router shutdown or a schema reload.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String", default = "default_connection_shutdown_timeout")]
+    pub(crate) connection_shutdown_timeout: Duration,
+
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
     pub(crate) path: String,
@@ -675,10 +689,10 @@ fn default_defer_support() -> bool {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -689,6 +703,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -704,10 +720,10 @@ impl Supergraph {
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -718,6 +734,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -1117,19 +1135,19 @@ pub(crate) fn load_key(data: &str) -> io::Result<PrivateKey> {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("could not parse the key: {e}"),
-            ))
+            ));
         }
         Some(_) => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "expected a private key",
-            ))
+            ));
         }
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "could not find a private key",
-            ))
+            ));
         }
     };
 
@@ -1445,6 +1463,10 @@ fn default_graphql_introspection() -> bool {
     false
 }
 
+fn default_connection_shutdown_timeout() -> Duration {
+    Duration::from_secs(60)
+}
+
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum BatchingMode {
@@ -1466,6 +1488,10 @@ pub(crate) struct Batching {
 
     /// Subgraph options for batching
     pub(crate) subgraph: Option<SubgraphConfiguration<CommonBatchingConfig>>,
+
+    /// Maximum size for a batch
+    #[serde(default)]
+    pub(crate) maximum_size: Option<usize>,
 }
 
 /// Common options for configuring subgraph batching
@@ -1488,7 +1514,7 @@ impl Batching {
                     subgraph_batching_config
                         .subgraphs
                         .get(service_name)
-                        .map_or(true, |x| x.enabled)
+                        .is_none_or(|x| x.enabled)
                 } else {
                     // If it isn't, require:
                     // - an enabled subgraph entry
@@ -1498,6 +1524,13 @@ impl Batching {
                         .is_some_and(|x| x.enabled)
                 }
             }
+            None => false,
+        }
+    }
+
+    pub(crate) fn exceeds_batch_size<T>(&self, batch: &[T]) -> bool {
+        match self.maximum_size {
+            Some(maximum_size) => batch.len() > maximum_size,
             None => false,
         }
     }

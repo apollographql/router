@@ -10,27 +10,34 @@ use multimap::MultiMap;
 use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
-use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower::service_fn;
 use tower_service::Service;
 use tracing::Instrument;
 
+use crate::ListenAddr;
+use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::configuration::TlsClient;
-use crate::configuration::APOLLO_PLUGIN_PREFIX;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::subscription::Subscription;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
-use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
+use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::query_planner::QueryPlannerService;
+use crate::services::HasConfig;
+use crate::services::HasSchema;
+use crate::services::PluggableSupergraphServiceBuilder;
+use crate::services::Plugins;
+use crate::services::SubgraphService;
+use crate::services::SupergraphCreator;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::services::http::HttpClientServiceFactory;
@@ -38,17 +45,11 @@ use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::transport;
-use crate::services::HasConfig;
-use crate::services::HasSchema;
-use crate::services::PluggableSupergraphServiceBuilder;
-use crate::services::Plugins;
-use crate::services::SubgraphService;
-use crate::services::SupergraphCreator;
 use crate::spec::Schema;
-use crate::ListenAddr;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 
@@ -123,6 +124,8 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef>;
 }
 
 /// Factory for creating a RouterFactory
@@ -375,16 +378,14 @@ pub(crate) async fn create_subgraph_services(
     IndexMap<
         String,
         impl Service<
-                subgraph::Request,
-                Response = subgraph::Response,
-                Error = BoxError,
-                Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<
-                    SubgraphService,
-                >,
-            > + Clone
-            + Send
-            + Sync
-            + 'static,
+            subgraph::Request,
+            Response = subgraph::Response,
+            Error = BoxError,
+            Future = crate::plugins::traffic_shaping::TrafficShapingSubgraphFuture<SubgraphService>,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
     >,
     BoxError,
 > {
@@ -762,9 +763,9 @@ mod test {
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
-    use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
+    use crate::router_factory::inject_schema_id;
     use crate::spec::Schema;
 
     // Always starts and stops plugin

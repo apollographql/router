@@ -2,3 +2,6 @@
 
 # Reformat with imports_granularity = Item and group_imports = StdExternalCrate
 af3209126ffee9b825b694ee6913745873e8115b
+
+# Updated style_edition to 2024 for apollo-federation & apollo-router
+71998f7cddb3ac0f693526f53b8a70d397472317

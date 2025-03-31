@@ -3,29 +3,32 @@ use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use axum::body::BoxBody;
+use futures::Future;
+use futures::StreamExt;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
-use futures::Future;
-use futures::StreamExt;
+use http::HeaderMap;
+use http::HeaderValue;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
-use http::HeaderMap;
-use http::HeaderValue;
 use http_body::Body;
 use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
+use reqwest::Client;
+use reqwest::Method;
+use reqwest::StatusCode;
 use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
@@ -35,9 +38,6 @@ use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
 use reqwest::redirect::Policy;
-use reqwest::Client;
-use reqwest::Method;
-use reqwest::StatusCode;
 use serde_json::json;
 use test_log::test;
 use tokio::io::AsyncRead;
@@ -45,18 +45,24 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
-use tower::service_fn;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
+use tower::service_fn;
 
 pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
-use crate::configuration::cors::Cors;
+use crate::ApolloRouterError;
+use crate::Configuration;
+use crate::Context;
+use crate::ListenAddr;
+use crate::TestHarness;
+use crate::axum_factory::connection_handle::connection_counts;
 use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
+use crate::configuration::cors::Cors;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
@@ -64,9 +70,16 @@ use crate::json_ext::Path;
 use crate::metrics::FutureMetricsExt as _;
 use crate::plugin::test::MockSubgraph;
 use crate::query_planner::QueryPlannerService;
-use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::router_factory::create_plugins;
+use crate::services::HasSchema;
+use crate::services::MULTIPART_DEFER_ACCEPT;
+use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::services::PluggableSupergraphServiceBuilder;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphResponse;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -74,24 +87,13 @@ use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::router::service::RouterCreator;
 use crate::services::supergraph;
-use crate::services::HasSchema;
-use crate::services::PluggableSupergraphServiceBuilder;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
-use crate::services::SupergraphResponse;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::ApolloRouterError;
-use crate::Configuration;
-use crate::Context;
-use crate::ListenAddr;
-use crate::TestHarness;
 
 macro_rules! assert_header {
         ($response:expr, $header:expr, $expected:expr $(, $msg:expr)?) => {
@@ -164,16 +166,24 @@ impl RouterFactory for TestRouterFactory {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        Arc::new(PipelineRef {
+            schema_id: "dummy".to_string(),
+            launch_id: None,
+            config_hash: "dummy".to_string(),
+        })
+    }
 }
 
 async fn init(
     mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
 ) -> (HttpServerHandle, Client) {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
@@ -244,12 +254,12 @@ async fn init(
 
 pub(super) async fn init_with_config(
     mut router_service: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
     conf: Arc<Configuration>,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
@@ -302,12 +312,12 @@ pub(super) async fn init_with_config(
 #[cfg(unix)]
 async fn init_unix(
     mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
+        router::Request,
+        Response = router::Response,
+        Error = BoxError,
+        Future = BoxFuture<'static, router::ServiceResult>,
+    > + Send
+    + 'static,
     temp_dir: &tempfile::TempDir,
 ) -> HttpServerHandle {
     let server_factory = AxumHttpServerFactory::new();
@@ -1342,9 +1352,9 @@ async fn it_refuses_to_start_if_homepage_and_sandbox_are_enabled() {
         .unwrap_err();
 
     assert_eq!(
-            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
-            error.to_string()
-        )
+        "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+        error.to_string()
+    )
 }
 
 #[test(tokio::test)]
@@ -1365,9 +1375,9 @@ async fn it_refuses_to_start_if_sandbox_is_enabled_and_introspection_is_not() {
         .unwrap_err();
 
     assert_eq!(
-            "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
-            error.to_string()
-        )
+        "sandbox and homepage cannot be enabled at the same time: disable the homepage if you want to enable sandbox",
+        error.to_string()
+    )
 }
 
 #[test(tokio::test)]
@@ -1641,12 +1651,14 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
                 .has_next(true)
                 .build(),
             graphql::Response::builder()
-                .incremental(vec![graphql::IncrementalResponse::builder()
-                    .data(json!({
-                        "name": "Ada"
-                    }))
-                    .path(Path::from("me"))
-                    .build()])
+                .incremental(vec![
+                    graphql::IncrementalResponse::builder()
+                        .data(json!({
+                            "name": "Ada"
+                        }))
+                        .path(Path::from("me"))
+                        .build(),
+                ])
                 .has_next(true)
                 .build(),
             graphql::Response::builder().has_next(false).build(),
@@ -1680,15 +1692,15 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
-        );
+        std::str::from_utf8(&first).unwrap(),
+        "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"id\"},\"hasNext\":true}\r\n--graphql"
+    );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&second).unwrap(),
+        std::str::from_utf8(&second).unwrap(),
         "\r\ncontent-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"name\":\"Ada\"},\"path\":[\"me\"]}]}\r\n--graphql"
-        );
+    );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
@@ -1702,12 +1714,14 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 #[test(tokio::test)]
 async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterError> {
     let router_service = router::service::from_supergraph_mock_callback(move |req| {
-        let body = stream::iter(vec![graphql::Response::builder()
-            .data(json!({
-                "me": "name",
-            }))
-            .has_next(false)
-            .build()])
+        let body = stream::iter(vec![
+            graphql::Response::builder()
+                .data(json!({
+                    "me": "name",
+                }))
+                .has_next(false)
+                .build(),
+        ])
         .boxed();
 
         Ok(SupergraphResponse::new_from_response(
@@ -1738,9 +1752,9 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&first).unwrap(),
-            "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
-        );
+        std::str::from_utf8(&first).unwrap(),
+        "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":\"name\"},\"hasNext\":false}\r\n--graphql--\r\n"
+    );
 
     server.shutdown().await
 }
@@ -2447,6 +2461,70 @@ async fn it_reports_session_count_metric() {
             0,
             "listener" = url.clone()
         );
+    }
+    .with_metrics()
+    .await;
+}
+
+/// This tests that the apollo.router.open_connections metric is keeps track of connections
+/// It's a replacement for the session count total metric that is more in line with otel conventions
+/// It also has pipeline information attached to it.
+#[tokio::test]
+async fn it_reports_open_connections_metric() {
+    let configuration = Configuration::fake_builder().build().unwrap();
+
+    async {
+        let (server, _client) = init_with_config(
+            router::service::empty().await,
+            Arc::new(configuration),
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
+
+        let url = server
+            .graphql_listen_address()
+            .as_ref()
+            .unwrap()
+            .to_string();
+
+        let make_request = || {
+            http::Request::builder()
+                .uri(&url)
+                .body(hyper::Body::from(r#"{ "query": "{ me }" }"#))
+                .unwrap()
+        };
+
+        let client = hyper::Client::new();
+        // Create a second client that does not reuse the same connection pool.
+        let second_client = hyper::Client::new();
+
+        let first_response = client.request(make_request()).await.unwrap();
+
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 1);
+
+        let second_response = second_client.request(make_request()).await.unwrap();
+
+        // Both requests are in-flight
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
+
+        _ = hyper::body::to_bytes(first_response.into_body()).await;
+
+        // Connection is still open in the pool even though the request is complete.
+        assert_eq!(*connection_counts().iter().next().unwrap().1, 2);
+
+        _ = hyper::body::to_bytes(second_response.into_body()).await;
+
+        drop(client);
+        drop(second_client);
+
+        // XXX(@bryncooke): Not ideal, but we would probably have to drop down to very
+        // low-level hyper primitives to control the shutdown of connections to the required
+        // extent. 100ms is a long time so I hope it's not flaky.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // All connections are closed
+        assert_eq!(connection_counts().iter().count(), 0);
     }
     .with_metrics()
     .await;

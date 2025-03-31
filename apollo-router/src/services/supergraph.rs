@@ -1,13 +1,13 @@
 #![allow(missing_docs)] // FIXME
 
 use futures::future::ready;
-use futures::stream::once;
 use futures::stream::StreamExt;
-use http::header::HeaderName;
-use http::method::Method;
+use futures::stream::once;
 use http::HeaderValue;
 use http::StatusCode;
 use http::Uri;
+use http::header::HeaderName;
+use http::method::Method;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -16,13 +16,13 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::Context;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Path;
-use crate::Context;
 
 pub(crate) mod service;
 #[cfg(test)]
@@ -68,7 +68,6 @@ impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.
     ///
     /// Required parameters are required in non-testing code to create a Request.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         query: Option<String>,
@@ -184,7 +183,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn new(
         label: Option<String>,
@@ -230,7 +228,6 @@ impl Response {
     /// difficult to construct and not required for the purposes of the test.
     ///
     /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub")]
     fn fake_new(
         label: Option<String>,
@@ -308,7 +305,6 @@ impl Response {
     /// This is the constructor (or builder) to use when constructing a real Response..
     ///
     /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
     #[builder(visibility = "pub(crate)")]
     fn infallible_new(
         label: Option<String>,

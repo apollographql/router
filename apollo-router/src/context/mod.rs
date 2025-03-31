@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
+use dashmap::DashMap;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
-use dashmap::DashMap;
 use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
 use parking_lot::Mutex;
@@ -348,10 +348,10 @@ impl Default for BusyTimer {
 
 #[cfg(test)]
 mod test {
-    use crate::spec::Query;
-    use crate::spec::Schema;
     use crate::Configuration;
     use crate::Context;
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     #[test]
     fn test_context_insert() {

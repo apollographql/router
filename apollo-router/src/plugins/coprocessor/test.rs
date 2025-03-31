@@ -4,12 +4,12 @@ mod tests {
     use std::sync::Arc;
 
     use futures::future::BoxFuture;
-    use http::header::ACCEPT;
-    use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::Method;
     use http::StatusCode;
+    use http::header::ACCEPT;
+    use http::header::CONTENT_TYPE;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
     use router::body::RouterBody;
@@ -27,9 +27,9 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
-    use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::router::body::get_body_bytes;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -63,12 +63,14 @@ mod tests {
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
-        assert!(crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .is_err());
+        assert!(
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -88,12 +90,14 @@ mod tests {
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
-        assert!(crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .is_err());
+        assert!(
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -1116,12 +1120,13 @@ mod tests {
         };
 
         let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            assert!(req
-                .context
-                .get::<&str, u8>("this-is-a-test-context")
-                .ok()
-                .flatten()
-                .is_none());
+            assert!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
             Ok(supergraph::Response::builder()
                 .data(json!({ "test": 1234_u32 }))
                 .context(req.context)

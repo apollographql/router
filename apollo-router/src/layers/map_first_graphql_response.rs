@@ -5,16 +5,16 @@
 use std::future::ready;
 use std::task::Poll;
 
-use futures::future::BoxFuture;
-use futures::stream::once;
 use futures::FutureExt;
 use futures::StreamExt;
+use futures::future::BoxFuture;
+use futures::stream::once;
 use tower::Layer;
 use tower::Service;
 
+use crate::Context;
 use crate::graphql;
 use crate::services::supergraph;
-use crate::Context;
 
 /// [`Layer`] for mapping first graphql responses. See [`ServiceBuilderExt::map_first_graphql_response()`](crate::layers::ServiceBuilderExt::map_first_graphql_response()).
 pub struct MapFirstGraphqlResponseLayer<Callback> {

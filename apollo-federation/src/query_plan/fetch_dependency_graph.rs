@@ -1,10 +1,12 @@
 use std::fmt::Write as _;
 use std::iter;
 use std::ops::Deref;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::atomic::AtomicU64;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
@@ -14,8 +16,6 @@ use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
 use apollo_compiler::name;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
@@ -25,8 +25,8 @@ use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
 
-use super::query_planner::SubgraphOperationCompression;
 use super::FetchDataKeyRenamer;
+use super::query_planner::SubgraphOperationCompression;
 use crate::bail;
 use crate::display_helpers::DisplayOption;
 use crate::error::FederationError;
@@ -44,27 +44,28 @@ use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
-use crate::operation::VariableCollector;
 use crate::operation::TYPENAME_FIELD;
-use crate::query_graph::graph_path::concat_op_paths;
-use crate::query_graph::graph_path::concat_paths_in_parents;
+use crate::operation::VariableCollector;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::concat_op_paths;
+use crate::query_graph::graph_path::concat_paths_in_parents;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::path_tree::PathTreeChild;
-use crate::query_graph::QueryGraph;
-use crate::query_graph::QueryGraphEdgeTransition;
-use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::conditions::remove_conditions_from_selection_set;
-use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
-use crate::query_plan::conditions::Conditions;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchDataValueSetter;
 use crate::query_plan::QueryPlanCost;
+use crate::query_plan::conditions::Conditions;
+use crate::query_plan::conditions::remove_conditions_from_selection_set;
+use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::schema::ValidFederationSchema;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
@@ -72,7 +73,6 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::PositionLookupError;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
@@ -3039,7 +3039,7 @@ fn operation_for_entities_fetch(
             return Err(SingleFederationError::InvalidSubgraph {
                 message: "the root query type must be an object".to_string(),
             }
-            .into())
+            .into());
         }
     };
 
@@ -3149,7 +3149,7 @@ impl SelectionSet {
                 Selection::FragmentSpread(_) => {
                     return Err(FederationError::internal(
                         "unexpected fragment spread in FetchDependencyGraphNode",
-                    ))
+                    ));
                 }
             };
             let subselections_cost = if let Some(selection_set) = subselections {
@@ -3566,7 +3566,7 @@ pub(crate) fn compute_nodes_for_tree(
                         _ => {
                             return Err(FederationError::internal(format!(
                                 "Unexpected non-collecting edge {edge}"
-                            )))
+                            )));
                         }
                     }
                 }
@@ -4269,11 +4269,13 @@ fn wrap_selection_with_type_and_conditions<T>(
     context.iter().fold(initial, |acc, cond| {
         let directive = Directive {
             name: cond.kind.name(),
-            arguments: vec![Argument {
-                name: name!("if"),
-                value: cond.value.clone().into(),
-            }
-            .into()],
+            arguments: vec![
+                Argument {
+                    name: name!("if"),
+                    value: cond.value.clone().into(),
+                }
+                .into(),
+            ],
         };
         wrap_in_fragment(
             InlineFragment {

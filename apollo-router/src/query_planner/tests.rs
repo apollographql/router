@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
 use apollo_compiler::name;
 use futures::StreamExt;
@@ -17,6 +17,10 @@ use super::OperationKind;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlan;
+use crate::Configuration;
+use crate::Context;
+use crate::MockedSubgraphs;
+use crate::TestHarness;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::graphql;
 use crate::json_ext::Path;
@@ -26,16 +30,12 @@ use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
-use crate::services::subgraph_service::MakeSubgraphService;
-use crate::services::supergraph;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
+use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::supergraph;
 use crate::spec::Query;
 use crate::spec::Schema;
-use crate::Configuration;
-use crate::Context;
-use crate::MockedSubgraphs;
-use crate::TestHarness;
 
 macro_rules! test_query_plan {
     () => {

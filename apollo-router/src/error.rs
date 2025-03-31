@@ -22,8 +22,8 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
+use crate::spec::operation_limits::OperationLimits;
 
 /// Return up to this many GraphQL parsing or validation errors.
 ///
@@ -217,10 +217,12 @@ impl IntoGraphQLErrors for CacheResolverError {
                 .clone()
                 .into_graphql_errors()
                 .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
-            CacheResolverError::BatchingError(msg) => Ok(vec![Error::builder()
-                .message(msg)
-                .extension_code("BATCH_PROCESSING_FAILED")
-                .build()]),
+            CacheResolverError::BatchingError(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code("BATCH_PROCESSING_FAILED")
+                    .build(),
+            ]),
         }
     }
 }
@@ -329,14 +331,18 @@ impl From<FederationError> for FederationErrorBridge {
 impl IntoGraphQLErrors for FederationErrorBridge {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            FederationErrorBridge::UnknownOperation(msg) => Ok(vec![Error::builder()
-                .message(msg)
-                .extension_code("GRAPHQL_VALIDATION_FAILED")
-                .build()]),
-            FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![Error::builder()
-                .message(msg)
-                .extension_code("GRAPHQL_VALIDATION_FAILED")
-                .build()]),
+            FederationErrorBridge::UnknownOperation(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ]),
+            FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ]),
             // All other errors will be pushed on and be treated as internal server errors
             err => Err(err),
         }

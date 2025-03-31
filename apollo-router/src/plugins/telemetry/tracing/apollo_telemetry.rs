@@ -3,20 +3,23 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
-use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::TryFutureExt;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use lru::LruCache;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
@@ -26,9 +29,6 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceError;
 use opentelemetry::trace::TraceId;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use prost::Message;
@@ -39,11 +39,21 @@ use url::Url;
 
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::OperationSubType;
 use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::proto;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Method;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
@@ -57,11 +67,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ParallelNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ResponsePathElement;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Sampler;
@@ -75,15 +80,8 @@ use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
-use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::BoxError;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::query_planner::OperationKind;
+use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -92,9 +90,11 @@ use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::OperationKind;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -339,7 +339,6 @@ enum TreeData {
 #[buildstructor::buildstructor]
 impl Exporter {
     #[builder]
-    #[allow(clippy::too_many_arguments)] // not typically used directly, only defines the builder
     pub(crate) fn new<'a>(
         endpoint: &'a Url,
         otlp_endpoint: &'a Url,
@@ -360,11 +359,7 @@ impl Exporter {
         let otlp_tracing_ratio = match otlp_tracing_sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
                 // can't use std::cmp::min because f64 is not Ord
-                if *ratio > 1.0 {
-                    1.0
-                } else {
-                    *ratio
-                }
+                if *ratio > 1.0 { 1.0 } else { *ratio }
             }
             SamplerOption::Always(s) => match s {
                 Sampler::AlwaysOn => 1f64,

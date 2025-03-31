@@ -3,11 +3,12 @@ use derivative::Derivative;
 use opentelemetry_api::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
 use super::attributes::SubgraphRequestResendCountKey;
+use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -17,21 +18,20 @@ use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::TraceIdFormat;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::Event;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::trace_id;
-use crate::plugins::telemetry::config_new::Selector;
-use crate::plugins::telemetry::config_new::ToOtelValue;
 use crate::query_planner::APOLLO_OPERATION_ID;
+use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::spec::operation_limits::OperationLimits;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -1757,6 +1757,8 @@ mod test {
     use std::sync::Arc;
 
     use http::StatusCode;
+    use opentelemetry::Context;
+    use opentelemetry::KeyValue;
     use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -1764,8 +1766,6 @@ mod test {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::Context;
-    use opentelemetry::KeyValue;
     use opentelemetry_api::StringValue;
     use serde_json::json;
     use serde_json_bytes::path::JsonPathInst;
@@ -1781,6 +1781,7 @@ mod test {
     use crate::plugins::cache::entity::CacheSubgraph;
     use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::selectors::All;
     use crate::plugins::telemetry::config_new::selectors::CacheKind;
     use crate::plugins::telemetry::config_new::selectors::EntityType;
@@ -1794,11 +1795,10 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
-    use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
-    use crate::services::subgraph::SubgraphRequestId;
     use crate::services::FIRST_EVENT_CONTEXT_KEY;
+    use crate::services::subgraph::SubgraphRequestId;
     use crate::spec::operation_limits::OperationLimits;
 
     #[test]
@@ -3463,15 +3463,17 @@ mod test {
             )
         );
 
-        assert!(selector
-            .on_response(
-                &crate::services::SubgraphResponse::fake_builder()
-                    .data(serde_json_bytes::json!({
-                        "hi": ["bonjour", "hello", "ciao"]
-                    }))
-                    .build()
-            )
-            .is_none());
+        assert!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .data(serde_json_bytes::json!({
+                            "hi": ["bonjour", "hello", "ciao"]
+                        }))
+                        .build()
+                )
+                .is_none()
+        );
 
         let selector = SubgraphSelector::SubgraphResponseData {
             subgraph_response_data: JsonPathInst::from_str("$.hello.*.greeting").unwrap(),

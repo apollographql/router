@@ -4,24 +4,21 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+use base64::Engine as _;
 use base64::prelude::BASE64_STANDARD;
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::prelude::BASE64_URL_SAFE;
 use base64::prelude::BASE64_URL_SAFE_NO_PAD;
-use base64::Engine as _;
 use bytes::Bytes;
-use http::header::InvalidHeaderName;
-use http::uri::Authority;
-use http::uri::Parts;
-use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
-use rhai::module_resolvers::FileModuleResolver;
-use rhai::plugin::*;
-use rhai::serde::from_dynamic;
-use rhai::serde::to_dynamic;
+use http::header::InvalidHeaderName;
+use http::uri::Authority;
+use http::uri::Parts;
+use http::uri::PathAndQuery;
+use rhai::AST;
 use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
@@ -30,16 +27,20 @@ use rhai::FnPtr;
 use rhai::Instant;
 use rhai::Map;
 use rhai::Scope;
-use rhai::AST;
+use rhai::module_resolvers::FileModuleResolver;
+use rhai::plugin::*;
+use rhai::serde::from_dynamic;
+use rhai::serde::to_dynamic;
 use tower::BoxError;
 use uuid::Uuid;
 
+use super::Rhai;
+use super::ServiceStep;
 use super::execution;
 use super::router;
 use super::subgraph;
 use super::supergraph;
-use super::Rhai;
-use super::ServiceStep;
+use crate::Context;
 use crate::configuration::expansion;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -52,7 +53,6 @@ use crate::plugins::demand_control::COST_RESULT_KEY;
 use crate::plugins::demand_control::COST_STRATEGY_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
@@ -426,7 +426,7 @@ mod router_context {
     // Register a contains function for Context so that "in" works
     #[rhai_fn(name = "contains", pure)]
     pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
-        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+        x.get(key).is_ok_and(|v: Option<Dynamic>| v.is_some())
     }
 
     // Register a Context indexer so we can get/set context

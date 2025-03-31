@@ -3,8 +3,8 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use http::request::Parts;
 use http::HeaderValue;
+use http::request::Parts;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -77,7 +77,6 @@ fn default_cors_methods() -> Vec<String> {
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         allow_any_origin: Option<bool>,
         allow_credentials: Option<bool>,
@@ -186,28 +185,38 @@ impl Cors {
     // with a message describing what the problem is.
     fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
         if self.origins.iter().any(|x| x == "*") {
-            return Err("Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
+            return Err(
+                "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`",
+            );
         }
         if self.allow_credentials {
             if self.allow_headers.iter().any(|x| x == "*") {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                        with `Access-Control-Allow-Headers: *`");
+                return Err(
+                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                        with `Access-Control-Allow-Headers: *`",
+                );
             }
 
             if self.methods.iter().any(|x| x == "*") {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Methods: *`");
+                return Err(
+                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                    with `Access-Control-Allow-Methods: *`",
+                );
             }
 
             if self.allow_any_origin {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `allow_any_origin: true`");
+                return Err(
+                    "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                    with `allow_any_origin: true`",
+                );
             }
 
             if let Some(headers) = &self.expose_headers {
                 if headers.iter().any(|x| x == "*") {
-                    return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                        with `Access-Control-Expose-Headers: *`");
+                    return Err(
+                        "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
+                        with `Access-Control-Expose-Headers: *`",
+                    );
                 }
             }
         }

@@ -3,21 +3,21 @@ use std::fmt;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
-use tracing::field::Visit;
 use tracing::Subscriber;
+use tracing::field::Visit;
 use tracing_core::Field;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 
 use crate::metrics::aggregation::AggregateMeterProvider;
 

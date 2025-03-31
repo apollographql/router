@@ -10,9 +10,9 @@ use std::ops::DerefMut;
 use axum::body::boxed;
 use axum::response::IntoResponse;
 use bytes::Bytes;
+use http::HeaderValue;
 use http::header;
 use http::header::HeaderName;
-use http::HeaderValue;
 use multimap::MultiMap;
 
 use crate::graphql;

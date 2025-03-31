@@ -12,8 +12,8 @@ use tower_service::Service;
 
 use super::*;
 use crate::graphql;
-use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
+use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
 
@@ -256,12 +256,14 @@ where
                 serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
                     .unwrap_or_else(|error| {
                         crate::graphql::Response::builder()
-                            .errors(vec![Error::builder()
-                                .message(format!(
-                                    "couldn't deserialize coprocessor output body: {error}"
-                                ))
-                                .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
-                                .build()])
+                            .errors(vec![
+                                Error::builder()
+                                    .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                    .extension_code("EXTERNAL_DESERIALIZATION_ERROR")
+                                    .build(),
+                            ])
                             .build()
                     });
 
@@ -511,8 +513,8 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::services::execution;
-    use crate::services::router::body::get_body_bytes;
     use crate::services::router::body::RouterBody;
+    use crate::services::router::body::get_body_bytes;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(

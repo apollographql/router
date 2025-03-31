@@ -10,14 +10,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use anyhow::Result;
-use clap::builder::FalseyValueParser;
+use anyhow::anyhow;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
+use clap::builder::FalseyValueParser;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
 use regex::Captures;
@@ -25,9 +25,10 @@ use regex::Regex;
 use url::ParseError;
 use url::Url;
 
+use crate::LicenseSource;
+use crate::configuration::Discussed;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::Discussed;
 use crate::metrics::meter_provider;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
@@ -37,7 +38,6 @@ use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 use crate::uplink::Endpoints;
 use crate::uplink::UplinkConfig;
-use crate::LicenseSource;
 
 #[cfg(all(
     feature = "global-allocator",
@@ -517,7 +517,10 @@ impl Executable {
             "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for details.".to_string()
         };
 
-        let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
+        let apollo_router_msg = format!(
+            "Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)",
+            std::env!("CARGO_PKG_VERSION")
+        );
 
         // Schema source will be in order of precedence:
         // 1. Cli --supergraph
@@ -529,13 +532,19 @@ impl Executable {
         #[cfg(not(unix))]
         let akp: &Option<PathBuf> = &None;
 
-        let schema_source = match (schema, &opt.supergraph_path, &opt.supergraph_urls, &opt.apollo_key, akp) {
+        let schema_source = match (
+            schema,
+            &opt.supergraph_path,
+            &opt.supergraph_urls,
+            &opt.apollo_key,
+            akp,
+        ) {
             (Some(_), Some(_), _, _, _) | (Some(_), _, Some(_), _, _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
-                ))
+                ));
             }
-            (Some(source), None, None,_,_) => source,
+            (Some(source), None, None, _, _) => source,
             (_, Some(supergraph_path), _, _, _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
@@ -558,7 +567,7 @@ impl Executable {
                 SchemaSource::URLs {
                     urls: supergraph_urls.clone(),
                     watch: opt.hot_reload,
-                    period: opt.apollo_uplink_poll_interval
+                    period: opt.apollo_uplink_poll_interval,
                 }
             }
             (_, None, None, _, Some(apollo_key_path)) => {
@@ -583,27 +592,23 @@ impl Executable {
                     // Note: We could, in future, add support for Windows.
                     #[cfg(unix)]
                     {
-                        let meta = std::fs::metadata(apollo_key_path.clone()).map_err(|err|
-                                anyhow!(
-                                    "Failed to read Apollo key file: {}",
-                                    err
-                                ))?;
+                        let meta = std::fs::metadata(apollo_key_path.clone())
+                            .map_err(|err| anyhow!("Failed to read Apollo key file: {}", err))?;
                         let mode = meta.mode();
                         // If our mode isn't "safe", fail...
                         // safe == none of the "group" or "other" bits set.
                         if mode & 0o077 != 0 {
-                            return Err(
-                                anyhow!(
-                                    "Apollo key file permissions ({:#o}) are too permissive", mode & 0o000777
-                                ));
+                            return Err(anyhow!(
+                                "Apollo key file permissions ({:#o}) are too permissive",
+                                mode & 0o000777
+                            ));
                         }
                         let euid = unsafe { libc::geteuid() };
                         let owner = meta.uid();
                         if euid != owner {
-                            return Err(
-                                anyhow!(
-                                    "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
-                                ));
+                            return Err(anyhow!(
+                                "Apollo key file owner id ({owner}) does not match effective user id ({euid})"
+                            ));
                         }
                     }
                     //The key file exists try and load it
@@ -612,14 +617,11 @@ impl Executable {
                             opt.apollo_key = Some(apollo_key.trim().to_string());
                         }
                         Err(err) => {
-                            return Err(anyhow!(
-                                "Failed to read Apollo key file: {}",
-                                err
-                            ));
+                            return Err(anyhow!("Failed to read Apollo key file: {}", err));
                         }
-                };
-                SchemaSource::Registry(opt.uplink_config()?)
-            }
+                    };
+                    SchemaSource::Registry(opt.uplink_config()?)
+                }
             }
             (_, None, None, Some(_apollo_key), None) => {
                 tracing::info!("{apollo_router_msg}");
@@ -703,7 +705,9 @@ impl Executable {
             && !rust_log_set
             && ["trace", "debug", "warn", "error", "info"].contains(&apollo_router_log.as_str())
         {
-            tracing::info!("Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details");
+            tracing::info!(
+                "Custom plugins are present. To see log messages from your plugins you must configure `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables. See the Router logging documentation for more details"
+            );
         }
 
         let uplink_config = opt.uplink_config().ok();
@@ -715,7 +719,9 @@ impl Executable {
             .url_count()
             == 1
         {
-            tracing::warn!("Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists.");
+            tracing::warn!(
+                "Only a single uplink endpoint is configured. We recommend specifying at least two endpoints so that a fallback exists."
+            );
         }
 
         let router = RouterHttpServer::builder()
@@ -745,7 +751,10 @@ fn setup_panic_handler() {
     let show_backtraces =
         backtrace_env.as_deref() == Ok("1") || backtrace_env.as_deref() == Ok("full");
     if show_backtraces {
-        tracing::warn!("RUST_BACKTRACE={} detected. This is useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
+        tracing::warn!(
+            "RUST_BACKTRACE={} detected. This is useful for diagnostics but will have a performance impact and may leak sensitive information",
+            backtrace_env.as_ref().unwrap()
+        );
     }
     std::panic::set_hook(Box::new(move |e| {
         if show_backtraces {
@@ -765,7 +774,9 @@ static COPIED: AtomicBool = AtomicBool::new(false);
 
 fn copy_args_to_env() {
     if Ok(false) != COPIED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
-        panic!("`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen");
+        panic!(
+            "`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen"
+        );
     }
     // Copy all the args to env.
     // This way, Clap is still responsible for the definitive view of what the current options are.

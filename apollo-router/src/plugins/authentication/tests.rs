@@ -2,25 +2,25 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
-use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use base64::Engine as _;
+use base64::prelude::BASE64_URL_SAFE_NO_PAD;
 use http::header::CONTENT_TYPE;
+use hyper::Server;
 use hyper::server::conn::AddrIncoming;
 use hyper::service::make_service_fn;
 use hyper::service::service_fn;
-use hyper::Server;
 use insta::assert_yaml_snapshot;
+use jsonwebtoken::EncodingKey;
 use jsonwebtoken::encode;
 use jsonwebtoken::get_current_timestamp;
 use jsonwebtoken::jwk::CommonParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyParameters;
 use jsonwebtoken::jwk::EllipticCurveKeyType;
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::EncodingKey;
 use mime::APPLICATION_JSON;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
@@ -232,7 +232,10 @@ async fn it_rejects_when_auth_prefix_is_missing() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Header Value: 'invalid' is not correctly formatted. prefix should be 'Bearer'")
+        .message(format!(
+            "Value of '{0}' JWT header should be prefixed with 'Bearer'",
+            http::header::AUTHORIZATION,
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -242,7 +245,7 @@ async fn it_rejects_when_auth_prefix_is_missing() {
 }
 
 #[tokio::test]
-async fn it_rejects_when_auth_prefix_has_no_jwt() {
+async fn it_rejects_when_auth_prefix_has_no_jwt_token() {
     let test_harness = build_a_default_test_harness().await;
 
     // Let's create a request with our operation name
@@ -268,7 +271,10 @@ async fn it_rejects_when_auth_prefix_has_no_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Header Value: 'Bearer' is not correctly formatted. Missing JWT")
+        .message(format!(
+            "Value of '{0}' JWT header has only 'Bearer' prefix but no JWT token",
+            http::header::AUTHORIZATION,
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 

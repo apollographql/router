@@ -1,8 +1,8 @@
 // Compare response shapes from a query plan and an input operation.
 
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable::Field;
-use apollo_compiler::Node;
 
 use super::response_shape::DefinitionVariant;
 use super::response_shape::FieldSelectionKey;

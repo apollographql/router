@@ -5,9 +5,9 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
+use opentelemetry::sdk::Resource;
 use opentelemetry::sdk::metrics::MeterProvider;
 use opentelemetry::sdk::metrics::View;
-use opentelemetry::sdk::Resource;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -17,6 +17,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::ListenAddr;
 use crate::plugins::telemetry::config::MetricView;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
@@ -25,7 +26,6 @@ use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
 use crate::services::router::Body;
-use crate::ListenAddr;
 
 /// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
