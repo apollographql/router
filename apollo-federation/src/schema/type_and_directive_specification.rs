@@ -246,7 +246,7 @@ where
         let actual_name = actual_type_name(&self.name, link);
         let members = (self.members)(schema);
         // PORT_NOTE: The JS version sorts the members by name.
-        // TODO: Consider sorting members here. Currently, doing it breaks `plugins::cache` tests.
+        // TODO(ROUTER-1223): Sort members here. Currently, doing it breaks `plugins::cache` tests.
         let existing = schema.try_get_type(actual_name.clone());
 
         // ensure new union has at least one member
@@ -379,7 +379,7 @@ impl TypeAndDirectiveSpecification for EnumTypeSpecification {
                     .values
                     .iter()
                     // PORT_NOTE: The JS version sorts the enum values by name.
-                    // TODO: Consider sorting enum values here. (Also, see the union type above.)
+                    // TODO(ROUTER-1223): Sort enum values here. (Also, see the union type above.)
                     .map(|val| {
                         (
                             val.name.clone(),
