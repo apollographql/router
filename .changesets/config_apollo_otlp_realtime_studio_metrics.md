@@ -4,4 +4,4 @@ This change provides a secondary pathway for new "realtime" Studio metrics whose
 
 All other Apollo metrics will maintain the previous hardcoded 60s send interval.
 
-By [@rregitsky](https://github.com/rregitsky) in https://github.com/apollographql/router/pull/7138
+By [@rregitsky](https://github.com/rregitsky) and [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7138
