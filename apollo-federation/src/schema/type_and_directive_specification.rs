@@ -435,20 +435,15 @@ impl DirectiveSpecification {
     ) -> Self {
         let mut composition: Option<DirectiveCompositionSpecification> = None;
         if composes {
-            assert!(
-                supergraph_specification.is_some(),
-                "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
-            );
+            let Some(supergraph_specification) = supergraph_specification else {
+                panic!(
+                    "Should provide a @link specification to use in supergraph for directive @{name} if it composes"
+                );
+            };
             let mut argument_merger: Option<Box<ArgumentMergerFactory>> = None;
-            let arg_strategies_iter = args
-                .iter()
-                .filter(|arg| arg.composition_strategy.is_some())
-                .map(|arg| {
-                    (
-                        arg.base_spec.name.to_string(),
-                        arg.composition_strategy.unwrap(),
-                    )
-                });
+            let arg_strategies_iter = args.iter().filter_map(|arg| {
+                Some((arg.base_spec.name.to_string(), arg.composition_strategy?))
+            });
             let arg_strategies: IndexMap<String, ArgumentCompositionStrategy> =
                 IndexMap::from_iter(arg_strategies_iter);
             if !arg_strategies.is_empty() {
@@ -467,7 +462,7 @@ impl DirectiveSpecification {
                 ));
             }
             composition = Some(DirectiveCompositionSpecification {
-                supergraph_specification: supergraph_specification.unwrap(),
+                supergraph_specification,
                 argument_merger,
             })
         }
@@ -701,7 +696,7 @@ fn ensure_same_arguments(
     // ensure expected arguments are a subset of actual arguments.
     for expected_arg in expected {
         let actual_arg = actual.iter().find(|x| x.name == expected_arg.name);
-        if actual_arg.is_none() {
+        let Some(actual_arg) = actual_arg else {
             // Not declaring an optional argument is ok: that means you won't be able to pass a non-default value in your schema, but we allow you that.
             // But missing a required argument it not ok.
             if expected_arg.ty.is_non_null() && expected_arg.default_value.is_none() {
@@ -711,10 +706,9 @@ fn ensure_same_arguments(
                     )));
             }
             continue;
-        }
+        };
 
         // ensure expected argument and actual argument have the same type.
-        let actual_arg = actual_arg.unwrap();
         // TODO: Make it easy to get a cloned (inner) type from a Node<Type>.
         let mut actual_type = actual_arg.ty.clone();
         if actual_type.is_non_null() && !expected_arg.ty.is_non_null() {
@@ -772,7 +766,7 @@ fn ensure_same_fields(
     for actual_field_def in actual_fields {
         let actual_field_name = &actual_field_def.name;
         let expected_field = existing_obj_type.fields.get(actual_field_name);
-        if expected_field.is_none() {
+        let Some(expected_field) = expected_field else {
             errors.push(SingleFederationError::TypeDefinitionInvalid {
                 message: format!(
                     "Invalid definition of type {}: missing field {}",
@@ -780,10 +774,9 @@ fn ensure_same_fields(
                 ),
             });
             continue;
-        }
+        };
 
         // ensure field types are as expected
-        let expected_field = expected_field.unwrap();
         if actual_field_def.ty != expected_field.ty {
             let expected_field_type = &expected_field.ty;
             let actual_field_type = &actual_field_def.ty;
