@@ -40,6 +40,7 @@ use crate::metrics::filter::FilterMeterProvider;
 pub(crate) enum MeterProviderType {
     PublicPrometheus,
     Apollo,
+    ApolloRealtime,
     Public,
     OtelDefault,
 }
