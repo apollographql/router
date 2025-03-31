@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
@@ -193,12 +194,27 @@ pub enum SingleFederationError {
     RequiresInvalidFields { message: String },
     #[error("{message}")]
     KeyFieldsSelectInvalidType { message: String },
-    #[error("{message}")]
-    RootQueryUsed { message: String },
-    #[error("{message}")]
-    RootMutationUsed { message: String },
-    #[error("{message}")]
-    RootSubscriptionUsed { message: String },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootQueryUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the mutation root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootMutationUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the subscription root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootSubscriptionUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
     #[error("{message}")]
     InvalidSubgraphName { message: String },
     #[error("{message}")]
@@ -497,6 +513,27 @@ impl SingleFederationError {
                 ErrorCode::QueryPlanComplexityExceededError
             }
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
+        }
+    }
+
+    pub(crate) fn root_already_used(
+        operation_type: OperationType,
+        expected_name: Name,
+        found_name: Name,
+    ) -> Self {
+        match operation_type {
+            OperationType::Query => Self::RootQueryUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Mutation => Self::RootMutationUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Subscription => Self::RootSubscriptionUsed {
+                expected_name,
+                found_name,
+            },
         }
     }
 }

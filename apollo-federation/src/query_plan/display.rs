@@ -415,6 +415,12 @@ fn write_requires_selection(
     Ok(())
 }
 
+impl fmt::Display for requires_selection::Selection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_requires_selection(&mut State::new(f), self)
+    }
+}
+
 /// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
