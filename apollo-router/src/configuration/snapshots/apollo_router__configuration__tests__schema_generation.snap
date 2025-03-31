@@ -1790,6 +1790,10 @@ expression: "&schema"
           "description": "#/definitions/HeadersLocation",
           "nullable": true
         },
+        "connector": {
+          "$ref": "#/definitions/ConnectorHeadersConfiguration",
+          "description": "#/definitions/ConnectorHeadersConfiguration"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/HeadersLocation",
@@ -1912,6 +1916,25 @@ expression: "&schema"
         "response": {
           "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
           "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorHeadersConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
         }
       },
       "type": "object"

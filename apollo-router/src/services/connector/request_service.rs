@@ -79,6 +79,9 @@ pub(crate) struct Request {
 
     /// Mapping problems encountered when creating the transport request
     pub(crate) mapping_problems: Vec<Problem>,
+
+    /// Original request to the Router.
+    pub supergraph_request: Arc<http::Request<graphql::Request>>,
 }
 
 /// Response type for a connector
