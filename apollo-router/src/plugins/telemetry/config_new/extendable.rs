@@ -259,11 +259,12 @@ where
     E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
-        if let Some(Stage::Request) = &restricted_stage {
+        if let Some(restricted_stage) = restricted_stage {
             for (name, custom) in &self.custom {
-                if !custom.is_active(Stage::Request) {
+                if !custom.is_active(restricted_stage) {
                     return Err(format!(
-                        "cannot set the attribute {name:?} because it is using a selector computed in another stage than 'request' so it will not be computed"
+                        "cannot set the attribute {name:?} because it is using a selector computed in another stage than '{}' so it will not be computed",
+                        restricted_stage,
                     ));
                 }
             }

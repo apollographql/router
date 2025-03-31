@@ -61,69 +61,66 @@ where
         match self {
             Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => {
                 match (&arr[0], &arr[1]) {
-                    (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => Err(format!(
-                        "trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"
-                    )),
+                    (SelectorOrValue::Value(val1), SelectorOrValue::Value(val2)) => {
+                        return Err(format!(
+                            "trying to compare 2 values ('{val1}' and '{val2}'), usually it's a syntax error because you want to use a specific selector and a value in a condition"
+                        ));
+                    }
                     (SelectorOrValue::Value(_), SelectorOrValue::Selector(sel))
                     | (SelectorOrValue::Selector(sel), SelectorOrValue::Value(_)) => {
                         // Special condition for events
-                        if let Some(Stage::Request) = &restricted_stage {
-                            if !sel.is_active(Stage::Request) {
+                        if let Some(stage) = restricted_stage {
+                            if !sel.is_active(stage) {
                                 return Err(format!(
-                                    "selector {sel:?} is only valid for request stage, this log event will never trigger"
+                                    "selector {sel:?} is not valid for {} stage, this log event will never trigger",
+                                    stage
                                 ));
                             }
                         }
-                        Ok(())
                     }
                     (SelectorOrValue::Selector(sel1), SelectorOrValue::Selector(sel2)) => {
                         // Special condition for events
-                        if let Some(Stage::Request) = &restricted_stage {
-                            if !sel1.is_active(Stage::Request) {
+                        if let Some(stage) = restricted_stage {
+                            if !sel1.is_active(stage) {
                                 return Err(format!(
-                                    "selector {sel1:?} is only valid for request stage, this log event will never trigger"
+                                    "selector {sel1:?} is not valid for {} stage, this log event will never trigger",
+                                    stage
                                 ));
                             }
-                            if !sel2.is_active(Stage::Request) {
+                            if !sel2.is_active(stage) {
                                 return Err(format!(
-                                    "selector {sel2:?} is only valid for request stage, this log event will never trigger"
+                                    "selector {sel2:?} is not valid for {} stage, this log event will never trigger",
+                                    stage
                                 ));
                             }
                         }
-                        Ok(())
                     }
                 }
             }
-            Condition::Exists(sel) => match restricted_stage {
-                Some(stage) => {
-                    if sel.is_active(stage) {
-                        Ok(())
-                    } else {
-                        Err(format!(
-                            "the 'exists' condition use a selector applied at the wrong stage, this condition will be executed at the {} stage",
+            Condition::Exists(sel) => {
+                if let Some(stage) = restricted_stage {
+                    if !sel.is_active(stage) {
+                        return Err(format!(
+                            "the 'exists' condition use a selector that is not valid for {} stage, this log event will never trigger",
                             stage
-                        ))
+                        ));
                     }
                 }
-                None => Ok(()),
-            },
+            }
             Condition::All(all) => {
                 for cond in all {
                     cond.validate(restricted_stage)?;
                 }
-
-                Ok(())
             }
             Condition::Any(any) => {
                 for cond in any {
                     cond.validate(restricted_stage)?;
                 }
-
-                Ok(())
             }
-            Condition::Not(cond) => cond.validate(restricted_stage),
-            Condition::True | Condition::False => Ok(()),
-        }
+            Condition::Not(cond) => cond.validate(restricted_stage)?,
+            Condition::True | Condition::False => {}
+        };
+        Ok(())
     }
 
     pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
