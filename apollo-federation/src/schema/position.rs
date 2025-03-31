@@ -258,32 +258,8 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::InputObject(type_) => type_.rename(schema, new_name.clone())?,
         }
 
-        // Rename map keys inside the compiler schema
         if let Some(existing_type) = schema.schema.types.swap_remove(self.type_name()) {
             schema.schema.types.insert(new_name.clone(), existing_type);
-        }
-
-        // If this type is a root operation, update the schema definition
-        if let Some(query) = schema.schema.schema_definition.make_mut().query.as_mut() {
-            if query.name == *self.type_name() {
-                query.name = new_name.clone();
-            }
-        }
-        if let Some(mutation) = schema.schema.schema_definition.make_mut().mutation.as_mut() {
-            if mutation.name == *self.type_name() {
-                mutation.name = new_name.clone();
-            }
-        }
-        if let Some(subscription) = schema
-            .schema
-            .schema_definition
-            .make_mut()
-            .subscription
-            .as_mut()
-        {
-            if subscription.name == *self.type_name() {
-                subscription.name = new_name.clone();
-            }
         }
 
         Ok(())
@@ -1052,6 +1028,32 @@ impl SchemaRootDefinitionPosition {
         object_type_referencers.schema_roots.shift_remove(self);
         Ok(())
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema).make_mut();
+        match self.root_kind {
+            SchemaRootDefinitionKind::Query => {
+                if let Some(query) = &mut parent.query {
+                    query.name = new_name;
+                }
+            }
+            SchemaRootDefinitionKind::Mutation => {
+                if let Some(mutation) = &mut parent.mutation {
+                    mutation.name = new_name;
+                }
+            }
+            SchemaRootDefinitionKind::Subscription => {
+                if let Some(subscription) = &mut parent.subscription {
+                    subscription.name = new_name;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Display for SchemaRootDefinitionPosition {
@@ -1302,6 +1304,21 @@ impl ScalarTypeDefinitionPosition {
         if let Some(scalar_type_referencers) =
             schema.referencers.scalar_types.swap_remove(&self.type_name)
         {
+            for pos in scalar_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.object_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.interface_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
             schema
                 .referencers
                 .scalar_types
@@ -1771,12 +1788,37 @@ impl ObjectTypeDefinitionPosition {
         if let Some(object_type_referencers) =
             schema.referencers.object_types.swap_remove(&self.type_name)
         {
+            for pos in object_type_referencers.schema_roots.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in object_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in object_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in object_type_referencers.union_types.iter() {
+                pos.rename_member(schema, &self.type_name, new_name.clone())?;
+            }
+
             schema
                 .referencers
                 .object_types
                 .insert(new_name, object_type_referencers);
         }
 
+        Ok(())
+    }
+
+    fn rename_implemented_interface(
+        &self,
+        schema: &mut FederationSchema,
+        old_name: &Name,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        type_.implements_interfaces.swap_remove(old_name);
+        type_.implements_interfaces.insert(new_name.into());
         Ok(())
     }
 }
@@ -2138,6 +2180,16 @@ impl ObjectFieldDefinitionPosition {
             enum_type_referencers.object_fields.shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?.make_mut();
+        rename_type(&mut field.ty, new_name);
+        Ok(())
+    }
 }
 
 impl Display for ObjectFieldDefinitionPosition {
@@ -2392,6 +2444,16 @@ impl ObjectFieldArgumentDefinitionPosition {
                 .object_field_arguments
                 .shift_remove(self);
         }
+    }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?.make_mut();
+        rename_type(field.ty.make_mut(), new_name);
+        Ok(())
     }
 }
 
@@ -2842,12 +2904,36 @@ impl InterfaceTypeDefinitionPosition {
             .interface_types
             .swap_remove(&self.type_name)
         {
+            for pos in interface_type_referencers.object_types.iter() {
+                pos.rename_implemented_interface(schema, &self.type_name, new_name.clone())?;
+            }
+            for pos in interface_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in interface_type_referencers.interface_types.iter() {
+                pos.rename_implemented_interface(schema, &self.type_name, new_name.clone())?;
+            }
+            for pos in interface_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
             schema
                 .referencers
                 .interface_types
                 .insert(new_name, interface_type_referencers);
         }
 
+        Ok(())
+    }
+
+    fn rename_implemented_interface(
+        &self,
+        schema: &mut FederationSchema,
+        old_name: &Name,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        type_.implements_interfaces.swap_remove(old_name);
+        type_.implements_interfaces.insert(new_name.into());
         Ok(())
     }
 }
@@ -3194,6 +3280,21 @@ impl InterfaceFieldDefinitionPosition {
             enum_type_referencers.interface_fields.shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?.make_mut();
+        match field.ty.clone() {
+            ast::Type::Named(_) => field.ty = ast::Type::Named(new_name.clone()),
+            ast::Type::NonNullNamed(_) => field.ty = ast::Type::NonNullNamed(new_name.clone()),
+            ast::Type::List(_) => todo!(),
+            ast::Type::NonNullList(_) => todo!(),
+        }
+        Ok(())
+    }
 }
 
 impl Display for InterfaceFieldDefinitionPosition {
@@ -3445,6 +3546,23 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 .interface_field_arguments
                 .shift_remove(self);
         }
+    }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let argument = self.make_mut(&mut schema.schema)?.make_mut();
+        match argument.ty.as_ref() {
+            ast::Type::Named(_) => *argument.ty.make_mut() = ast::Type::Named(new_name.clone()),
+            ast::Type::NonNullNamed(_) => {
+                *argument.ty.make_mut() = ast::Type::NonNullNamed(new_name.clone())
+            }
+            ast::Type::List(_) => todo!(),
+            ast::Type::NonNullList(_) => todo!(),
+        }
+        Ok(())
     }
 }
 
@@ -3784,6 +3902,19 @@ impl UnionTypeDefinitionPosition {
                 .union_types
                 .insert(new_name, union_type_referencers);
         }
+
+        Ok(())
+    }
+
+    fn rename_member(
+        &self,
+        schema: &mut FederationSchema,
+        old_name: &Name,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        type_.members.swap_remove(old_name);
+        type_.members.insert(new_name.into());
 
         Ok(())
     }
@@ -4127,6 +4258,21 @@ impl EnumTypeDefinitionPosition {
         if let Some(enum_type_referencers) =
             schema.referencers.enum_types.swap_remove(&self.type_name)
         {
+            for pos in enum_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.object_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.interface_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
             schema
                 .referencers
                 .enum_types
@@ -4915,6 +5061,15 @@ impl InputObjectFieldDefinitionPosition {
                 .shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+        Ok(())
+    }
 }
 
 impl Display for InputObjectFieldDefinitionPosition {
@@ -5412,6 +5567,15 @@ fn validate_arguments(arguments: &[Node<InputValueDefinition>]) -> Result<(), Fe
     Ok(())
 }
 
+fn rename_type(ast_type: &mut ast::Type, new_name: Name) {
+    match ast_type {
+        ast::Type::Named(name) => *name = new_name,
+        ast::Type::NonNullNamed(name) => *name = new_name,
+        ast::Type::List(boxed) => rename_type(boxed, new_name),
+        ast::Type::NonNullList(boxed) => rename_type(boxed, new_name),
+    }
+}
+
 impl FederationSchema {
     /// Note that the input schema must be partially valid, in that:
     ///
@@ -5625,6 +5789,114 @@ mod tests {
 
             type Query {
               me: User
+            }
+        "#);
+    }
+
+    #[test]
+    fn rename_type() {
+        let schema = Schema::parse_and_validate(
+            r#"
+            schema {
+                query: MyQuery
+            }
+
+            type MyQuery {
+                a: MyData
+            }
+
+            interface OtherInterface {
+                b: MyValue
+            }
+
+            interface IMyData implements OtherInterface {
+                b: MyValue
+            }
+
+            type MyData implements IMyData & OtherInterface {
+                b: MyValue
+                c: String
+            }
+
+            type OtherData {
+                d: String
+                e: MyAorB
+            }
+
+            union MyUnionData = MyData | OtherData
+
+            scalar MyValue
+
+            enum MyAorB {
+                A
+                B
+            }
+        "#,
+            "test-schema.graphqls",
+        )
+        .unwrap();
+        let mut schema = FederationSchema::new(schema.into_inner()).unwrap();
+
+        let query_position = ObjectTypeDefinitionPosition::new(name!("MyQuery"));
+        let interface_position = InterfaceTypeDefinitionPosition {
+            type_name: name!("IMyData"),
+        };
+        let data_position = ObjectTypeDefinitionPosition::new(name!("MyData"));
+        let scalar_position = ScalarTypeDefinitionPosition {
+            type_name: name!("MyValue"),
+        };
+        let union_position = UnionTypeDefinitionPosition {
+            type_name: name!("MyUnionData"),
+        };
+        let enum_position = EnumTypeDefinitionPosition {
+            type_name: name!("MyAorB"),
+        };
+
+        query_position.rename(&mut schema, name!("Query")).unwrap();
+        interface_position
+            .rename(&mut schema, name!("IData"))
+            .unwrap();
+        data_position.rename(&mut schema, name!("Data")).unwrap();
+        scalar_position.rename(&mut schema, name!("Value")).unwrap();
+        union_position
+            .rename(&mut schema, name!("UnionData"))
+            .unwrap();
+        enum_position.rename(&mut schema, name!("AorB")).unwrap();
+
+        insta::assert_snapshot!(schema.schema(), @r#"
+            schema {
+              query: Query
+            }
+
+            type Query {
+              a: Data
+            }
+
+            interface OtherInterface {
+              b: Value
+            }
+
+            interface IData implements OtherInterface {
+              b: Value
+            }
+
+            type Data implements OtherInterface & IData {
+              b: Value
+              c: String
+            }
+
+            type OtherData {
+              d: String
+              e: AorB
+            }
+
+            union UnionData = OtherData | Data
+
+            scalar Value
+
+            enum AorB {
+              A
+              B
             }
         "#);
     }
