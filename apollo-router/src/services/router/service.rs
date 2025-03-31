@@ -27,7 +27,6 @@ use multimap::MultiMap;
 use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower::buffer::Buffer;
@@ -89,8 +88,6 @@ use crate::services::SupergraphCreator;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::layers::apq::APQLayer;
-use crate::services::layers::content_negotiation;
-use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
@@ -101,6 +98,7 @@ use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
+pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
 pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
 pub(crate) static MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
@@ -1072,14 +1070,14 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
+        let router_service = RouterService::new(
             supergraph_creator.create(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
             TelemetryConfig::apollo(&configuration),
-        ));
+        );
 
         // NOTE: This is the start of the router pipeline (router_service)
         let sb = Buffer::new(

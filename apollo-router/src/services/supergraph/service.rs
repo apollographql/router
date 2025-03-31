@@ -75,7 +75,6 @@ use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::new_service::ServiceFactory;
@@ -1009,7 +1008,6 @@ impl PluggableSupergraphServiceBuilder {
 
         let sb = Buffer::new(
             ServiceBuilder::new()
-                .layer(content_negotiation::SupergraphLayer::default())
                 .service(
                     self.plugins
                         .iter()
