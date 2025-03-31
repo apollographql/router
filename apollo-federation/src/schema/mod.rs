@@ -4,12 +4,15 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
+use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
 use crate::error::FederationError;
@@ -21,6 +24,7 @@ use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
 use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
 use crate::link::federation_spec_definition::RequiresDirectiveArguments;
+use crate::link::federation_spec_definition::TagDirectiveArguments;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
@@ -39,6 +43,7 @@ pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
+pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
 
 fn compute_subgraph_metadata(
@@ -56,7 +61,7 @@ fn compute_subgraph_metadata(
 pub(crate) mod type_and_directive_specification;
 
 /// A GraphQL schema with federation data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FederationSchema {
     schema: Schema,
     referencers: Referencers,
@@ -225,6 +230,12 @@ impl FederationSchema {
             ))),
             None => Ok(None),
         }
+    }
+
+    pub(crate) fn is_fed_2(&self) -> bool {
+        self.subgraph_metadata
+            .as_ref()
+            .is_some_and(|meta| meta.is_fed_2_schema())
     }
 
     pub(crate) fn context_directive_applications(
@@ -436,6 +447,60 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    // TODO: This currently only returns targets for object_fields and interface_fields
+    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
+        let tag_directive_referencers = self
+            .referencers()
+            .get_directive(&tag_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in &tag_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ObjectField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for field_definition_position in &tag_directive_referencers.interface_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InterfaceField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
@@ -456,7 +521,7 @@ pub(crate) struct KeyDirective<'schema> {
     /// The parsed arguments of this `@key` application
     arguments: KeyDirectiveArguments<'schema>,
     /// The original `Directive` instance from the AST with unparsed arguments
-    schema_directive: &'schema apollo_compiler::schema::Component<apollo_compiler::ast::Directive>,
+    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
     /// The `DirectiveList` containing all directives applied to the target position, including this one
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
@@ -475,6 +540,15 @@ pub(crate) struct RequiresDirective<'schema> {
     arguments: RequiresDirectiveArguments<'schema>,
     /// The schema position to which this directive is applied
     target: &'schema ObjectFieldDefinitionPosition,
+}
+
+pub(crate) struct TagDirective<'schema> {
+    /// The parsed arguments of this `@tag` application
+    arguments: TagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: TagDirectiveTargetPosition, // TODO: Make this a reference
+    /// Reference to the directive in the schema
+    directive: &'schema Node<Directive>,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.

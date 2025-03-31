@@ -843,6 +843,67 @@ impl SchemaDefinitionPosition {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum TagDirectiveTargetPosition {
+    ObjectField(ObjectFieldDefinitionPosition),
+    InterfaceField(InterfaceFieldDefinitionPosition),
+    UnionField(UnionTypenameFieldDefinitionPosition),
+    Object(ObjectTypeDefinitionPosition),
+    Interface(InterfaceTypeDefinitionPosition),
+    Union(UnionTypeDefinitionPosition),
+    ArgumentDefinition(DirectiveArgumentDefinitionPosition),
+    Scalar(ScalarTypeDefinitionPosition),
+    Enum(EnumTypeDefinitionPosition),
+    EnumValue(EnumValueDefinitionPosition),
+    InputObject(InputObjectTypeDefinitionPosition),
+    InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
+}
+
+impl Debug for TagDirectiveTargetPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ObjectField(p) => write!(f, "ObjectField({p})"),
+            Self::InterfaceField(p) => write!(f, "InterfaceField({p})"),
+            Self::UnionField(p) => write!(f, "UnionField({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+            Self::ArgumentDefinition(p) => write!(f, "ArgumentDefinition({p})"),
+            Self::Scalar(p) => write!(f, "Scalar({p})"),
+            Self::Enum(p) => write!(f, "Enum({p})"),
+            Self::EnumValue(p) => write!(f, "EnumValue({p})"),
+            Self::InputObject(p) => write!(f, "InputObject({p})"),
+            Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
+        }
+    }
+}
+
+fallible_conversions!(TagDirectiveTargetPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::InputObject -> InputObjectTypeDefinitionPosition);
+
+impl TryFrom<TagDirectiveTargetPosition> for FieldDefinitionPosition {
+    type Error = &'static str;
+
+    fn try_from(dl: TagDirectiveTargetPosition) -> Result<Self, Self::Error> {
+        match dl {
+            TagDirectiveTargetPosition::ObjectField(field) => {
+                Ok(FieldDefinitionPosition::Object(field))
+            }
+            TagDirectiveTargetPosition::InterfaceField(field) => {
+                Ok(FieldDefinitionPosition::Interface(field))
+            }
+            TagDirectiveTargetPosition::UnionField(field) => {
+                Ok(FieldDefinitionPosition::Union(field))
+            }
+            _ => Err("No valid conversion"),
+        }
+    }
+}
+
 #[derive(
     Debug,
     Copy,
@@ -2532,6 +2593,10 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 
 impl InterfaceTypeDefinitionPosition {
     const EXPECTED: &'static str = "an interface type";
+
+    pub(crate) fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
 
     pub(crate) fn field(&self, field_name: Name) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
