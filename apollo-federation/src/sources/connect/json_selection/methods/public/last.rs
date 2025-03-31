@@ -15,10 +15,12 @@ use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 
 impl_arrow_method!(LastMethod, last_method, last_shape);
-/// The "last" method is a utility function that can be run against an array to grab the final item from it.
+/// The "last" method is a utility function that can be run against an array to grab the final item from it
+/// or a string to get the last character.
 /// The simplest possible example:
 ///
 /// $->echo([1,2,3])->last     results in 3
+/// $->echo("hello")->last     results in "o"
 fn last_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -141,5 +143,13 @@ mod tests {
     #[test]
     fn last_should_get_none_when_no_items_exist() {
         assert_eq!(selection!("$->last").apply_to(&json!([])), (None, vec![]),);
+    }
+
+    #[test]
+    fn last_should_get_last_char_from_string() {
+        assert_eq!(
+            selection!("$->last").apply_to(&json!("hello")),
+            (Some(json!("o")), vec![]),
+        );
     }
 }
