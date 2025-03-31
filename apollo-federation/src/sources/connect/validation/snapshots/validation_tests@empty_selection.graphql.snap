@@ -13,9 +13,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/empty_sel
     },
     Message {
         code: InvalidBody,
-        message: "`@connect(http: {body:})` on `Query.emptyBody` is empty",
+        message: "`@connect(http: {body:})` on `Query.emptySelection` is empty",
         locations: [
-            18:41..18:45,
+            12:41..12:45,
         ],
     },
 ]
