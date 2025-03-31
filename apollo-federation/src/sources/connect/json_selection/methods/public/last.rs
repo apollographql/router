@@ -1,0 +1,155 @@
+use apollo_compiler::collections::IndexMap;
+use serde_json_bytes::Value as JSON;
+use shape::Shape;
+use shape::ShapeCase;
+use shape::location::SourceId;
+
+use crate::impl_arrow_method;
+use crate::sources::connect::json_selection::ApplyToError;
+use crate::sources::connect::json_selection::ApplyToInternal;
+use crate::sources::connect::json_selection::MethodArgs;
+use crate::sources::connect::json_selection::PathList;
+use crate::sources::connect::json_selection::VarsWithPathsMap;
+use crate::sources::connect::json_selection::immutable::InputPath;
+use crate::sources::connect::json_selection::location::Ranged;
+use crate::sources::connect::json_selection::location::WithRange;
+
+impl_arrow_method!(LastMethod, last_method, last_shape);
+/// The "last" method is a utility function that can be run against an array to grab the final item from it
+/// or a string to get the last character.
+/// The simplest possible example:
+///
+/// $->echo([1,2,3])->last     results in 3
+/// $->echo("hello")->last     results in "o"
+fn last_method(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    data: &JSON,
+    vars: &VarsWithPathsMap,
+    input_path: &InputPath<JSON>,
+    tail: &WithRange<PathList>,
+) -> (Option<JSON>, Vec<ApplyToError>) {
+    if method_args.is_some() {
+        return (
+            None,
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        );
+    }
+
+    match data {
+        JSON::Array(array) => {
+            if let Some(last) = array.last() {
+                tail.apply_to_path(last, vars, input_path)
+            } else {
+                (None, vec![])
+            }
+        }
+
+        JSON::String(s) => {
+            if let Some(last) = s.as_str().chars().last() {
+                tail.apply_to_path(&JSON::String(last.to_string().into()), vars, input_path)
+            } else {
+                (None, vec![])
+            }
+        }
+
+        _ => tail.apply_to_path(data, vars, input_path),
+    }
+}
+#[allow(dead_code)] // method type-checking disabled until we add name resolution
+fn last_shape(
+    method_name: &WithRange<String>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    _dollar_shape: Shape,
+    _named_var_shapes: &IndexMap<&str, Shape>,
+    source_id: &SourceId,
+) -> Shape {
+    if method_args.is_some() {
+        return Shape::error(
+            format!(
+                "Method ->{} does not take any arguments",
+                method_name.as_ref()
+            ),
+            method_name.shape_location(source_id),
+        );
+    }
+
+    match input_shape.case() {
+        ShapeCase::String(Some(value)) => {
+            if let Some(last_char) = value.chars().last() {
+                Shape::string_value(
+                    last_char.to_string().as_str(),
+                    method_name.shape_location(source_id),
+                )
+            } else {
+                Shape::none()
+            }
+        }
+        ShapeCase::String(None) => Shape::one(
+            [
+                Shape::string(method_name.shape_location(source_id)),
+                Shape::none(),
+            ],
+            method_name.shape_location(source_id),
+        ),
+        ShapeCase::Array { prefix, tail } => {
+            if tail.is_none() {
+                if let Some(last) = prefix.last() {
+                    last.clone()
+                } else {
+                    Shape::none()
+                }
+            } else if let Some(last) = prefix.last() {
+                Shape::one(
+                    [last.clone(), tail.clone(), Shape::none()],
+                    method_name.shape_location(source_id),
+                )
+            } else {
+                Shape::one(
+                    [tail.clone(), Shape::none()],
+                    method_name.shape_location(source_id),
+                )
+            }
+        }
+        ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
+        // When there is no obvious last element, ->last gives us the input
+        // value itself, which has input_shape.
+        _ => input_shape.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json_bytes::json;
+
+    use crate::selection;
+
+    #[test]
+    fn last_should_get_last_element_from_array() {
+        assert_eq!(
+            selection!("$->last").apply_to(&json!([1, 2, 3])),
+            (Some(json!(3)), vec![]),
+        );
+    }
+
+    #[test]
+    fn last_should_get_none_when_no_items_exist() {
+        assert_eq!(selection!("$->last").apply_to(&json!([])), (None, vec![]),);
+    }
+
+    #[test]
+    fn last_should_get_last_char_from_string() {
+        assert_eq!(
+            selection!("$->last").apply_to(&json!("hello")),
+            (Some(json!("o")), vec![]),
+        );
+    }
+}

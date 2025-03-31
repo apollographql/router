@@ -14,6 +14,7 @@ use State::Running;
 use State::Startup;
 use State::Stopped;
 use futures::prelude::*;
+use itertools::Itertools;
 #[cfg(test)]
 use tokio::sync::Notify;
 use tokio::sync::OwnedRwLockWriteGuard;
@@ -38,6 +39,7 @@ use crate::router::Event::UpdateLicense;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
+use crate::uplink::feature_gate_enforcement::FeatureGateEnforcementReport;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_URL;
 use crate::uplink::license_enforcement::LicenseEnforcementReport;
 use crate::uplink::license_enforcement::LicenseLimits;
@@ -375,6 +377,16 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         } else {
             license
         };
+
+        if let Err(feature_gate_violations) =
+            FeatureGateEnforcementReport::build(&configuration, &schema).check()
+        {
+            tracing::error!(
+                "The schema contains preview features not enabled in configuration.\n\n{}",
+                feature_gate_violations.iter().join("\n")
+            );
+            return Err(ApolloRouterError::FeatureGateViolation);
+        }
 
         let router_service_factory = state_machine
             .router_configurator

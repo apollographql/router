@@ -29,6 +29,7 @@ use wiremock::matchers::path;
 use crate::Configuration;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
+use crate::plugins::connectors::tests::req_asserts::Plan;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -38,9 +39,9 @@ use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
+mod connect_on_type;
 mod mock_api;
 mod quickstart;
-#[allow(dead_code)]
 mod req_asserts;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
@@ -342,17 +343,20 @@ async fn test_root_field_plus_entity_plus_requires() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users"),
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
             Matcher::new().method("POST").path("/graphql"),
+        ]),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+        ]),
+    ]);
+
+    plan.assert_matches(&mock_server.received_requests().await.unwrap())
 }
 
 /// Tests that a connector can vend an entity reference like `user: { id: userId }`
@@ -720,7 +724,7 @@ async fn test_tracing_connect_span() {
             assert!(
                 attributes
                     .fields()
-                    .field("apollo.connector.field.name")
+                    .field("apollo.connector.coordinate")
                     .is_some()
             );
             assert!(

@@ -20,9 +20,11 @@ use serde::de::DeserializeOwned;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
+use tracing::Instrument;
 
 use super::subgraph::SubgraphRequestId;
 use crate::Context;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
@@ -291,14 +293,38 @@ where
             .header(CONTENT_TYPE, "application/json")
             .body(router::body::from_bytes(serde_json::to_vec(&self)?))?;
 
+        let schema_uri = request.uri();
+        let host = schema_uri.host().unwrap_or_default();
+        let port = schema_uri.port_u16().unwrap_or_else(|| {
+            let scheme = schema_uri.scheme_str();
+            if scheme == Some("https") {
+                443
+            } else if scheme == Some("http") {
+                80
+            } else {
+                0
+            }
+        });
+        let otel_name = format!("POST {}", schema_uri);
+
+        let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
+            "otel.kind" = "CLIENT",
+            "http.request.method" = "POST",
+            "server.address" = %host,
+            "server.port" = %port,
+            "url.full" = %schema_uri,
+            "otel.name" = %otel_name,
+            "otel.original_name" = "http_request",
+        );
+
         get_text_map_propagator(|propagator| {
             propagator.inject_context(
-                &prepare_context(tracing::span::Span::current().context()),
+                &prepare_context(http_req_span.context()),
                 &mut crate::otel_compat::HeaderInjector(request.headers_mut()),
             );
         });
 
-        let response = client.call(request).await?;
+        let response = client.call(request).instrument(http_req_span).await?;
         router::body::into_bytes(response.into_body())
             .await
             .map_err(BoxError::from)
@@ -321,7 +347,12 @@ pub(crate) fn externalize_header_map(
 
 #[cfg(test)]
 mod test {
+    use http::Response;
+    use tower::service_fn;
+    use tracing_futures::WithSubscriber;
+
     use super::*;
+    use crate::assert_snapshot_subscriber;
 
     #[test]
     fn it_will_build_router_externalizable_correctly() {
@@ -384,5 +415,34 @@ mod test {
             .stage(PipelineStep::RouterResponse)
             .id(String::default())
             .build();
+    }
+
+    #[tokio::test]
+    async fn it_will_create_an_http_request_span() {
+        async {
+            // Create a mock service that returns a simple response
+            let service = service_fn(|_req: http::Request<RouterBody>| async {
+                tracing::info!("got request");
+                Ok::<_, BoxError>(
+                    Response::builder()
+                        .status(200)
+                        .body(router::body::from_bytes(vec![]))
+                        .unwrap(),
+                )
+            });
+
+            // Create an externalizable request
+            let externalizable = Externalizable::<String>::router_builder()
+                .stage(PipelineStep::RouterRequest)
+                .id("test-id".to_string())
+                .build();
+
+            // Make the call which should create the HTTP request span
+            let _ = externalizable
+                .call(service, "http://example.com/test")
+                .await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
     }
 }
