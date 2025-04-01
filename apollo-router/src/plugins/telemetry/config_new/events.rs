@@ -990,7 +990,7 @@ mod tests {
     async fn test_router_conditions_request_header() {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!(
-                "../testdata/conditions_request_header.router.yaml"
+                "fixtures/router/events_conditions_request_header.router.yaml"
             ))
             .build()
             .await;
@@ -999,9 +999,15 @@ mod tests {
             // Without the header to enable custom event
             test_harness
                 .router_service(
-                    |_r| async {
+                    |r| async {
+                        if r.context.extensions().with_lock(|d|d.contains_key::<DisplayRouterRequest>()) {
+                            // The actual log of the request happens later in the service once the request has been parsed. So let's just
+                            // say it happened here.
+                            tracing::info!("kind" = "router.request", "Logging request");
+                        }
                         Ok(router::Response::fake_builder()
                             .data(serde_json_bytes::json!({"data": "res"}))
+                            .context(r.context)
                             .build()
                             .expect("expecting valid response"))
                     },
