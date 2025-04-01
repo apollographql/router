@@ -260,21 +260,28 @@ impl Instrumented
     fn on_request(&self, request: &Self::Request) {
         if self.request.level() != EventLevel::Off {
             if let Some(condition) = self.request.condition() {
-                if condition.lock().evaluate_request(request) != Some(true) {
-                    return;
+                if condition.lock().evaluate_request(request) == Some(true) {
+                    request
+                        .context
+                        .extensions()
+                        .with_lock(|ext| ext.insert(DisplayRouterRequest(self.request.level())));
                 }
             }
-
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(DisplayRouterRequest(self.request.level())));
         }
         if self.response.level() != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
+            if let Some(condition) = self.response.condition() {
+                if condition.lock().evaluate_request(request) != Some(false) {
+                    request
+                        .context
+                        .extensions()
+                        .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
+                }
+            }
+        }
+        if self.error.level() != EventLevel::Off {
+            if let Some(condition) = self.error.condition() {
+                condition.lock().evaluate_request(request);
+            }
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -284,49 +291,52 @@ impl Instrumented
     fn on_response(&self, response: &Self::Response) {
         if self.response.level() != EventLevel::Off {
             if let Some(condition) = self.response.condition() {
-                if !condition.lock().evaluate_response(response) {
-                    return;
+                if condition.lock().evaluate_response(response) {
+                    let mut attrs = Vec::with_capacity(4);
+
+                    #[cfg(test)]
+                    let mut headers: indexmap::IndexMap<String, HeaderValue> = response
+                        .response
+                        .headers()
+                        .clone()
+                        .into_iter()
+                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                        .collect();
+                    #[cfg(test)]
+                    headers.sort_keys();
+                    #[cfg(not(test))]
+                    let headers = response.response.headers();
+                    attrs.push(KeyValue::new(
+                        HTTP_RESPONSE_HEADERS,
+                        opentelemetry::Value::String(format!("{:?}", headers).into()),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_RESPONSE_STATUS,
+                        opentelemetry::Value::String(
+                            format!("{}", response.response.status()).into(),
+                        ),
+                    ));
+                    attrs.push(KeyValue::new(
+                        HTTP_RESPONSE_VERSION,
+                        opentelemetry::Value::String(
+                            format!("{:?}", response.response.version()).into(),
+                        ),
+                    ));
+
+                    if let Some(body) = response
+                        .context
+                        .extensions()
+                        .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
+                    {
+                        attrs.push(KeyValue::new(
+                            HTTP_RESPONSE_BODY,
+                            opentelemetry::Value::String(body.0.into()),
+                        ));
+                    }
+
+                    log_event(self.response.level(), "router.response", attrs, "");
                 }
             }
-            let mut attrs = Vec::with_capacity(4);
-
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = response
-                .response
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = response.response.headers();
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_HEADERS,
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_STATUS,
-                opentelemetry::Value::String(format!("{}", response.response.status()).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_VERSION,
-                opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
-            ));
-
-            if let Some(body) = response
-                .context
-                .extensions()
-                .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
-            {
-                attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_BODY,
-                    opentelemetry::Value::String(body.0.into()),
-                ));
-            }
-
-            log_event(self.response.level(), "router.response", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_response(response);
@@ -336,19 +346,18 @@ impl Instrumented
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         if self.error.level() != EventLevel::Off {
             if let Some(condition) = self.error.condition() {
-                if !condition.lock().evaluate_error(error, ctx) {
-                    return;
+                if condition.lock().evaluate_error(error, ctx) {
+                    log_event(
+                        self.error.level(),
+                        "router.error",
+                        vec![KeyValue::new(
+                            Key::from_static_str("error"),
+                            opentelemetry::Value::String(error.to_string().into()),
+                        )],
+                        "",
+                    );
                 }
             }
-            log_event(
-                self.error.level(),
-                "router.error",
-                vec![KeyValue::new(
-                    Key::from_static_str("error"),
-                    opentelemetry::Value::String(error.to_string().into()),
-                )],
-                "",
-            );
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -975,6 +984,39 @@ mod tests {
             assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
         )
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_router_conditions_request_header() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!(
+                "../testdata/conditions_request_header.router.yaml"
+            ))
+            .build()
+            .await;
+
+        async {
+            // Without the header to enable custom event
+            test_harness
+                .router_service(
+                    |_r| async {
+                        Ok(router::Response::fake_builder()
+                            .data(serde_json_bytes::json!({"data": "res"}))
+                            .build()
+                            .expect("expecting valid response"))
+                    },
+                )
+                .call(router::Request::fake_builder()
+                    .header("x-log", HeaderValue::from_static("log"))
+                    .build()
+                    .unwrap())
+                .await
+                .expect("expecting successful response");
+        }
+            .with_subscriber(
+                assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
+            )
+            .await
     }
 
     #[tokio::test(flavor = "multi_thread")]

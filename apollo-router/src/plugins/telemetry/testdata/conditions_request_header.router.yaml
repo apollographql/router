@@ -1,0 +1,36 @@
+telemetry:
+  apollo:
+    client_name_header: name_header
+    client_version_header: version_header
+  instrumentation:
+    events:
+      router:
+        # Standard events
+        request:
+          level: info
+          condition:
+            eq:
+              - request_header: x-log
+              - "log"
+        response:
+          level: info
+          condition:
+            eq:
+              - request_header: x-log
+              - "log"
+        test_request:
+          level: info
+          message: Request custom
+          on: request
+          condition:
+            eq:
+              - request_header: x-log
+              - "log"
+        test_response:
+          level: info
+          message: Response custom
+          on: response
+          condition:
+            eq:
+              - request_header: x-log
+              - "log"

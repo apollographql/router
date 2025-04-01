@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/events.rs
+assertion_line: 1017
+expression: yaml
+---
+- fields:
+    kind: test_request
+  level: INFO
+  message: Request custom
+- fields:
+    kind: router.response
+  level: INFO
+  message: ""
+- fields:
+    kind: test_response
+  level: INFO
+  message: Response custom
