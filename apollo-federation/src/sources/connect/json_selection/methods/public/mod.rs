@@ -17,3 +17,5 @@ mod size;
 pub(crate) use size::SizeMethod;
 mod slice;
 pub(crate) use slice::SliceMethod;
+mod join;
+pub(crate) use join::JoinMethod;
