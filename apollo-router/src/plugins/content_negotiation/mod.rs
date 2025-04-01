@@ -4,6 +4,7 @@
 use std::ops::ControlFlow;
 
 use http::HeaderMap;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::ACCEPT;
@@ -11,7 +12,6 @@ use http::header::CONTENT_TYPE;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
-use mime::APPLICATION_JSON;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -22,7 +22,7 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
+// use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
@@ -32,10 +32,16 @@ use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
 use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::body::RouterBody;
-use crate::services::router::service::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::supergraph;
+
+const APPLICATION_JSON: &str = "application/json";
+const APPLICATION_GRAPHQL_JSON: &str = "application/graphql-response+json";
+
+const APPLICATION_JSON_HEADER_VALUE: HeaderValue = HeaderValue::from_static(APPLICATION_JSON);
+// const APPLICATION_GRAPHQL_JSON_HEADER_VALUE: HeaderValue =
+//     HeaderValue::from_static(APPLICATION_GRAPHQL_JSON);
 
 /// TODO: unify the following doc comments
 /// from RouterLayer
@@ -79,12 +85,13 @@ impl ContentNegotiation {
     fn invalid_content_type_header_response() -> http::Response<RouterBody> {
         let message = format!(
             r#"'content-type' header must be one of: {:?} or {:?}"#,
-            APPLICATION_JSON.essence_str(),
-            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+            APPLICATION_JSON, APPLICATION_GRAPHQL_JSON,
         );
+        // let accepted_content_types = [MediaType::parse(APPLICATION_JSON).unwrap(), MediaType::parse(APPLICATION_GRAPHQL_JSON).unwrap()];
         http::Response::builder()
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            // .header(ACCEPT, HeaderValue::from_str(&accepted_content_types.map(|c| c.to_string()).join(", ")).unwrap())
             .body(Self::response_body("INVALID_CONTENT_TYPE_HEADER", message))
             .expect("cannot fail")
     }
@@ -92,14 +99,14 @@ impl ContentNegotiation {
     fn invalid_accept_header_response() -> http::Response<RouterBody> {
         let message = format!(
             r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-            APPLICATION_JSON.essence_str(),
-            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+            APPLICATION_JSON,
+            APPLICATION_GRAPHQL_JSON,
             MULTIPART_SUBSCRIPTION_ACCEPT,
             MULTIPART_DEFER_ACCEPT
         );
         http::Response::builder()
             .status(StatusCode::NOT_ACCEPTABLE)
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
             .body(Self::response_body("INVALID_ACCEPT_HEADER", message))
             .expect("cannot fail")
     }
@@ -140,12 +147,7 @@ impl Plugin for ContentNegotiation {
             })
             .checkpoint(|request: router::Request| {
                 let accepts = parse_accept_header(request.router_request.headers());
-                let valid_accept_header = accepts.json
-                    || accepts.wildcard
-                    || accepts.multipart_defer
-                    || accepts.multipart_subscription;
-
-                if valid_accept_header {
+                if accepts.is_valid() {
                     request
                         .context
                         .extensions()
@@ -184,7 +186,7 @@ impl Plugin for ContentNegotiation {
 
                 let headers = response.response.headers_mut();
                 if accepts_json || accepts_wildcard {
-                    headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+                    headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
                 } else if accepts_multipart_defer {
                     headers.insert(
                         CONTENT_TYPE,
@@ -295,19 +297,20 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::header::HeaderValue;
 
-    use super::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+    use super::APPLICATION_GRAPHQL_JSON;
+    use super::APPLICATION_JSON;
     use super::content_type_includes_json;
     use super::parse_accept_header;
     use crate::services::MULTIPART_DEFER_ACCEPT;
 
-    const VALID_CONTENT_TYPES: [&str; 2] = ["application/json", GRAPHQL_JSON_RESPONSE_HEADER_VALUE];
+    const VALID_CONTENT_TYPES: [&str; 2] = [APPLICATION_JSON, APPLICATION_GRAPHQL_JSON];
     const INVALID_CONTENT_TYPES: [&str; 3] = ["invalid", "application/invalid", "application/yaml"];
 
     #[test]
     fn test_content_type_includes_json_handles_valid_content_types() {
         for content_type in VALID_CONTENT_TYPES {
             let mut headers = HeaderMap::new();
-            headers.insert(CONTENT_TYPE, content_type.parse().unwrap());
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
             assert!(content_type_includes_json(&headers));
         }
     }
@@ -316,7 +319,7 @@ mod tests {
     fn test_content_type_includes_json_handles_invalid_content_types() {
         for content_type in INVALID_CONTENT_TYPES {
             let mut headers = HeaderMap::new();
-            headers.insert(CONTENT_TYPE, content_type.parse().unwrap());
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
             assert!(!content_type_includes_json(&headers));
         }
     }
@@ -325,10 +328,10 @@ mod tests {
     fn test_content_type_includes_json_can_process_multiple_content_types() {
         let mut headers = HeaderMap::new();
         for content_type in INVALID_CONTENT_TYPES {
-            headers.insert(CONTENT_TYPE, content_type.parse().unwrap());
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
         }
         for content_type in VALID_CONTENT_TYPES {
-            headers.insert(CONTENT_TYPE, content_type.parse().unwrap());
+            headers.insert(CONTENT_TYPE, HeaderValue::from_static(content_type));
         }
 
         assert!(content_type_includes_json(&headers));
@@ -366,19 +369,13 @@ mod tests {
         assert!(accepts.wildcard);
 
         let mut default_headers = HeaderMap::new();
-        default_headers.insert(
-            ACCEPT,
-            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
-        );
+        default_headers.insert(ACCEPT, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON));
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
         let accepts = parse_accept_header(&default_headers);
         assert!(accepts.json);
 
         let mut default_headers = HeaderMap::new();
-        default_headers.insert(
-            ACCEPT,
-            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
-        );
+        default_headers.insert(ACCEPT, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON));
         default_headers.append(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT));
         let accepts = parse_accept_header(&default_headers);
         assert!(accepts.multipart_defer);

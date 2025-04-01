@@ -404,6 +404,12 @@ pub(crate) struct ClientRequestAccepts {
     pub(crate) wildcard: bool,
 }
 
+impl ClientRequestAccepts {
+    pub(crate) fn is_valid(&self) -> bool {
+        self.json || self.wildcard || self.multipart_defer || self.multipart_subscription
+    }
+}
+
 impl<T> From<http::Response<T>> for Response
 where
     T: http_body::Body<Data = Bytes> + Send + 'static,
