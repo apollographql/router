@@ -20,7 +20,6 @@ use tower::ServiceExt;
 
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
-use crate::layers::ServiceExt as _;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
@@ -170,36 +169,36 @@ impl Plugin for ContentNegotiation {
     // XXX(@goto-bus-stop): this feels a bit odd. It probably works fine because we can only ever respond
     // with JSON, but maybe this should be done as close as possible to where we populate the response body..?
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        service
-            .map_first_graphql_response(|context, mut parts, response| {
+        ServiceBuilder::new()
+            .map_response(|mut response: supergraph::Response| {
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
                     json: accepts_json,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
-                } = context.extensions().with_lock(|lock| {
+                } = response.context.extensions().with_lock(|lock| {
                     lock.get::<ClientRequestAccepts>()
                         .cloned()
                         .unwrap_or_default()
                 });
 
-                if !response.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
+                let headers = response.response.headers_mut();
+                if accepts_json || accepts_wildcard {
+                    headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                 } else if accepts_multipart_defer {
-                    parts.headers.insert(
+                    headers.insert(
                         CONTENT_TYPE,
                         MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
                     );
                 } else if accepts_multipart_subscription {
-                    parts.headers.insert(
+                    headers.insert(
                         CONTENT_TYPE,
                         MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
                     );
                 }
-                (parts, response)
+                response
             })
+            .service(service)
             .boxed()
     }
 }
