@@ -25,18 +25,17 @@ pub(crate) fn experimental_set_thread_pool_size(size: usize) {
 /// In the worst case, we’ll have moderate context switching cost
 /// as the kernel’s scheduler distributes time to it or Tokio or other threads.
 fn thread_pool_size() -> usize {
-    let configured_size = CONFIGURED_POOL_SIZE.load(std::sync::atomic::Ordering::Acquire);
+    let mut configured_size = CONFIGURED_POOL_SIZE.load(std::sync::atomic::Ordering::Acquire);
     if configured_size == 0 {
-        std::thread::available_parallelism()
+        configured_size = std::thread::available_parallelism()
             .expect("available_parallelism() failed")
-            .get()
-    } else {
-        tracing::info!(
-            configured_size = configured_size,
-            "starting worker pool with experimental custom size"
-        );
-        configured_size
+            .get();
     }
+    tracing::info!(
+        configured_size = configured_size,
+        "starting worker pool with size"
+    );
+    configured_size
 }
 
 type Job = Box<dyn FnOnce() + Send + 'static>;

@@ -23,6 +23,7 @@ use clap::Subcommand;
 use once_cell::sync::OnceCell;
 use regex::Captures;
 use regex::Regex;
+use tokio::runtime::Handle;
 use url::ParseError;
 use url::Url;
 
@@ -337,9 +338,16 @@ pub fn main() -> Result<()> {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
     {
+        tracing::info!(
+            nb = nb,
+            "starting router with specified APOLLO_ROUTER_NUM_CORES"
+        );
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
+    let metrics = Handle::current().metrics();
+    let n = metrics.num_workers();
+    tracing::info!(n = n, "starting router with tokio worker threads count");
     runtime.block_on(Executable::builder().start())
 }
 
