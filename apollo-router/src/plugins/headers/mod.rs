@@ -189,7 +189,7 @@ struct ConnectorHeadersConfiguration {
     #[serde(default)]
     sources: HashMap<String, HeadersLocation>,
 
-    /// Options applying to all sources
+    /// Options applying to all sources across all subgraphs
     #[serde(default)]
     all: Option<HeadersLocation>,
 }

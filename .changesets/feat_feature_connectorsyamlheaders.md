@@ -9,8 +9,8 @@ take priority and be treated as an override.
 ```
 headers:
   connector:
-    all:
-    request:
+    all: # configuration for all connectors across all subgraphs
+      request:
         - insert:
             name: "x-inserted-header"
             value: "hello world!"
