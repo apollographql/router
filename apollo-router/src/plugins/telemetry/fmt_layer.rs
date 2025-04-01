@@ -872,6 +872,7 @@ connector:
                             path: "@.id".to_string(),
                         },
                     ],
+                    supergraph_request: Default::default(),
                 };
                 let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
@@ -1223,6 +1224,7 @@ subgraph:
                             path: "@.id".to_string(),
                         },
                     ],
+                    supergraph_request: Default::default(),
                 };
                 let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
