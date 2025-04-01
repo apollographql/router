@@ -8,9 +8,7 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
@@ -30,7 +28,6 @@ fn or_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         let mut result = is_truthy(data);
@@ -45,8 +42,7 @@ fn or_method(
             result = value_opt.map(|value| is_truthy(&value)).unwrap_or(false);
         }
 
-        tail.apply_to_path(&JSON::Bool(result), vars, input_path)
-            .prepend_errors(errors)
+        (Some(JSON::Bool(result)), errors)
     } else {
         (
             None,

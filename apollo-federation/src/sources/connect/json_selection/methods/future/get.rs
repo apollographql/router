@@ -10,9 +10,7 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
@@ -35,7 +33,6 @@ fn get_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
@@ -48,8 +45,7 @@ fn get_method(
                         } else {
                             i as usize
                         }) {
-                            tail.apply_to_path(element, vars, input_path)
-                                .prepend_errors(index_errors)
+                            (Some(element.clone()), index_errors)
                         } else {
                             (
                                 None,
@@ -77,12 +73,7 @@ fn get_method(
                         if index >= 0 && index < ilen {
                             let uindex = index as usize;
                             let single_char_string = s_str[uindex..uindex + 1].to_string();
-                            tail.apply_to_path(
-                                &JSON::String(single_char_string.into()),
-                                vars,
-                                input_path,
-                            )
-                            .prepend_errors(index_errors)
+                            (Some(JSON::String(single_char_string.into())), index_errors)
                         } else {
                             (
                                 None,
@@ -135,8 +126,7 @@ fn get_method(
                 (Some(ref key @ JSON::String(ref s)), index_errors) => match data {
                     JSON::Object(map) => {
                         if let Some(value) = map.get(s.as_str()) {
-                            tail.apply_to_path(value, vars, input_path)
-                                .prepend_errors(index_errors)
+                            (Some(value.clone()), index_errors)
                         } else {
                             (
                                 None,
