@@ -22,13 +22,13 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use self::body::RouterBody;
-use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
 use crate::Context;
 use crate::graphql;
 use crate::http_ext::header_map;
 use crate::json_ext::Path;
+use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use crate::plugins::content_negotiation::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use crate::services::TryIntoHeaderName;
 use crate::services::TryIntoHeaderValue;
 

@@ -4,11 +4,13 @@
 use std::ops::ControlFlow;
 
 use http::HeaderMap;
+use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::header::VARY;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
@@ -22,26 +24,40 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-// use crate::services::APPLICATION_JSON_HEADER_VALUE;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
-use crate::services::MULTIPART_DEFER_SPEC_VALUE;
-use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
-use crate::services::MULTIPART_SUBSCRIPTION_SPEC_PARAMETER;
-use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
+use crate::protocols::multipart::ProtocolMode;
 use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::body::RouterBody;
-use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
-use crate::services::supergraph;
+
+register_plugin!("apollo", "content_negotiation", ContentNegotiation);
 
 const APPLICATION_JSON: &str = "application/json";
-const APPLICATION_GRAPHQL_JSON: &str = "application/graphql-response+json";
+pub(crate) const APPLICATION_GRAPHQL_JSON: &str = "application/graphql-response+json";
 
 const APPLICATION_JSON_HEADER_VALUE: HeaderValue = HeaderValue::from_static(APPLICATION_JSON);
-// const APPLICATION_GRAPHQL_JSON_HEADER_VALUE: HeaderValue =
-//     HeaderValue::from_static(APPLICATION_GRAPHQL_JSON);
+
+#[cfg(test)]
+pub(crate) const APPLICATION_GRAPHQL_JSON_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON);
+
+const ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
+const ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
+const ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
+
+// set the supported `@defer` specification version to https://github.com/graphql/graphql-spec/pull/742/commits/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82
+const MULTIPART_DEFER_SPEC_PARAMETER: &str = "deferSpec";
+const MULTIPART_DEFER_SPEC_VALUE: &str = "20220824";
+pub(crate) const MULTIPART_DEFER_ACCEPT_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static("multipart/mixed;deferSpec=20220824");
+pub(crate) const MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static("multipart/mixed;boundary=\"graphql\";deferSpec=20220824");
+
+const MULTIPART_SUBSCRIPTION_ACCEPT: &str = "multipart/mixed;subscriptionSpec=1.0";
+const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec";
+const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
+
+pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
+    HeaderValue::from_static("multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0");
 
 /// TODO: unify the following doc comments
 /// from RouterLayer
@@ -102,7 +118,7 @@ impl ContentNegotiation {
             APPLICATION_JSON,
             APPLICATION_GRAPHQL_JSON,
             MULTIPART_SUBSCRIPTION_ACCEPT,
-            MULTIPART_DEFER_ACCEPT
+            MULTIPART_DEFER_ACCEPT_HEADER_VALUE
         );
         http::Response::builder()
             .status(StatusCode::NOT_ACCEPTABLE)
@@ -131,6 +147,13 @@ impl Plugin for ContentNegotiation {
     ///
     /// # Context
     /// If the request is valid, this layer adds a [`ClientRequestAccepts`] value to the context.
+    ///
+    /// TODO: update these docs
+    ///     // /// A layer for the execution service that populates the Content-Type response header.
+    //     // ///
+    //     // /// The content type is decided based on a combination of:
+    //     // /// * [`ClientRequestAccepts`] context value, which is populated by the `router` layer of this plugin, and
+    //     // /// * [`ProtocolMode`] context value, populated by the `execution` service
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
             .checkpoint(|request: router::Request| {
@@ -160,19 +183,13 @@ impl Plugin for ContentNegotiation {
                 }
             })
             .service(service)
-            .boxed()
-    }
-
-    /// A layer for the supergraph service that populates the Content-Type response header.
-    ///
-    /// The content type is decided based on the [`ClientRequestAccepts`] context value, which is
-    /// populated by the content negotiation [`RouterLayer`].
-    //
-    // XXX(@goto-bus-stop): this feels a bit odd. It probably works fine because we can only ever respond
-    // with JSON, but maybe this should be done as close as possible to where we populate the response body..?
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
-            .map_response(|mut response: supergraph::Response| {
+            .map_response(|mut response: router::Response| {
+                let protocol_mode = response.context.extensions().with_lock(|lock| {
+                    lock.get::<Option<ProtocolMode>>()
+                        .cloned()
+                        .unwrap_or_default()
+                });
+                // println!("{protocol_mode:?}");
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
                     json: accepts_json,
@@ -185,22 +202,49 @@ impl Plugin for ContentNegotiation {
                 });
 
                 let headers = response.response.headers_mut();
-                if accepts_json || accepts_wildcard {
-                    headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
-                } else if accepts_multipart_defer {
-                    headers.insert(
-                        CONTENT_TYPE,
-                        MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
-                    );
-                } else if accepts_multipart_subscription {
-                    headers.insert(
-                        CONTENT_TYPE,
-                        MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
-                    );
+                process_vary_header(headers);
+
+                match protocol_mode {
+                    Some(ProtocolMode::Defer) if accepts_multipart_defer => {
+                        headers.insert(CONTENT_TYPE, MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE);
+                    }
+                    Some(ProtocolMode::Subscription) if accepts_multipart_subscription => {
+                        headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE,
+                        );
+                    }
+                    None if accepts_json || accepts_wildcard => {
+                        // TODO: accepts_json and accepts_wildcard should probably be separate cases to
+                        //  return separate content types, but for now I'm just replicating the existing
+                        //  behavior
+                        headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
+                    }
+                    None if accepts_multipart_defer => {
+                        headers.insert(CONTENT_TYPE, MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE);
+                    }
+                    None if accepts_multipart_subscription => {
+                        headers.insert(
+                            CONTENT_TYPE,
+                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE,
+                        );
+                    }
+                    _ => {
+                        // TODO: return an error?
+                        headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
+                    }
                 }
+
+                if protocol_mode.is_some() {
+                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default
+                    // (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                    headers.insert(ACCEL_BUFFERING_HEADER_NAME, ACCEL_BUFFERING_HEADER_VALUE);
+                }
+
+                eprintln!("headers = {headers:?}");
+
                 response
             })
-            .service(service)
             .boxed()
     }
 }
@@ -288,7 +332,13 @@ fn parse_accept_header(headers: &HeaderMap) -> ClientRequestAccepts {
     accepts
 }
 
-register_plugin!("apollo", "content_negotiation", ContentNegotiation);
+// Process the headers to make sure that `VARY` is set correctly
+fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
+    if headers.get(VARY).is_none() {
+        // We don't have a VARY header, add one with value "origin"
+        headers.insert(VARY, ORIGIN_HEADER_VALUE);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -296,12 +346,14 @@ mod tests {
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use http::header::HeaderValue;
+    use http::header::VARY;
 
     use super::APPLICATION_GRAPHQL_JSON;
     use super::APPLICATION_JSON;
+    use super::MULTIPART_DEFER_ACCEPT_HEADER_VALUE;
     use super::content_type_includes_json;
     use super::parse_accept_header;
-    use crate::services::MULTIPART_DEFER_ACCEPT;
+    use super::process_vary_header;
 
     const VALID_CONTENT_TYPES: [&str; 2] = [APPLICATION_JSON, APPLICATION_GRAPHQL_JSON];
     const INVALID_CONTENT_TYPES: [&str; 3] = ["invalid", "application/invalid", "application/yaml"];
@@ -376,7 +428,7 @@ mod tests {
 
         let mut default_headers = HeaderMap::new();
         default_headers.insert(ACCEPT, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON));
-        default_headers.append(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT));
+        default_headers.append(ACCEPT, MULTIPART_DEFER_ACCEPT_HEADER_VALUE);
         let accepts = parse_accept_header(&default_headers);
         assert!(accepts.multipart_defer);
 
@@ -393,5 +445,41 @@ mod tests {
         let default_headers = HeaderMap::new();
         let accepts = parse_accept_header(&default_headers);
         assert!(accepts.json);
+    }
+
+    // Test Vary processing
+
+    #[test]
+    fn it_adds_default_with_value_origin_if_no_vary_header() {
+        let mut default_headers = HeaderMap::new();
+        process_vary_header(&mut default_headers);
+        let vary_opt = default_headers.get(VARY);
+        assert!(vary_opt.is_some());
+        let vary = vary_opt.expect("has a value");
+        assert_eq!(vary, "origin");
+    }
+
+    #[test]
+    fn it_leaves_vary_alone_if_set() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(VARY, HeaderValue::from_static("*"));
+        process_vary_header(&mut default_headers);
+        let vary_opt = default_headers.get(VARY);
+        assert!(vary_opt.is_some());
+        let vary = vary_opt.expect("has a value");
+        assert_eq!(vary, "*");
+    }
+
+    #[test]
+    fn it_leaves_varys_alone_if_there_are_more_than_one() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(VARY, HeaderValue::from_static("one"));
+        default_headers.append(VARY, HeaderValue::from_static("two"));
+        process_vary_header(&mut default_headers);
+        let vary = default_headers.get_all(VARY);
+        assert_eq!(vary.iter().count(), 2);
+        for value in vary {
+            assert!(value == "one" || value == "two");
+        }
     }
 }

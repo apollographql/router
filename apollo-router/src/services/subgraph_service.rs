@@ -44,7 +44,6 @@ use super::Plugins;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::router::body::RouterBody;
-use super::router::service::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::subgraph::SubgraphRequestId;
 use crate::Configuration;
 use crate::Context;
@@ -61,6 +60,7 @@ use crate::graphql;
 use crate::json_ext::Object;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::plugins::authentication::subgraph::SigningParamsConfig;
+use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
 use crate::plugins::file_uploads;
 use crate::plugins::subscription::CallbackMode;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
@@ -1459,7 +1459,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
             "{}; expected content-type: {} or content-type: {}",
             reason,
             APPLICATION_JSON.essence_str(),
-            GRAPHQL_JSON_RESPONSE_HEADER_VALUE
+            APPLICATION_GRAPHQL_JSON
         ),
     })
 }
@@ -1686,6 +1686,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
+    use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON_HEADER_VALUE;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
@@ -1815,7 +1816,7 @@ mod tests {
     ) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
+                .header(CONTENT_TYPE, APPLICATION_GRAPHQL_JSON_HEADER_VALUE)
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#"invalid"#.into())
                 .unwrap())
@@ -1841,7 +1842,7 @@ mod tests {
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
+                .header(CONTENT_TYPE, APPLICATION_GRAPHQL_JSON_HEADER_VALUE)
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
                 .unwrap())

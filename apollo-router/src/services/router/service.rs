@@ -14,13 +14,9 @@ use futures::future::join_all;
 use futures::future::ready;
 use futures::stream::StreamExt;
 use futures::stream::once;
-use http::HeaderMap;
-use http::HeaderName;
-use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::CONTENT_TYPE;
-use http::header::VARY;
 use http::request::Parts;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
@@ -49,7 +45,6 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
@@ -75,13 +70,8 @@ use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
-use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::HasPlugins;
 use crate::services::HasSchema;
-use crate::services::MULTIPART_DEFER_ACCEPT;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
-use crate::services::MULTIPART_SUBSCRIPTION_CONTENT_TYPE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphCreator;
@@ -97,15 +87,6 @@ use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
-
-pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
-pub(crate) static MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE);
-pub(crate) static MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(MULTIPART_SUBSCRIPTION_CONTENT_TYPE);
-static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
-static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
-static ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -297,14 +278,10 @@ impl RouterService {
             },
         };
 
-        // XXX(@goto-bus-stop): *all* of the code using these `accepts_` variables looks like it
-        // duplicates what the content_negotiation::SupergraphLayer is doing. We should delete one
-        // or the other, and absolutely not do it inline here.
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
-            multipart_defer: accepts_multipart_defer,
-            multipart_subscription: accepts_multipart_subscription,
+            ..
         } = context
             .extensions()
             .with_lock(|lock| lock.get().cloned())
@@ -317,7 +294,6 @@ impl RouterService {
             .unwrap_or_default();
 
         let (mut parts, mut body) = response.into_parts();
-        process_vary_header(&mut parts.headers);
 
         if context
             .extensions()
@@ -362,9 +338,6 @@ impl RouterService {
                         );
                     }
 
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     let body: Result<String, BoxError> = tracing::trace_span!("serialize_response")
                         .in_scope(|| {
                             let body = serde_json::to_string(&response)?;
@@ -382,19 +355,7 @@ impl RouterService {
                         response: http::Response::from_parts(parts, router::body::from_bytes(body)),
                         context,
                     })
-                } else if accepts_multipart_defer || accepts_multipart_subscription {
-                    if accepts_multipart_defer {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    } else if accepts_multipart_subscription {
-                        parts.headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE.clone(),
-                        );
-                    }
-
+                } else {
                     if !response.errors.is_empty() {
                         Self::count_errors(
                             &response.errors,
@@ -403,11 +364,6 @@ impl RouterService {
                         );
                     }
 
-                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
-                    parts.headers.insert(
-                        ACCEL_BUFFERING_HEADER_NAME.clone(),
-                        ACCEL_BUFFERING_HEADER_VALUE.clone(),
-                    );
                     let response = match response.subscribed {
                         Some(true) => http::Response::from_parts(
                             parts,
@@ -426,31 +382,6 @@ impl RouterService {
                     };
 
                     Ok(RouterResponse { response, context })
-                } else {
-                    Self::count_error_codes(
-                        vec!["INVALID_ACCEPT_HEADER"],
-                        &context,
-                        &self.apollo_telemetry_config.errors,
-                    );
-
-                    // this should be unreachable due to a previous check, but just to be sure...
-                    Ok(router::Response::error_builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(format!(
-                                        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-                                        APPLICATION_JSON.essence_str(),
-                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                        MULTIPART_DEFER_ACCEPT,
-                                        MULTIPART_SUBSCRIPTION_ACCEPT,
-                                    ))
-                                    .extension_code("INVALID_ACCEPT_HEADER")
-                                    .build(),
-                            )
-                            .status_code(StatusCode::NOT_ACCEPTABLE)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                            .context(context)
-                            .build()?)
                 }
             }
         }
@@ -820,57 +751,59 @@ impl RouterService {
         parts: &Parts,
         body: Body,
     ) -> Result<Result<(Vec<graphql::Request>, bool), TranslateError>, BoxError> {
-        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> =
-            if parts.method == Method::GET {
-                self.translate_query_request(parts).await
-            } else {
-                let bytes = router::body::into_bytes(body)
-                    .instrument(tracing::debug_span!("receive_body"))
-                    .await?;
-                if let Some(level) = context
-                    .extensions()
-                    .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
-                    .map(|d| d.0)
-                {
-                    let mut attrs = Vec::with_capacity(5);
-                    #[cfg(test)]
-                    let mut headers: indexmap::IndexMap<String, HeaderValue> = parts
-                        .headers
-                        .clone()
-                        .into_iter()
-                        .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                        .collect();
-                    #[cfg(test)]
-                    headers.sort_keys();
-                    #[cfg(not(test))]
-                    let headers = &parts.headers;
+        let graphql_requests: Result<(Vec<graphql::Request>, bool), TranslateError> = if parts
+            .method
+            == Method::GET
+        {
+            self.translate_query_request(parts).await
+        } else {
+            let bytes = router::body::into_bytes(body)
+                .instrument(tracing::debug_span!("receive_body"))
+                .await?;
+            if let Some(level) = context
+                .extensions()
+                .with_lock(|ext| ext.get::<DisplayRouterRequest>().cloned())
+                .map(|d| d.0)
+            {
+                let mut attrs = Vec::with_capacity(5);
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, http::HeaderValue> = parts
+                    .headers
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = &parts.headers;
 
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_HEADERS,
-                        opentelemetry::Value::String(format!("{:?}", headers).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_METHOD,
-                        opentelemetry::Value::String(format!("{}", parts.method).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_URI,
-                        opentelemetry::Value::String(format!("{}", parts.uri).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_VERSION,
-                        opentelemetry::Value::String(format!("{:?}", parts.version).into()),
-                    ));
-                    attrs.push(KeyValue::new(
-                        HTTP_REQUEST_BODY,
-                        opentelemetry::Value::String(
-                            format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
-                        ),
-                    ));
-                    log_event(level, "router.request", attrs, "");
-                }
-                self.translate_bytes_request(&bytes)
-            };
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_METHOD,
+                    opentelemetry::Value::String(format!("{}", parts.method).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_URI,
+                    opentelemetry::Value::String(format!("{}", parts.uri).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_VERSION,
+                    opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_BODY,
+                    opentelemetry::Value::String(
+                        format!("{:?}", String::from_utf8_lossy(&bytes)).into(),
+                    ),
+                ));
+                log_event(level, "router.request", attrs, "");
+            }
+            self.translate_bytes_request(&bytes)
+        };
         Ok(graphql_requests)
     }
 
@@ -950,24 +883,6 @@ impl RouterService {
         }
     }
 
-    fn count_error_codes(codes: Vec<&str>, context: &Context, errors_config: &ErrorsConfiguration) {
-        let errors = codes
-            .iter()
-            .map(|c| {
-                let mut extensions = Object::new();
-                extensions.insert("code", Value::String((*c).into()));
-                graphql::Error {
-                    message: "".into(),
-                    locations: vec![],
-                    path: None,
-                    extensions,
-                }
-            })
-            .collect();
-
-        Self::count_errors(&errors, context, errors_config);
-    }
-
     fn count_value_completion_errors(
         value_completion: &Value,
         context: &Context,
@@ -988,14 +903,6 @@ struct TranslateError {
     status: StatusCode,
     extension_code: String,
     extension_details: String,
-}
-
-// Process the headers to make sure that `VARY` is set correctly
-pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
-    if headers.get(VARY).is_none() {
-        // We don't have a VARY header, add one with value "origin"
-        headers.insert(VARY, ORIGIN_HEADER_VALUE.clone());
-    }
 }
 
 /// A collection of services and data which may be used to create a "router".

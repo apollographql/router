@@ -51,6 +51,7 @@ use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
+use crate::protocols::multipart::ProtocolMode;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlannerService;
@@ -276,6 +277,17 @@ async fn service_call(
 
             let is_deferred = plan.is_deferred(&variables);
             let is_subscription = plan.is_subscription();
+
+            let protocol_mode = if is_deferred {
+                Some(ProtocolMode::Defer)
+            } else if is_subscription {
+                Some(ProtocolMode::Subscription)
+            } else {
+                None
+            };
+            context
+                .extensions()
+                .with_lock(|lock| lock.insert(protocol_mode));
 
             if let Some(batching) = context
                 .extensions()
