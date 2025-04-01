@@ -439,7 +439,7 @@ fn test_arithmetic_methods() {
 
     assert_eq!(
         selection!("$->div(2)").apply_to(&json!(6)),
-        (Some(json!(3)), vec![]),
+        (Some(json!(3.0)), vec![]),
     );
     assert_eq!(
         selection!("$->div(2.5)").apply_to(&json!(7.5)),
@@ -447,7 +447,7 @@ fn test_arithmetic_methods() {
     );
     assert_eq!(
         selection!("$->div(2)").apply_to(&json!(7)),
-        (Some(json!(3)), vec![]),
+        (Some(json!(3.5)), vec![]),
     );
     assert_eq!(
         selection!("$->div(2.5)").apply_to(&json!(7)),
@@ -455,7 +455,7 @@ fn test_arithmetic_methods() {
     );
     assert_eq!(
         selection!("$->div(2, 3, 5, 7)").apply_to(&json!(2100)),
-        (Some(json!(10)), vec![]),
+        (Some(json!(10.0)), vec![]),
     );
 
     assert_eq!(
