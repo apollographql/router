@@ -157,7 +157,7 @@ impl FetchService {
                 )
                 .await
                 .map_to_graphql_error(subgraph_name.clone(), &current_dir.to_owned())
-                .add_subgraph_name(subgraph_name.as_str())
+                .with_subgraph_name(subgraph_name.as_str())
             {
                 Err(e) => {
                     return Ok((Value::default(), vec![e]));
