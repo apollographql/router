@@ -345,9 +345,9 @@ pub fn main() -> Result<()> {
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
-    let metrics = Handle::current().metrics();
-    let n = metrics.num_workers();
-    tracing::info!(n = n, "starting router with tokio worker threads count");
+    // let metrics = Handle::current().metrics();
+    // let n = metrics.num_workers();
+    // tracing::info!(n = n, "starting router with tokio worker threads count");
     runtime.block_on(Executable::builder().start())
 }
 
