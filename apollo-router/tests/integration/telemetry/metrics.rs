@@ -8,6 +8,7 @@ use crate::integration::common::graph_os_enabled;
 
 const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 const SUBGRAPH_AUTH_CONFIG: &str = include_str!("fixtures/subgraph_auth.router.yaml");
+const JWT_AUTH_CONFIG: &str = include_str!("fixtures/jwt_auth.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() {
@@ -129,6 +130,43 @@ async fn test_subgraph_auth_metrics() {
     );
 
     router.assert_metrics_contains(r#"apollo_router_operations_authentication_aws_sigv4_total{authentication_aws_sigv4_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 2"#, None).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_jwt_metrics() {
+    if !graph_os_enabled() {
+        return;
+    }
+    let mut router = IntegrationTest::builder()
+        .config(JWT_AUTH_CONFIG)
+        .build()
+        .await;
+
+    let query = Query::builder()
+        .header("http::header::AUTHORIZATION", "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A")
+        .build();
+    router.start().await;
+    router.assert_started().await;
+    router.execute_query(query).await;
+    router
+        .assert_log_not_contains("this is a bug and should not happen")
+        .await;
+
+    // Get Prometheus metrics.
+    let metrics_response = router.get_metrics_response().await.unwrap();
+
+    // Validate metric headers.
+    let metrics_headers = metrics_response.headers();
+    assert!(
+        "text/plain; version=0.0.4"
+            == metrics_headers
+                .get(http::header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap()
+    );
+
+    router.assert_metrics_contains(r#"apollo_router_operations_authentication_jwt_total{authentication_jwt_failed="false",subgraph_service_name="products",otel_scope_name="apollo/router"} 1"#, None).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -449,12 +449,7 @@ fn authenticate(
         source: Option<&Source>,
     ) -> ControlFlow<router::Response, router::Request> {
         // This is a metric and will not appear in the logs
-        u64_counter!(
-            "apollo.router.operations.authentication.jwt",
-            "Number of requests with JWT authentication",
-            1,
-            authentication.jwt.failed = true
-        );
+        metric_authentication_jwt(true);
         tracing::error!(message = %error, "jwt authentication failure");
 
         let _ = request.context.insert_json_value(
@@ -588,11 +583,7 @@ fn authenticate(
             );
         }
         // This is a metric and will not appear in the logs
-        u64_counter!(
-            "apollo.router.operations.jwt",
-            "Number of requests with JWT authentication",
-            1
-        );
+        metric_authentication_jwt(false);
 
         let _ = request.context.insert_json_value(
             JWT_CONTEXT_KEY,
@@ -617,9 +608,41 @@ fn authenticate(
     )
 }
 
+fn metric_authentication_jwt(is_failure: bool) {
+    u64_counter!(
+        "apollo.router.operations.authentication.jwt",
+        "Number of requests with JWT authentication",
+        1,
+        authentication.jwt.failed = is_failure
+    );
+}
+
 // This macro allows us to use it in our plugin registry!
 // register_plugin takes a group name, and a plugin name.
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
 register_private_plugin!("apollo", "authentication", AuthenticationPlugin);
+
+mod metrics_tests {
+
+    #[test]
+    fn test_metric_authentication_jwt() {
+        use crate::plugins::authentication::metric_authentication_jwt;
+
+        metric_authentication_jwt(true);
+        metric_authentication_jwt(true);
+        metric_authentication_jwt(false);
+        assert_counter!(
+            "apollo.router.operations.authentication.jwt",
+            2,
+            "authentication.jwt.failed" = true
+        );
+
+        assert_counter!(
+            "apollo.router.operations.authentication.jwt",
+            1,
+            "authentication.jwt.failed" = false
+        );
+    }
+}
