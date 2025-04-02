@@ -161,6 +161,23 @@ safelist.
 The operation could not be parsed as GraphQL.
 
 </Property>
+<Property name="PERSISTED_QUERY_HASH_MISMATCH">
+
+The operation was not executed due to a mismatch with the automatic persisted query (APQ) protocol.
+There was an attempt to store this operation in the APQ cache, but the provided hash did not match the operation.
+
+</Property>
+<Property name="PERSISTED_QUERY_NOT_FOUND">
+
+The operation was not executed since it was not found in the automatic persisted query (APQ) cache.  
+This is an expected behavior when using the APQ protocol.
+
+</Property>
+<Property name="PERSISTED_QUERY_NOT_SUPPORTED">
+
+An operation attempted to use automatic persisted queries, but the feature was not enabled.
+
+</Property>
 <Property name="PERSISTED_QUERY_NOT_IN_LIST">
 
 The operation was not executed because it was not found in the persisted query
@@ -182,6 +199,12 @@ schema.
 <Property name="SUBREQUEST_HTTP_ERROR">
 
 There was an error at the HTTP transport layer when fetching data from a subgraph service.
+
+</Property>
+<Property name="UNAUTHORIZED_FIELD_OR_TYPE">
+
+The operation was not fully executed because it attempted to use a field
+or type was unauthorized.
 
 </Property>
 </PropertyList>
