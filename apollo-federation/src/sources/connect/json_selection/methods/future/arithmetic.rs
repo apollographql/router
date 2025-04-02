@@ -8,9 +8,7 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::vec_push;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
@@ -159,10 +157,8 @@ macro_rules! infix_math_method {
             data: &JSON,
             vars: &VarsWithPathsMap,
             input_path: &InputPath<JSON>,
-            tail: &WithRange<PathList>,
         ) -> (Option<JSON>, Vec<ApplyToError>) {
             arithmetic_method(method_name, method_args, $op, data, vars, input_path)
-                .and_then_collecting_errors(|result| tail.apply_to_path(&result, vars, input_path))
         }
     };
 }

@@ -8,7 +8,6 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::immutable::InputPath;
@@ -34,7 +33,6 @@ fn map_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(args) = method_args {
         if let Some(first_arg) = args.args.first() {
@@ -47,47 +45,39 @@ fn map_method(
                     let (applied_opt, arg_errors) =
                         first_arg.apply_to_path(element, vars, &input_path);
                     errors.extend(arg_errors);
-                    if let Some(applied) = applied_opt {
-                        let (value_opt, apply_errors) =
-                            tail.apply_to_path(&applied, vars, &input_path);
-                        errors.extend(apply_errors);
-                        if let Some(value) = value_opt {
-                            output.push(value);
-                            continue;
-                        }
-                    }
-                    output.push(JSON::Null);
+                    output.insert(i, applied_opt.unwrap_or(JSON::Null));
                 }
 
-                return (Some(JSON::Array(output)), errors);
+                (Some(JSON::Array(output)), errors)
             } else {
                 // Return a singleton array wrapping the value of applying the
                 // ->map method the non-array input data.
-                return first_arg
+                first_arg
                     .apply_to_path(data, vars, input_path)
                     .and_then_collecting_errors(|value| {
-                        tail.apply_to_path(&JSON::Array(vec![value.clone()]), vars, input_path)
-                    });
+                        (Some(JSON::Array(vec![value.clone()])), vec![])
+                    })
             }
         } else {
-            return (
+            (
                 None,
                 vec![ApplyToError::new(
                     format!("Method ->{} requires one argument", method_name.as_ref()),
                     input_path.to_vec(),
                     method_name.range(),
                 )],
-            );
+            )
         }
+    } else {
+        (
+            None,
+            vec![ApplyToError::new(
+                format!("Method ->{} requires one argument", method_name.as_ref()),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        )
     }
-    (
-        None,
-        vec![ApplyToError::new(
-            format!("Method ->{} requires one argument", method_name.as_ref()),
-            input_path.to_vec(),
-            method_name.range(),
-        )],
-    )
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn map_shape(

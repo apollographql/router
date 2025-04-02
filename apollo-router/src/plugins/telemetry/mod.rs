@@ -213,6 +213,7 @@ struct TelemetryActivation {
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
     private_meter_provider: Option<FilterMeterProvider>,
+    private_realtime_meter_provider: Option<FilterMeterProvider>,
     is_active: bool,
 }
 
@@ -242,7 +243,8 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 impl Drop for Telemetry {
     fn drop(&mut self) {
         let mut activation = self.activation.lock();
-        let metrics_providers: [Option<FilterMeterProvider>; 3] = [
+        let metrics_providers: [Option<FilterMeterProvider>; 4] = [
+            activation.private_realtime_meter_provider.take(),
             activation.private_meter_provider.take(),
             activation.public_meter_provider.take(),
             activation.public_prometheus_meter_provider.take(),
@@ -319,6 +321,11 @@ impl PluginPrivate for Telemetry {
                 )),
                 private_meter_provider: Some(FilterMeterProvider::private(
                     metrics_builder.apollo_meter_provider_builder.build(),
+                )),
+                private_realtime_meter_provider: Some(FilterMeterProvider::private_realtime(
+                    metrics_builder
+                        .apollo_realtime_meter_provider_builder
+                        .build(),
                 )),
                 public_prometheus_meter_provider: metrics_builder
                     .prometheus_meter_provider
@@ -1674,7 +1681,7 @@ impl TelemetryActivation {
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider_internal();
         commit_prometheus();
-        let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
+        let mut old_meter_providers: [Option<FilterMeterProvider>; 4] = Default::default();
 
         old_meter_providers[0] = meter_provider.set(
             MeterProviderType::PublicPrometheus,
@@ -1686,13 +1693,18 @@ impl TelemetryActivation {
             self.private_meter_provider.take(),
         );
 
-        old_meter_providers[2] =
+        old_meter_providers[2] = meter_provider.set(
+            MeterProviderType::ApolloRealtime,
+            self.private_realtime_meter_provider.take(),
+        );
+
+        old_meter_providers[3] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
 
         Self::checked_meter_shutdown(old_meter_providers);
     }
 
-    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 3]) {
+    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 4]) {
         for meter_provider in meters.into_iter().flatten() {
             Telemetry::checked_spawn_task(Box::new(move || {
                 if let Err(e) = meter_provider.shutdown() {

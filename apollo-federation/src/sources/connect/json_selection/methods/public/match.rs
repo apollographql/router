@@ -36,7 +36,6 @@ fn match_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut errors = Vec::new();
 
@@ -52,9 +51,6 @@ fn match_method(
                         if candidate == *data {
                             return pair[1]
                                 .apply_to_path(data, vars, input_path)
-                                .and_then_collecting_errors(|value| {
-                                    tail.apply_to_path(value, vars, input_path)
-                                })
                                 .prepend_errors(errors);
                         }
                     };

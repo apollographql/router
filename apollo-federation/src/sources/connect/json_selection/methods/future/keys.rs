@@ -8,9 +8,7 @@ use shape::location::SourceId;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
@@ -26,9 +24,8 @@ fn keys_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    vars: &VarsWithPathsMap,
+    _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -47,7 +44,7 @@ fn keys_method(
     match data {
         JSON::Object(map) => {
             let keys = map.keys().map(|key| JSON::String(key.clone())).collect();
-            tail.apply_to_path(&JSON::Array(keys), vars, input_path)
+            (Some(JSON::Array(keys)), vec![])
         }
         _ => (
             None,

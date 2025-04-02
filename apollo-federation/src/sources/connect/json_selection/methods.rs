@@ -5,7 +5,6 @@ use shape::location::SourceId;
 
 use super::ApplyToError;
 use super::MethodArgs;
-use super::PathList;
 use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
@@ -68,9 +67,8 @@ macro_rules! impl_arrow_method {
                 data: &JSON,
                 vars: &VarsWithPathsMap,
                 input_path: &InputPath<JSON>,
-                tail: &WithRange<PathList>,
             ) -> (Option<JSON>, Vec<ApplyToError>) {
-                $impl_fn_name(method_name, method_args, data, vars, input_path, tail)
+                $impl_fn_name(method_name, method_args, data, vars, input_path)
             }
 
             fn shape(
@@ -104,7 +102,6 @@ pub(super) trait ArrowMethodImpl {
         data: &JSON,
         vars: &VarsWithPathsMap,
         input_path: &InputPath<JSON>,
-        tail: &WithRange<PathList>,
     ) -> (Option<JSON>, Vec<ApplyToError>);
 
     fn shape(
