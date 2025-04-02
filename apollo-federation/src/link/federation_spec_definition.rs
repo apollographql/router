@@ -715,7 +715,10 @@ impl FederationSpecDefinition {
                 composition_strategy: None,
             }],
             false,
-            &[DirectiveLocation::FieldDefinition],
+            &[
+                DirectiveLocation::Object,
+                DirectiveLocation::FieldDefinition,
+            ],
             false,
             None,
             None,
@@ -740,8 +743,8 @@ impl FederationSpecDefinition {
             &[],
             self.version().ge(&Version { major: 2, minor: 2 }),
             &[
-                DirectiveLocation::FieldDefinition,
                 DirectiveLocation::Object,
+                DirectiveLocation::FieldDefinition,
             ],
             false,
             None,
