@@ -29,6 +29,9 @@ use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::body::RouterBody;
 
+// TODO: a lot of these headers are defined in multiple ways, ie up here as well as in the `is_*`
+//  functions below. would be nice to standardize that.
+
 register_plugin!("apollo", "content_negotiation", ContentNegotiation);
 
 const APPLICATION_JSON: &str = "application/json";
@@ -83,8 +86,12 @@ struct ContentNegotiation {}
 struct Config {}
 
 impl ContentNegotiation {
-    // TODO: see if there's already an implementation of this
-    fn response_body(extension_code: &str, message: String) -> RouterBody {
+    /// Helper to build a `RouterBody` containing a `graphql::Error` with the provided extension
+    /// code and message.
+    ///
+    /// NB: perhaps it's worth moving this somewhere else? might be generally useful outside this
+    /// plugin
+    fn error_response_body(extension_code: &str, message: String) -> RouterBody {
         router::body::from_bytes(
             serde_json::json!({
                 "errors": [
@@ -103,12 +110,10 @@ impl ContentNegotiation {
             r#"'content-type' header must be one of: {:?} or {:?}"#,
             APPLICATION_JSON, APPLICATION_GRAPHQL_JSON,
         );
-        // let accepted_content_types = [MediaType::parse(APPLICATION_JSON).unwrap(), MediaType::parse(APPLICATION_GRAPHQL_JSON).unwrap()];
         http::Response::builder()
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
             .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-            // .header(ACCEPT, HeaderValue::from_str(&accepted_content_types.map(|c| c.to_string()).join(", ")).unwrap())
-            .body(Self::response_body("INVALID_CONTENT_TYPE_HEADER", message))
+            .body(Self::error_response_body("INVALID_CONTENT_TYPE_HEADER", message))
             .expect("cannot fail")
     }
 
@@ -123,7 +128,7 @@ impl ContentNegotiation {
         http::Response::builder()
             .status(StatusCode::NOT_ACCEPTABLE)
             .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-            .body(Self::response_body("INVALID_ACCEPT_HEADER", message))
+            .body(Self::error_response_body("INVALID_ACCEPT_HEADER", message))
             .expect("cannot fail")
     }
 }
@@ -159,28 +164,24 @@ impl Plugin for ContentNegotiation {
             .checkpoint(|request: router::Request| {
                 let valid_content_type_header = request.router_request.method() == Method::GET
                     || content_type_includes_json(request.router_request.headers());
-
-                if valid_content_type_header {
-                    Ok(ControlFlow::Continue(request))
-                } else {
-                    Ok(ControlFlow::Break(
+                if !valid_content_type_header {
+                    return Ok(ControlFlow::Break(
                         Self::invalid_content_type_header_response().into(),
-                    ))
+                    ));
                 }
-            })
-            .checkpoint(|request: router::Request| {
+
                 let accepts = parse_accept_header(request.router_request.headers());
-                if accepts.is_valid() {
-                    request
-                        .context
-                        .extensions()
-                        .with_lock(|lock| lock.insert(accepts));
-                    Ok(ControlFlow::Continue(request))
-                } else {
-                    Ok(ControlFlow::Break(
+                if !accepts.is_valid() {
+                    return Ok(ControlFlow::Break(
                         Self::invalid_accept_header_response().into(),
-                    ))
+                    ));
                 }
+
+                request
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.insert(accepts));
+                Ok(ControlFlow::Continue(request))
             })
             .service(service)
             .map_response(|mut response: router::Response| {
@@ -189,7 +190,6 @@ impl Plugin for ContentNegotiation {
                         .cloned()
                         .unwrap_or_default()
                 });
-                // println!("{protocol_mode:?}");
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
                     json: accepts_json,
