@@ -6168,6 +6168,7 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "description": "activates caching for this subgraph, overrides the global configuration",
+          "nullable": true,
           "type": "boolean"
         },
         "invalidation": {
