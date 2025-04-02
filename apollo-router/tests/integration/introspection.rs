@@ -144,7 +144,7 @@ async fn operation_name_error() {
         {
           "message": "Unknown operation named \"NonExistentOp\"",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "GRAPHQL_UNKNOWN_OPERATION_NAME"
           }
         }
       ]

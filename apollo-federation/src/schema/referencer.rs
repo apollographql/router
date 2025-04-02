@@ -4,6 +4,7 @@ use apollo_compiler::collections::IndexSet;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::internal_error;
 use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::EnumValueDefinitionPosition;
@@ -59,10 +60,7 @@ impl Referencers {
         name: &str,
     ) -> Result<&DirectiveReferencers, FederationError> {
         self.directives.get(name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: "Directive referencers unexpectedly missing directive".to_owned(),
-            }
-            .into()
+            internal_error!("Directive referencers unexpectedly missing directive `{name}`")
         })
     }
 }
