@@ -10,25 +10,24 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 
 impl_arrow_method!(SliceMethod, slice_method, slice_shape);
 /// Extracts part of an array given a set of indices and returns a new array.
+/// Can also be used on a string to get chars at the specified indices.
 /// The simplest possible example:
 ///
 /// $->echo([0,1,2,3,4,5])->slice(1, 3)     would result in [1,2]
+/// $->echo("hello")->slice(1,3)            would result in "el"
 fn slice_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let length = if let JSON::Array(array) = data {
         array.len() as i64
@@ -102,8 +101,7 @@ fn slice_method(
             _ => unreachable!(),
         };
 
-        tail.apply_to_path(&array, vars, input_path)
-            .prepend_errors(errors)
+        (Some(array), errors)
     } else {
         // TODO Should calling ->slice or ->slice() without arguments be an
         // error? In JavaScript, array->slice() copies the array, but that's not
@@ -185,6 +183,38 @@ mod tests {
         assert_eq!(
             selection!("$->slice(1, 3)").apply_to(&json!([])),
             (Some(json!([])), vec![]),
+        );
+    }
+
+    #[test]
+    fn slice_should_return_blank_when_string_is_empty() {
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!("")),
+            (Some(json!("")), vec![]),
+        );
+    }
+
+    #[test]
+    fn slice_should_return_part_of_string() {
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!("hello")),
+            (Some(json!("el")), vec![]),
+        );
+    }
+
+    #[test]
+    fn slice_should_return_part_of_string_when_slice_indices_are_larger_than_string() {
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!("he")),
+            (Some(json!("e")), vec![]),
+        );
+    }
+
+    #[test]
+    fn slice_should_return_empty_string_when_indices_are_completely_out_of_string_bounds() {
+        assert_eq!(
+            selection!("$->slice(1, 3)").apply_to(&json!("h")),
+            (Some(json!("")), vec![]),
         );
     }
 }

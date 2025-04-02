@@ -28,7 +28,7 @@ use crate::plugins::cache::entity::Subgraph;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
-const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
+pub(super) const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");
 #[derive(Debug)]
 pub(crate) struct MockStore {
@@ -193,7 +193,7 @@ async fn insert() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -203,7 +203,7 @@ async fn insert() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -323,7 +323,7 @@ async fn insert_with_requires() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -333,7 +333,7 @@ async fn insert_with_requires() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -542,7 +542,7 @@ async fn private() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -552,7 +552,7 @@ async fn private() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -700,7 +700,7 @@ async fn no_data() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -710,7 +710,7 @@ async fn no_data() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -889,7 +889,7 @@ async fn missing_entities() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -899,7 +899,7 @@ async fn missing_entities() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },

@@ -9,13 +9,7 @@ type Query {
   emptySelection: [String!]!
     @connect(
       source: "v2"
-      http: { POST: "/resources" }
-      selection: "# comment"
-    )
-  emptyBody: [String!]!
-    @connect(
-      source: "v2"
       http: { POST: "/resources", body: "  " }
-      selection: "$"
+      selection: "# comment"
     )
 }
