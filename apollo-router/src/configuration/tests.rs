@@ -13,6 +13,7 @@ use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
+use super::schema::Mode;
 use super::schema::validate_yaml_configuration;
 use super::subgraph::SubgraphConfiguration;
 use super::*;
@@ -137,15 +138,15 @@ subgraphs:
   account: true
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 4
 
-  
   supergraph:
     path: /
 ┌ subgraphs:
@@ -165,15 +166,16 @@ unknown:
   foo: true
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 2
 
-  
+
 ┌ unknown:
 |   foo: true
 └-----> Additional properties are not allowed ('unknown' was unexpected)
@@ -189,6 +191,7 @@ fn empty_config() {
         r#"
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should have been ok with an empty config");
 }
@@ -205,6 +208,7 @@ telemetry:
   another_non_existant: 3
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -222,6 +226,7 @@ supergraph:
   another_one: true
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -237,6 +242,7 @@ supergraph:
   listen: true
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -254,6 +260,7 @@ cors:
   allow_headers: [ Content-Type, 5 ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -273,6 +280,7 @@ cors:
     - 5
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -287,6 +295,7 @@ cors:
   allow_headers: [ "*" ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -308,6 +317,7 @@ cors:
   methods: [ GET, "*" ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -329,6 +339,7 @@ cors:
   allow_any_origin: true
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -350,6 +361,7 @@ cors:
     - "*"
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -425,7 +437,8 @@ fn validate_project_config_files() {
                     .mocked_env_var("PARSER_MAX_RECURSION", "500")
                     .build()
                     .unwrap();
-                if let Err(e) = validate_yaml_configuration(&yaml, expansion) {
+
+                if let Err(e) = validate_yaml_configuration(&yaml, expansion, Mode::NoUpgrade) {
                     panic!(
                         "{} configuration error: \n{}",
                         entry.path().to_string_lossy(),
@@ -449,6 +462,7 @@ supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
         expansion,
+        Mode::NoUpgrade,
     )
     .expect_err("Must have an error because we expect a boolean");
     insta::assert_snapshot!(error.to_string());
@@ -470,6 +484,7 @@ cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         expansion,
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -494,6 +509,7 @@ cors:
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
         expansion,
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -512,6 +528,7 @@ supergraph:
   another_one: foo
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -525,6 +542,7 @@ supergraph:
   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("must have an error because the env variable is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -541,6 +559,7 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
+        Mode::NoUpgrade,
     )
     .expect_err("must have an error because the mode is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -558,6 +577,7 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
+        Mode::NoUpgrade,
     )
     .expect("must have expanded successfully");
 }
@@ -578,6 +598,7 @@ supergraph:
             path.to_string_lossy()
         ),
         Expansion::builder().supported_mode("file").build(),
+        Mode::NoUpgrade,
     )
     .expect("must have expanded successfully");
 
@@ -589,7 +610,7 @@ supergraph:
 struct Asset;
 
 #[test]
-fn upgrade_old_configuration() {
+fn upgrade_old_major_configuration() {
     for file_name in Asset::iter() {
         if file_name.ends_with(".yaml") {
             let source = Asset::get(&file_name).expect("test file must exist");
@@ -599,12 +620,17 @@ fn upgrade_old_configuration() {
             let new_config = crate::configuration::upgrade::upgrade_configuration(
                 &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
+                upgrade::UpgradeMode::Major,
             )
             .expect("configuration could not be updated");
             let new_config =
                 serde_yaml::to_string(&new_config).expect("must be able to serialize config");
 
-            let result = validate_yaml_configuration(&new_config, Expansion::builder().build());
+            let result = validate_yaml_configuration(
+                &new_config,
+                Expansion::builder().build(),
+                Mode::NoUpgrade,
+            );
 
             match result {
                 Ok(_) => {
@@ -617,6 +643,41 @@ fn upgrade_old_configuration() {
                         "migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}"
                     )
                 }
+            }
+        }
+    }
+}
+
+#[derive(RustEmbed)]
+#[folder = "src/configuration/testdata/migrations/minor"]
+struct AssetMinor;
+
+#[test]
+fn upgrade_old_minor_configuration() {
+    for file_name in AssetMinor::iter() {
+        if file_name.ends_with(".yaml") {
+            let source = AssetMinor::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data)
+                .expect("expected utf8")
+                .to_string();
+            let new_config = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                true,
+                upgrade::UpgradeMode::Minor,
+            )
+            .expect("configuration could not be updated");
+            let new_config =
+                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+
+            let result = validate_yaml_configuration(
+                &new_config,
+                Expansion::builder().build(),
+                Mode::NoUpgrade,
+            );
+
+            // FIXME: this test will change once we have our first minor upgrade
+            if result.is_ok() {
+                panic!("minor upgrade should raise errors, but it did not for {file_name}")
             }
         }
     }
@@ -752,6 +813,7 @@ tls:
 "#,
         ),
         Expansion::builder().supported_mode("file").build(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     cfg.tls.supergraph.unwrap().tls_config().unwrap();
