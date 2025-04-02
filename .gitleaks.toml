@@ -57,6 +57,7 @@
             "76aaa5ec21d4fbde65676c6cf0dc265dd6daee99",
             "d2b85acee5cf94120b47093f87ae80a7365d7b28",
             "f107c2a42292d0c8068395f5cb8f491377559a42",
+            "9c9fe0b0601b63751764f18b7bc511054d3493a9",
 
             # https://github.com/apollographql/router-private/blob/0a9f1a720dc532e8c090541a59d32c9377a6320b/apollo-router/src/uplink/license_enforcement.rs#L336
             # https://github.com/apollographql/router-private/blob/15c337ee5ee5003fc72ef93d570d11e73a7bd7fb/apollo-router/src/uplink/license_enforcement.rs#L341
@@ -72,7 +73,8 @@
 
         paths = [
             '''^apollo-router\/src\/.+\/testdata\/.+''',
-            '''^apollo-router/src/plugins/authentication/tests.rs$'''
+            '''^apollo-router/src/plugins/authentication/tests.rs$''',
+            '''^apollo-router/tests/integration/telemetry/.+'''
         ]
 
 [[ rules ]]
