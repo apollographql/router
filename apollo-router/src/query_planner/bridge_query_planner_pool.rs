@@ -293,7 +293,9 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         if crate::compute_job::is_full() {
-            return Poll::Pending;
+            return Poll::Ready(Err(QueryPlannerError::PoolProcessing(
+                "compute queue is full".into(),
+            )));
         }
         match &self.pool_mode {
             PoolMode::Pool { sender, .. } if sender.is_full() => Poll::Ready(Err(
