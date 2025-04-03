@@ -91,7 +91,7 @@ With router v1.61.0+  and v2.x+, if you have enabled exposing query plans via `-
 - `true`: Returns a human-readable string and JSON blob of the query plan while still executing the query to fetch data.
 - `dry-run`: Generates the query plan and aborts without executing the query.
 
-After using `dry-run`, query plans are saved to your configured cache locations, making it useful for pre-warming internal or external caches. Using real, mirrored, or similar to production operations is a great way to warmup the caches before transitioning traffic to new router instances.
+After using `dry-run`, query plans are saved to your configured cache locations. Using real, mirrored, or similar to production operations is a great way to warmup the caches before transitioning traffic to new router instances.
 
 ## Caching automatic persisted queries (APQ)
 
