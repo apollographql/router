@@ -71,7 +71,6 @@ pub(crate) fn upgrade_configuration(
     upgrade_mode: UpgradeMode,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
     const CURRENT_MAJOR_VERSION: &str = env!("CARGO_PKG_VERSION_MAJOR");
-    dbg!(CURRENT_MAJOR_VERSION);
     // Transformers are loaded from a file and applied in order
     let mut migrations: Vec<Migration> = Vec::new();
     let files = Asset::iter().sorted().filter(|f| {
