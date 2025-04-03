@@ -4,7 +4,8 @@ use strum_macros::Display;
 
 /// Items with higher priority value get handled sooner
 #[allow(unused)]
-#[derive(Copy, Clone, Display)]
+#[derive(Copy, Clone, Display, Debug, Eq, PartialEq)]
+#[repr(u8)]
 pub(crate) enum Priority {
     P1 = 1,
     P2,
@@ -17,7 +18,21 @@ pub(crate) enum Priority {
 }
 
 impl Priority {
-    fn from_index(index: usize) -> Priority {}
+    const fn from_index(index: usize) -> Priority {
+        match index {
+            0 => Priority::P8,
+            1 => Priority::P7,
+            2 => Priority::P6,
+            3 => Priority::P5,
+            4 => Priority::P4,
+            5 => Priority::P3,
+            6 => Priority::P2,
+            7 => Priority::P1,
+            _ => {
+                panic!("invalid index")
+            }
+        }
+    }
 }
 
 const INNER_QUEUES_COUNT: usize = Priority::P8 as usize - Priority::P1 as usize + 1;
@@ -26,11 +41,6 @@ const INNER_QUEUES_COUNT: usize = Priority::P8 as usize - Priority::P1 as usize 
 const fn index_from_priority(priority: Priority) -> usize {
     Priority::P8 as usize - priority as usize
 }
-
-const _: () = {
-    assert!(index_from_priority(Priority::P1) == 7);
-    assert!(index_from_priority(Priority::P8) == 0);
-};
 
 pub(crate) struct AgeingPriorityQueue<T>
 where
@@ -150,4 +160,12 @@ fn test_priorities() {
     assert_eq!(receiver.blocking_recv().0, "p2 again");
     assert_eq!(receiver.blocking_recv().0, "p1");
     assert_eq!(queue.queued_count(), 0);
+}
+
+#[test]
+fn test_priority_conversions() {
+    assert!(index_from_priority(Priority::P1) == 7);
+    assert!(index_from_priority(Priority::P8) == 0);
+    assert!(Priority::from_index(7) == Priority::P1);
+    assert!(Priority::from_index(0) == Priority::P8);
 }

@@ -13,7 +13,9 @@ use tracing_futures::Instrument;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
-use crate::plugins::telemetry::consts::WORKER_POOL_SPAN_NAME;
+use crate::plugins::telemetry::consts::{
+    OTEL_STATUS_CODE_ERROR, OTEL_STATUS_CODE_OK, WORKER_POOL_SPAN_NAME,
+};
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
@@ -71,7 +73,7 @@ fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
 
                 let mut receiver = queue.receiver();
                 loop {
-                    let (job, priority) = receiver.blocking_recv();
+                    let (job, final_priority) = receiver.blocking_recv();
                     let queue_duration = job.queue_start.elapsed();
                     f64_histogram!(
                         "apollo.router.compute_jobs.queue.wait.duration",
@@ -82,6 +84,9 @@ fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
                     );
                     let job_start = std::time::Instant::now();
                     let _guard = job.parent_span.enter();
+                    job.parent_span
+                        .record("job.priority.final", &final_priority.to_string());
+
                     (job.job)();
                     let job_duration = job_start.elapsed();
                     f64_histogram!(
@@ -116,7 +121,9 @@ where
     let worker_pool_span = tracing::info_span!(
         WORKER_POOL_SPAN_NAME,
         "otel.kind" = "INTERNAL",
-        "job.priority" = priority.to_string(),
+        "job.type" = compute_job_type.to_string(),
+        "job.priority.initial" = priority.to_string(),
+        "job.priority.final" = field::Empty,
         "job.outcome" = field::Empty
     );
     let (tx, rx) = oneshot::channel();
@@ -133,20 +140,20 @@ where
     };
     queue().send(priority, job);
     async move {
-        let result = rx
-            .instrument(worker_pool_span)
-            .await
-            .expect("channel disconnected");
-        job_watcher.outcome = Outcome::Executed;
-
-        // TODO update the span...
+        let result = rx.await.expect("channel disconnected");
+        job_watcher.outcome = match &result {
+            Ok(_) => Outcome::Executed,
+            Err(_) => Outcome::ExecutedError,
+        };
         result
     }
+    .instrument(worker_pool_span)
 }
 
 #[derive(Display)]
 enum Outcome {
     Executed,
+    ExecutedError,
     Abandoned,
 }
 
@@ -158,17 +165,26 @@ struct JobWatcher {
 
 impl Drop for JobWatcher {
     fn drop(&mut self) {
-        tracing::Span::current().record("job.outcome", &self.outcome.to_string());
+        let current_span = tracing::Span::current();
+        current_span.record("job.outcome", &self.outcome.to_string());
+
+        let otel_status = match self.outcome {
+            Outcome::Executed => OTEL_STATUS_CODE_OK,
+            Outcome::Abandoned | Outcome::ExecutedError => OTEL_STATUS_CODE_ERROR,
+        };
+
+        current_span.record("otel.status_code", &otel_status);
+
         let compute_job_type = self.compute_job_type.to_string();
         let outcome = self.outcome.to_string();
         let priority = self.compute_job_type.to_string();
-        u64_counter!(
+        let queue_duration = self.queue_start.elapsed();
+        f64_histogram!(
             "apollo.router.compute_jobs.queue.jobs",
             "Information about the jobs",
-            1,
+            queue_duration.as_millis() as f64 / 1000.0f64,
             "job.type" = compute_job_type,
             "job.priority" = priority,
-            //"job.priority.final" = priority, // TODO the final priority if the job was executed
             "job.outcome" = outcome
         );
     }
