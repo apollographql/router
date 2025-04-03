@@ -738,17 +738,11 @@ where
     /// [OpenTelemetry `Span`]: opentelemetry::trace::Span
     /// [tracing `Span`]: tracing::Span
     fn on_new_span(&self, attrs: &Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-<<<<<<< HEAD
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
+        // NB: order matters here! `parent_context` will temporarily lock `extensions` and we
+        // need to make sure that there isn't a lock already in place.
         let parent_cx = self.parent_context(attrs, &ctx);
-=======
-        if let Some(span) = ctx.span(id) {
-            // NB: order matters here! `parent_context` will temporarily lock `extensions` and we
-            // need to make sure that there isn't a lock already in place.
-            let parent_cx = self.parent_context(attrs, &ctx);
-            let mut extensions = span.extensions_mut();
->>>>>>> a949a083 (Tracing deadlock investigation (#7142))
+        let mut extensions = span.extensions_mut();
 
         // Record new trace id if there is no active parent span
         let trace_id = if parent_cx.span().span_context().trace_id()
@@ -834,37 +828,16 @@ where
             return;
         }
 
-<<<<<<< HEAD
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
 
+        let mut extensions = span.extensions_mut();
         if let Some(timings) = extensions.get_mut::<Timings>() {
             let now = Instant::now();
             timings.idle += (now - timings.last).as_nanos() as i64;
             timings.last = now;
-=======
-        if let Some(span) = ctx.span(id) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
-            let mut extensions = span.extensions_mut();
-            if let Some(timings) = extensions.get_mut::<Timings>() {
-                let now = Instant::now();
-                timings.idle += (now - timings.last).as_nanos() as i64;
-                timings.last = now;
-            }
-        } else {
-            tracing::error!("Span not found, this is a bug");
->>>>>>> a949a083 (Tracing deadlock investigation (#7142))
         }
     }
 
@@ -873,37 +846,16 @@ where
             return;
         }
 
-<<<<<<< HEAD
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
 
+        let mut extensions = span.extensions_mut();
         if let Some(timings) = extensions.get_mut::<Timings>() {
             let now = Instant::now();
             timings.busy += (now - timings.last).as_nanos() as i64;
             timings.last = now;
-=======
-        if let Some(span) = ctx.span(id) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
-            let mut extensions = span.extensions_mut();
-            if let Some(timings) = extensions.get_mut::<Timings>() {
-                let now = Instant::now();
-                timings.busy += (now - timings.last).as_nanos() as i64;
-                timings.last = now;
-            }
-        } else {
-            tracing::error!("Span not found, this is a bug");
->>>>>>> a949a083 (Tracing deadlock investigation (#7142))
         }
     }
 
@@ -911,110 +863,55 @@ where
     ///
     /// [`attributes`]: opentelemetry::trace::SpanBuilder::attributes
     fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-<<<<<<< HEAD
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
+
+        let mut extensions = span.extensions_mut();
 
         if let Some(data) = extensions.get_mut::<OtelData>() {
             values.record(&mut SpanAttributeVisitor {
                 span_builder: &mut data.builder,
                 exception_config: self.exception_config,
             });
-=======
-        if let Some(span) = ctx.span(id) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
-            let mut extensions = span.extensions_mut();
-            if let Some(data) = extensions.get_mut::<OtelData>() {
-                values.record(&mut SpanAttributeVisitor {
-                    span_builder: &mut data.builder,
-                    exception_config: self.exception_config,
-                });
-            }
-        } else {
-            tracing::error!("Span not found, this is a bug");
->>>>>>> a949a083 (Tracing deadlock investigation (#7142))
         }
     }
 
     fn on_follows_from(&self, id: &Id, follows: &Id, ctx: Context<S>) {
-<<<<<<< HEAD
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
-
-        let data = extensions
-            .get_mut::<OtelData>()
-            .expect("Missing otel data span extensions");
 
         let follows_span = ctx
             .span(follows)
             .expect("Span to follow not found, this is a bug");
-        let mut follows_extensions = follows_span.extensions_mut();
-        let follows_data = follows_extensions
-            .get_mut::<OtelData>()
-            .expect("Missing otel data span extensions");
 
-        let follows_context = self
-            .tracer
-            .sampled_context(follows_data)
-            .span()
-            .span_context()
-            .clone();
-        let follows_link = otel::Link::new(follows_context, Vec::new());
-        if let Some(ref mut links) = data.builder.links {
-            links.push(follows_link);
-=======
-        if let (Some(span), Some(follows_span)) = (ctx.span(id), ctx.span(follows)) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
-            // NB: inside block so that `follows_span.extensions_mut()` will be dropped before
-            // `span.extensions_mut()` is called later.
-            let follows_link = {
-                let mut follows_extensions = follows_span.extensions_mut();
-                let follows_data = follows_extensions
-                    .get_mut::<OtelData>()
-                    .expect("Missing otel data span extensions");
-
-                let follows_context = self
-                    .tracer
-                    .sampled_context(follows_data)
-                    .span()
-                    .span_context()
-                    .clone();
-                otel::Link::new(follows_context, Vec::new(), 0)
-            };
-
-            let mut extensions = span.extensions_mut();
-            let data = extensions
+        // NB: inside block so that `follows_span.extensions_mut()` will be dropped before
+        // `span.extensions_mut()` is called later.
+        let follows_link = {
+            let mut follows_extensions = follows_span.extensions_mut();
+            let follows_data = follows_extensions
                 .get_mut::<OtelData>()
                 .expect("Missing otel data span extensions");
 
-            if let Some(ref mut links) = data.builder.links {
-                links.push(follows_link);
-            } else {
-                data.builder.links = Some(vec![follows_link]);
-            }
->>>>>>> a949a083 (Tracing deadlock investigation (#7142))
+            let follows_context = self
+                .tracer
+                .sampled_context(follows_data)
+                .span()
+                .span_context()
+                .clone();
+            otel::Link::new(follows_context, Vec::new())
+        };
+
+        let mut extensions = span.extensions_mut();
+        let data = extensions
+            .get_mut::<OtelData>()
+            .expect("Missing otel data span extensions");
+
+        if let Some(ref mut links) = data.builder.links {
+            links.push(follows_link);
         } else {
             data.builder.links = Some(vec![follows_link]);
         }
@@ -1120,18 +1017,12 @@ where
     ///
     /// [`Span`]: opentelemetry::trace::Span
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-<<<<<<< HEAD
         let span = ctx.span(&id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if extensions
-            .get_mut::<SampledSpan>()
-            .map(|s| matches!(s, SampledSpan::NotSampled(_, _)))
-            .unwrap_or(true)
-        {
-            // It's not sampled
+        if !Self::sampled(&span) {
             return;
         }
 
+        let mut extensions = span.extensions_mut();
         if let Some(OtelData {
             mut builder,
             parent_cx,
@@ -1145,28 +1036,6 @@ where
                 if let Some(timings) = extensions.get_mut::<Timings>() {
                     let busy_ns = Key::new("busy_ns");
                     let idle_ns = Key::new("idle_ns");
-=======
-        if let Some(span) = ctx.span(&id) {
-            if !Self::sampled(&span) {
-                return;
-            }
-
-            let mut extensions = span.extensions_mut();
-            if let Some(OtelData {
-                mut builder,
-                parent_cx,
-                forced_status,
-                forced_span_name,
-                ..
-            }) = extensions.remove::<OtelData>()
-            {
-                if self.tracked_inactivity {
-                    // Append busy/idle timings when enabled.
-                    if let Some(timings) = extensions.get_mut::<Timings>() {
-                        let busy_ns = Key::new("busy_ns");
-                        let idle_ns = Key::new("idle_ns");
->>>>>>> a949a083 (Tracing deadlock investigation (#7142))
-
                     let attributes = builder
                         .attributes
                         .get_or_insert_with(|| OrderMap::with_capacity(3));
