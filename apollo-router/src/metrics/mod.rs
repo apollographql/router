@@ -26,7 +26,6 @@ use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::query_planner::stats_report_key_hash;
 use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
 use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
 use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
@@ -1299,24 +1298,25 @@ pub(crate) fn count_operation_errors(
 
     // Try to get operation ID from the stats report key if it's not in context (e.g. on parse/validation error)
     if operation_id.is_empty() {
-        let maybe_stats_report_key = context.extensions().with_lock(|lock| {
-            lock.get::<Arc<UsageReporting>>()
-                .map(|u| u.stats_report_key.clone())
+        let maybe_usage_reporting = context.extensions().with_lock(|lock| {
+            lock.get::<Arc<UsageReporting>>().cloned()
         });
-        if let Some(stats_report_key) = maybe_stats_report_key {
-            operation_id = stats_report_key_hash(stats_report_key.as_str());
+        if let Some(usage_reporting) = maybe_usage_reporting {
+            operation_id = usage_reporting.generate_operation_id();
 
             // If the operation name is empty, it's possible it's an error and we can populate the name by skipping the
             // first character of the stats report key ("#") and the last newline character. E.g.
             // "## GraphQLParseFailure\n" will turn into "# GraphQLParseFailure".
-            if operation_name.is_empty() {
-                operation_name = match stats_report_key.as_str() {
+            // TODO NJM move this logic into UsageReporting
+            if operation_name.is_empty() && usage_reporting.error_key.is_some() {
+                let error_key = usage_reporting.error_key.clone().expect("infallible");
+                operation_name = match error_key.as_str() {
                     GRAPHQL_PARSE_FAILURE_ERROR_KEY
                     | GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
-                    | GRAPHQL_VALIDATION_FAILURE_ERROR_KEY => stats_report_key
+                    | GRAPHQL_VALIDATION_FAILURE_ERROR_KEY => error_key
                         .chars()
                         .skip(1)
-                        .take(stats_report_key.len() - 2)
+                        .take(error_key.len() - 2)
                         .collect(),
                     _ => "".to_string(),
                 }

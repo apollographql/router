@@ -1,7 +1,6 @@
 //! Implements GraphQL parsing/validation/usage counting of requests at the supergraph service
 //! stage.
 
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
@@ -245,10 +244,9 @@ impl QueryAnalysisLayer {
             }
             Err(MaybeBackPressureError::PermanentError(errors)) => {
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(Arc::new(UsageReporting {
-                        stats_report_key: errors.get_error_key().to_string(),
-                        referenced_fields_by_type: HashMap::new(),
-                    }))
+                    lock.insert(Arc::new(UsageReporting::for_error(
+                        errors.get_error_key().to_string(),
+                    )))
                 });
                 let errors = match errors.into_graphql_errors() {
                     Ok(v) => v,
@@ -268,10 +266,9 @@ impl QueryAnalysisLayer {
             }
             Err(MaybeBackPressureError::TemporaryError(error)) => {
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(Arc::new(UsageReporting {
-                        stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
-                        referenced_fields_by_type: HashMap::new(),
-                    }))
+                    lock.insert(Arc::new(UsageReporting::for_error(
+                        GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
+                    )))
                 });
                 Err(SupergraphResponse::builder()
                     .error(error.to_graphql_error())

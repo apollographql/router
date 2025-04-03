@@ -1,5 +1,4 @@
 //! Router errors.
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -434,10 +433,9 @@ impl IntoGraphQLErrors for QueryPlannerError {
 impl QueryPlannerError {
     pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
         match self {
-            QueryPlannerError::SpecError(e) => Some(UsageReporting {
-                stats_report_key: e.get_error_key().to_string(),
-                referenced_fields_by_type: HashMap::new(),
-            }),
+            QueryPlannerError::SpecError(e) => {
+                Some(UsageReporting::for_error(e.get_error_key().to_string()))
+            }
             _ => None,
         }
     }

@@ -526,9 +526,10 @@ impl PluginPrivate for Telemetry {
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
                                     .map(|u| {
-                                        u.stats_report_key == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
-                                            || u.stats_report_key == GRAPHQL_PARSE_FAILURE_ERROR_KEY
-                                            || u.stats_report_key
+                                        // TODO NJM fix this - add function to say if it's one of these (a non-billable error)
+                                        u.generate_stats_report_key() == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
+                                            || u.generate_stats_report_key() == GRAPHQL_PARSE_FAILURE_ERROR_KEY
+                                            || u.generate_stats_report_key()
                                                 == GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
                                     })
                                     .unwrap_or(false)
@@ -607,9 +608,10 @@ impl PluginPrivate for Telemetry {
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
                     // Record the operation signature on the router span
+                    // NJM TODO fix this
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.stats_report_key.as_str(),
+                        usage_reporting.generate_operation_signature().as_str(),
                     );
                 }
                 // To expose trace_id or not
@@ -1358,8 +1360,9 @@ impl Telemetry {
             .extensions()
             .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
         {
+            // TODO NJM move this logic into UsageReporting?
             let licensed_operation_count =
-                licensed_operation_count(&usage_reporting.stats_report_key);
+                licensed_operation_count(&usage_reporting.generate_stats_report_key());
             let persisted_query_hit = context
                 .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
@@ -1428,7 +1431,7 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting.stats_report_key.to_string(),
+                        usage_reporting.generate_stats_report_key().to_string(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {

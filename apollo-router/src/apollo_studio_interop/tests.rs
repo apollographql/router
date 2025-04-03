@@ -5,7 +5,7 @@ use super::*;
 use crate::Configuration;
 
 fn assert_expected_signature(actual: &UsageReporting, expected_sig: &str) {
-    assert_eq!(actual.stats_report_key, expected_sig);
+    assert_eq!(actual.generate_operation_signature(), expected_sig);
 }
 
 macro_rules! assert_extended_references {
@@ -299,4 +299,38 @@ async fn test_enums_from_response_fragments() {
 
     let generated = enums_from_response(query_str, op_name, schema_str, response_str);
     assert_enums_from_response!(&generated);
+}
+
+#[test]
+fn apollo_operation_id_hash() {
+    let usage_reporting = UsageReporting {
+        operation_name: Some("IgnitionMeQuery".to_string()),
+        operation_signature: Some("query IgnitionMeQuery{me{id}}".to_string()),
+        error_key: None,
+        referenced_fields_by_type: HashMap::new(),
+    };
+
+    assert_eq!(
+        "d1554552698157b05c2a462827fb4367a4548ee5",
+        usage_reporting.generate_operation_id()
+    );
+}
+
+// The Apollo operation ID hash for these errors is based on a slightly different string. E.g. instead of hashing
+// "## GraphQLValidationFailure\n" we should hash "# # GraphQLValidationFailure".
+#[test]
+fn apollo_error_operation_id_hash() {
+    assert_eq!(
+        "ea4f152696abedca148b016d72df48842b713697",
+        UsageReporting::for_error("## GraphQLValidationFailure\n".into()).generate_operation_id()
+    );
+    assert_eq!(
+        "3f410834f13153f401ffe73f7e454aa500d10bf7",
+        UsageReporting::for_error("## GraphQLParseFailure\n".into()).generate_operation_id()
+    );
+    assert_eq!(
+        "7486043da2085fed407d942508a572ef88dc8120",
+        UsageReporting::for_error("## GraphQLUnknownOperationName\n".into())
+            .generate_operation_id()
+    );
 }

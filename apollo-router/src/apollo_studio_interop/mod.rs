@@ -1,4 +1,5 @@
 //! Generation of usage reporting fields
+use sha2::Digest;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -165,13 +166,67 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UsageReporting {
-    /// The `stats_report_key` is a unique identifier derived from schema and query.
-    /// Metric data  sent to Studio must be aggregated
-    /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
-    pub(crate) stats_report_key: String,
+    /// The operation name, or None if there is no operation name
+    pub(crate) operation_name: Option<String>,
+    /// The normalized operation signature, or None if there is no valid signature
+    pub(crate) operation_signature: Option<String>,
+    /// The error key to use for the stats report, or None if there is no error
+    pub(crate) error_key: Option<String>,
+    // NJM TODO add PQ ID
     /// a list of all types and fields referenced in the query
     #[serde(default)]
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+}
+
+impl UsageReporting {
+    pub(crate) fn for_error(error_key: String) -> UsageReporting {
+        UsageReporting {
+            // NJM TODO - move logic from get_error_key from SpecError to here? Maybe pass for_error an error instead of a string
+            // NJM TODO - move logic to add newline and empty query body here?
+            operation_name: None,
+            operation_signature: None,
+            error_key: Some(error_key),
+            referenced_fields_by_type: HashMap::new(),
+        }
+    }
+
+    // NJM TODO - generate these once instead of every time they're needed? at least for op sig and op id
+
+    /// The `stats_report_key` is a unique identifier derived from schema and query.
+    /// Metric data  sent to Studio must be aggregated
+    /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
+    pub(crate) fn generate_stats_report_key(&self) -> String {
+        if let Some(error_key) = &self.error_key {
+            return error_key.clone();
+        }
+
+        self.generate_operation_signature()
+    }
+
+    /// The Apollo operation signature is a string of the form "# <operation_name>\n<operation_signature>"
+    pub(crate) fn generate_operation_signature(&self) -> String {
+        let op_name = self.operation_name.as_deref().unwrap_or("-");
+        let op_sig = self.operation_signature.as_deref().unwrap_or("");
+
+        format!("# {}\n{}", op_name, op_sig)
+    }
+
+    pub(crate) fn generate_operation_id(&self) -> String {
+        // To match the logic of Apollo's error key handling, we need to change the "##"" prefix on errors to "# #".
+        // So for example, "## GraphQLParseFailure\n" changes to "# # GraphQLParseFailure\n"
+        // TODO NJM do this better
+        let op_sig = self.generate_operation_signature();
+        let modified_op_sig = if let Some(stripped) = op_sig.strip_prefix("##") {
+            format!("# #{}", stripped)
+        } else {
+            op_sig.to_string()
+        };
+
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(modified_op_sig.as_bytes());
+        let result = hasher.finalize();
+        hex::encode(result)
+    }
 }
 
 /// A list of fields that will be resolved for a given type
@@ -186,9 +241,10 @@ pub(crate) struct ReferencedFieldsForType {
     pub(crate) is_interface: bool,
 }
 
-/// Generate a UsageReporting containing the stats_report_key (a normalized version of the operation signature)
-/// and referenced fields of an operation. The document used to generate the signature and for the references can be
-/// different to handle cases where the operation has been filtered, but we want to keep the same signature.
+/// Generate a UsageReporting containing the data required to generate a stats_report_key (either a normalized version of
+/// the operation signature or an error key or a PQ ID) and referenced fields of an operation. The document used to
+/// generate the signature and for the references can be different to handle cases where the operation has been filtered,
+/// but we want to keep the same signature.
 pub(crate) fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
@@ -362,12 +418,22 @@ struct UsageGenerator<'a> {
 impl UsageGenerator<'_> {
     fn generate_usage_reporting(&mut self) -> UsageReporting {
         UsageReporting {
-            stats_report_key: self.generate_stats_report_key(),
+            operation_name: self.get_operation_name(),
+            operation_signature: self.generate_normalized_signature(),
+            error_key: None,
             referenced_fields_by_type: self.generate_apollo_reporting_refs(),
         }
     }
 
-    fn generate_stats_report_key(&mut self) -> String {
+    fn get_operation_name(&self) -> Option<String> {
+        self.signature_doc
+            .operations
+            .get(self.operation_name.as_deref())
+            .ok()
+            .and_then(|operation| operation.name.as_ref().map(|node| node.to_string()))
+    }
+
+    fn generate_normalized_signature(&mut self) -> Option<String> {
         self.fragments_map.clear();
 
         match self
@@ -376,10 +442,10 @@ impl UsageGenerator<'_> {
             .get(self.operation_name.as_deref())
             .ok()
         {
-            None => "".to_string(),
+            None => None,
             Some(operation) => {
                 self.extract_signature_fragments(&operation.selection_set);
-                self.format_operation_for_report(operation)
+                Some(self.format_operation_signature_for_report(operation))
             }
         }
     }
@@ -410,15 +476,10 @@ impl UsageGenerator<'_> {
         }
     }
 
-    fn format_operation_for_report(&self, operation: &Node<Operation>) -> String {
-        // The result in the name of the operation
-        let op_name = match &operation.name {
-            None => "-".into(),
-            Some(node) => node.to_string(),
-        };
-        let mut result = format!("# {}\n", op_name);
+    fn format_operation_signature_for_report(&self, operation: &Node<Operation>) -> String {
+        let mut result = String::new();
 
-        // Followed by a sorted list of fragments
+        // The signature starts with a sorted list of fragments
         let mut sorted_fragments: Vec<_> = self.fragments_map.iter().collect();
         sorted_fragments.sort_by_key(|&(k, _)| k);
 
