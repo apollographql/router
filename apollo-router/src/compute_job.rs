@@ -1,15 +1,17 @@
 use std::future::Future;
-use std::panic::AssertUnwindSafe;
+use std::panic::UnwindSafe;
 use std::sync::atomic::AtomicUsize;
 use std::sync::OnceLock;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
+use tracing_futures::Instrument;
 
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::consts::WORKER_POOL_SPAN_NAME;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
@@ -38,10 +40,14 @@ fn thread_pool_size() -> usize {
     configured_size
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+struct ComputeJob {
+    job: Box<dyn FnOnce() + Send + 'static>,
+    parent_span: tracing::Span,
+    queue_time: std::time::Instant,
+}
 
-fn queue() -> &'static AgeingPriorityQueue<Job> {
-    static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
+fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
+    static QUEUE: OnceLock<AgeingPriorityQueue<ComputeJob>> = OnceLock::new();
     QUEUE.get_or_init(|| {
         let pool_size = thread_pool_size();
         for _ in 0..pool_size {
@@ -55,7 +61,8 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 let mut receiver = queue.receiver();
                 loop {
                     let job = receiver.blocking_recv();
-                    job();
+                    let _guard = job.parent_span.enter();
+                    (job.job)();
                 }
             });
         }
@@ -69,17 +76,26 @@ pub(crate) fn execute<T, F>(
     job: F,
 ) -> impl Future<Output = std::thread::Result<T>>
 where
-    F: FnOnce() -> T + Send + 'static,
+    F: FnOnce() -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
 {
+    let worker_pool_span = tracing::info_span!(WORKER_POOL_SPAN_NAME, "otel.kind" = "INTERNAL");
     let (tx, rx) = oneshot::channel();
     let job = Box::new(move || {
         // Ignore the error if the oneshot receiver was dropped
-        let job = AssertUnwindSafe(job);
         let _ = tx.send(std::panic::catch_unwind(job));
     });
+    let job = ComputeJob {
+        job,
+        parent_span: worker_pool_span.clone(),
+        queue_time: std::time::Instant::now(),
+    };
     queue().send(priority, job);
-    async { rx.await.expect("channel disconnected") }
+    async {
+        rx.instrument(worker_pool_span)
+            .await
+            .expect("channel disconnected")
+    }
 }
 
 pub(crate) fn is_full() -> bool {

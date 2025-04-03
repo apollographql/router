@@ -87,18 +87,17 @@ impl QueryAnalysisLayer {
 
         // Must be created *outside* of the spawn_blocking or the span is not connected to the
         // parent
-        let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
         let priority = compute_job::Priority::P4; // Medium priority
         let job = move || {
-            span.in_scope(|| {
-                Query::parse_document(
-                    &query,
-                    operation_name.as_deref(),
-                    schema.as_ref(),
-                    conf.as_ref(),
-                )
-            })
+            let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
+            let _guard = span.enter();
+            Query::parse_document(
+                &query,
+                operation_name.as_deref(),
+                schema.as_ref(),
+                conf.as_ref(),
+            )
         };
         // TODO: is this correct?
         let job = std::panic::AssertUnwindSafe(job);

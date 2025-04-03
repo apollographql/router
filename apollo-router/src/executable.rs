@@ -23,7 +23,6 @@ use clap::Subcommand;
 use once_cell::sync::OnceCell;
 use regex::Captures;
 use regex::Regex;
-use tokio::runtime::Handle;
 use url::ParseError;
 use url::Url;
 
