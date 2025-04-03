@@ -309,6 +309,7 @@ fn request_params_to_requests(
             transport_request,
             key: response_key,
             mapping_problems,
+            supergraph_request: original_request.supergraph_request.clone(),
         });
     }
 
