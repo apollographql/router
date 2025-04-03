@@ -7,6 +7,7 @@ use serde_json_bytes::json;
 
 use crate::cache::storage::CacheStorage;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::graphql;
 use crate::plugins::telemetry::consts::QUERY_INTROSPECTION_SPAN_NAME;
 use crate::query_planner::QueryKey;
@@ -133,7 +134,7 @@ impl IntrospectionCache {
         let schema = schema.clone();
         let doc = doc.clone();
         let priority = compute_job::Priority::P1; // Low priority
-        let response = compute_job::execute(priority, move || {
+        let response = compute_job::execute(priority, ComputeJobType::Introspection, move || {
             let span = tracing::info_span!(QUERY_INTROSPECTION_SPAN_NAME, "otel.kind" = "INTERNAL");
             let _guard = span.enter();
             Self::execute_introspection(&schema, &doc)

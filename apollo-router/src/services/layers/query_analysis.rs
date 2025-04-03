@@ -17,6 +17,7 @@ use tokio::sync::Mutex;
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
@@ -101,7 +102,7 @@ impl QueryAnalysisLayer {
         };
         // TODO: is this correct?
         let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
+        compute_job::execute(priority, ComputeJobType::QueryParsing, job)
             .await
             .expect("Query::parse_document panicked")
     }

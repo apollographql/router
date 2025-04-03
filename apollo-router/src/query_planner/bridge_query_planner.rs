@@ -31,6 +31,7 @@ use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -256,44 +257,45 @@ impl PlannerMode {
                 let doc = doc.clone();
                 let rust_planner = rust_planner.clone();
                 let priority = compute_job::Priority::P8; // High priority
-                let (plan, mut root_node) = compute_job::execute(priority, move || {
-                    let internal_planning_span = tracing::info_span!(
-                        BRIDGE_QUERY_PLANNER_PLAN_SPAN_NAME,
-                        "otel.kind" = "INTERNAL"
-                    );
-                    // This span will indicate pure planning time.
-                    // The difference between this one and its parent is the time
-                    // spent waiting, or dealing with defer labels and the like.
-                    let _guard = internal_planning_span.enter();
-                    let start = Instant::now();
+                let (plan, mut root_node) =
+                    compute_job::execute(priority, ComputeJobType::QueryPlanning, move || {
+                        let internal_planning_span = tracing::info_span!(
+                            BRIDGE_QUERY_PLANNER_PLAN_SPAN_NAME,
+                            "otel.kind" = "INTERNAL"
+                        );
+                        // This span will indicate pure planning time.
+                        // The difference between this one and its parent is the time
+                        // spent waiting, or dealing with defer labels and the like.
+                        let _guard = internal_planning_span.enter();
+                        let start = Instant::now();
 
-                    let query_plan_options = QueryPlanOptions {
-                        override_conditions: plan_options.override_conditions,
-                    };
+                        let query_plan_options = QueryPlanOptions {
+                            override_conditions: plan_options.override_conditions,
+                        };
 
-                    let result = operation
-                        .as_deref()
-                        .map(|n| Name::new(n).map_err(FederationError::from))
-                        .transpose()
-                        .and_then(|operation| {
-                            rust_planner.build_query_plan(
-                                &doc.executable,
-                                operation,
-                                query_plan_options,
-                            )
+                        let result = operation
+                            .as_deref()
+                            .map(|n| Name::new(n).map_err(FederationError::from))
+                            .transpose()
+                            .and_then(|operation| {
+                                rust_planner.build_query_plan(
+                                    &doc.executable,
+                                    operation,
+                                    query_plan_options,
+                                )
+                            })
+                            .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+
+                        let elapsed = start.elapsed().as_secs_f64();
+                        metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
+
+                        result.map(|plan| {
+                            let root_node = convert_root_query_plan_node(&plan);
+                            (plan, root_node)
                         })
-                        .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
-
-                    let elapsed = start.elapsed().as_secs_f64();
-                    metric_query_planning_plan_duration(RUST_QP_MODE, elapsed);
-
-                    result.map(|plan| {
-                        let root_node = convert_root_query_plan_node(&plan);
-                        (plan, root_node)
                     })
-                })
-                .await
-                .expect("query planner panicked")?;
+                    .await
+                    .expect("query planner panicked")?;
                 if let Some(node) = &mut root_node {
                     init_query_plan_root_node(node)?;
                 }

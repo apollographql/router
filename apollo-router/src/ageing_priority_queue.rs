@@ -1,8 +1,10 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use strum_macros::Display;
 
 /// Items with higher priority value get handled sooner
 #[allow(unused)]
+#[derive(Copy, Clone, Display)]
 pub(crate) enum Priority {
     P1 = 1,
     P2,
@@ -12,6 +14,10 @@ pub(crate) enum Priority {
     P6,
     P7,
     P8,
+}
+
+impl Priority {
+    fn from_index(index: usize) -> Priority {}
 }
 
 const INNER_QUEUES_COUNT: usize = Priority::P8 as usize - Priority::P1 as usize + 1;
@@ -89,7 +95,7 @@ impl<'a, T> Receiver<'a, T>
 where
     T: Send + 'static,
 {
-    pub(crate) fn blocking_recv(&mut self) -> T {
+    pub(crate) fn blocking_recv(&mut self) -> (T, Priority) {
         loop {
             // Block until something is ready.
             // Ignore the returned index because it is "random" when multiple operations are ready.
@@ -99,7 +105,7 @@ where
                 if let Ok(message) = inner_receiver.try_recv() {
                     self.shared.queued_count.fetch_sub(1, Ordering::Relaxed);
                     self.age(index);
-                    return message;
+                    return (message, Priority::from_index(index));
                 }
             }
             // Another thread raced us to it or `ready()` returned spuriously, try again
@@ -139,9 +145,9 @@ fn test_priorities() {
     assert_eq!(queue.queued_count(), 4);
 
     let mut receiver = queue.receiver();
-    assert_eq!(receiver.blocking_recv(), "p3");
-    assert_eq!(receiver.blocking_recv(), "p2");
-    assert_eq!(receiver.blocking_recv(), "p2 again");
-    assert_eq!(receiver.blocking_recv(), "p1");
+    assert_eq!(receiver.blocking_recv().0, "p3");
+    assert_eq!(receiver.blocking_recv().0, "p2");
+    assert_eq!(receiver.blocking_recv().0, "p2 again");
+    assert_eq!(receiver.blocking_recv().0, "p1");
     assert_eq!(queue.queued_count(), 0);
 }

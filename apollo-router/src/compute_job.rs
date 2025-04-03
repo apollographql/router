@@ -5,7 +5,9 @@ use std::sync::OnceLock;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
+use strum_macros::Display;
 use tokio::sync::oneshot;
+use tracing::field;
 use tracing_futures::Instrument;
 
 use crate::ageing_priority_queue::AgeingPriorityQueue;
@@ -40,10 +42,19 @@ fn thread_pool_size() -> usize {
     configured_size
 }
 
+#[derive(Display, Copy, Clone)]
+pub(crate) enum ComputeJobType {
+    QueryParsing,
+    QueryPlanning,
+    Introspection,
+}
+
 struct ComputeJob {
+    ty: ComputeJobType,
+    priority: Priority,
     job: Box<dyn FnOnce() + Send + 'static>,
     parent_span: tracing::Span,
-    queue_time: std::time::Instant,
+    queue_start: std::time::Instant,
 }
 
 fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
@@ -60,9 +71,26 @@ fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
 
                 let mut receiver = queue.receiver();
                 loop {
-                    let job = receiver.blocking_recv();
+                    let (job, priority) = receiver.blocking_recv();
+                    let queue_duration = job.queue_start.elapsed();
+                    f64_histogram!(
+                        "apollo.router.compute_jobs.queue.wait.duration",
+                        "Number of seconds it took to queue the job",
+                        queue_duration.as_millis() as f64 / 1000.0f64,
+                        "job.type" = job.ty.to_string(),
+                        "job.priority" = job.priority.to_string()
+                    );
+                    let job_start = std::time::Instant::now();
                     let _guard = job.parent_span.enter();
                     (job.job)();
+                    let job_duration = job_start.elapsed();
+                    f64_histogram!(
+                        "apollo.router.compute_jobs.execution.duration",
+                        "Number of seconds it took to execute the job",
+                        job_duration.as_millis() as f64 / 1000.0f64,
+                        "job.type" = job.ty.to_string(),
+                        "job.priority" = job.priority.to_string()
+                    );
                 }
             });
         }
@@ -73,28 +101,76 @@ fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
     priority: Priority,
+    compute_job_type: ComputeJobType,
     job: F,
 ) -> impl Future<Output = std::thread::Result<T>>
 where
     F: FnOnce() -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
 {
-    let worker_pool_span = tracing::info_span!(WORKER_POOL_SPAN_NAME, "otel.kind" = "INTERNAL");
+    let mut job_watcher = JobWatcher {
+        queue_start: std::time::Instant::now(),
+        outcome: Outcome::Abandoned,
+        compute_job_type,
+    };
+    let worker_pool_span = tracing::info_span!(
+        WORKER_POOL_SPAN_NAME,
+        "otel.kind" = "INTERNAL",
+        "job.priority" = priority.to_string(),
+        "job.outcome" = field::Empty
+    );
     let (tx, rx) = oneshot::channel();
     let job = Box::new(move || {
         // Ignore the error if the oneshot receiver was dropped
         let _ = tx.send(std::panic::catch_unwind(job));
     });
     let job = ComputeJob {
+        ty: compute_job_type,
+        priority,
         job,
         parent_span: worker_pool_span.clone(),
-        queue_time: std::time::Instant::now(),
+        queue_start: std::time::Instant::now(),
     };
     queue().send(priority, job);
-    async {
-        rx.instrument(worker_pool_span)
+    async move {
+        let result = rx
+            .instrument(worker_pool_span)
             .await
-            .expect("channel disconnected")
+            .expect("channel disconnected");
+        job_watcher.outcome = Outcome::Executed;
+
+        // TODO update the span...
+        result
+    }
+}
+
+#[derive(Display)]
+enum Outcome {
+    Executed,
+    Abandoned,
+}
+
+struct JobWatcher {
+    queue_start: std::time::Instant,
+    outcome: Outcome,
+    compute_job_type: ComputeJobType,
+}
+
+impl Drop for JobWatcher {
+    fn drop(&mut self) {
+        tracing::Span::current().record("job.outcome", &self.outcome.to_string());
+        let compute_job_type = self.compute_job_type.to_string();
+        let outcome = self.outcome.to_string();
+        let priority = self.compute_job_type.to_string();
+        u64_counter!(
+            "apollo.router.compute_jobs.queue.jobs",
+            "Information about the jobs",
+            1,
+            "job.type" = compute_job_type,
+            "job.priority" = priority,
+            //"job.priority.final" = priority, // TODO the final priority if the job was executed
+            "job.outcome" = outcome
+        );
     }
 }
 
@@ -123,9 +199,11 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, || std::thread::current().id())
-            .await
-            .unwrap();
+        let job_thread = execute(Priority::P4, ComputeJobType::QueryParsing, || {
+            std::thread::current().id()
+        })
+        .await
+        .unwrap();
         assert_ne!(job_thread, test_thread)
     }
 
@@ -135,11 +213,11 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, || {
+        let one = execute(Priority::P8, ComputeJobType::QueryParsing, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         });
-        let two = execute(Priority::P8, || {
+        let two = execute(Priority::P8, ComputeJobType::QueryParsing, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         });
