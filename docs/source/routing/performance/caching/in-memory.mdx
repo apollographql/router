@@ -86,12 +86,13 @@ If the router is using distributed caching for query plans, the warm-up phase wi
 
 </MinVersion>
 
-With router v1.61.0+  and v2.x+, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
+With router v1.61.0+  and v2.x+, if you have enabled exposing query plans via `--dev` mode or `plugins.experimental.expose_query_plan: true`, you can pass the `Apollo-Expose-Query-Plan` header to return query plans in the GraphQL response extensions. You must set the header to one of the following values:
 
-- `true`: Returns a human-readable string and JSON blob of the query plan.
-- `dry-run`: Generates the query plan without executing the query.  After generation, query plans are saved to your configured cache locations, making it useful for pre-warming internal or external caches.
+- `true`: Returns a human-readable string and JSON blob of the query plan while still executing the query to fetch data.
+- `dry-run`: Generates the query plan and aborts without executing the query.
 
-This lets you warm up query plan caches with real, mirrored, or similar to production operations before transitioning traffic to new router instances.
+After using `dry-run`, query plans are saved to your configured cache locations, making it useful for pre-warming internal or external caches. Using real, mirrored, or similar to production operations is a great way to warmup the caches before transitioning traffic to new router instances.
+
 ## Caching automatic persisted queries (APQ)
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
