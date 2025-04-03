@@ -6,7 +6,7 @@ description: Reference of error codes and HTTP status codes returned by Apollo G
 
 Learn about error codes and HTTP response status codes returned by GraphOS Router and Apollo Router Core.
 
-## HTTP Status codes
+## HTTP status codes
 
 <PropertyList kind="errCodes">
 <Property name="400" short="Bad request">
@@ -71,7 +71,7 @@ You can create Rhai scripts that throw custom status codes. See [Terminating cli
 
 </Note>
 
-## GraphQL Error codes
+## GraphQL error codes
 
 GraphQL error codes can appear in client responses under `errors[].extensions.code`, which is an established convention found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format). Learn how to see these error codes in Studio via [extended error metrics](/graphos/routing/graphos-reporting#enabling-extended-error-reporting).
 
@@ -79,7 +79,7 @@ GraphQL error codes can appear in client responses under `errors[].extensions.co
 
 <Property name="CANNOT_SEND_PQ_ID_AND_BODY">
 
-The operation could not be executed because sending a persisted query ID and a
+The operation was not executed because sending a persisted query ID and a
 body in the same request is disallowed.
 
 </Property>
@@ -110,7 +110,7 @@ The response from a subgraph did not match the GraphQL schema.
 </Property>
 <Property name="GATEWAY_TIMEOUT">
 
-There request timed out when fetching data from a connector service.
+The request timed out when fetching data from a connector service.
 
 </Property>
 <Property name="GRAPHQL_VALIDATION_FAILED">
@@ -132,22 +132,22 @@ connector service.
 </Property>
 <Property name="MAX_ALIASES_LIMIT">
 
-The operation was not executed due to exceeding the max_aliases limit.
+The operation was not executed due to exceeding the `max_aliases` limit.
 
 </Property>
 <Property name="MAX_DEPTH_LIMIT">
 
-The operation was not executed due to exceeding the max_depth limit.
+The operation was not executed due to exceeding the `max_depth` limit.
 
 </Property>
 <Property name="MAX_HEIGHT_LIMIT">
 
-The operation was not executed due to exceeding the max_height limit.
+The operation was not executed due to exceeding the `max_height` limit.
 
 </Property>
 <Property name="MAX_ROOT_FIELDS_LIMIT">
 
-The operation was not executed due to exceeding the max_root_fields limit.
+The operation was not executed due to exceeding the `max_root_fields` limit.
 
 </Property>
 <Property name="QUERY_NOT_IN_SAFELIST">
@@ -169,7 +169,7 @@ There was an attempt to store this operation in the APQ cache, but the provided 
 </Property>
 <Property name="PERSISTED_QUERY_NOT_FOUND">
 
-The operation was not executed since it was not found in the automatic persisted query (APQ) cache.  
+The operation was not executed because it was not found in the automatic persisted query (APQ) cache.  
 This is an expected behavior when using the APQ protocol.
 
 </Property>
