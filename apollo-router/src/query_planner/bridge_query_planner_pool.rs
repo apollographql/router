@@ -292,7 +292,13 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // TODO: is this the issue?
         if crate::compute_job::is_full() {
+            u64_counter!(
+                "apollo.router.compute_jobs.queue_is_full",
+                "Number of requests rejected because the queue for compute jobs is full",
+                1u64
+            );
             return Poll::Pending;
         }
         match &self.pool_mode {

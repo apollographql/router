@@ -148,6 +148,7 @@ where
         result
     }
     .instrument(worker_pool_span)
+    .in_current_span()
 }
 
 #[derive(Display)]
