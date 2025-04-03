@@ -35,6 +35,7 @@ use crate::subgraph::spec::SERVICE_TYPE;
 
 mod database;
 pub mod spec;
+pub mod typestate; // TODO: Move here to overwrite Subgraph after API is reasonable
 
 pub struct Subgraph {
     pub name: String,

@@ -38,19 +38,19 @@ struct CoreFeature {
     purpose: Option<Purpose>,
 }
 #[allow(dead_code)]
-struct FederationBlueprint {
+pub(crate) struct FederationBlueprint {
     with_root_type_renaming: bool,
 }
 
 #[allow(dead_code)]
 impl FederationBlueprint {
-    fn new(with_root_type_renaming: bool) -> Self {
+    pub(crate) fn new(with_root_type_renaming: bool) -> Self {
         Self {
             with_root_type_renaming,
         }
     }
 
-    fn on_missing_directive_definition(
+    pub(crate) fn on_missing_directive_definition(
         schema: &mut FederationSchema,
         directive: &Directive,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
@@ -63,7 +63,7 @@ impl FederationBlueprint {
         }
     }
 
-    fn on_directive_definition_and_schema_parsed(
+    pub(crate) fn on_directive_definition_and_schema_parsed(
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
         let federation_spec = get_federation_spec_definition_from_subgraph(schema)?;
@@ -74,26 +74,29 @@ impl FederationBlueprint {
         Self::expand_known_features(schema)
     }
 
-    fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
+    pub(crate) fn ignore_parsed_field(_type: NamedType, _field_name: &str) -> bool {
         todo!()
     }
 
-    fn on_constructed(schema: &mut FederationSchema) -> Result<(), FederationError> {
+    pub(crate) fn on_constructed(schema: &mut FederationSchema) -> Result<(), FederationError> {
         if schema.subgraph_metadata.is_none() {
             schema.subgraph_metadata = compute_subgraph_metadata(schema)?.map(Box::new);
         }
         Ok(())
     }
 
-    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
+    pub(crate) fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
         todo!()
     }
 
-    fn on_invalidation(_: &Schema) {
+    pub(crate) fn on_invalidation(_: &Schema) {
         todo!()
     }
 
-    fn on_validation(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    pub(crate) fn on_validation(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
         let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
         if self.with_root_type_renaming {
             let mut operation_types_to_rename = HashMap::new();
