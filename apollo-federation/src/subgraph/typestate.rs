@@ -10,6 +10,7 @@ use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
+use crate::subgraph::SubgraphError;
 
 pub trait SubgraphState {}
 
@@ -24,12 +25,14 @@ pub struct Expanded {
 }
 impl SubgraphState for Expanded {}
 
+#[derive(Debug)]
 pub struct Validated {
     schema: ValidFederationSchema,
     metadata: SubgraphMetadata,
 }
 impl SubgraphState for Validated {}
 
+#[derive(Debug)]
 pub struct Subgraph<S: SubgraphState> {
     pub name: String,
     pub url: String,
@@ -46,7 +49,7 @@ impl Subgraph<Raw> {
     }
 
     pub fn parse(
-        name: &str,
+        name: &'static str,
         url: &str,
         schema_str: &str,
     ) -> Result<Subgraph<Raw>, FederationError> {
@@ -74,7 +77,7 @@ impl Subgraph<Raw> {
         })
     }
 
-    pub fn expand(self) -> Result<Subgraph<Expanded>, FederationError> {
+    pub fn expand_links(self) -> Result<Subgraph<Expanded>, FederationError> {
         let mut schema = FederationSchema::new_uninitialized(self.state.schema)?;
         // First, copy types over from the underlying schema AST to make sure we have built-ins that directives may reference
         schema.collect_shallow_references();
@@ -106,6 +109,9 @@ impl Subgraph<Raw> {
         // Also, the backfilled definitions mean we can collect deep references.
         schema.collect_deep_references()?;
 
+        // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
+        FederationBlueprint::on_constructed(&mut schema)?;
+
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -122,18 +128,23 @@ impl Subgraph<Raw> {
 }
 
 impl Subgraph<Expanded> {
-    pub fn upgrade(&mut self) -> Result<Self, FederationError> {
+    pub fn upgrade(&mut self) -> Result<Self, SubgraphError> {
         todo!("Implement upgrade logic for expanded subgraphs");
     }
 
-    pub fn validate(mut self) -> Result<Subgraph<Validated>, FederationError> {
-        let blueprint = FederationBlueprint::new(true); // TODO: Check if there are paths with this as false
-        blueprint.on_validation(&mut self.state.schema)?;
+    pub fn validate(
+        mut self,
+        rename_root_types: bool,
+    ) -> Result<Subgraph<Validated>, SubgraphError> {
+        let blueprint = FederationBlueprint::new(rename_root_types);
+        blueprint
+            .on_validation(&mut self.state.schema)
+            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
         let schema = self
             .state
             .schema
             .validate_or_return_self()
-            .map_err(|t| t.1)?;
+            .map_err(|t| SubgraphError::new(self.name.clone(), t.1))?;
 
         Ok(Subgraph {
             name: self.name,
@@ -147,7 +158,7 @@ impl Subgraph<Expanded> {
 }
 
 impl Subgraph<Validated> {
-    pub fn invalidate(self) -> Result<Subgraph<Expanded>, FederationError> {
+    pub fn invalidate(self) -> Result<Subgraph<Expanded>, SubgraphError> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
@@ -157,5 +168,470 @@ impl Subgraph<Validated> {
                 metadata: self.state.metadata,
             },
         })
+    }
+}
+
+#[cfg(test)]
+mod expand_tests {
+    use apollo_compiler::name;
+
+    use super::*;
+
+    #[test]
+    fn detects_federation_1_subgraphs_correctly() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        assert!(!subgraph.state.metadata.is_fed_2_schema());
+    }
+
+    #[test]
+    fn detects_federation_2_subgraphs_correctly() {
+        let schema = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        assert!(schema.state.metadata.is_fed_2_schema());
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_1_0() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_directive_names = subgraph
+            .state
+            .schema
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("core"),
+                name!("deprecated"),
+                name!("extends"),
+                name!("external"),
+                name!("include"),
+                name!("key"),
+                name!("provides"),
+                name!("requires"),
+                name!("skip"),
+                name!("specifiedBy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_2_0() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.0")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_directive_names = subgraph
+            .state
+            .schema
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
+                name!("include"),
+                name!("link"),
+                name!("skip"),
+                name!("specifiedBy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn injects_missing_directive_definitions_fed_2_1() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                extend schema @link(url: "https://specs.apollo.dev/federation/v2.1")
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let mut defined_directive_names = subgraph
+            .state
+            .schema
+            .schema()
+            .directive_definitions
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        defined_directive_names.sort();
+
+        assert_eq!(
+            defined_directive_names,
+            vec![
+                name!("deprecated"),
+                name!("federation__composeDirective"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
+                name!("include"),
+                name!("link"),
+                name!("skip"),
+                name!("specifiedBy"),
+            ]
+        );
+    }
+
+    #[test]
+    fn replaces_known_bad_definitions_from_fed1() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+                directive @key(fields: String) repeatable on OBJECT | INTERFACE
+                directive @provides(fields: _FieldSet) repeatable on FIELD_DEFINITION
+                directive @requires(fields: FieldSet) repeatable on FIELD_DEFINITION
+
+                scalar _FieldSet
+                scalar FieldSet
+
+                type Query {
+                    s: String
+                }"#,
+        )
+        .expect("valid schema")
+        .expand_links()
+        .expect("expands subgraph");
+
+        let key_definition = subgraph
+            .state
+            .schema
+            .schema()
+            .directive_definitions
+            .get(&name!("key"))
+            .unwrap();
+        assert_eq!(key_definition.arguments.len(), 2);
+        assert_eq!(
+            key_definition
+                .argument_by_name(&name!("fields"))
+                .unwrap()
+                .ty
+                .inner_named_type(),
+            "_FieldSet"
+        );
+        assert!(
+            key_definition
+                .argument_by_name(&name!("resolvable"))
+                .is_some()
+        );
+
+        let provides_definition = subgraph
+            .state
+            .schema
+            .schema()
+            .directive_definitions
+            .get(&name!("provides"))
+            .unwrap();
+        assert_eq!(provides_definition.arguments.len(), 1);
+        assert_eq!(
+            provides_definition
+                .argument_by_name(&name!("fields"))
+                .unwrap()
+                .ty
+                .inner_named_type(),
+            "_FieldSet"
+        );
+
+        let requires_definition = subgraph
+            .state
+            .schema
+            .schema()
+            .directive_definitions
+            .get(&name!("requires"))
+            .unwrap();
+        assert_eq!(requires_definition.arguments.len(), 1);
+        assert_eq!(
+            requires_definition
+                .argument_by_name(&name!("fields"))
+                .unwrap()
+                .ty
+                .inner_named_type(),
+            "_FieldSet"
+        );
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use apollo_compiler::ast::OperationType;
+
+    use super::*;
+
+    #[test]
+    fn rejects_non_root_use_of_default_query_name() {
+        let error = Subgraph::parse(
+            "S",
+            "",
+            r#"
+            schema {
+                query: MyQuery
+            }
+
+            type MyQuery {
+                f: Int
+            }
+
+            type Query {
+                g: Int
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands links")
+        .validate(true)
+        .expect_err("fails validation");
+
+        assert_eq!(
+            error.to_string(),
+            r#"[S] The schema has a type named "Query" but it is not set as the query root type ("MyQuery" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#
+        );
+    }
+
+    #[test]
+    fn rejects_non_root_use_of_default_mutation_name() {
+        let error = Subgraph::parse(
+            "S",
+            "",
+            r#"
+            schema {
+                mutation: MyMutation
+            }
+
+            type MyMutation {
+                f: Int
+            }
+
+            type Mutation {
+                g: Int
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands links")
+        .validate(true)
+        .expect_err("fails validation");
+
+        assert_eq!(
+            error.to_string(),
+            r#"[S] The schema has a type named "Mutation" but it is not set as the mutation root type ("MyMutation" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+        );
+    }
+
+    #[test]
+    fn rejects_non_root_use_of_default_subscription_name() {
+        let error = Subgraph::parse(
+            "S",
+            "",
+            r#"
+            schema {
+                subscription: MySubscription
+            }
+
+            type MySubscription {
+                f: Int
+            }
+
+            type Subscription {
+                g: Int
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands links")
+        .validate(true)
+        .expect_err("fails validation");
+
+        assert_eq!(
+            error.to_string(),
+            r#"[S] The schema has a type named "Subscription" but it is not set as the subscription root type ("MySubscription" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+        );
+    }
+
+    #[test]
+    fn renames_root_operations_to_default_names() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+                subscription: MySubscription
+            }
+
+            type MyQuery {
+                f: Int
+            }
+
+            type MyMutation {
+                g: Int
+            }
+
+            type MySubscription {
+                h: Int
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands links")
+        .validate(true)
+        .expect("is valid");
+
+        assert_eq!(
+            subgraph
+                .state
+                .schema
+                .schema()
+                .root_operation(OperationType::Query),
+            Some(name!("Query")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .state
+                .schema
+                .schema()
+                .root_operation(OperationType::Mutation),
+            Some(name!("Mutation")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .state
+                .schema
+                .schema()
+                .root_operation(OperationType::Subscription),
+            Some(name!("Subscription")).as_ref()
+        );
+    }
+
+    #[test]
+    fn does_not_rename_root_operations_when_disabled() {
+        let subgraph = Subgraph::parse(
+            "S",
+            "",
+            r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+                subscription: MySubscription
+            }
+    
+            type MyQuery {
+                f: Int
+            }
+    
+            type MyMutation {
+                g: Int
+            }
+    
+            type MySubscription {
+                h: Int
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands links")
+        .validate(false)
+        .expect("is valid");
+
+        assert_eq!(
+            subgraph
+                .state
+                .schema
+                .schema()
+                .root_operation(OperationType::Query),
+            Some(name!("MyQuery")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .state
+                .schema
+                .schema()
+                .root_operation(OperationType::Mutation),
+            Some(name!("MyMutation")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .state
+                .schema
+                .schema()
+                .root_operation(OperationType::Subscription),
+            Some(name!("MySubscription")).as_ref()
+        );
     }
 }

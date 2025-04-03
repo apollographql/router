@@ -85,7 +85,7 @@ impl FederationBlueprint {
         Ok(())
     }
 
-    pub(crate) fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
+    fn on_added_core_feature(_schema: &mut Schema, _feature: &CoreFeature) {
         todo!()
     }
 
@@ -637,16 +637,11 @@ mod tests {
         with_root_type_renaming: bool,
     ) -> Result<ValidFederationSchema, SubgraphError> {
         let blueprint = FederationBlueprint::new(with_root_type_renaming);
-        let subgraph = build_schema(source, &blueprint).map_err(|error| SubgraphError {
-            subgraph: Name::new_unchecked(name),
-            error,
-        })?;
+        let subgraph =
+            build_schema(source, &blueprint).map_err(|error| SubgraphError::new(name, error))?;
         subgraph
             .validate_or_return_self()
-            .map_err(|(_, error)| SubgraphError {
-                subgraph: Name::new_unchecked(name),
-                error,
-            })
+            .map_err(|(_, error)| SubgraphError::new(name, error))
     }
 
     fn build_schema(
