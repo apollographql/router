@@ -52,6 +52,7 @@ pub(super) enum ArrowMethod {
     Not,
     Or,
     And,
+    Format,
 }
 
 #[macro_export]
@@ -164,6 +165,7 @@ impl std::ops::Deref for ArrowMethod {
             Self::Not => &future::NotMethod,
             Self::Or => &future::OrMethod,
             Self::And => &future::AndMethod,
+            Self::Format => &future::FormatMethod,
         }
     }
 }
@@ -201,6 +203,7 @@ impl ArrowMethod {
             "or" => Some(Self::Or),
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
+            "format" => Some(Self::Format),
             _ => None,
         };
 
