@@ -14,6 +14,7 @@ pub use apply_to::*;
 // unused lint warning. If pretty code is needed in not test code, feel free to
 // remove the `#[cfg(test)]`.
 pub(crate) use location::Ranged;
+pub(crate) use methods::URL_SAFE;
 pub use parser::*;
 #[cfg(test)]
 pub(crate) use pretty::*;

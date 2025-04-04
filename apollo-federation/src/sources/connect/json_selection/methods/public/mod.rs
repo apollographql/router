@@ -19,3 +19,6 @@ mod slice;
 pub(crate) use slice::SliceMethod;
 mod join;
 pub(crate) use join::JoinMethod;
+mod url_safe;
+pub(crate) use url_safe::URL_SAFE;
+pub(crate) use url_safe::UrlSafeMethod;

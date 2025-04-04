@@ -6,17 +6,31 @@ use http::HeaderName;
 use itertools::Itertools;
 use percent_encoding::AsciiSet;
 use percent_encoding::CONTROLS;
+use percent_encoding::percent_encode;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use url::Url;
+use url::form_urlencoded::byte_serialize;
 
 use super::HeaderSource;
 use crate::error::FederationError;
 use crate::sources::connect::ApplyToError;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
+use crate::sources::connect::json_selection::URL_SAFE;
 use crate::sources::connect::spec::ConnectHTTPArguments;
 use crate::sources::connect::spec::SourceHTTPArguments;
+
+/// https://url.spec.whatwg.org/#fragment-percent-encode-set
+const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+
+/// https://url.spec.whatwg.org/#path-percent-encode-set
+const PATH: &AsciiSet = &FRAGMENT.add(b'#').add(b'?').add(b'{').add(b'}');
+
+const PATH_SEGMENT: &AsciiSet = &PATH.add(b'/').add(b'%');
+
+const KEY: &str = "key";
+const VALUE: &str = "value";
 
 #[derive(Debug, Clone)]
 pub struct Http {
@@ -258,7 +272,10 @@ impl Http {
             .chain(connect_path.into_iter().flatten())
             .flat_map(|v| match v {
                 Value::Null => Some(MaybeEncode::Safe("".to_string())),
-                Value::String(byte_string) => Some(MaybeEncode::Unsafe(byte_string.as_str().to_string())),
+                Value::String(byte_string) => {
+                    Some(MaybeEncode::Unsafe(byte_string.as_str().to_string()))
+                }
+                Value::Object(_) => handle_url_safe(&v),
                 _ => None,
             });
 
@@ -281,19 +298,36 @@ impl Http {
                 let mut pairs = vec![];
                 for value in values {
                     if let Value::Object(map) = value {
-                        let Some(name) = map.get("name").and_then(|v| v.as_str()) else {
+                        let (Some(key), Some(value)) = (map.get(KEY), map.get(VALUE)) else {
                             continue;
                         };
 
-                        match map.get("value") {
-                            Some(Value::String(value)) => {
-                                pairs.push((MaybeEncode::Unsafe(name.to_string()), MaybeEncode::Unsafe(value.as_str().to_string())));
+                        let key = match key {
+                            Value::String(key) => {
+                                Some(MaybeEncode::Unsafe(key.as_str().to_string()))
                             }
-                            Some(Value::Number(value)) => {
-                                pairs.push((MaybeEncode::Safe(name.to_string()), MaybeEncode::Safe(value.to_string())));
+                            Value::Object(_) => handle_url_safe(key),
+                            _ => None,
+                        };
+
+                        let Some(key) = key else {
+                            continue;
+                        };
+
+                        match value {
+                            Value::String(value) => {
+                                pairs.push((key, MaybeEncode::Unsafe(value.as_str().to_string())));
                             }
-                            Some(Value::Bool(value)) => {
-                                pairs.push((MaybeEncode::Safe(name.to_string()), MaybeEncode::Safe(value.to_string())));
+                            Value::Number(value) => {
+                                pairs.push((key, MaybeEncode::Safe(value.to_string())));
+                            }
+                            Value::Bool(value) => {
+                                pairs.push((key, MaybeEncode::Safe(value.to_string())));
+                            }
+                            Value::Object(_) => {
+                                if let Some(v) = handle_url_safe(value) {
+                                    pairs.push((key, v));
+                                };
                             }
                             _ => {}
                         }
@@ -306,10 +340,13 @@ impl Http {
                 .filter_map(|(key, value)| {
                     let key = MaybeEncode::Unsafe(key.as_str().to_string());
                     match value {
-                        Value::String(value) => Some((key, MaybeEncode::Unsafe(value.as_str().to_string()))),
+                        Value::String(value) => {
+                            Some((key, MaybeEncode::Unsafe(value.as_str().to_string())))
+                        }
                         Value::Number(value) => Some((key, MaybeEncode::Safe(value.to_string()))),
                         Value::Bool(value) => Some((key, MaybeEncode::Safe(value.to_string()))),
                         Value::Null => None,
+                        Value::Object(_) => handle_url_safe(&value).map(|v| (key, v)),
                         _ => None,
                     }
                 })
@@ -325,7 +362,13 @@ impl Http {
     fn query(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(impl Iterator<Item = (MaybeEncode, MaybeEncode)>, Vec<ApplyToError>), String> {
+    ) -> Result<
+        (
+            impl Iterator<Item = (MaybeEncode, MaybeEncode)>,
+            Vec<ApplyToError>,
+        ),
+        String,
+    > {
         let mut all_errors = vec![];
         let mut query = vec![];
 
@@ -361,53 +404,16 @@ impl Http {
         let (path, warnings) = self.path(inputs)?;
         all_warnings.extend(warnings);
 
-        {
-            let mut mut_path = url.path_segments_mut().map_err(|_| "cannot mutate path?")?;
-            mut_path.extend(path.into_iter().filter_map(|s| match s {
-                MaybeEncode::Unsafe(s) => Some(s),
-                MaybeEncode::Safe(_) => None,
-            }));
-        }
-
-        let (query, warnings) = self.query(inputs)?;
-        let query = query.collect_vec();
-        all_warnings.extend(warnings);
-        if !query.is_empty() {
-            let mut qp = url.query_pairs_mut();
-            for (key, value) in query {
-                qp.append_pair(&key, &value);
-            }
-        }
-
-        Ok((url, all_warnings))
-    }
-
-    pub fn to_uri_unsafe(
-        &self,
-        inputs: &IndexMap<String, Value>,
-    ) -> Result<(Url, Vec<ApplyToError>), String> {
-        use percent_encoding::percent_encode;
-        use url::form_urlencoded::byte_serialize;
-
-        /// https://url.spec.whatwg.org/#fragment-percent-encode-set
-        const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
-
-        /// https://url.spec.whatwg.org/#path-percent-encode-set
-        const PATH: &AsciiSet = &FRAGMENT.add(b'#').add(b'?').add(b'{').add(b'}');
-
-        const PATH_SEGMENT: &AsciiSet = &PATH.add(b'/').add(b'%');
-
-        let (mut url, mut all_warnings) = self.base_url(inputs)?;
-
-        let (path, warnings) = self.path(inputs)?;
-        all_warnings.extend(warnings);
-
-        url.set_path(path.map(|s| {
-            match s {
-                MaybeEncode::Unsafe(s) => percent_encode(s.as_bytes(), PATH_SEGMENT).collect::<String>(),
+        url.set_path(
+            path.map(|s| match s {
+                MaybeEncode::Unsafe(s) => {
+                    percent_encode(s.as_bytes(), PATH_SEGMENT).collect::<String>()
+                }
                 MaybeEncode::Safe(s) => s,
-            }
-        }).join("/").as_str());
+            })
+            .join("/")
+            .as_str(),
+        );
 
         let (query, warnings) = self.query(inputs)?;
         let query = query.collect_vec();
@@ -418,11 +424,15 @@ impl Http {
                     .into_iter()
                     .map(|(k, v)| {
                         let k = match k {
-                            MaybeEncode::Unsafe(s) => byte_serialize(s.as_bytes()).collect::<String>(),
+                            MaybeEncode::Unsafe(s) => {
+                                byte_serialize(s.as_bytes()).collect::<String>()
+                            }
                             MaybeEncode::Safe(s) => s,
                         };
                         let v = match v {
-                            MaybeEncode::Unsafe(s) => byte_serialize(s.as_bytes()).collect::<String>(),
+                            MaybeEncode::Unsafe(s) => {
+                                byte_serialize(s.as_bytes()).collect::<String>()
+                            }
                             MaybeEncode::Safe(s) => s,
                         };
                         format!("{}={}", k, v)
@@ -458,6 +468,19 @@ impl Http {
             .chain(self.body.iter().flat_map(|b| b.external_variables()))
             .collect()
     }
+}
+
+fn handle_url_safe(value: &Value) -> Option<MaybeEncode> {
+    let Value::Object(map) = value else {
+        return None;
+    };
+
+    map.get(URL_SAFE)?;
+    let value = map.get("value")?;
+
+    Some(MaybeEncode::Safe(
+        value.as_str().unwrap_or_default().to_string(),
+    ))
 }
 
 enum MaybeEncode {
@@ -502,7 +525,7 @@ mod tests {
         let http = super::Http::builder()
             .source_query(selection!("$({ api_key: '1234' })"))
             .connect_query(selection!(
-                "$([{ name: 'limit', value: $args.first }, { name: 'offset', value: $args.after }])"
+                "$([{ key: 'limit', value: $args.first }, { key: 'offset', value: $args.after }])"
             ))
             .build();
 
@@ -517,7 +540,7 @@ mod tests {
     #[test]
     fn test_repeated_params() {
         let http = super::Http::builder()
-            .connect_query(selection!("$batch.id { name: $('id[]') value: $ }"))
+            .connect_query(selection!("$batch.id { key: $('id[]') value: $ }"))
             .build();
 
         let inputs =
@@ -556,17 +579,6 @@ mod tests {
             url.to_string(),
             "https://localhost/normal/with%20space/slash%2Fin%2Fsegment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%2520chars"
         );
-
-        let (url, warnings) = http.to_uri_unsafe(&inputs).unwrap();
-
-        assert_eq!(warnings, vec![]);
-        assert_eq!(
-            url.to_string(),
-            "https://localhost/normal/with%20space/slash%2Fin%2Fsegment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%2520chars"
-        );
-
-        //    "https://localhost/normal/with%20space/slash/in/segment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%20chars"
-        //"https://localhost/normal/with%20space/slash%2Fin%2Fsegment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%2520chars"
     }
 
     #[test]
@@ -595,17 +607,6 @@ mod tests {
             url.to_string(),
             "https://localhost/?q=1&user+name=1&na%26me=1&fil%2Fter=1&emoji_%F0%9F%98%80=1&key%3Dval=1&%21weird-key=1"
         );
-
-        let (url, warnings) = http.to_uri_unsafe(&inputs).unwrap();
-
-        assert_eq!(warnings, vec![]);
-        assert_eq!(
-            url.to_string(),
-            "https://localhost/?q=1&user+name=1&na%26me=1&fil%2Fter=1&emoji_%F0%9F%98%80=1&key%3Dval=1&%21weird-key=1"
-        );
-
-        //   "https://localhost/?q=1&user%20name=1&na&me=1&fil/ter=1&emoji_%F0%9F%98%80=1&key=val=1&!weird-key=1"
-        // "https://localhost/?q=1&user+name=1&na%26me=1&fil%2Fter=1&emoji_%F0%9F%98%80=1&key%3Dval=1&%21weird-key=1"
     }
 
     #[test]
@@ -637,16 +638,58 @@ mod tests {
             url.to_string(),
             "https://localhost/?a=simple&b=has+space&c=a%26b%3Dc&d=10%25+increase&e=%3Fquestion&f=%23fragment&g=weird%3A%3Bvalue&h=multi%0Aline&i=%F0%9F%92%AF&j=a%3Db%26c%3Dd"
         );
+    }
 
-        let (url, warnings) = http.to_uri_unsafe(&inputs).unwrap();
+    #[test]
+    fn test_url_safe() {
+        let http = super::Http::builder()
+            .connect_path(selection!("$(['foo', $args.path->urlSafe, 'quux/quaz'])"))
+            .connect_query(selection!(
+                "$([{ key: $args.param->urlSafe, value: $args.value->urlSafe }])"
+            ))
+            .build();
+
+        let inputs = IndexMap::from_iter([(
+            "$args".to_string(),
+            json!({ "path": "bar/baz", "param": "weird?param", "value": "a=b&c=d" }),
+        )]);
+        let (url, warnings) = http.to_uri(&inputs).unwrap();
 
         assert_eq!(warnings, vec![]);
         assert_eq!(
             url.to_string(),
-            "https://localhost/?a=simple&b=has+space&c=a%26b%3Dc&d=10%25+increase&e=%3Fquestion&f=%23fragment&g=weird%3A%3Bvalue&h=multi%0Aline&i=%F0%9F%92%AF&j=a%3Db%26c%3Dd"
+            "https://localhost/foo/bar/baz/quux%2Fquaz?weird?param=a=b&c=d"
         );
+    }
 
-        //   "https://localhost/?a=simple&b=has%20space&c=a&b=c&d=10%%20increase&e=?question&f=%23fragment&g=weird:;value&h=multiline&i=%F0%9F%92%AF&j=a=b&c=d"
-        // "https://localhost/?a=simple&b=has+space&c=a%26b%3Dc&d=10%25+increase&e=%3Fquestion&f=%23fragment&g=weird%3A%3Bvalue&h=multi%0Aline&i=%F0%9F%92%AF&j=a%3Db%26c%3Dd"
+    #[test]
+    fn test_url_safe_batch() {
+        let http = super::Http::builder()
+            .source_query(selection!("$({ commas: $batch.id->join(',')->urlSafe })"))
+            .connect_query(selection!("$batch.id { key: $('id[]')->urlSafe value: $ }"))
+            .build();
+
+        let inputs =
+            IndexMap::from_iter([("$batch".to_string(), json!([{ "id": 1 }, { "id": 2 }]))]);
+        let (url, warnings) = http.to_uri(&inputs).unwrap();
+
+        assert_eq!(warnings, vec![]);
+        assert_eq!(
+            url.to_string(),
+            "https://localhost/?commas=1,2&id[]=1&id[]=2"
+        );
+    }
+
+    #[test]
+    fn test_trailing_slash() {
+        let http = super::Http::builder()
+            .connect_path(selection!("$(['foo', 'bar', 'baz', ''])"))
+            .build();
+
+        let inputs = IndexMap::default();
+        let (url, warnings) = http.to_uri(&inputs).unwrap();
+
+        assert_eq!(warnings, vec![]);
+        assert_eq!(url.to_string(), "https://localhost/foo/bar/baz/");
     }
 }

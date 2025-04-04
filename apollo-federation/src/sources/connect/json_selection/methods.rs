@@ -20,6 +20,8 @@ use super::location::WithRange;
 mod future;
 mod public;
 
+pub(crate) use public::URL_SAFE;
+
 #[cfg(test)]
 mod tests;
 
@@ -36,6 +38,8 @@ pub(super) enum ArrowMethod {
     Entries,
     JsonStringify,
     Join,
+
+    UrlSafe,
 
     // Future methods:
     TypeOf,
@@ -150,6 +154,8 @@ impl std::ops::Deref for ArrowMethod {
             Self::JsonStringify => &public::JsonStringifyMethod,
             Self::Join => &public::JoinMethod,
 
+            Self::UrlSafe => &public::UrlSafeMethod,
+
             // Future methods:
             Self::TypeOf => &future::TypeOfMethod,
             Self::Eq => &future::EqMethod,
@@ -204,6 +210,7 @@ impl ArrowMethod {
             "and" => Some(Self::And),
             "jsonStringify" => Some(Self::JsonStringify),
             "join" => Some(Self::Join),
+            "urlSafe" => Some(Self::UrlSafe),
             _ => None,
         };
 
@@ -229,6 +236,7 @@ impl ArrowMethod {
                 | Self::Entries
                 | Self::JsonStringify
                 | Self::Join
+                | Self::UrlSafe
         )
     }
 }
