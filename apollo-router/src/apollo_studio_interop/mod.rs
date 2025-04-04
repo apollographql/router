@@ -181,8 +181,6 @@ pub(crate) struct UsageReporting {
 impl UsageReporting {
     pub(crate) fn for_error(error_key: String) -> UsageReporting {
         UsageReporting {
-            // NJM TODO - move logic from get_error_key from SpecError to here? Maybe pass for_error an error instead of a string
-            // NJM TODO - move logic to add newline and empty query body here?
             operation_name: None,
             operation_signature: None,
             error_key: Some(error_key),
@@ -197,7 +195,7 @@ impl UsageReporting {
     /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
     pub(crate) fn generate_stats_report_key(&self) -> String {
         if let Some(error_key) = &self.error_key {
-            return error_key.clone();
+            return format!("## {}\n", error_key);
         }
 
         self.generate_operation_signature()
@@ -212,20 +210,32 @@ impl UsageReporting {
     }
 
     pub(crate) fn generate_operation_id(&self) -> String {
-        // To match the logic of Apollo's error key handling, we need to change the "##"" prefix on errors to "# #".
-        // So for example, "## GraphQLParseFailure\n" changes to "# # GraphQLParseFailure\n"
-        // TODO NJM do this better
-        let op_sig = self.generate_operation_signature();
-        let modified_op_sig = if let Some(stripped) = op_sig.strip_prefix("##") {
-            format!("# #{}", stripped)
+        let sig_to_hash = if self.error_key.is_some() {
+            // To match the logic of Apollo's error key handling, we need to handle error keys specially.
+            // The correct string to hash in this case is e.g. "# # GraphQLParseFailure\n".
+            format!("# #{}\n", self.error_key.as_ref().unwrap())
         } else {
-            op_sig.to_string()
+            self.generate_operation_signature()
         };
 
         let mut hasher = sha1::Sha1::new();
-        hasher.update(modified_op_sig.as_bytes());
+        hasher.update(sig_to_hash.as_bytes());
         let result = hasher.finalize();
         hex::encode(result)
+    }
+
+    pub(crate) fn get_operation_name(&self) -> String {
+        if let Some(op_name) = &self.operation_name {
+            op_name.clone()
+        } else if let Some(err_key) = &self.error_key {
+            format!("# {}", err_key)
+        } else {
+            "".to_string()
+        }
+    }
+
+    pub(crate) fn is_error(&self) -> bool {
+        self.error_key.is_some()
     }
 }
 

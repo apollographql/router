@@ -26,9 +26,6 @@ use crate::plugins::telemetry::CLIENT_VERSION;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::ExtendedErrorMetricsMode;
 use crate::query_planner::APOLLO_OPERATION_ID;
-use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
-use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
@@ -1296,31 +1293,19 @@ pub(crate) fn count_operation_errors(
     let client_name = unwrap_context_string(CLIENT_NAME);
     let client_version = unwrap_context_string(CLIENT_VERSION);
 
-    // Try to get operation ID from the stats report key if it's not in context (e.g. on parse/validation error)
-    if operation_id.is_empty() {
-        let maybe_usage_reporting = context.extensions().with_lock(|lock| {
-            lock.get::<Arc<UsageReporting>>().cloned()
-        });
-        if let Some(usage_reporting) = maybe_usage_reporting {
-            operation_id = usage_reporting.generate_operation_id();
+    let maybe_usage_reporting = context
+        .extensions()
+        .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned());
 
-            // If the operation name is empty, it's possible it's an error and we can populate the name by skipping the
-            // first character of the stats report key ("#") and the last newline character. E.g.
-            // "## GraphQLParseFailure\n" will turn into "# GraphQLParseFailure".
-            // TODO NJM move this logic into UsageReporting
-            if operation_name.is_empty() && usage_reporting.error_key.is_some() {
-                let error_key = usage_reporting.error_key.clone().expect("infallible");
-                operation_name = match error_key.as_str() {
-                    GRAPHQL_PARSE_FAILURE_ERROR_KEY
-                    | GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
-                    | GRAPHQL_VALIDATION_FAILURE_ERROR_KEY => error_key
-                        .chars()
-                        .skip(1)
-                        .take(error_key.len() - 2)
-                        .collect(),
-                    _ => "".to_string(),
-                }
-            }
+    if let Some(usage_reporting) = maybe_usage_reporting {
+        // Try to get operation ID from usage reporting if it's not in context (e.g. on parse/validation error)
+        if operation_id.is_empty() {
+            operation_id = usage_reporting.generate_operation_id();
+        }
+
+        // Also try to get operation name from usage reporting if it's not in context
+        if operation_name.is_empty() {
+            operation_name = usage_reporting.get_operation_name();
         }
     }
 

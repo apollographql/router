@@ -24,6 +24,7 @@ use crate::compute_job;
 use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::error::ValidationErrors;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
@@ -34,7 +35,6 @@ use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
@@ -266,9 +266,9 @@ impl QueryAnalysisLayer {
             }
             Err(MaybeBackPressureError::TemporaryError(error)) => {
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(Arc::new(UsageReporting::for_error(
-                        GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
-                    )))
+                    let error_key = SpecError::ValidationError(ValidationErrors { errors: vec![] })
+                        .get_error_key();
+                    lock.insert(Arc::new(UsageReporting::for_error(error_key.to_string())))
                 });
                 Err(SupergraphResponse::builder()
                     .error(error.to_graphql_error())

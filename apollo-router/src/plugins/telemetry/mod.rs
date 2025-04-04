@@ -143,9 +143,6 @@ use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
-use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
@@ -525,13 +522,7 @@ impl PluginPrivate for Telemetry {
 
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
-                                    .map(|u| {
-                                        // TODO NJM fix this - add function to say if it's one of these (a non-billable error)
-                                        u.generate_stats_report_key() == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
-                                            || u.generate_stats_report_key() == GRAPHQL_PARSE_FAILURE_ERROR_KEY
-                                            || u.generate_stats_report_key()
-                                                == GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
-                                    })
+                                    .map(|u| u.is_error())
                                     .unwrap_or(false)
                             }) {
                                 Self::update_apollo_metrics(
@@ -608,7 +599,6 @@ impl PluginPrivate for Telemetry {
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
                     // Record the operation signature on the router span
-                    // NJM TODO fix this
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
                         usage_reporting.generate_operation_signature().as_str(),
@@ -1360,9 +1350,7 @@ impl Telemetry {
             .extensions()
             .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
         {
-            // TODO NJM move this logic into UsageReporting?
-            let licensed_operation_count =
-                licensed_operation_count(&usage_reporting.generate_stats_report_key());
+            let licensed_operation_count = licensed_operation_count(&usage_reporting);
             let persisted_query_hit = context
                 .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
@@ -1759,14 +1747,8 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
     }
 }
 
-// Planner errors return stats report key that start with `## `
-// while successful planning stats report key start with `# `
-fn licensed_operation_count(stats_report_key: &str) -> u64 {
-    if stats_report_key.starts_with("## ") {
-        0
-    } else {
-        1
-    }
+fn licensed_operation_count(usage_reporting: &UsageReporting) -> u64 {
+    if usage_reporting.is_error() { 0 } else { 1 }
 }
 
 fn convert(
