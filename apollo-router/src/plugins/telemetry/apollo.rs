@@ -505,7 +505,6 @@ impl From<TracesAndStats>
             referenced_fields_by_type: stats.referenced_fields_by_type,
             trace: stats.traces,
             query_metadata: stats.query_metadata,
-            ..Default::default()
         }
     }
 }
