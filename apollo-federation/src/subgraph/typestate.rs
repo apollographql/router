@@ -12,28 +12,47 @@ use crate::schema::compute_subgraph_metadata;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 use crate::subgraph::SubgraphError;
 
-pub trait SubgraphState {}
-
 #[derive(Clone, Debug)]
 pub struct Raw {
     schema: Schema,
 }
-impl SubgraphState for Raw {}
 
 #[derive(Clone, Debug)]
 pub struct Expanded {
     schema: FederationSchema,
     metadata: SubgraphMetadata,
 }
-impl SubgraphState for Expanded {}
 
 #[derive(Clone, Debug)]
 pub struct Validated {
     schema: ValidFederationSchema,
     metadata: SubgraphMetadata,
 }
+
+pub trait SubgraphState {}
+impl SubgraphState for Raw {}
+impl SubgraphState for Expanded {}
 impl SubgraphState for Validated {}
 
+/// A subgraph represents a schema and its associated metadata. Subgraphs are updated through the
+/// composition pipeline, such as when links are expanded or when fed 1 subgraphs are upgraded to fed 2.
+/// We aim to encode these state transitions using the [typestate pattern](https://cliffle.com/blog/rust-typestate).
+///
+/// ```text
+///   (expand)     (validate)
+/// Raw ──► Expanded ──► Validated
+///            ▲             │
+///            └────────────┘
+///          (mutate/invalidate)
+///  ```
+///
+/// Subgraph states and their invariants:
+/// - `Raw`: The initial state, containing a raw schema. This provides no guarantees about the schema, other than
+///   that it can be parsed.
+/// - `Expanded`: The schema's links have been expanded to include missing directive definitions and subgraph
+///   metadata has been computed.
+/// - `Validated`: The schema has been validated according to Federation rules. Iterators over directives should
+///   be infallible at this stage.
 #[derive(Clone, Debug)]
 pub struct Subgraph<S: SubgraphState> {
     pub name: String,
@@ -182,7 +201,8 @@ impl Subgraph<Validated> {
 }
 
 #[cfg(test)]
-mod expand_tests {
+mod tests {
+    use apollo_compiler::ast::OperationType;
     use apollo_compiler::name;
 
     use super::*;
@@ -430,13 +450,6 @@ mod expand_tests {
             "_FieldSet"
         );
     }
-}
-
-#[cfg(test)]
-mod validation_tests {
-    use apollo_compiler::ast::OperationType;
-
-    use super::*;
 
     #[test]
     fn rejects_non_root_use_of_default_query_name() {

@@ -67,7 +67,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     }
     for subgraph in subgraphs.iter() {
         if !subgraph.schema().is_fed_2() {
-            let mut upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map)?;
+            let mut upgrader = SchemaUpgrader::new(subgraph, subgraphs, &object_type_map)?;
             upgrader.upgrade()?;
         }
     }
