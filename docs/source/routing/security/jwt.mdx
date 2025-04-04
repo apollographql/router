@@ -112,7 +112,7 @@ The following configuration options are supported:
 - `url`: **required** URL from which the JWKS file will be read. Must be a valid URL.
   - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
-- `issuers`: **optional** list of issuers accepted, that will be compared to the `iss` claim in the JWT if present. If one does not match, the request will be rejected.
+- `issuers`: **optional** list of issuers accepted, that will be compared to the `iss` claim in the JWT if present. If none match, the request will be rejected.
 - `algorithms`: **optional** list of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
 - `poll_interval`: **optional** interval in human-readable format (e.g. `60s` or `1hour 30s`) at which the JWKS will be polled for changes. If not specified, the JWKS endpoint will be polled every 60 seconds.
 - `headers`: **optional** a list of headers sent when downloading from the JWKS URL
