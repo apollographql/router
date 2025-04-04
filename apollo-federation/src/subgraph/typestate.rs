@@ -14,25 +14,27 @@ use crate::subgraph::SubgraphError;
 
 pub trait SubgraphState {}
 
+#[derive(Clone, Debug)]
 pub struct Raw {
     schema: Schema,
 }
 impl SubgraphState for Raw {}
 
+#[derive(Clone, Debug)]
 pub struct Expanded {
     schema: FederationSchema,
     metadata: SubgraphMetadata,
 }
 impl SubgraphState for Expanded {}
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Validated {
     schema: ValidFederationSchema,
     metadata: SubgraphMetadata,
 }
 impl SubgraphState for Validated {}
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Subgraph<S: SubgraphState> {
     pub name: String,
     pub url: String,
@@ -128,6 +130,14 @@ impl Subgraph<Raw> {
 }
 
 impl Subgraph<Expanded> {
+    pub(crate) fn metadata(&self) -> &SubgraphMetadata {
+        &self.state.metadata
+    }
+
+    pub fn schema(&self) -> &FederationSchema {
+        &self.state.schema
+    }
+
     pub fn upgrade(&mut self) -> Result<Self, SubgraphError> {
         todo!("Implement upgrade logic for expanded subgraphs");
     }
