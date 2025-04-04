@@ -1,10 +1,11 @@
+use ahash::{HashMap, HashMapExt};
+use opentelemetry::metrics::MeterProvider as _;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry_api::KeyValue;
 use std::future::Future;
 use std::panic::UnwindSafe;
 use std::sync::atomic::AtomicUsize;
-use std::sync::OnceLock;
-
-use opentelemetry::metrics::MeterProvider as _;
-use opentelemetry::metrics::ObservableGauge;
+use std::sync::{Arc, Mutex, OnceLock};
 use strum_macros::Display;
 use tokio::sync::oneshot;
 use tracing::field;
@@ -49,7 +50,7 @@ fn thread_pool_size() -> usize {
     configured_size
 }
 
-#[derive(Display, Copy, Clone)]
+#[derive(Display, Copy, Clone, Hash, Eq, PartialEq, Debug)]
 pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
@@ -64,10 +65,42 @@ struct ComputeJob {
     queue_start: std::time::Instant,
 }
 
+struct ComputeJobHandle {
+    ty: ComputeJobType,
+    active: Arc<Mutex<HashMap<ComputeJobType, u64>>>,
+}
+
+impl ComputeJobHandle {
+    fn new(active: Arc<Mutex<HashMap<ComputeJobType, u64>>>, ty: ComputeJobType) -> Self {
+        *active.lock().expect("poisoned").entry(ty).or_insert(0) += 1;
+        ComputeJobHandle { active, ty }
+    }
+}
+
+impl Drop for ComputeJobHandle {
+    fn drop(&mut self) {
+        *self
+            .active
+            .lock()
+            .expect("active poisoned")
+            .entry(self.ty)
+            .or_insert(0) -= 1
+    }
+}
+
+static ACTIVE: OnceLock<Arc<Mutex<HashMap<ComputeJobType, u64>>>> = OnceLock::new();
+
+fn active() -> Arc<Mutex<HashMap<ComputeJobType, u64>>> {
+    ACTIVE
+        .get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+        .clone()
+}
+
 fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
     static QUEUE: OnceLock<AgeingPriorityQueue<ComputeJob>> = OnceLock::new();
     QUEUE.get_or_init(|| {
         let pool_size = thread_pool_size();
+
         for _ in 0..pool_size {
             std::thread::spawn(|| {
                 // This looks like we need the queue before creating the queue,
@@ -79,6 +112,7 @@ fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
                 let mut receiver = queue.receiver();
                 loop {
                     let (job, final_priority) = receiver.blocking_recv();
+                    let _handle = ComputeJobHandle::new(active(), job.ty);
                     let queue_duration = job.queue_start.elapsed();
                     f64_histogram!(
                         "apollo.router.compute_jobs.queue.wait.duration",
@@ -91,7 +125,6 @@ fn queue() -> &'static AgeingPriorityQueue<ComputeJob> {
                     let _guard = job.parent_span.enter();
                     job.parent_span
                         .record("job.priority.final", &final_priority.to_string());
-
                     (job.job)();
                     let job_duration = job_start.elapsed();
                     f64_histogram!(
@@ -208,6 +241,19 @@ pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
             "Number of computation jobs (parsing, planning, …) waiting to be scheduled",
         )
         .with_callback(move |m| m.observe(queue().queued_count() as u64, &[]))
+        .init()
+}
+
+pub(crate) fn create_queue_active_gauge() -> ObservableGauge<u64> {
+    meter_provider()
+        .meter("apollo/router")
+        .u64_observable_gauge("apollo.router.compute_jobs.active")
+        .with_description("Number of computation jobs in progress")
+        .with_callback(move |m| {
+            for (ty, count) in active().lock().expect("active poisoned").iter() {
+                m.observe(*count, &[KeyValue::new("job.type", ty.to_string())])
+            }
+        })
         .init()
 }
 

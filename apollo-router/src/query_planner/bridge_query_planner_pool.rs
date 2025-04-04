@@ -44,6 +44,7 @@ pub(crate) struct BridgeQueryPlannerPool {
     schema: Arc<Schema>,
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     compute_jobs_queue_size_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
+    compute_jobs_active_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_used: Arc<AtomicU64>,
     v8_heap_used_gauge: Arc<Mutex<Option<ObservableGauge<u64>>>>,
     v8_heap_total: Arc<AtomicU64>,
@@ -188,6 +189,7 @@ impl BridgeQueryPlannerPool {
             schema,
             subgraph_schemas,
             compute_jobs_queue_size_gauge: Default::default(),
+            compute_jobs_active_gauge: Default::default(),
             v8_heap_used,
             v8_heap_used_gauge: Default::default(),
             v8_heap_total,
@@ -275,6 +277,10 @@ impl BridgeQueryPlannerPool {
             .compute_jobs_queue_size_gauge
             .lock()
             .expect("lock poisoned") = Some(crate::compute_job::create_queue_size_gauge());
+        *self
+            .compute_jobs_active_gauge
+            .lock()
+            .expect("lock poisoned") = Some(crate::compute_job::create_queue_active_gauge());
         self.create_pool_size_gauge();
         *self.v8_heap_used_gauge.lock().expect("lock poisoned") =
             Some(self.create_heap_used_gauge());
