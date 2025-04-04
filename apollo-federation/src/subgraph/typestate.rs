@@ -187,8 +187,8 @@ impl Subgraph<Expanded> {
 }
 
 impl Subgraph<Validated> {
-    pub fn invalidate(self) -> Result<Subgraph<Expanded>, SubgraphError> {
-        Ok(Subgraph {
+    pub fn invalidate(self) -> Subgraph<Expanded> {
+        Subgraph {
             name: self.name,
             url: self.url,
             state: Expanded {
@@ -196,7 +196,7 @@ impl Subgraph<Validated> {
                 schema: (*self.state.schema).clone(),
                 metadata: self.state.metadata,
             },
-        })
+        }
     }
 }
 
