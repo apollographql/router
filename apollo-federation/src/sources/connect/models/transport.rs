@@ -1,7 +1,11 @@
+use std::ops::Deref;
+
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use http::HeaderName;
 use itertools::Itertools;
+use percent_encoding::AsciiSet;
+use percent_encoding::CONTROLS;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use url::Url;
@@ -219,7 +223,7 @@ impl Http {
     fn path(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(impl Iterator<Item = String>, Vec<ApplyToError>), String> {
+    ) -> Result<(impl Iterator<Item = MaybeEncode>, Vec<ApplyToError>), String> {
         let mut all_errors = vec![];
 
         let source_path = self
@@ -253,8 +257,8 @@ impl Http {
             .flatten()
             .chain(connect_path.into_iter().flatten())
             .flat_map(|v| match v {
-                Value::Null => Some("".to_string()),
-                Value::String(byte_string) => Some(byte_string.as_str().to_string()),
+                Value::Null => Some(MaybeEncode::Safe("".to_string())),
+                Value::String(byte_string) => Some(MaybeEncode::Unsafe(byte_string.as_str().to_string())),
                 _ => None,
             });
 
@@ -265,7 +269,7 @@ impl Http {
     fn query_key_pairs_from_selection(
         selection: &JSONSelection,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(Vec<(String, String)>, Vec<ApplyToError>), String> {
+    ) -> Result<(Vec<(MaybeEncode, MaybeEncode)>, Vec<ApplyToError>), String> {
         let (query, warnings) = selection.apply_with_vars(&json!({}), inputs);
 
         let Some(query) = query else {
@@ -283,13 +287,13 @@ impl Http {
 
                         match map.get("value") {
                             Some(Value::String(value)) => {
-                                pairs.push((name.to_string(), value.as_str().to_string()));
+                                pairs.push((MaybeEncode::Unsafe(name.to_string()), MaybeEncode::Unsafe(value.as_str().to_string())));
                             }
                             Some(Value::Number(value)) => {
-                                pairs.push((name.to_string(), value.to_string()));
+                                pairs.push((MaybeEncode::Safe(name.to_string()), MaybeEncode::Safe(value.to_string())));
                             }
                             Some(Value::Bool(value)) => {
-                                pairs.push((name.to_string(), value.to_string()));
+                                pairs.push((MaybeEncode::Safe(name.to_string()), MaybeEncode::Safe(value.to_string())));
                             }
                             _ => {}
                         }
@@ -300,11 +304,11 @@ impl Http {
             Value::Object(map) => map
                 .into_iter()
                 .filter_map(|(key, value)| {
-                    let key = key.as_str().to_string();
+                    let key = MaybeEncode::Unsafe(key.as_str().to_string());
                     match value {
-                        Value::String(value) => Some((key, value.as_str().to_string())),
-                        Value::Number(value) => Some((key, value.to_string())),
-                        Value::Bool(value) => Some((key, value.to_string())),
+                        Value::String(value) => Some((key, MaybeEncode::Unsafe(value.as_str().to_string()))),
+                        Value::Number(value) => Some((key, MaybeEncode::Safe(value.to_string()))),
+                        Value::Bool(value) => Some((key, MaybeEncode::Safe(value.to_string()))),
                         Value::Null => None,
                         _ => None,
                     }
@@ -321,7 +325,7 @@ impl Http {
     fn query(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(impl Iterator<Item = (String, String)>, Vec<ApplyToError>), String> {
+    ) -> Result<(impl Iterator<Item = (MaybeEncode, MaybeEncode)>, Vec<ApplyToError>), String> {
         let mut all_errors = vec![];
         let mut query = vec![];
 
@@ -359,7 +363,10 @@ impl Http {
 
         {
             let mut mut_path = url.path_segments_mut().map_err(|_| "cannot mutate path?")?;
-            mut_path.extend(path);
+            mut_path.extend(path.into_iter().filter_map(|s| match s {
+                MaybeEncode::Unsafe(s) => Some(s),
+                MaybeEncode::Safe(_) => None,
+            }));
         }
 
         let (query, warnings) = self.query(inputs)?;
@@ -370,6 +377,58 @@ impl Http {
             for (key, value) in query {
                 qp.append_pair(&key, &value);
             }
+        }
+
+        Ok((url, all_warnings))
+    }
+
+    pub fn to_uri_unsafe(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Url, Vec<ApplyToError>), String> {
+        use percent_encoding::percent_encode;
+        use url::form_urlencoded::byte_serialize;
+
+        /// https://url.spec.whatwg.org/#fragment-percent-encode-set
+        const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+
+        /// https://url.spec.whatwg.org/#path-percent-encode-set
+        const PATH: &AsciiSet = &FRAGMENT.add(b'#').add(b'?').add(b'{').add(b'}');
+
+        const PATH_SEGMENT: &AsciiSet = &PATH.add(b'/').add(b'%');
+
+        let (mut url, mut all_warnings) = self.base_url(inputs)?;
+
+        let (path, warnings) = self.path(inputs)?;
+        all_warnings.extend(warnings);
+
+        url.set_path(path.map(|s| {
+            match s {
+                MaybeEncode::Unsafe(s) => percent_encode(s.as_bytes(), PATH_SEGMENT).collect::<String>(),
+                MaybeEncode::Safe(s) => s,
+            }
+        }).join("/").as_str());
+
+        let (query, warnings) = self.query(inputs)?;
+        let query = query.collect_vec();
+        all_warnings.extend(warnings);
+        if !query.is_empty() {
+            url.set_query(Some(
+                &query
+                    .into_iter()
+                    .map(|(k, v)| {
+                        let k = match k {
+                            MaybeEncode::Unsafe(s) => byte_serialize(s.as_bytes()).collect::<String>(),
+                            MaybeEncode::Safe(s) => s,
+                        };
+                        let v = match v {
+                            MaybeEncode::Unsafe(s) => byte_serialize(s.as_bytes()).collect::<String>(),
+                            MaybeEncode::Safe(s) => s,
+                        };
+                        format!("{}={}", k, v)
+                    })
+                    .join("&"),
+            ));
         }
 
         Ok((url, all_warnings))
@@ -398,6 +457,22 @@ impl Http {
             )
             .chain(self.body.iter().flat_map(|b| b.external_variables()))
             .collect()
+    }
+}
+
+enum MaybeEncode {
+    Safe(String),
+    Unsafe(String),
+}
+
+impl Deref for MaybeEncode {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            MaybeEncode::Safe(s) => s,
+            MaybeEncode::Unsafe(s) => s,
+        }
     }
 }
 
@@ -481,6 +556,17 @@ mod tests {
             url.to_string(),
             "https://localhost/normal/with%20space/slash%2Fin%2Fsegment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%2520chars"
         );
+
+        let (url, warnings) = http.to_uri_unsafe(&inputs).unwrap();
+
+        assert_eq!(warnings, vec![]);
+        assert_eq!(
+            url.to_string(),
+            "https://localhost/normal/with%20space/slash%2Fin%2Fsegment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%2520chars"
+        );
+
+        //    "https://localhost/normal/with%20space/slash/in/segment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%20chars"
+        //"https://localhost/normal/with%20space/slash%2Fin%2Fsegment/semi;colon/colon:colon/unicode-%E2%9C%93/quote%22'/reserved!*();:@&=+$/weird%2520chars"
     }
 
     #[test]
@@ -509,6 +595,17 @@ mod tests {
             url.to_string(),
             "https://localhost/?q=1&user+name=1&na%26me=1&fil%2Fter=1&emoji_%F0%9F%98%80=1&key%3Dval=1&%21weird-key=1"
         );
+
+        let (url, warnings) = http.to_uri_unsafe(&inputs).unwrap();
+
+        assert_eq!(warnings, vec![]);
+        assert_eq!(
+            url.to_string(),
+            "https://localhost/?q=1&user+name=1&na%26me=1&fil%2Fter=1&emoji_%F0%9F%98%80=1&key%3Dval=1&%21weird-key=1"
+        );
+
+        //   "https://localhost/?q=1&user%20name=1&na&me=1&fil/ter=1&emoji_%F0%9F%98%80=1&key=val=1&!weird-key=1"
+        // "https://localhost/?q=1&user+name=1&na%26me=1&fil%2Fter=1&emoji_%F0%9F%98%80=1&key%3Dval=1&%21weird-key=1"
     }
 
     #[test]
@@ -540,5 +637,16 @@ mod tests {
             url.to_string(),
             "https://localhost/?a=simple&b=has+space&c=a%26b%3Dc&d=10%25+increase&e=%3Fquestion&f=%23fragment&g=weird%3A%3Bvalue&h=multi%0Aline&i=%F0%9F%92%AF&j=a%3Db%26c%3Dd"
         );
+
+        let (url, warnings) = http.to_uri_unsafe(&inputs).unwrap();
+
+        assert_eq!(warnings, vec![]);
+        assert_eq!(
+            url.to_string(),
+            "https://localhost/?a=simple&b=has+space&c=a%26b%3Dc&d=10%25+increase&e=%3Fquestion&f=%23fragment&g=weird%3A%3Bvalue&h=multi%0Aline&i=%F0%9F%92%AF&j=a%3Db%26c%3Dd"
+        );
+
+        //   "https://localhost/?a=simple&b=has%20space&c=a&b=c&d=10%%20increase&e=?question&f=%23fragment&g=weird:;value&h=multiline&i=%F0%9F%92%AF&j=a=b&c=d"
+        // "https://localhost/?a=simple&b=has+space&c=a%26b%3Dc&d=10%25+increase&e=%3Fquestion&f=%23fragment&g=weird%3A%3Bvalue&h=multi%0Aline&i=%F0%9F%92%AF&j=a%3Db%26c%3Dd"
     }
 }
