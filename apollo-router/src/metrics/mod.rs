@@ -1300,7 +1300,7 @@ pub(crate) fn count_operation_errors(
     if let Some(usage_reporting) = maybe_usage_reporting {
         // Try to get operation ID from usage reporting if it's not in context (e.g. on parse/validation error)
         if operation_id.is_empty() {
-            operation_id = usage_reporting.generate_operation_id();
+            operation_id = usage_reporting.get_operation_id();
         }
 
         // Also try to get operation name from usage reporting if it's not in context

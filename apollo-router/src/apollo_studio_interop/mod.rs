@@ -1,5 +1,4 @@
 //! Generation of usage reporting fields
-use sha2::Digest;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -29,6 +28,7 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use serde::Deserialize;
 use serde::Serialize;
+use sha2::Digest;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
@@ -188,34 +188,32 @@ impl UsageReporting {
         }
     }
 
-    // NJM TODO - generate these once instead of every time they're needed? at least for op sig and op id
-
     /// The `stats_report_key` is a unique identifier derived from schema and query.
     /// Metric data  sent to Studio must be aggregated
     /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
-    pub(crate) fn generate_stats_report_key(&self) -> String {
+    pub(crate) fn get_stats_report_key(&self) -> String {
         if let Some(error_key) = &self.error_key {
-            return format!("## {}\n", error_key);
+            format!("## {}\n", error_key)
+        } else {
+            self.get_operation_signature()
         }
-
-        self.generate_operation_signature()
     }
 
     /// The Apollo operation signature is a string of the form "# <operation_name>\n<operation_signature>"
-    pub(crate) fn generate_operation_signature(&self) -> String {
+    pub(crate) fn get_operation_signature(&self) -> String {
         let op_name = self.operation_name.as_deref().unwrap_or("-");
         let op_sig = self.operation_signature.as_deref().unwrap_or("");
 
         format!("# {}\n{}", op_name, op_sig)
     }
 
-    pub(crate) fn generate_operation_id(&self) -> String {
+    pub(crate) fn get_operation_id(&self) -> String {
         let sig_to_hash = if self.error_key.is_some() {
             // To match the logic of Apollo's error key handling, we need to handle error keys specially.
             // The correct string to hash in this case is e.g. "# # GraphQLParseFailure\n".
-            format!("# #{}\n", self.error_key.as_ref().unwrap())
+            format!("# # {}\n", self.error_key.as_ref().unwrap())
         } else {
-            self.generate_operation_signature()
+            self.get_operation_signature()
         };
 
         let mut hasher = sha1::Sha1::new();

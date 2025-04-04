@@ -422,11 +422,11 @@ where
                 {
                     let _ = context.insert(
                         APOLLO_OPERATION_ID,
-                        usage_reporting.generate_operation_id().clone(),
+                        usage_reporting.get_operation_id().clone(),
                     );
                     let _ = context.insert(
                         "apollo_operation_signature",
-                        usage_reporting.generate_operation_signature().clone(),
+                        usage_reporting.get_operation_signature().clone(),
                     );
                 }
             })

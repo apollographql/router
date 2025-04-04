@@ -536,7 +536,7 @@ async fn subscription_task(
         .extensions()
         .with_lock(|lock| {
             lock.get::<Arc<UsageReporting>>()
-                .map(|usage_reporting| usage_reporting.generate_operation_signature().clone())
+                .map(|usage_reporting| usage_reporting.get_operation_signature().clone())
         })
         .unwrap_or_default();
 
