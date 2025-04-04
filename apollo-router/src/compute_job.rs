@@ -32,14 +32,19 @@ pub(crate) fn experimental_set_thread_pool_size(size: usize) {
 /// as the kernel’s scheduler distributes time to it or Tokio or other threads.
 fn thread_pool_size() -> usize {
     let mut configured_size = CONFIGURED_POOL_SIZE.load(std::sync::atomic::Ordering::Acquire);
+    let available_parallelism = std::thread::available_parallelism()
+        .expect("available_parallelism() failed")
+        .get();
     if configured_size == 0 {
-        configured_size = std::thread::available_parallelism()
-            .expect("available_parallelism() failed")
-            .get();
+        configured_size = available_parallelism;
     }
     tracing::info!(
         configured_size = configured_size,
         "starting worker pool with size"
+    );
+    tracing::info!(
+        available_parallelism = available_parallelism,
+        "available threads"
     );
     configured_size
 }
