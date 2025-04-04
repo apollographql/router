@@ -211,25 +211,45 @@ impl SourceHTTPArguments {
                         .map_err(|err| internal!(err.to_string()))?,
                 );
             } else if name == "method" {
-                method = Some(value.as_str().ok_or(internal!(
-                    "`method` field in `@source` directive's `http` field is not a string"
-                ))?.to_string());
+                method = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`method` field in `@source` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else if name == "scheme" {
-                scheme = Some(value.as_str().ok_or(internal!(
-                    "`scheme` field in `@source` directive's `http` field is not a string"
-                ))?.to_string());
+                scheme = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`scheme` field in `@source` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else if name == "authority" {
                 authority = Some(value.as_str().ok_or(internal!(
                     "`authority` field in `@source` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "path" {
-                path = Some(value.as_str().ok_or(internal!(
-                    "`path` field in `@source` directive's `http` field is not a string"
-                ))?.to_string());
+                path = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`path` field in `@source` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else if name == "query" {
-                query = Some(value.as_str().ok_or(internal!(
-                    "`query` field in `@source` directive's `http` field is not a string"
-                ))?.to_string());
+                query = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`query` field in `@source` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
@@ -361,25 +381,45 @@ impl ConnectHTTPArguments {
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "method" {
-                method = Some(value.as_str().ok_or(internal!(
-                    "`method` field in `@connect` directive's `http` field is not a string"
-                ))?.to_string());
+                method = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`method` field in `@connect` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else if name == "scheme" {
-                scheme = Some(value.as_str().ok_or(internal!(
-                    "`scheme` field in `@connect` directive's `http` field is not a string"
-                ))?.to_string());
+                scheme = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`scheme` field in `@connect` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else if name == "authority" {
                 authority = Some(value.as_str().ok_or(internal!(
                     "`authority` field in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "path" {
-                path = Some(value.as_str().ok_or(internal!(
-                    "`path` field in `@connect` directive's `http` field is not a string"
-                ))?.to_string());
+                path = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`path` field in `@connect` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else if name == "query" {
-                query = Some(value.as_str().ok_or(internal!(
-                    "`query` field in `@connect` directive's `http` field is not a string"
-                ))?.to_string());
+                query = Some(
+                    value
+                        .as_str()
+                        .ok_or(internal!(
+                            "`query` field in `@connect` directive's `http` field is not a string"
+                        ))?
+                        .to_string(),
+                );
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@connect` directive's `http` field: {name}"

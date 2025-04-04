@@ -43,7 +43,7 @@ pub(crate) fn make_request(
             .to_method(&inputs)
             .map_err(|_| HttpJsonTransportError::NoBaseUrl)?;
 
-            dbg!(&inputs, &method, &uri.as_str());
+        dbg!(&inputs, &method, &uri.as_str());
         http::Request::builder().method(method).uri(uri.as_str())
     } else {
         let uri = make_uri(

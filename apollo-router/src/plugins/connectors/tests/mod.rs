@@ -42,8 +42,8 @@ use crate::uplink::license_enforcement::LicenseState;
 mod connect_on_type;
 mod mock_api;
 mod quickstart;
-mod req_asserts;
 mod quickstart_new_url;
+mod req_asserts;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("../testdata/mutation.graphql");

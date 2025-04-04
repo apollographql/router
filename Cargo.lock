@@ -195,6 +195,7 @@ version = "2.1.0"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
+ "buildstructor",
  "derive_more",
  "dhat",
  "either",

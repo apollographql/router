@@ -88,8 +88,7 @@ async fn execute(query: &str, variables: JsonMap) -> (serde_json::Value, MockSer
         ).mount(&mock_server).await;
 
     let res = super::execute(
-        &include_str!("../testdata/quickstart-new-url.graphql"),
-        // &QUICKSTART_SCHEMA.replace("https://jsonplaceholder.typicode.com", &mock_server.uri()),
+        include_str!("../testdata/quickstart-new-url.graphql"),
         &mock_server.uri(),
         query,
         variables,

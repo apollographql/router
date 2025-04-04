@@ -68,8 +68,9 @@ type Query
   @join__type(graph: CONNECTORS)
 {
   posts: [Post] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {path: "$(['posts'])"}, selection: "id\ntitle\nbody\nauthor: { id: userId }"})
-  post(id: ID!): Post @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {path: "$(['posts', $args.id])", query: "$([{ name: 'id', value: $args.id}])"}, selection: "id\ntitle\nbody\nauthor: { id: userId }", entity: true})
-  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {path: "$(['users', $args.id])", query: "$([{ name: 'id', value: $args.id}])"}, selection: "id\nname\nusername", entity: true})
+  # post(id: ID!): Post @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {path: "$(['posts', $args.id])", query: "$([1, 2, 'na&me']) { name: $('id[]') value: @ }"}, selection: "id\ntitle\nbody\nauthor: { id: userId }", entity: true})
+  post(id: ID!): Post @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {path: "$(['posts', $args.id])", query: "$([{ name: 'ids', value: $([1,2,3])->join(',') }])"}, selection: "id\ntitle\nbody\nauthor: { id: userId }", entity: true})
+  user(id: ID!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "jsonPlaceholder", http: {path: "$(['users', $args.id])", query: "$([1, 2, 'na&me']) { name: $('id[]') value: @ }"}, selection: "id\nname\nusername", entity: true})
 }
 
 type User
