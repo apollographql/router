@@ -111,7 +111,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let connect_http_field_list = vec![
+    let mut connect_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: name!(GET),
@@ -165,6 +165,44 @@ pub(super) fn check_or_add(
             directives: Default::default(),
         },
     ];
+
+    if spec != &ConnectSpec::V0_2 {
+        connect_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(method),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        connect_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(scheme),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        connect_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(authority),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        connect_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(path),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        connect_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(query),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+    }
 
     let mut connect_http_fields = IndexMap::with_hasher(Default::default());
     for field in connect_http_field_list {
@@ -260,11 +298,11 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let source_http_field_list = vec![
+    let mut source_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
-            ty: ty!(String!).into(),
+            ty: ty!(String).into(),
             default_value: None,
             directives: Default::default(),
         },
@@ -279,6 +317,44 @@ pub(super) fn check_or_add(
             directives: Default::default(),
         },
     ];
+
+    if spec != &ConnectSpec::V0_2 {
+        source_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(method),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        source_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(scheme),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        source_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(authority),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        source_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(path),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+        source_http_field_list.push(InputValueDefinition {
+            description: None,
+            name: name!(query),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        });
+    }
 
     let mut source_http_fields = IndexMap::with_hasher(Default::default());
     for field in source_http_field_list {

@@ -81,6 +81,7 @@ mod tests {
                 headers: Default::default(),
                 body: Default::default(),
             },
+            transport2: None,
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
             config: Default::default(),

@@ -319,7 +319,7 @@ router:
     on: request
     attributes:
       http.request.body.size: true
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -330,7 +330,7 @@ router:
     on: response
     attributes:
       http.response.body.size: true
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -346,7 +346,7 @@ supergraph:
     message: "my event message"
     level: info
     on: request
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -836,6 +836,7 @@ connector:
                         headers: Default::default(),
                         body: None,
                     },
+                    transport2: None,
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,
@@ -1188,6 +1189,7 @@ subgraph:
                         headers: Default::default(),
                         body: None,
                     },
+                    transport2: None,
                     selection: JSONSelection::empty(),
                     config: None,
                     max_requests: None,

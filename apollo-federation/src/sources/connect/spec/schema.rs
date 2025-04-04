@@ -48,11 +48,21 @@ pub(crate) struct SourceDirectiveArguments {
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
-    pub(crate) base_url: Url,
+    pub(crate) base_url: Option<Url>,
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+
+    pub(crate) method: Option<String>,
+
+    pub(crate) scheme: Option<String>,
+
+    pub(crate) authority: Option<String>,
+
+    pub(crate) path: Option<String>,
+
+    pub(crate) query: Option<String>,
 }
 
 /// Arguments to the `@connect` directive
@@ -107,4 +117,14 @@ pub(crate) struct ConnectHTTPArguments {
     ///
     /// Overrides headers from the associated @source by name.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+
+    pub(crate) method: Option<String>,
+
+    pub(crate) scheme: Option<String>,
+
+    pub(crate) authority: Option<String>,
+
+    pub(crate) path: Option<String>,
+
+    pub(crate) query: Option<String>,
 }

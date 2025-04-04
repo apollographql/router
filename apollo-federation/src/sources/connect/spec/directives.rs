@@ -184,6 +184,11 @@ impl SourceHTTPArguments {
     ) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
+        let mut method = None;
+        let mut scheme = None;
+        let mut authority = None;
+        let mut path = None;
+        let mut query = None;
         for (name, value) in values {
             let name = name.as_str();
 
@@ -205,6 +210,26 @@ impl SourceHTTPArguments {
                         .try_collect()
                         .map_err(|err| internal!(err.to_string()))?,
                 );
+            } else if name == "method" {
+                method = Some(value.as_str().ok_or(internal!(
+                    "`method` field in `@source` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "scheme" {
+                scheme = Some(value.as_str().ok_or(internal!(
+                    "`scheme` field in `@source` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "authority" {
+                authority = Some(value.as_str().ok_or(internal!(
+                    "`authority` field in `@source` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "path" {
+                path = Some(value.as_str().ok_or(internal!(
+                    "`path` field in `@source` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "query" {
+                query = Some(value.as_str().ok_or(internal!(
+                    "`query` field in `@source` directive's `http` field is not a string"
+                ))?.to_string());
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
@@ -213,10 +238,13 @@ impl SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_url: base_url.ok_or(internal!(
-                "missing `base_url` field in `@source` directive's `http` argument"
-            ))?,
+            base_url,
             headers: headers.unwrap_or_default(),
+            method,
+            scheme,
+            authority,
+            path,
+            query,
         })
     }
 }
@@ -290,6 +318,12 @@ impl ConnectHTTPArguments {
         let mut delete = None;
         let mut body = None;
         let mut headers = None;
+        let mut method = None;
+        let mut scheme = None;
+        let mut authority = None;
+        let mut path = None;
+        let mut query = None;
+
         for (name, value) in values {
             let name = name.as_str();
 
@@ -326,6 +360,30 @@ impl ConnectHTTPArguments {
                 delete = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
+            } else if name == "method" {
+                method = Some(value.as_str().ok_or(internal!(
+                    "`method` field in `@connect` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "scheme" {
+                scheme = Some(value.as_str().ok_or(internal!(
+                    "`scheme` field in `@connect` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "authority" {
+                authority = Some(value.as_str().ok_or(internal!(
+                    "`authority` field in `@connect` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "path" {
+                path = Some(value.as_str().ok_or(internal!(
+                    "`path` field in `@connect` directive's `http` field is not a string"
+                ))?.to_string());
+            } else if name == "query" {
+                query = Some(value.as_str().ok_or(internal!(
+                    "`query` field in `@connect` directive's `http` field is not a string"
+                ))?.to_string());
+            } else {
+                return Err(internal!(format!(
+                    "unknown argument in `@connect` directive's `http` field: {name}"
+                )));
             }
         }
 
@@ -337,6 +395,11 @@ impl ConnectHTTPArguments {
             delete,
             body,
             headers: headers.unwrap_or_default(),
+            method,
+            scheme,
+            authority,
+            path,
+            query,
         })
     }
 }

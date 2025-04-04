@@ -3,6 +3,7 @@ use std::sync::Arc;
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::sources::connect::HTTPMethod;
 use apollo_federation::sources::connect::HeaderSource;
+use apollo_federation::sources::connect::Http;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::URLTemplate;
 use displaydoc::Display;
@@ -29,19 +30,32 @@ use crate::services::connector::request_service::transport::http::HttpRequest;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
+    transport2: &Option<Http>,
     inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let uri = make_uri(
-        transport.source_url.as_ref(),
-        &transport.connect_template,
-        &inputs,
-    )?;
+    let request = if let Some(transport2) = transport2 {
+        let (uri, _warnings) = transport2
+            .to_uri(&inputs)
+            .map_err(|_| HttpJsonTransportError::NoBaseUrl)?;
+        let (method, _warnings) = transport2
+            .to_method(&inputs)
+            .map_err(|_| HttpJsonTransportError::NoBaseUrl)?;
 
-    let request = http::Request::builder()
-        .method(transport.method.as_str())
-        .uri(uri.as_str());
+            dbg!(&inputs, &method, &uri.as_str());
+        http::Request::builder().method(method).uri(uri.as_str())
+    } else {
+        let uri = make_uri(
+            transport.source_url.as_ref(),
+            &transport.connect_template,
+            &inputs,
+        )?;
+
+        http::Request::builder()
+            .method(transport.method.as_str())
+            .uri(uri.as_str())
+    };
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
     let (mut request, content_type) = add_headers(
@@ -699,6 +713,7 @@ mod tests {
                 headers: Default::default(),
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
             },
+            &None,
             vars,
             &connect::Request {
                 service_name: Arc::from("service"),
@@ -758,6 +773,7 @@ mod tests {
                 headers,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
             },
+            &None,
             vars,
             &connect::Request {
                 service_name: Arc::from("service"),

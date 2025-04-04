@@ -354,6 +354,7 @@ mod tests {
                 headers: Default::default(),
                 body: None,
             },
+            transport2: None,
             selection: JSONSelection::empty(),
             config: None,
             max_requests: None,

@@ -1,4 +1,5 @@
 mod keys;
+pub(crate) mod transport;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -6,6 +7,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
@@ -54,6 +56,7 @@ use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NA
 pub struct Connector {
     pub id: ConnectId,
     pub transport: HttpJsonTransport,
+    pub transport2: Option<transport::Http>,
     pub selection: JSONSelection,
     pub config: Option<CustomConfiguration>,
     pub max_requests: Option<usize>,
@@ -140,8 +143,13 @@ impl Connector {
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
 
+        let transport2 = Some(transport::Http::from_directive(connect_http, source_http)?);
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
-        let request_variables = transport.variables().collect();
+        let request_variables = if let Some(transport2) = &transport2 {
+            transport2.variables()
+        } else {
+            transport.variables().collect()
+        };
         let response_variables = connect.selection.external_variables().collect();
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
 
@@ -155,6 +163,7 @@ impl Connector {
         let connector = Connector {
             id: id.clone(),
             transport,
+            transport2,
             selection: connect.selection,
             entity_resolver,
             config: None,
@@ -275,7 +284,7 @@ fn determine_entity_resolver(
 }
 
 // --- HTTP JSON ---------------------------------------------------------------
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
     pub source_url: Option<Url>,
     pub connect_template: URLTemplate,
@@ -289,6 +298,7 @@ impl HttpJsonTransport {
         http: &ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
+        static DEFAULT_URL: LazyLock<String> = LazyLock::new(|| "/".to_string());
         let (method, connect_url) = if let Some(url) = &http.get {
             (HTTPMethod::Get, url)
         } else if let Some(url) = &http.post {
@@ -300,7 +310,8 @@ impl HttpJsonTransport {
         } else if let Some(url) = &http.delete {
             (HTTPMethod::Delete, url)
         } else {
-            return Err(FederationError::internal("missing http method"));
+            (HTTPMethod::Get, &*DEFAULT_URL)
+            // return Err(FederationError::internal("missing http method"));
         };
 
         #[allow(clippy::mutable_key_type)]
@@ -315,7 +326,7 @@ impl HttpJsonTransport {
         }
 
         Ok(Self {
-            source_url: source.map(|s| s.base_url.clone()),
+            source_url: source.and_then(|s| s.base_url.clone()),
             connect_template: connect_url.parse().map_err(|e: string_template::Error| {
                 FederationError::internal(format!(
                     "could not parse URL template: {message}",
@@ -355,8 +366,9 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum HTTPMethod {
+    #[default]
     Get,
     Post,
     Patch,
