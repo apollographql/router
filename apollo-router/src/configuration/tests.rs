@@ -144,10 +144,10 @@ subgraphs:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 4
 
-  
+
   supergraph:
     path: /
 ┌ subgraphs:
@@ -173,10 +173,10 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            r#"configuration had errors: 
+            r#"configuration had errors:
 1. at line 2
 
-  
+
 ┌ unknown:
 |   foo: true
 └-----> Additional properties are not allowed ('unknown' was unexpected)
@@ -611,7 +611,7 @@ supergraph:
 struct Asset;
 
 #[test]
-fn upgrade_old_major_configuration() {
+fn upgrade_old_configuration() {
     for file_name in Asset::iter() {
         if file_name.ends_with(".yaml") {
             let source = Asset::get(&file_name).expect("test file must exist");
