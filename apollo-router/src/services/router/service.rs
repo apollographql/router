@@ -217,7 +217,7 @@ impl Service<RouterRequest> for RouterService {
         // This service eventually calls `QueryAnalysisLayer::parse_document()`
         // which calls `compute_job::execute()`
         if crate::compute_job::is_full() {
-            return Poll::Pending;
+            return Poll::Ready(Err("compute queue is full".into()));
         }
         Poll::Ready(Ok(()))
     }

@@ -299,7 +299,9 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
                 "Number of requests rejected because the queue for compute jobs is full",
                 1u64
             );
-            return Poll::Pending;
+            return Poll::Ready(Err(QueryPlannerError::PoolProcessing(
+                "compute queue is full".into(),
+            )));
         }
         match &self.pool_mode {
             PoolMode::Pool { sender, .. } if sender.is_full() => Poll::Ready(Err(
