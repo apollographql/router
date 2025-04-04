@@ -420,13 +420,10 @@ where
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
-                    let _ = context.insert(
-                        APOLLO_OPERATION_ID,
-                        usage_reporting.get_operation_id().clone(),
-                    );
+                    let _ = context.insert(APOLLO_OPERATION_ID, usage_reporting.get_operation_id());
                     let _ = context.insert(
                         "apollo_operation_signature",
-                        usage_reporting.get_operation_signature().clone(),
+                        usage_reporting.get_stats_report_key(None),
                     );
                 }
             })

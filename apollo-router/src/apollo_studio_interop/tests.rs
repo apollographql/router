@@ -5,7 +5,7 @@ use super::*;
 use crate::Configuration;
 
 fn assert_expected_signature(actual: &UsageReporting, expected_sig: &str) {
-    assert_eq!(actual.get_operation_signature(), expected_sig);
+    assert_eq!(actual.get_stats_report_key(None), expected_sig);
 }
 
 macro_rules! assert_extended_references {
@@ -322,14 +322,16 @@ fn apollo_operation_id_hash() {
 fn apollo_error_operation_id_hash() {
     assert_eq!(
         "ea4f152696abedca148b016d72df48842b713697",
-        UsageReporting::for_error("## GraphQLValidationFailure\n".into()).get_operation_id()
+        UsageReporting::for_error("## GraphQLValidationFailure\n".into())
+            .get_stats_report_key(None)
     );
     assert_eq!(
         "3f410834f13153f401ffe73f7e454aa500d10bf7",
-        UsageReporting::for_error("## GraphQLParseFailure\n".into()).get_operation_id()
+        UsageReporting::for_error("## GraphQLParseFailure\n".into()).get_stats_report_key(None)
     );
     assert_eq!(
         "7486043da2085fed407d942508a572ef88dc8120",
-        UsageReporting::for_error("## GraphQLUnknownOperationName\n".into()).get_operation_id()
+        UsageReporting::for_error("## GraphQLUnknownOperationName\n".into())
+            .get_stats_report_key(None)
     );
 }

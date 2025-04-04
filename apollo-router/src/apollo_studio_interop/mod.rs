@@ -172,7 +172,6 @@ pub(crate) struct UsageReporting {
     pub(crate) operation_signature: Option<String>,
     /// The error key to use for the stats report, or None if there is no error
     pub(crate) error_key: Option<String>,
-    // NJM TODO add PQ ID
     /// a list of all types and fields referenced in the query
     #[serde(default)]
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
@@ -191,20 +190,30 @@ impl UsageReporting {
     /// The `stats_report_key` is a unique identifier derived from schema and query.
     /// Metric data  sent to Studio must be aggregated
     /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
-    pub(crate) fn get_stats_report_key(&self) -> String {
+    /// For errors, the report key is of the form "## <error name>\n".
+    /// For operations requested by PQ, the report key is of the form "pq# <pq id>".
+    /// For operations not requested by PQ, the report key is of the form "# <op name>\n<op sig>".
+    /// Note that this combination of operation name and signature is sometimes referred to in code as
+    /// "operation signature" even though it also contains the operation name as the first line.
+    pub(crate) fn get_stats_report_key(&self, maybe_pq_id: Option<String>) -> String {
         if let Some(error_key) = &self.error_key {
             format!("## {}\n", error_key)
+        } else if let Some(pq_id) = maybe_pq_id {
+            format!("pq# {}", pq_id)
         } else {
-            self.get_operation_signature()
+            format!(
+                "# {}\n{}",
+                self.get_operation_name(),
+                self.get_operation_signature()
+            )
         }
     }
 
-    /// The Apollo operation signature is a string of the form "# <operation_name>\n<operation_signature>"
     pub(crate) fn get_operation_signature(&self) -> String {
-        let op_name = self.operation_name.as_deref().unwrap_or("-");
-        let op_sig = self.operation_signature.as_deref().unwrap_or("");
-
-        format!("# {}\n{}", op_name, op_sig)
+        self.operation_signature
+            .as_deref()
+            .unwrap_or("")
+            .to_string()
     }
 
     pub(crate) fn get_operation_id(&self) -> String {
@@ -213,7 +222,7 @@ impl UsageReporting {
             // The correct string to hash in this case is e.g. "# # GraphQLParseFailure\n".
             format!("# # {}\n", self.error_key.as_ref().unwrap())
         } else {
-            self.get_operation_signature()
+            self.get_stats_report_key(None)
         };
 
         let mut hasher = sha1::Sha1::new();
@@ -228,7 +237,7 @@ impl UsageReporting {
         } else if let Some(err_key) = &self.error_key {
             format!("# {}", err_key)
         } else {
-            "".to_string()
+            "-".to_string()
         }
     }
 

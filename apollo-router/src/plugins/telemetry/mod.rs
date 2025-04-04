@@ -94,6 +94,7 @@ use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -140,6 +141,7 @@ use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
+use crate::services::layers::persisted_queries::UsedQueryIdFromManifest;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -601,7 +603,7 @@ impl PluginPrivate for Telemetry {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.get_operation_signature().as_str(),
+                        usage_reporting.get_stats_report_key(None).as_str(),
                     );
                 }
                 // To expose trace_id or not
@@ -1402,6 +1404,11 @@ impl Telemetry {
                     .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
+                let maybe_pq_id = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
+                    .map(|u| u.pq_id);
+
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1419,7 +1426,9 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting.get_stats_report_key().to_string(),
+                        usage_reporting
+                            .get_stats_report_key(maybe_pq_id.clone())
+                            .to_string(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
@@ -1460,6 +1469,12 @@ impl Telemetry {
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
+                            // For now we only want to populate query metadata for PQ operations
+                            query_metadata: maybe_pq_id.as_ref().map(|pq_id| QueryMetadata {
+                                name: usage_reporting.get_operation_name(),
+                                signature: usage_reporting.get_operation_signature(),
+                                pq_id: pq_id.clone(),
+                            }),
                         },
                     )]),
                 }

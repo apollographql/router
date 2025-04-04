@@ -31,8 +31,9 @@ const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
 /// Used to identify requests that were expanded from a persisted query ID
+#[derive(Clone)]
 pub(crate) struct UsedQueryIdFromManifest {
-    _pq_id: String,
+    pub(crate) pq_id: String,
 }
 
 /// Implements persisted query support, namely expanding requests using persisted query IDs and
@@ -174,7 +175,7 @@ impl PersistedQueryLayer {
 
                 request.context.extensions().with_lock(|lock| {
                     lock.insert(UsedQueryIdFromManifest {
-                        _pq_id: persisted_query_id.into(),
+                        pq_id: persisted_query_id.into(),
                     })
                 });
                 u64_counter!(
