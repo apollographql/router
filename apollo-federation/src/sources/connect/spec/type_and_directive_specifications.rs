@@ -205,7 +205,7 @@ pub(super) fn check_or_add(
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: CONNECT_SOURCE_ARGUMENT_NAME.clone(),
-                    get_type: |_| Ok(ty!(String)),
+                    get_type: |_, _| Ok(ty!(String)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -213,7 +213,7 @@ pub(super) fn check_or_add(
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: HTTP_ARGUMENT_NAME.clone(),
-                    get_type: |s| {
+                    get_type: |s, _| {
                         let name = s
                             .metadata()
                             .ok_or_else(|| internal!("missing metadata"))?
@@ -229,7 +229,7 @@ pub(super) fn check_or_add(
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: CONNECT_SELECTION_ARGUMENT_NAME.clone(),
-                    get_type: |s| {
+                    get_type: |s, _| {
                         let name = s
                             .metadata()
                             .ok_or_else(|| internal!("missing metadata"))?
@@ -245,7 +245,7 @@ pub(super) fn check_or_add(
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: CONNECT_ENTITY_ARGUMENT_NAME.clone(),
-                    get_type: |_| Ok(Type::Named(name!(Boolean))),
+                    get_type: |_, _| Ok(Type::Named(name!(Boolean))),
                     default_value: Some(Value::Boolean(false)),
                 },
                 composition_strategy: None,
@@ -254,6 +254,7 @@ pub(super) fn check_or_add(
         true,
         spec.connect_directive_locations(),
         false,
+        None,
         None,
     );
 
@@ -311,7 +312,7 @@ pub(super) fn check_or_add(
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: SOURCE_NAME_ARGUMENT_NAME.clone(),
-                    get_type: |_| Ok(ty!(String!)),
+                    get_type: |_, _| Ok(ty!(String!)),
                     default_value: None,
                 },
                 composition_strategy: None,
@@ -319,7 +320,7 @@ pub(super) fn check_or_add(
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
                     name: HTTP_ARGUMENT_NAME.clone(),
-                    get_type: |s| {
+                    get_type: |s, _| {
                         let name = s
                             .metadata()
                             .ok_or_else(|| internal!("missing metadata"))?
@@ -336,6 +337,7 @@ pub(super) fn check_or_add(
         true,
         &[DirectiveLocation::Schema],
         false,
+        None,
         None,
     );
 

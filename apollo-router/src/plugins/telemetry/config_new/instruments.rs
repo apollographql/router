@@ -3393,6 +3393,7 @@ mod tests {
                                         transport_request,
                                         key: response_key.clone(),
                                         mapping_problems,
+                                        supergraph_request: Default::default(),
                                     };
                                     connector_instruments = Some({
                                         let connector_instruments = config

@@ -816,6 +816,7 @@ mod test {
             transport_request: http_request.into(),
             key,
             mapping_problems,
+            supergraph_request: Default::default(),
         }
     }
 

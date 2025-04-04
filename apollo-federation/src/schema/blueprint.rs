@@ -1,11 +1,16 @@
+use std::collections::HashMap;
+
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::ty;
 
 use crate::bail;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Import;
 use crate::link::Purpose;
@@ -14,12 +19,15 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::link_spec_definition::LINK_VERSIONS;
+use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Url;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
+use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
+use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
 
 #[allow(dead_code)]
 struct CoreFeature {
@@ -47,11 +55,12 @@ impl FederationBlueprint {
         directive: &Directive,
     ) -> Result<Option<DirectiveDefinitionPosition>, FederationError> {
         if directive.name == DEFAULT_LINK_NAME {
-            let latest_version = LINK_VERSIONS.versions().last().unwrap();
-            let link_spec = LINK_VERSIONS.find(latest_version).unwrap();
-            link_spec.add_elements_to_schema(schema)?;
+            // TODO (FED-428): pass `alias` and `imports`
+            LinkSpecDefinition::latest().add_definitions_to_schema(schema, /*alias*/ None)?;
+            Ok(schema.get_directive_definition(&directive.name))
+        } else {
+            Ok(None)
         }
-        Ok(schema.get_directive_definition(&DEFAULT_LINK_NAME))
     }
 
     fn on_directive_definition_and_schema_parsed(
@@ -84,8 +93,44 @@ impl FederationBlueprint {
         todo!()
     }
 
-    fn on_validation(_schema: &Schema) -> Result<(), FederationError> {
-        todo!()
+    fn on_validation(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let mut error_collector = MultipleFederationErrors { errors: Vec::new() };
+        if self.with_root_type_renaming {
+            let mut operation_types_to_rename = HashMap::new();
+            for (op_type, op_name) in schema.schema().schema_definition.iter_root_operations() {
+                let default_name = default_operation_name(&op_type);
+                if op_name.name != default_name {
+                    operation_types_to_rename.insert(op_name.name.clone(), default_name.clone());
+                    if schema.try_get_type(default_name.clone()).is_some() {
+                        error_collector.push(
+                            SingleFederationError::root_already_used(
+                                op_type,
+                                default_name,
+                                op_name.name.clone(),
+                            )
+                            .into(),
+                        );
+                    }
+                }
+            }
+            for (current_name, new_name) in operation_types_to_rename {
+                schema.get_type(current_name)?.rename(schema, new_name)?;
+            }
+        }
+
+        let Some(meta) = schema.subgraph_metadata() else {
+            bail!("Federation schema should have had its metadata set on construction");
+        };
+        // We skip the rest of validation for fed1 schemas because there is a number of validations that is stricter than what fed 1
+        // accepted, and some of those issues are fixed by `SchemaUpgrader`. So insofar as any fed 1 schma is ultimately converted
+        // to a fed 2 one before composition, then skipping some validation on fed 1 schema is fine.
+        if !meta.is_fed_2_schema() {
+            return error_collector.into_result();
+        }
+
+        // TODO: Remaining validations
+
+        error_collector.into_result()
     }
 
     fn on_apollo_rs_validation_error(
@@ -180,17 +225,22 @@ impl FederationBlueprint {
     }
 }
 
+fn default_operation_name(op_type: &OperationType) -> Name {
+    match op_type {
+        OperationType::Query => GRAPHQL_QUERY_TYPE_NAME,
+        OperationType::Mutation => GRAPHQL_MUTATION_TYPE_NAME,
+        OperationType::Subscription => GRAPHQL_SUBSCRIPTION_TYPE_NAME,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::Node;
-    use apollo_compiler::ast::Argument;
     use apollo_compiler::name;
-    use apollo_compiler::schema::Component;
 
     use super::*;
-    use crate::error::FederationError;
-    use crate::schema::FederationSchema;
+    use crate::link::federation_spec_definition::add_fed1_link_to_schema;
     use crate::schema::ValidFederationSchema;
+    use crate::subgraph::SubgraphError;
 
     #[test]
     fn detects_federation_1_subgraphs_correctly() {
@@ -202,13 +252,12 @@ mod tests {
             "empty-fed1-schema.graphqls",
         )
         .expect("valid schema");
-        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
         let metadata = subgraph.subgraph_metadata().expect("has metadata");
 
         assert!(!metadata.is_fed_2_schema());
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn detects_federation_2_subgraphs_correctly() {
         let schema = Schema::parse(
@@ -221,7 +270,7 @@ mod tests {
             "empty-fed2-schema.graphqls",
         )
         .expect("valid schema");
-        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
         let metadata = subgraph.subgraph_metadata().expect("has metadata");
 
         assert!(metadata.is_fed_2_schema());
@@ -237,7 +286,7 @@ mod tests {
             "empty-fed1-schema.graphqls",
         )
         .expect("valid schema");
-        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
 
         let mut defined_directive_names = subgraph
             .schema()
@@ -250,6 +299,7 @@ mod tests {
         assert_eq!(
             defined_directive_names,
             vec![
+                name!("core"),
                 name!("deprecated"),
                 name!("extends"),
                 name!("external"),
@@ -263,7 +313,6 @@ mod tests {
         );
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn injects_missing_directive_definitions_fed_2_0() {
         let schema = Schema::parse(
@@ -276,7 +325,7 @@ mod tests {
             "empty-fed2-schema.graphqls",
         )
         .expect("valid schema");
-        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
 
         let mut defined_directive_names = subgraph
             .schema()
@@ -290,21 +339,20 @@ mod tests {
             defined_directive_names,
             vec![
                 name!("deprecated"),
-                name!("external"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
                 name!("include"),
-                name!("key"),
                 name!("link"),
-                name!("override"),
-                name!("provides"),
-                name!("requires"),
-                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
         );
     }
 
-    #[ignore = "Ignoring until FieldSet is properly handled with namespaced directives and types"]
     #[test]
     fn injects_missing_directive_definitions_fed_2_1() {
         let schema = Schema::parse(
@@ -317,7 +365,7 @@ mod tests {
             "empty-fed2-schema.graphqls",
         )
         .expect("valid schema");
-        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
 
         let mut defined_directive_names = subgraph
             .schema()
@@ -330,16 +378,16 @@ mod tests {
         assert_eq!(
             defined_directive_names,
             vec![
-                name!("composeDirective"),
                 name!("deprecated"),
-                name!("external"),
+                name!("federation__composeDirective"),
+                name!("federation__external"),
+                name!("federation__key"),
+                name!("federation__override"),
+                name!("federation__provides"),
+                name!("federation__requires"),
+                name!("federation__shareable"),
                 name!("include"),
-                name!("key"),
                 name!("link"),
-                name!("override"),
-                name!("provides"),
-                name!("requires"),
-                name!("shareable"),
                 name!("skip"),
                 name!("specifiedBy"),
             ]
@@ -363,7 +411,7 @@ mod tests {
             "empty-fed1-schema.graphqls",
         )
         .expect("valid schema");
-        let subgraph = build_subgraph(&schema, true).expect("builds subgraph");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
 
         let key_definition = subgraph
             .schema()
@@ -377,7 +425,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
         assert!(
             key_definition
@@ -397,7 +445,7 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
         );
 
         let requires_definition = subgraph
@@ -412,22 +460,195 @@ mod tests {
                 .unwrap()
                 .ty
                 .inner_named_type(),
-            "FieldSet"
+            "_FieldSet"
+        );
+    }
+
+    #[test]
+    fn rejects_non_root_use_of_default_query_name() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                query: MyQuery
+            }
+
+            type MyQuery {
+                f: Int
+            }
+
+            type Query {
+                g: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let error = build_subgraph("S", &schema, true).expect_err("fails validation");
+        assert_eq!(
+            error.to_string(),
+            r#"[S] The schema has a type named "Query" but it is not set as the query root type ("MyQuery" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#
+        );
+    }
+
+    #[test]
+    fn rejects_non_root_use_of_default_mutation_name() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                mutation: MyMutation
+            }
+
+            type MyMutation {
+                f: Int
+            }
+
+            type Mutation {
+                g: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let error = build_subgraph("S", &schema, true).expect_err("fails validation");
+        assert_eq!(
+            error.to_string(),
+            r#"[S] The schema has a type named "Mutation" but it is not set as the mutation root type ("MyMutation" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+        );
+    }
+
+    #[test]
+    fn rejects_non_root_use_of_default_subscription_name() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                subscription: MySubscription
+            }
+
+            type MySubscription {
+                f: Int
+            }
+
+            type Subscription {
+                g: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let error = build_subgraph("S", &schema, true).expect_err("fails validation");
+        assert_eq!(
+            error.to_string(),
+            r#"[S] The schema has a type named "Subscription" but it is not set as the subscription root type ("MySubscription" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."#,
+        );
+    }
+
+    #[test]
+    fn renames_root_operations_to_default_names() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+                subscription: MySubscription
+            }
+
+            type MyQuery {
+                f: Int
+            }
+
+            type MyMutation {
+                g: Int
+            }
+
+            type MySubscription {
+                h: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let subgraph = build_subgraph("S", &schema, true).expect("builds subgraph");
+
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Query),
+            Some(name!("Query")).as_ref()
+        );
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Mutation),
+            Some(name!("Mutation")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .schema()
+                .root_operation(OperationType::Subscription),
+            Some(name!("Subscription")).as_ref()
+        );
+    }
+
+    #[test]
+    fn does_not_rename_root_operations_when_disabled() {
+        let schema = Schema::parse(
+            r#"
+            schema {
+                query: MyQuery
+                mutation: MyMutation
+                subscription: MySubscription
+            }
+    
+            type MyQuery {
+                f: Int
+            }
+    
+            type MyMutation {
+                g: Int
+            }
+    
+            type MySubscription {
+                h: Int
+            }
+            "#,
+            "test.graphqls",
+        )
+        .expect("parses schema");
+        let subgraph = build_subgraph("S", &schema, false).expect("builds subgraph");
+
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Query),
+            Some(name!("MyQuery")).as_ref()
+        );
+        assert_eq!(
+            subgraph.schema().root_operation(OperationType::Mutation),
+            Some(name!("MyMutation")).as_ref()
+        );
+        assert_eq!(
+            subgraph
+                .schema()
+                .root_operation(OperationType::Subscription),
+            Some(name!("MySubscription")).as_ref()
         );
     }
 
     fn build_subgraph(
+        name: &str,
         source: &Schema,
         with_root_type_renaming: bool,
-    ) -> Result<ValidFederationSchema, FederationError> {
+    ) -> Result<ValidFederationSchema, SubgraphError> {
         let blueprint = FederationBlueprint::new(with_root_type_renaming);
-        let subgraph = build_schema(source, &blueprint)?;
-        subgraph.validate_or_return_self().map_err(|(_, err)| err)
+        let subgraph = build_schema(source, &blueprint).map_err(|error| SubgraphError {
+            subgraph: Name::new_unchecked(name),
+            error,
+        })?;
+        subgraph
+            .validate_or_return_self()
+            .map_err(|(_, error)| SubgraphError {
+                subgraph: Name::new_unchecked(name),
+                error,
+            })
     }
 
     fn build_schema(
         schema: &Schema,
-        _blueprint: &FederationBlueprint,
+        blueprint: &FederationBlueprint,
     ) -> Result<FederationSchema, FederationError> {
         let mut federation_schema = FederationSchema::new_uninitialized(schema.clone())?;
 
@@ -448,26 +669,20 @@ mod tests {
         }
 
         // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-        // TODO: We may need to do the same for `@core` on Fed 1 schemas.
         if federation_schema
             .get_directive_definition(&name!("link"))
             .is_some()
         {
-            federation_schema
-                .schema
-                .schema_definition
-                .make_mut()
-                .directives
-                .insert(
-                    0,
-                    Component::new(Directive {
-                        name: name!("link"),
-                        arguments: vec![Node::new(Argument {
-                            name: name!("url"),
-                            value: "https://specs.apollo.dev/link/v1.0".into(),
-                        })],
-                    }),
-                );
+            LinkSpecDefinition::latest()
+                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+        } else {
+            // This must be a Fed 1 schema.
+            LinkSpecDefinition::fed1_latest()
+                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+
+            // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
+            //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
+            add_fed1_link_to_schema(&mut federation_schema)?;
         }
 
         // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
@@ -483,6 +698,10 @@ mod tests {
         // code was lazy and we could call this hook to lazily use federation directives before actually adding their
         // definitions.
         FederationBlueprint::on_constructed(&mut federation_schema)?;
+
+        // TODO: This should really happen inside `FederationSchema::validate_or_return_self`, but that code is running in the
+        // production QP. Once we have validation tests ported over from JS, this can move to the correct location.
+        blueprint.on_validation(&mut federation_schema)?;
 
         Ok(federation_schema)
     }
