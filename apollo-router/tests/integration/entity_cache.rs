@@ -31,6 +31,7 @@ fn base_config() -> serde_json::Value {
                         "urls": ["redis://127.0.0.1:6379"],
                         "ttl": "10m",
                         "namespace": namespace,
+                        "required_to_start": true,
                     },
                     "invalidation": {
                         "enabled": true,
