@@ -270,7 +270,7 @@ pub(crate) enum QueryPlannerError {
     JoinError(String),
 
     /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
-    EmptyPlan(UsageReporting), // usage_reporting_signature
+    EmptyPlan(String), // usage_reporting_signature
 
     /// unhandled planner result
     UnhandledPlannerResult,
