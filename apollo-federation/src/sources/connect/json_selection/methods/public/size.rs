@@ -6,9 +6,7 @@ use shape::location::SourceId;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
@@ -16,17 +14,18 @@ use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 
 impl_arrow_method!(SizeMethod, size_method, size_shape);
-/// Returns the number of items in an array.
+/// Returns the number of items in an array, length of a string, or the number of properties in an array.
 /// The simplest possible example:
 ///
-/// $->echo([1,2,3,4,5])->size     would result in 5
+/// $->echo([1,2,3,4,5])->size                      would result in 5
+/// $->echo("hello")->size                          would result in 5
+/// $->echo({"a": true, "b": true})->size           would result in 2
 fn size_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    vars: &VarsWithPathsMap,
+    _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -45,17 +44,17 @@ fn size_method(
     match data {
         JSON::Array(array) => {
             let size = array.len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
+            (Some(JSON::Number(size.into())), vec![])
         }
         JSON::String(s) => {
             let size = s.as_str().len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
+            (Some(JSON::Number(size.into())), vec![])
         }
         // Though we can't ask for ->first or ->last or ->at(n) on an object, we
         // can safely return how many properties the object has for ->size.
         JSON::Object(map) => {
             let size = map.len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
+            (Some(JSON::Number(size.into())), vec![])
         }
         _ => (
             None,
@@ -192,6 +191,38 @@ mod tests {
                     "range": [7, 11],
                 }))]
             ),
+        );
+    }
+
+    #[test]
+    fn size_should_return_length_of_string() {
+        assert_eq!(
+            selection!("$->size").apply_to(&json!("hello")),
+            (Some(json!(5)), vec![]),
+        );
+    }
+
+    #[test]
+    fn size_should_return_0_on_empty_string() {
+        assert_eq!(
+            selection!("$->size").apply_to(&json!("")),
+            (Some(json!(0)), vec![]),
+        );
+    }
+
+    #[test]
+    fn size_should_return_number_of_properties_of_an_object() {
+        assert_eq!(
+            selection!("$->size").apply_to(&json!({ "a": 1, "b": 2, "c": 3 })),
+            (Some(json!(3)), vec![]),
+        );
+    }
+
+    #[test]
+    fn size_should_return_0_on_empty_object() {
+        assert_eq!(
+            selection!("$->size").apply_to(&json!({})),
+            (Some(json!(0)), vec![]),
         );
     }
 }

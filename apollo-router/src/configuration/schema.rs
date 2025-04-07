@@ -26,7 +26,9 @@ use super::expansion::Expansion;
 use super::expansion::coerce;
 use super::plugins;
 use super::yaml;
+use crate::configuration::upgrade::UpgradeMode;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
+use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
@@ -75,6 +77,12 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     schema
 }
 
+#[derive(Eq, PartialEq)]
+pub(crate) enum Mode {
+    Upgrade,
+    NoUpgrade,
+}
+
 /// Validate config yaml against the generated json schema.
 /// This is a tricky problem, and the solution here is by no means complete.
 /// In the case that validation cannot be performed then it will let serde validate as normal. The
@@ -92,6 +100,7 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 pub(crate) fn validate_yaml_configuration(
     raw_yaml: &str,
     expansion: Expansion,
+    migration: Mode,
 ) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
         "plugins:".to_string()
@@ -99,7 +108,7 @@ pub(crate) fn validate_yaml_configuration(
         raw_yaml.to_string()
     };
 
-    let yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+    let mut yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
@@ -121,6 +130,18 @@ pub(crate) fn validate_yaml_configuration(
             }
         }
     });
+
+    if migration == Mode::Upgrade {
+        let upgraded = upgrade_configuration(&yaml, true, UpgradeMode::Minor)?;
+        let expanded_yaml = expansion.expand(&upgraded)?;
+        if schema.validate(&expanded_yaml).is_ok() {
+            yaml = upgraded;
+        } else {
+            tracing::warn!(
+                "Configuration could not be upgraded automatically as it had errors. If you previously used this configuration with Router 1.x, please refer to the migration guide: https://www.apollographql.com/docs/graphos/reference/migration/from-router-v1"
+            )
+        }
+    }
 
     let expanded_yaml = expansion.expand(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;

@@ -163,7 +163,7 @@ async fn incorrect_operation_name() {
         {
           "message": "Unknown operation named \"SecretThirdOp\"",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "GRAPHQL_UNKNOWN_OPERATION_NAME"
           }
         }
       ]

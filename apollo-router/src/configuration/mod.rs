@@ -25,6 +25,7 @@ use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
+use schema::Mode;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
@@ -65,7 +66,7 @@ pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
-mod schema;
+pub(crate) mod schema;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -559,7 +560,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
     }
 }
 
