@@ -35,7 +35,6 @@ use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
-#[cfg(test)]
 use crate::uplink::license_enforcement::LicenseState;
 
 /// Mocks for services the Apollo Router must integrate with.
@@ -340,10 +339,10 @@ impl<'a> TestHarness<'a> {
         .boxed_clone())
     }
 
-    #[cfg(test)]
-    pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
+    /// Build the HTTP service
+    pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
-        use crate::axum_factory::tests::make_axum_router;
+        use crate::axum_factory::axum_http_server_factory::make_axum_router;
         use crate::router_factory::RouterFactory;
 
         let (config, supergraph_creator) = self.build_common().await?;
@@ -369,8 +368,7 @@ impl<'a> TestHarness<'a> {
 }
 
 /// An HTTP-level service, as would be given to Hyper’s server
-#[cfg(test)]
-pub(crate) type HttpService = tower::util::BoxService<
+pub type HttpService = tower::util::BoxService<
     http::Request<crate::services::router::Body>,
     http::Response<axum::body::Body>,
     std::convert::Infallible,
