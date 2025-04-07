@@ -12,11 +12,11 @@ use tokio::sync::oneshot;
 use self::metrics::ActiveComputeMetric;
 use self::metrics::JobWatcher;
 use self::metrics::Outcome;
+use self::metrics::observe_compute_duration;
+use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
-use crate::compute_job::metrics::observe_compute_duration;
-use crate::compute_job::metrics::observe_queue_wait_duration;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
