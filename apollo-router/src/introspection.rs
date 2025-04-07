@@ -168,8 +168,7 @@ impl IntrospectionCache {
         // * We try to avoid such panics in the first place and consider them bugs
         // * The panic handler in `apollo-router/src/executable.rs` exits the process
         //   so this error case should never be reached.
-        .await
-        .expect("Introspection panicked");
+        .await;
         storage.insert(cache_key, response.clone()).await;
         Ok(response)
     }

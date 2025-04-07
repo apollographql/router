@@ -17,6 +17,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
 use tower::util::BoxService;
+use tracing_futures::WithSubscriber;
 use uuid::Uuid;
 
 use super::PathBuf;
@@ -24,6 +25,7 @@ use super::Rhai;
 use super::process_error;
 use super::subgraph;
 use crate::Context;
+use crate::assert_snapshot_subscriber;
 use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
@@ -113,118 +115,126 @@ async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
 
 #[tokio::test]
 async fn rhai_plugin_supergraph_service() -> Result<(), BoxError> {
-    let mut mock_service = MockSupergraphService::new();
-    mock_service
-        .expect_call()
-        .times(1)
-        .returning(move |req: SupergraphRequest| {
-            Ok(SupergraphResponse::fake_builder()
-                .header("x-custom-header", "CUSTOM_VALUE")
-                .context(req.context)
-                .build()
-                .unwrap())
-        });
+    async {
+        let mut mock_service = MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: SupergraphRequest| {
+                Ok(SupergraphResponse::fake_builder()
+                    .header("x-custom-header", "CUSTOM_VALUE")
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
 
-    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-        .find(|factory| factory.name == "apollo.rhai")
-        .expect("Plugin not found")
-        .create_instance_without_schema(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-        )
-        .await
-        .unwrap();
-    let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
-    let context = Context::new();
-    context.insert("test", 5i64).unwrap();
-    let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.supergraph_service(BoxService::new(mock_service));
+        let context = Context::new();
+        context.insert("test", 5i64).unwrap();
+        let supergraph_req = SupergraphRequest::fake_builder().context(context).build()?;
 
-    let mut supergraph_resp = router_service.ready().await?.call(supergraph_req).await?;
-    assert_eq!(supergraph_resp.response.status(), 200);
-    let headers = supergraph_resp.response.headers().clone();
-    let context = supergraph_resp.context.clone();
-    // Check if it fails
-    let resp = supergraph_resp.next_response().await.unwrap();
-    if !resp.errors.is_empty() {
-        panic!(
-            "Contains errors : {}",
-            resp.errors
-                .into_iter()
-                .map(|err| err.to_string())
-                .collect::<Vec<String>>()
-                .join("\n")
+        let mut supergraph_resp = router_service.ready().await?.call(supergraph_req).await?;
+        assert_eq!(supergraph_resp.response.status(), 200);
+        let headers = supergraph_resp.response.headers().clone();
+        let context = supergraph_resp.context.clone();
+        // Check if it fails
+        let resp = supergraph_resp.next_response().await.unwrap();
+        if !resp.errors.is_empty() {
+            panic!(
+                "Contains errors : {}",
+                resp.errors
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
+        }
+
+        assert_eq!(headers.get("coucou").unwrap(), &"hello");
+        assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
+        assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
+        assert_eq!(
+            context.get::<_, String>("addition").unwrap().unwrap(),
+            "Here is a new element in the context".to_string()
         );
+        Ok(())
     }
-
-    assert_eq!(headers.get("coucou").unwrap(), &"hello");
-    assert_eq!(headers.get("coming_from_entries").unwrap(), &"value_15");
-    assert_eq!(context.get::<_, i64>("test").unwrap().unwrap(), 42i64);
-    assert_eq!(
-        context.get::<_, String>("addition").unwrap().unwrap(),
-        "Here is a new element in the context".to_string()
-    );
-    Ok(())
+    .with_subscriber(assert_snapshot_subscriber!())
+    .await
 }
 
 #[tokio::test]
 async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
-    let mut mock_service = MockExecutionService::new();
-    mock_service.expect_clone().return_once(move || {
+    async {
         let mut mock_service = MockExecutionService::new();
-        // The execution_service in test.rhai throws an exception, so we never
-        // get a call into the mock service...
-        mock_service.expect_call().never();
-        mock_service
-    });
+        mock_service.expect_clone().return_once(move || {
+            let mut mock_service = MockExecutionService::new();
+            // The execution_service in test.rhai throws an exception, so we never
+            // get a call into the mock service...
+            mock_service.expect_call().never();
+            mock_service
+        });
 
-    let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-        .find(|factory| factory.name == "apollo.rhai")
-        .expect("Plugin not found")
-        .create_instance_without_schema(
-            &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
-        )
-        .await
-        .unwrap();
-    let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
-    let fake_req = http_ext::Request::fake_builder()
-        .header("x-custom-header", "CUSTOM_VALUE")
-        .body(Request::builder().query(String::new()).build())
-        .build()?;
-    let context = Context::new();
-    context.insert("test", 5i64).unwrap();
-    let exec_req = ExecutionRequest::fake_builder()
-        .context(context)
-        .supergraph_request(fake_req)
-        .build();
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut router_service = dyn_plugin.execution_service(BoxService::new(mock_service));
+        let fake_req = http_ext::Request::fake_builder()
+            .header("x-custom-header", "CUSTOM_VALUE")
+            .body(Request::builder().query(String::new()).build())
+            .build()?;
+        let context = Context::new();
+        context.insert("test", 5i64).unwrap();
+        let exec_req = ExecutionRequest::fake_builder()
+            .context(context)
+            .supergraph_request(fake_req)
+            .build();
 
-    let mut exec_resp = router_service
-        .ready()
-        .await
-        .unwrap()
-        .call(exec_req)
-        .await
-        .unwrap();
-    assert_eq!(
-        exec_resp.response.status(),
-        http::StatusCode::INTERNAL_SERVER_ERROR
-    );
-    // Check if it fails
-    let body = exec_resp.next_response().await.unwrap();
-    if body.errors.is_empty() {
-        panic!(
-            "Must contain errors : {}",
-            body.errors
-                .into_iter()
-                .map(|err| err.to_string())
-                .collect::<Vec<String>>()
-                .join("\n")
+        let mut exec_resp = router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(exec_req)
+            .await
+            .unwrap();
+        assert_eq!(
+            exec_resp.response.status(),
+            http::StatusCode::INTERNAL_SERVER_ERROR
         );
-    }
+        // Check if it fails
+        let body = exec_resp.next_response().await.unwrap();
+        if body.errors.is_empty() {
+            panic!(
+                "Must contain errors : {}",
+                body.errors
+                    .into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join("\n")
+            );
+        }
 
-    assert_eq!(
-        body.errors.first().unwrap().message.as_str(),
-        "rhai execution error: 'Runtime error: An error occured (line 30, position 5)'"
-    );
-    Ok(())
+        assert_eq!(
+            body.errors.first().unwrap().message.as_str(),
+            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)'"
+        );
+        Ok(())
+    }
+    .with_subscriber(assert_snapshot_subscriber!({r#"[].message"# => "[message]"}))
+    .await
 }
 
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty

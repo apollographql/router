@@ -1751,8 +1751,9 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                self.engine
-                    .call_fn(
+                let _ = self
+                    .engine
+                    .call_fn::<Dynamic>(
                         &mut guard,
                         &self.ast,
                         function_name,
@@ -1761,8 +1762,9 @@ impl Rhai {
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                self.engine
-                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
+                let _ = self
+                    .engine
+                    .call_fn::<Dynamic>(&mut guard, &self.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }

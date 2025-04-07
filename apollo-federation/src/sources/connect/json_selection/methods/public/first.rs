@@ -6,26 +6,25 @@ use shape::location::SourceId;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 
 impl_arrow_method!(FirstMethod, first_method, first_shape);
-/// The "first" method is a utility function that can be run against an array to grab the 0th item from it.
+/// The "first" method is a utility function that can be run against an array to grab the 0th item from it
+/// or a string to get the first character.
 /// The simplest possible example:
 ///
 /// $->echo([1,2,3])->first     results in 1
+/// $->echo("hello")->first     results in "h"
 fn first_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    vars: &VarsWithPathsMap,
+    _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -42,23 +41,25 @@ fn first_method(
     }
 
     match data {
-        JSON::Array(array) => {
-            if let Some(first) = array.first() {
-                tail.apply_to_path(first, vars, input_path)
-            } else {
-                (None, vec![])
-            }
-        }
-
+        JSON::Array(array) => (array.first().cloned(), vec![]),
         JSON::String(s) => {
             if let Some(first) = s.as_str().chars().next() {
-                tail.apply_to_path(&JSON::String(first.to_string().into()), vars, input_path)
+                (Some(JSON::String(first.to_string().into())), vec![])
             } else {
                 (None, vec![])
             }
         }
-
-        _ => tail.apply_to_path(data, vars, input_path),
+        _ => (
+            Some(data.clone()),
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires an array or string input",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        ),
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
@@ -97,9 +98,17 @@ fn first_shape(
             }
         }
         ShapeCase::Name(_, _) => input_shape.item(0, locations),
+        ShapeCase::Unknown => Shape::unknown(locations),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.
-        _ => input_shape.clone(),
+        _ => Shape::error_with_partial(
+            format!(
+                "Method ->{} requires an array or string input",
+                method_name.as_ref()
+            ),
+            input_shape.clone(),
+            locations,
+        ),
     }
 }
 
@@ -120,5 +129,13 @@ mod tests {
     #[test]
     fn first_should_get_none_when_no_items_exist() {
         assert_eq!(selection!("$->first").apply_to(&json!([])), (None, vec![]),);
+    }
+
+    #[test]
+    fn first_should_get_first_char_from_string() {
+        assert_eq!(
+            selection!("$->first").apply_to(&json!("hello")),
+            (Some(json!("h")), vec![]),
+        );
     }
 }

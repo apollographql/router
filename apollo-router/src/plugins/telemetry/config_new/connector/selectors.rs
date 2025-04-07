@@ -403,6 +403,7 @@ mod tests {
             }),
             key: response_key(),
             mapping_problems,
+            supergraph_request: Default::default(),
         }
     }
 

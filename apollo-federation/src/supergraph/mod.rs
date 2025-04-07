@@ -1661,7 +1661,9 @@ pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("repres
 pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
 const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
-const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
+pub(crate) const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
+pub(crate) const GRAPHQL_MUTATION_TYPE_NAME: Name = name!("Mutation");
+pub(crate) const GRAPHQL_SUBSCRIPTION_TYPE_NAME: Name = name!("Subscription");
 
 const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecification {
     name: FEDERATION_ANY_TYPE_NAME,
