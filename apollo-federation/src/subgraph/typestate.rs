@@ -7,6 +7,7 @@ use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::schema::FederationSchema;
+use crate::schema::KeyDirective;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
@@ -29,10 +30,30 @@ pub struct Validated {
     metadata: SubgraphMetadata,
 }
 
-pub trait SubgraphState {}
-impl SubgraphState for Raw {}
-impl SubgraphState for Expanded {}
-impl SubgraphState for Validated {}
+trait SubgraphMetadataState {
+    fn metadata(&self) -> &SubgraphMetadata;
+    fn schema(&self) -> &FederationSchema;
+}
+
+impl SubgraphMetadataState for Expanded {
+    fn metadata(&self) -> &SubgraphMetadata {
+        &self.metadata
+    }
+
+    fn schema(&self) -> &FederationSchema {
+        &self.schema
+    }
+}
+
+impl SubgraphMetadataState for Validated {
+    fn metadata(&self) -> &SubgraphMetadata {
+        &self.metadata
+    }
+
+    fn schema(&self) -> &FederationSchema {
+        &self.schema
+    }
+}
 
 /// A subgraph represents a schema and its associated metadata. Subgraphs are updated through the
 /// composition pipeline, such as when links are expanded or when fed 1 subgraphs are upgraded to fed 2.
@@ -51,10 +72,10 @@ impl SubgraphState for Validated {}
 ///   that it can be parsed.
 /// - `Expanded`: The schema's links have been expanded to include missing directive definitions and subgraph
 ///   metadata has been computed.
-/// - `Validated`: The schema has been validated according to Federation rules. Iterators over directives should
-///   be infallible at this stage.
+/// - `Validated`: The schema has been validated according to Federation rules. Iterators over directives are
+///   infallible at this stage.
 #[derive(Clone, Debug)]
-pub struct Subgraph<S: SubgraphState> {
+pub struct Subgraph<S> {
     pub name: String,
     pub url: String,
     pub state: S,
@@ -149,14 +170,6 @@ impl Subgraph<Raw> {
 }
 
 impl Subgraph<Expanded> {
-    pub(crate) fn metadata(&self) -> &SubgraphMetadata {
-        &self.state.metadata
-    }
-
-    pub fn schema(&self) -> &FederationSchema {
-        &self.state.schema
-    }
-
     pub fn upgrade(&mut self) -> Result<Self, SubgraphError> {
         todo!("Implement upgrade logic for expanded subgraphs");
     }
@@ -184,6 +197,13 @@ impl Subgraph<Expanded> {
             },
         })
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn key_directive_applications(
+        &self,
+    ) -> Result<Vec<Result<KeyDirective, FederationError>>, FederationError> {
+        self.state.schema.key_directive_applications()
+    }
 }
 
 impl Subgraph<Validated> {
@@ -197,6 +217,22 @@ impl Subgraph<Validated> {
                 metadata: self.state.metadata,
             },
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn key_directive_applications(&self) -> Vec<KeyDirective<'_>> {
+        todo!("Validated @key directives should be made available after validation")
+    }
+}
+
+#[allow(private_bounds)]
+impl<S: SubgraphMetadataState> Subgraph<S> {
+    pub(crate) fn metadata(&self) -> &SubgraphMetadata {
+        self.state.metadata()
+    }
+
+    pub(crate) fn schema(&self) -> &FederationSchema {
+        self.state.schema()
     }
 }
 
@@ -301,8 +337,7 @@ mod tests {
         .expect("expands subgraph");
 
         let mut defined_directive_names = subgraph
-            .state
-            .schema
+            .schema()
             .schema()
             .directive_definitions
             .keys()
@@ -345,8 +380,7 @@ mod tests {
         .expect("expands subgraph");
 
         let mut defined_directive_names = subgraph
-            .state
-            .schema
+            .schema()
             .schema()
             .directive_definitions
             .keys()
@@ -395,8 +429,7 @@ mod tests {
         .expect("expands subgraph");
 
         let key_definition = subgraph
-            .state
-            .schema
+            .schema()
             .schema()
             .directive_definitions
             .get(&name!("key"))
@@ -417,8 +450,7 @@ mod tests {
         );
 
         let provides_definition = subgraph
-            .state
-            .schema
+            .schema()
             .schema()
             .directive_definitions
             .get(&name!("provides"))
@@ -434,8 +466,7 @@ mod tests {
         );
 
         let requires_definition = subgraph
-            .state
-            .schema
+            .schema()
             .schema()
             .directive_definitions
             .get(&name!("requires"))

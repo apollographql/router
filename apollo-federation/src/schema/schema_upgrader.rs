@@ -21,7 +21,7 @@ use crate::utils::FallibleIterator;
 struct SchemaUpgrader<'a> {
     schema: FederationSchema,
     original_subgraph: &'a Subgraph<Expanded>,
-    subgraphs: &'a Vec<Subgraph<Expanded>>,
+    subgraphs: &'a [Subgraph<Expanded>],
     #[allow(unused)]
     object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
@@ -35,7 +35,7 @@ struct TypeInfo {
 
 #[allow(unused)]
 pub(crate) fn upgrade_subgraphs_if_necessary(
-    subgraphs: &mut Vec<Subgraph<Expanded>>,
+    subgraphs: &mut [Subgraph<Expanded>],
 ) -> Result<(), FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
@@ -79,7 +79,7 @@ impl<'a> SchemaUpgrader<'a> {
     #[allow(unused)]
     fn new(
         original_subgraph: &'a Subgraph<Expanded>,
-        subgraphs: &'a Vec<Subgraph<Expanded>>,
+        subgraphs: &'a [Subgraph<Expanded>],
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
         Ok(SchemaUpgrader {
