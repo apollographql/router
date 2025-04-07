@@ -1843,6 +1843,17 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_f64_histogram_with_unit() {
+        async {
+            f64_histogram_with_unit!("test", "test description", "m/s", 1.0, "attr" = "val");
+            assert_histogram_sum!("test", 1, "attr" = "val");
+            assert_unit("test", "m/s");
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
     async fn test_u64_counter_with_unit() {
         async {
             u64_counter_with_unit!("test", "test description", "Hz", 1, attr = "val");
@@ -1853,14 +1864,15 @@ mod test {
         .await;
     }
 
+    #[tokio::test]
     async fn test_i64_up_down_counter_with_unit() {
         async {
             i64_up_down_counter_with_unit!("test", "test description", "{request}", 1);
             assert_up_down_counter!("test", 1, "attr" = "val");
             assert_unit("test", "{request}");
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -1870,8 +1882,8 @@ mod test {
             assert_up_down_counter!("test", 1.5, "attr" = "val");
             assert_unit("test", "kg");
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -1881,19 +1893,8 @@ mod test {
             assert_histogram_sum!("test", 1, "attr" = "val");
             assert_unit("test", "{packet}");
         }
-            .with_metrics()
-            .await;
-    }
-
-    #[tokio::test]
-    async fn test_f64_histogram_with_unit() {
-        async {
-            f64_histogram_with_unit!("test", "test description", "m/s", 1.0, "attr" = "val");
-            assert_histogram_sum!("test", 1, "attr" = "val");
-            assert_unit("test", "m/s");
-        }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
@@ -1903,8 +1904,8 @@ mod test {
             assert_counter!("test", 1.5, "attr" = "val");
             assert_unit("test", "s");
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 
     #[tokio::test]
