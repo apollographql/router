@@ -1,17 +1,21 @@
+mod metrics;
+
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::OnceLock;
 use std::time::Instant;
+
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
 
+use self::metrics::JobWatcher;
+use self::metrics::Outcome;
+use self::metrics::QueueActiveMetric;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
@@ -113,7 +117,7 @@ impl From<ComputeJobType> for Priority {
 
 pub(crate) struct Job {
     ty: ComputeJobType,
-    queue_start: std::time::Instant,
+    queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
 }
 
@@ -168,11 +172,7 @@ where
     F: FnOnce(JobStatus<'_, T>) -> T + Send + 'static,
     T: Send + 'static,
 {
-    let mut job_watcher = JobWatcher {
-        queue_start: std::time::Instant::now(),
-        outcome: Outcome::Abandoned,
-        compute_job_type,
-    };
+    let mut job_watcher = JobWatcher::new(compute_job_type);
 
     let (tx, rx) = oneshot::channel();
     let wrapped_job_fn = Box::new(move || {
@@ -193,26 +193,28 @@ where
     let job = Job {
         ty: compute_job_type,
         job_fn: wrapped_job_fn,
-        queue_start: std::time::Instant::now(),
+        queue_start: Instant::now(),
     };
 
-    queue.send(Priority::from(compute_job_type), job).map_err(|e| match e {
-        SendError::QueueIsFull => {
-            u64_counter!(
-                "apollo.router.compute_jobs.queue_is_full",
-                "Number of requests rejected because the queue for compute jobs is full",
-                1u64
-            );
-            job_watcher.outcome = Outcome::RejectedQueueFull;
-            ComputeBackPressureError
-        }
-        SendError::Disconnected => {
-            // This never panics because this channel can never be disconnect:
-            // the receiver is owned by `queue` which we can access here:
-            let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
-            unreachable!("compute thread pool queue is disconnected")
-        }
-    })?;
+    queue
+        .send(Priority::from(compute_job_type), job)
+        .map_err(|e| match e {
+            SendError::QueueIsFull => {
+                u64_counter!(
+                    "apollo.router.compute_jobs.queue_is_full",
+                    "Number of requests rejected because the queue for compute jobs is full",
+                    1u64
+                );
+                job_watcher.outcome = Outcome::RejectedQueueFull;
+                ComputeBackPressureError
+            }
+            SendError::Disconnected => {
+                // This never panics because this channel can never be disconnect:
+                // the receiver is owned by `queue` which we can access here:
+                let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
+                unreachable!("compute thread pool queue is disconnected")
+            }
+        })?;
 
     Ok(async move {
         let result = rx.await;
@@ -260,71 +262,6 @@ pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
         )
         .with_callback(move |m| m.observe(queue().queued_count() as u64, &[]))
         .init()
-}
-
-#[derive(strum_macros::Display)]
-enum Outcome {
-    Executed,
-    ExecutedError,
-    RejectedQueueFull,
-    Abandoned,
-}
-
-struct JobWatcher {
-    queue_start: std::time::Instant,
-    outcome: Outcome,
-    compute_job_type: ComputeJobType,
-}
-
-impl Drop for JobWatcher {
-    fn drop(&mut self) {
-        let otel_status = match self.outcome {
-            Outcome::Executed => OTEL_STATUS_CODE_OK,
-            Outcome::Abandoned | Outcome::ExecutedError | Outcome::RejectedQueueFull => OTEL_STATUS_CODE_ERROR,
-        };
-
-        let current_span = tracing::Span::current();
-        current_span.record("job.outcome", self.outcome.to_string());
-        current_span.record("otel.status_code", otel_status);
-
-        let queue_duration = self.queue_start.elapsed();
-        f64_histogram!(
-            "apollo.router.compute_jobs.queue.jobs",
-            "Information about the jobs",
-            queue_duration.as_secs_f64(),
-            "job.type" = self.compute_job_type.to_string(),
-            "job.outcome" = self.outcome.to_string()
-        );
-    }
-}
-
-struct QueueActiveMetric {
-    compute_job_type: ComputeJobType,
-}
-
-impl QueueActiveMetric {
-    // create metric (auto-increments and decrements)
-    fn register(compute_job_type: ComputeJobType) -> Self {
-        let s = Self { compute_job_type };
-        s.incr(1);
-        s
-    }
-
-    fn incr(&self, value: i64) {
-        i64_up_down_counter_with_unit!(
-            "apollo.router.compute_jobs.active",
-            "Number of computation jobs in progress",
-            "s",
-            value,
-            job.type = self.compute_job_type.to_string()
-        );
-    }
-}
-
-impl Drop for QueueActiveMetric {
-    fn drop(&mut self) {
-        self.incr(-1);
-    }
 }
 
 #[cfg(test)]

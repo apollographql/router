@@ -188,10 +188,9 @@ impl QueryPlannerService {
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
         };
-        let (plan, mut root_node) =
-            compute_job::execute(ComputeJobType::QueryPlanning, job)
-                .map_err(MaybeBackPressureError::TemporaryError)?
-                .await?;
+        let (plan, mut root_node) = compute_job::execute(ComputeJobType::QueryPlanning, job)
+            .map_err(MaybeBackPressureError::TemporaryError)?
+            .await?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
