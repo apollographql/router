@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::OnceLock;
-
+use std::time::Instant;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
@@ -10,6 +10,8 @@ use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
@@ -92,7 +94,28 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::Display)]
+pub(crate) enum ComputeJobType {
+    QueryParsing,
+    QueryPlanning,
+    Introspection,
+}
+
+impl From<ComputeJobType> for Priority {
+    fn from(job_type: ComputeJobType) -> Self {
+        match job_type {
+            ComputeJobType::QueryPlanning => Self::P8, // high
+            ComputeJobType::QueryParsing => Self::P4,  // medium
+            ComputeJobType::Introspection => Self::P1, // low
+        }
+    }
+}
+
+pub(crate) struct Job {
+    ty: ComputeJobType,
+    queue_start: std::time::Instant,
+    job_fn: Box<dyn FnOnce() + Send + 'static>,
+}
 
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
@@ -109,7 +132,26 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                 let mut receiver = queue.receiver();
                 loop {
                     let job = receiver.blocking_recv();
-                    job();
+                    let queue_duration = job.queue_start.elapsed();
+                    f64_histogram_with_unit!(
+                        "apollo.router.compute_jobs.queue.wait.duration",
+                        "Time spent in the compute queue by the job",
+                        "s",
+                        queue_duration.as_secs_f64(),
+                        "job.type" = job.ty.to_string()
+                    );
+
+                    let _active_metric = QueueActiveMetric::register(job.ty);
+                    let job_start = Instant::now();
+                    (job.job_fn)();
+                    let job_duration = job_start.elapsed();
+                    f64_histogram_with_unit!(
+                        "apollo.router.compute_jobs.execution.duration",
+                        "Time spent executing the job",
+                        "s",
+                        job_duration.as_secs_f64(),
+                        "job.type" = job.ty.to_string()
+                    );
                 }
             });
         }
@@ -119,15 +161,21 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
-    priority: Priority,
+    compute_job_type: ComputeJobType,
     job: F,
 ) -> Result<impl Future<Output = T>, ComputeBackPressureError>
 where
     F: FnOnce(JobStatus<'_, T>) -> T + Send + 'static,
     T: Send + 'static,
 {
+    let mut job_watcher = JobWatcher {
+        queue_start: std::time::Instant::now(),
+        outcome: Outcome::Abandoned,
+        compute_job_type,
+    };
+
     let (tx, rx) = oneshot::channel();
-    let wrapped_job = Box::new(move || {
+    let wrapped_job_fn = Box::new(move || {
         let status = JobStatus { result_sender: &tx };
         // `AssertUnwindSafe` here is correct because this `catch_unwind`
         // is paired with `resume_unwind` below, so the overall effect on unwind safety
@@ -140,14 +188,22 @@ where
             }
         }
     });
+
     let queue = queue();
-    queue.send(priority, wrapped_job).map_err(|e| match e {
+    let job = Job {
+        ty: compute_job_type,
+        job_fn: wrapped_job_fn,
+        queue_start: std::time::Instant::now(),
+    };
+
+    queue.send(Priority::from(compute_job_type), job).map_err(|e| match e {
         SendError::QueueIsFull => {
             u64_counter!(
                 "apollo.router.compute_jobs.queue_is_full",
                 "Number of requests rejected because the queue for compute jobs is full",
                 1u64
             );
+            job_watcher.outcome = Outcome::RejectedQueueFull;
             ComputeBackPressureError
         }
         SendError::Disconnected => {
@@ -157,8 +213,15 @@ where
             unreachable!("compute thread pool queue is disconnected")
         }
     })?;
+
     Ok(async move {
-        match rx.await {
+        let result = rx.await;
+        job_watcher.outcome = match &result {
+            Ok(_) => Outcome::Executed,
+            Err(_) => Outcome::ExecutedError,
+        };
+
+        match result {
             Ok(Ok(value)) => value,
             Ok(Err(panic_payload)) => {
                 // The `job` callback panicked.
@@ -199,6 +262,71 @@ pub(crate) fn create_queue_size_gauge() -> ObservableGauge<u64> {
         .init()
 }
 
+#[derive(strum_macros::Display)]
+enum Outcome {
+    Executed,
+    ExecutedError,
+    RejectedQueueFull,
+    Abandoned,
+}
+
+struct JobWatcher {
+    queue_start: std::time::Instant,
+    outcome: Outcome,
+    compute_job_type: ComputeJobType,
+}
+
+impl Drop for JobWatcher {
+    fn drop(&mut self) {
+        let otel_status = match self.outcome {
+            Outcome::Executed => OTEL_STATUS_CODE_OK,
+            Outcome::Abandoned | Outcome::ExecutedError | Outcome::RejectedQueueFull => OTEL_STATUS_CODE_ERROR,
+        };
+
+        let current_span = tracing::Span::current();
+        current_span.record("job.outcome", self.outcome.to_string());
+        current_span.record("otel.status_code", otel_status);
+
+        let queue_duration = self.queue_start.elapsed();
+        f64_histogram!(
+            "apollo.router.compute_jobs.queue.jobs",
+            "Information about the jobs",
+            queue_duration.as_secs_f64(),
+            "job.type" = self.compute_job_type.to_string(),
+            "job.outcome" = self.outcome.to_string()
+        );
+    }
+}
+
+struct QueueActiveMetric {
+    compute_job_type: ComputeJobType,
+}
+
+impl QueueActiveMetric {
+    // create metric (auto-increments and decrements)
+    fn register(compute_job_type: ComputeJobType) -> Self {
+        let s = Self { compute_job_type };
+        s.incr(1);
+        s
+    }
+
+    fn incr(&self, value: i64) {
+        i64_up_down_counter_with_unit!(
+            "apollo.router.compute_jobs.active",
+            "Number of computation jobs in progress",
+            "s",
+            value,
+            job.type = self.compute_job_type.to_string()
+        );
+    }
+}
+
+impl Drop for QueueActiveMetric {
+    fn drop(&mut self) {
+        self.incr(-1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -209,9 +337,11 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, |_| std::thread::current().id())
-            .unwrap()
-            .await;
+        let job_thread = execute(ComputeJobType::QueryParsing, |_| {
+            std::thread::current().id()
+        })
+        .unwrap()
+        .await;
         assert_ne!(job_thread, test_thread)
     }
 
@@ -221,12 +351,12 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, |_| {
+        let one = execute(ComputeJobType::QueryPlanning, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         })
         .unwrap();
-        let two = execute(Priority::P8, |_| {
+        let two = execute(ComputeJobType::QueryPlanning, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         })
@@ -241,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn test_cancel() {
         let (side_channel_sender, side_channel_receiver) = oneshot::channel();
-        let queue_receiver = execute(Priority::P1, move |status| {
+        let queue_receiver = execute(ComputeJobType::Introspection, move |status| {
             // We expect the first iteration to succeed,
             // but let’s add lots of margin for CI machines with super-busy CPU cores
             for _ in 0..1_000 {

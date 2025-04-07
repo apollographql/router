@@ -26,6 +26,7 @@ use super::QueryKey;
 use crate::Configuration;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
@@ -151,7 +152,6 @@ impl QueryPlannerService {
     ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
-        let priority = compute_job::Priority::P8; // High priority
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
@@ -188,9 +188,10 @@ impl QueryPlannerService {
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
         };
-        let (plan, mut root_node) = compute_job::execute(priority, job)
-            .map_err(MaybeBackPressureError::TemporaryError)?
-            .await?;
+        let (plan, mut root_node) =
+            compute_job::execute(ComputeJobType::QueryPlanning, job)
+                .map_err(MaybeBackPressureError::TemporaryError)?
+                .await?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
