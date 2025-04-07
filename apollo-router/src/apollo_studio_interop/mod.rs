@@ -210,9 +210,10 @@ impl UsageReporting {
         } else if let Some(persisted_query_id) = &self.pq_id {
             format!("pq# {}", persisted_query_id)
         } else {
+            let stats_report_key_op_name = self.operation_name.as_deref().unwrap_or("-").to_string();
             format!(
                 "# {}\n{}",
-                self.get_operation_name(),
+                stats_report_key_op_name,
                 self.get_operation_signature()
             )
         }
@@ -246,7 +247,7 @@ impl UsageReporting {
         } else if let Some(err_key) = &self.error_key {
             format!("# {}", err_key)
         } else {
-            "-".to_string()
+            "".to_string()
         }
     }
 
