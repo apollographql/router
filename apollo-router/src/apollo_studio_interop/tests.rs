@@ -334,3 +334,82 @@ fn apollo_error_operation_id_hash() {
         UsageReporting::for_error("GraphQLUnknownOperationName".into()).get_operation_id()
     );
 }
+
+#[test]
+fn test_get_stats_report_key() {
+    let usage_reporting_for_errors = UsageReporting::for_error("GraphQLParseFailure".into());
+    assert_eq!(
+        "## GraphQLParseFailure\n",
+        usage_reporting_for_errors.get_stats_report_key()
+    );
+
+    let usage_reporting_for_pq = UsageReporting {
+        operation_name: Some("SomeQuery".into()),
+        operation_signature: Some("query SomeQuery{thing{id}}".into()),
+        error_key: None,
+        pq_id: Some("SomePqId".into()),
+        referenced_fields_by_type: HashMap::new(),
+    };
+    assert_eq!(
+        "pq# SomePqId",
+        usage_reporting_for_pq.get_stats_report_key()
+    );
+
+    let usage_reporting_for_named_operation = UsageReporting {
+        operation_name: Some("SomeQuery".into()),
+        operation_signature: Some("query SomeQuery{thing{id}}".into()),
+        error_key: None,
+        pq_id: None,
+        referenced_fields_by_type: HashMap::new(),
+    };
+    assert_eq!(
+        "# SomeQuery\nquery SomeQuery{thing{id}}",
+        usage_reporting_for_named_operation.get_stats_report_key()
+    );
+
+    let usage_reporting_for_unnamed_operation = UsageReporting {
+        operation_name: None,
+        operation_signature: Some("query{thing{id}}".into()),
+        error_key: None,
+        pq_id: None,
+        referenced_fields_by_type: HashMap::new(),
+    };
+    assert_eq!(
+        "# -\nquery{thing{id}}",
+        usage_reporting_for_unnamed_operation.get_stats_report_key()
+    );
+}
+
+
+#[test]
+fn test_get_operation_name() {
+    let usage_reporting_for_errors = UsageReporting::for_error("GraphQLParseFailure".into());
+    assert_eq!(
+        "# GraphQLParseFailure",
+        usage_reporting_for_errors.get_operation_name()
+    );
+
+    let usage_reporting_for_named_operation = UsageReporting {
+        operation_name: Some("SomeQuery".into()),
+        operation_signature: Some("query SomeQuery{thing{id}}".into()),
+        error_key: None,
+        pq_id: None,
+        referenced_fields_by_type: HashMap::new(),
+    };
+    assert_eq!(
+        "SomeQuery",
+        usage_reporting_for_named_operation.get_operation_name()
+    );
+
+    let usage_reporting_for_unnamed_operation = UsageReporting {
+        operation_name: None,
+        operation_signature: Some("query{thing{id}}".into()),
+        error_key: None,
+        pq_id: None,
+        referenced_fields_by_type: HashMap::new(),
+    };
+    assert_eq!(
+        "",
+        usage_reporting_for_unnamed_operation.get_operation_name()
+    );
+}
