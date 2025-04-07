@@ -55,7 +55,6 @@ use tower::Service;
 use tower::ServiceExt;
 use tower::service_fn;
 
-pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
 use crate::ApolloRouterError;
 use crate::Configuration;

@@ -25,6 +25,7 @@ use regex::Regex;
 use rustls::ServerConfig;
 use rustls::pki_types::CertificateDer;
 use rustls::pki_types::PrivateKeyDer;
+use schema::Mode;
 use schemars::JsonSchema;
 use schemars::r#gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
@@ -65,7 +66,7 @@ pub(crate) mod expansion;
 mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
-mod schema;
+pub(crate) mod schema;
 pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
@@ -559,7 +560,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
     }
 }
 
@@ -650,6 +651,11 @@ pub(crate) struct Supergraph {
     /// Defaults to 127.0.0.1:4000
     pub(crate) listen: ListenAddr,
 
+    /// The timeout for shutting down connections during a router shutdown or a schema reload.
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String", default = "default_connection_shutdown_timeout")]
+    pub(crate) connection_shutdown_timeout: Duration,
+
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
     pub(crate) path: String,
@@ -699,6 +705,7 @@ impl Supergraph {
     pub(crate) fn new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -709,6 +716,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -727,6 +736,7 @@ impl Supergraph {
     pub(crate) fn fake_new(
         listen: Option<ListenAddr>,
         path: Option<String>,
+        connection_shutdown_timeout: Option<Duration>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
@@ -737,6 +747,8 @@ impl Supergraph {
         Self {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
+            connection_shutdown_timeout: connection_shutdown_timeout
+                .unwrap_or_else(default_connection_shutdown_timeout),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
@@ -1390,6 +1402,10 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
+}
+
+fn default_connection_shutdown_timeout() -> Duration {
+    Duration::from_secs(60)
 }
 
 #[derive(Clone, Debug, Default, Error, Display, Serialize, Deserialize, JsonSchema)]

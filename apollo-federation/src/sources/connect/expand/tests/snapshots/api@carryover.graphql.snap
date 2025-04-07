@@ -8,6 +8,7 @@ directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE
 type Query {
   ts: [T]
   t(id: ID): T
+  z: Z
 }
 
 type R {
@@ -23,4 +24,15 @@ type T {
   policy: String
   overridden: String
   r: R
+}
+
+type X {
+  id: ID!
+  w: String
+}
+
+type Z {
+  id: ID!
+  y: String
+  x: X
 }

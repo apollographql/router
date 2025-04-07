@@ -6,12 +6,10 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
-use apollo_compiler::schema::ObjectType;
 
 use super::DirectiveName;
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::id::ConnectedElement;
-use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
@@ -183,28 +181,4 @@ impl Display for HttpHeadersCoordinate<'_> {
             }
         }
     }
-}
-
-pub(super) fn connect_directive_entity_argument_coordinate(
-    connect_directive_entity_argument: &Name,
-    value: &Value,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!(
-        "`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object_name}.{field}`",
-        object_name = object.name
-    )
-}
-
-pub(super) fn field_with_connect_directive_entity_true_coordinate(
-    connect_directive_entity_argument: &Name,
-    value: &Value,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!(
-        "`{object_name}.{field}` with `@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})`",
-        object_name = object.name
-    )
 }

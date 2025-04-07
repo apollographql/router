@@ -143,6 +143,9 @@ use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
+use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
+use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
@@ -210,6 +213,7 @@ struct TelemetryActivation {
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
     private_meter_provider: Option<FilterMeterProvider>,
+    private_realtime_meter_provider: Option<FilterMeterProvider>,
     is_active: bool,
 }
 
@@ -239,7 +243,8 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 impl Drop for Telemetry {
     fn drop(&mut self) {
         let mut activation = self.activation.lock();
-        let metrics_providers: [Option<FilterMeterProvider>; 3] = [
+        let metrics_providers: [Option<FilterMeterProvider>; 4] = [
+            activation.private_realtime_meter_provider.take(),
             activation.private_meter_provider.take(),
             activation.public_meter_provider.take(),
             activation.public_prometheus_meter_provider.take(),
@@ -316,6 +321,11 @@ impl PluginPrivate for Telemetry {
                 )),
                 private_meter_provider: Some(FilterMeterProvider::private(
                     metrics_builder.apollo_meter_provider_builder.build(),
+                )),
+                private_realtime_meter_provider: Some(FilterMeterProvider::private_realtime(
+                    metrics_builder
+                        .apollo_realtime_meter_provider_builder
+                        .build(),
                 )),
                 public_prometheus_meter_provider: metrics_builder
                     .prometheus_meter_provider
@@ -516,10 +526,10 @@ impl PluginPrivate for Telemetry {
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
                                     .map(|u| {
-                                        u.stats_report_key == "## GraphQLValidationFailure\n"
-                                            || u.stats_report_key == "## GraphQLParseFailure\n"
+                                        u.stats_report_key == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
+                                            || u.stats_report_key == GRAPHQL_PARSE_FAILURE_ERROR_KEY
                                             || u.stats_report_key
-                                                == "## GraphQLUnknownOperationName\n"
+                                                == GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
                                     })
                                     .unwrap_or(false)
                             }) {
@@ -1671,7 +1681,7 @@ impl TelemetryActivation {
     fn reload_metrics(&mut self) {
         let meter_provider = meter_provider_internal();
         commit_prometheus();
-        let mut old_meter_providers: [Option<FilterMeterProvider>; 3] = Default::default();
+        let mut old_meter_providers: [Option<FilterMeterProvider>; 4] = Default::default();
 
         old_meter_providers[0] = meter_provider.set(
             MeterProviderType::PublicPrometheus,
@@ -1683,13 +1693,18 @@ impl TelemetryActivation {
             self.private_meter_provider.take(),
         );
 
-        old_meter_providers[2] =
+        old_meter_providers[2] = meter_provider.set(
+            MeterProviderType::ApolloRealtime,
+            self.private_realtime_meter_provider.take(),
+        );
+
+        old_meter_providers[3] =
             meter_provider.set(MeterProviderType::Public, self.public_meter_provider.take());
 
         Self::checked_meter_shutdown(old_meter_providers);
     }
 
-    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 3]) {
+    fn checked_meter_shutdown(meters: [Option<FilterMeterProvider>; 4]) {
         for meter_provider in meters.into_iter().flatten() {
             Telemetry::checked_spawn_task(Box::new(move || {
                 if let Err(e) = meter_provider.shutdown() {
@@ -2884,6 +2899,22 @@ mod tests {
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
             assert!(prometheus_metrics.is_empty());
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_units_are_included() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            u64_histogram_with_unit!("apollo.test.histo1", "no unit", "{request}", 1u64);
+            f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
+
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+            assert_snapshot!(prometheus_metrics);
         }
         .with_metrics()
         .await;

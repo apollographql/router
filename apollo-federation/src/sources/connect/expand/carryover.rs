@@ -3,6 +3,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::HashSet;
 use apollo_compiler::name;
 
 use crate::error::FederationError;
@@ -23,6 +24,8 @@ use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
@@ -36,6 +39,7 @@ const REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC: Name = name!("requiresScopes");
 const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
 const COST_DIRECTIVE_NAME_IN_SPEC: Name = name!("cost");
 const LIST_SIZE_DIRECTIVE_NAME_IN_SPEC: Name = name!("listSize");
+const CONTEXT_DIRECTIVE_NAME_IN_SPEC: Name = name!("context");
 
 pub(super) fn carryover_directives(
     from: &FederationSchema,
@@ -258,6 +262,141 @@ pub(super) fn carryover_directives(
             Ok::<_, FederationError>(())
         })?;
 
+    // @context
+
+    if let Some(link) = metadata.for_identity(&Identity {
+        domain: APOLLO_SPEC_DOMAIN.to_string(),
+        name: CONTEXT_DIRECTIVE_NAME_IN_SPEC,
+    }) {
+        let mut insert_link = false;
+
+        let directive_name = link.directive_name_in_schema(&CONTEXT_DIRECTIVE_NAME_IN_SPEC);
+        from.referencers()
+            .get_directive(&directive_name)
+            .and_then(|referencers| {
+                if referencers.len() > 0 {
+                    insert_link = true;
+                    copy_directive_definition(from, to, directive_name.clone())?;
+                }
+                referencers.copy_directives(from, to, &directive_name)
+            })?;
+
+        if insert_link {
+            SchemaDefinitionPosition
+                .insert_directive(to, link.to_directive_application().into())?;
+        }
+    }
+
+    // @join__field(contextArguments: ...)
+    // This is a special case where we need to copy a specific argument from
+    // join__field directives in the original supergraph over to matching (by
+    // graph: arguments) join__field directives in the new schema. This is to
+    // avoid recreating the logic for constructing the contextArguments
+    // argument. This works because @fromContext is not allowed in connector
+    // subgraphs, so we can always directly carry over argument values.
+    if let Ok(referencers) = from.referencers().get_directive("join__field") {
+        let fields = referencers
+            .object_fields
+            .iter()
+            .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Object(pos.clone()))
+            .chain(
+                referencers
+                    .interface_fields
+                    .iter()
+                    .map(|pos| ObjectOrInterfaceFieldDefinitionPosition::Interface(pos.clone())),
+            )
+            .filter_map(|pos| {
+                let field_def = pos.get(from.schema()).ok()?;
+                let applications = field_def
+                    .directives
+                    .iter()
+                    .filter(|d| d.name == name!("join__field"))
+                    .collect::<Vec<_>>();
+                Some((pos, applications))
+            })
+            .flat_map(|(pos, applications)| {
+                applications
+                    .into_iter()
+                    .map(move |application| (pos.clone(), application))
+            })
+            .filter_map(|(pos, application)| {
+                let argument = application
+                    .arguments
+                    .iter()
+                    .find(|arg| arg.name == name!("contextArguments"))?
+                    .clone();
+                let graph = application
+                    .arguments
+                    .iter()
+                    .find(|arg| arg.name == name!("graph"))
+                    .and_then(|arg| arg.value.as_enum())?
+                    .to_string();
+                Some((pos, graph, argument))
+            });
+
+        for (pos, graph, argument) in fields {
+            let field = pos.get(to.schema())?;
+            let directive_index = field
+                .directives
+                .iter()
+                .position(|d| {
+                    d.name == name!("join__field")
+                        && d.arguments.iter().any(|a| {
+                            a.name == name!("graph")
+                                && a.value.as_enum().map(|e| e.to_string()).unwrap_or_default()
+                                    == graph
+                        })
+                })
+                .ok_or_else(|| {
+                    FederationError::internal("Cannot find matching directive in new supergraph")
+                })?;
+
+            let argument_names = argument
+                .value
+                .as_list()
+                .map(|list| list.iter().flat_map(|v| v.as_object()).flatten())
+                .map(|pairs| {
+                    pairs
+                        .filter(|(name, _)| name == &name!("name"))
+                        .flat_map(|(_, value)| value.as_str())
+                        .flat_map(|s| Name::new(s).ok())
+                        .collect::<HashSet<_>>()
+                })
+                .ok_or_else(|| {
+                    FederationError::internal("Cannot find `name` argument in `contextArguments`")
+                })?;
+
+            ObjectOrInterfaceFieldDirectivePosition {
+                field: pos.clone(),
+                directive_name: name!("join__field"),
+                directive_index,
+            }
+            .add_argument(to, argument)?;
+
+            for argument_name in argument_names {
+                // Remove the argument now that it's handled by `@join__field(contextArguments:)`
+                match &pos {
+                    ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
+                        ObjectFieldArgumentDefinitionPosition {
+                            type_name: pos.type_name.clone(),
+                            field_name: pos.field_name.clone(),
+                            argument_name,
+                        }
+                        .remove(to)?;
+                    }
+                    ObjectOrInterfaceFieldDefinitionPosition::Interface(pos) => {
+                        InterfaceFieldArgumentDefinitionPosition {
+                            type_name: pos.type_name.clone(),
+                            field_name: pos.field_name.clone(),
+                            argument_name,
+                        }
+                        .remove(to)?;
+                    }
+                }
+            }
+        }
+    };
+
     Ok(())
 }
 
@@ -271,6 +410,7 @@ fn is_known_link(link: &Link) -> bool {
             name!(authenticated),
             name!(requiresScopes),
             name!(policy),
+            name!(context),
         ]
         .contains(&link.url.identity.name)
 }
@@ -443,7 +583,7 @@ impl_copy_directive! {
 }
 
 impl DirectiveReferencers {
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.schema.as_ref().map(|_| 1).unwrap_or_default()
             + self.scalar_types.len()
             + self.object_types.len()
