@@ -380,7 +380,6 @@ fn test_get_stats_report_key() {
     );
 }
 
-
 #[test]
 fn test_get_operation_name() {
     let usage_reporting_for_errors = UsageReporting::for_error("GraphQLParseFailure".into());
