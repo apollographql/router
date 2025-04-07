@@ -253,9 +253,7 @@ fn resolve_normal_field<'a>(
     field_name: &'a str,
     arguments: &'a JsonMap,
 ) -> Result<ResolvedValue<'a>, execution::resolver::ResolverError> {
-    if !arguments.is_empty() {
-        return Err("arguments not supported".into()); // TODO?
-    }
+    let _ignored = arguments; // TODO: find some way to vary response based on arguments?
     let mock = mocks
         .get(field_name)
         .ok_or("field not found in mocked data")?;
