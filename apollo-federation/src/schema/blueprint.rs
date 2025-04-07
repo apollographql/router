@@ -1,18 +1,12 @@
 use std::collections::HashMap;
 
 use apollo_compiler::Name;
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::NamedType;
-<<<<<<< HEAD
-use apollo_compiler::name;
-use apollo_compiler::schema::Component;
-=======
 use apollo_compiler::ast::OperationType;
+use apollo_compiler::name;
 use apollo_compiler::ty;
->>>>>>> dev
 
 use crate::bail;
 use crate::error::FederationError;
@@ -25,6 +19,7 @@ use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::link_spec_definition::LinkSpecDefinition;
 use crate::link::spec::Url;
@@ -33,6 +28,7 @@ use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::subgraph::SubgraphError;
 use crate::supergraph::GRAPHQL_MUTATION_TYPE_NAME;
 use crate::supergraph::GRAPHQL_QUERY_TYPE_NAME;
 use crate::supergraph::GRAPHQL_SUBSCRIPTION_TYPE_NAME;
@@ -243,18 +239,27 @@ fn default_operation_name(op_type: &OperationType) -> Name {
 
 #[allow(dead_code)]
 fn build_subgraph(
+    name: &str,
     source: &Schema,
     with_root_type_renaming: bool,
-) -> Result<ValidFederationSchema, FederationError> {
+) -> Result<ValidFederationSchema, SubgraphError> {
     let blueprint = FederationBlueprint::new(with_root_type_renaming);
-    let subgraph = build_schema(source, &blueprint)?;
-    subgraph.validate_or_return_self().map_err(|(_, err)| err)
+    let subgraph = build_schema(source, &blueprint).map_err(|error| SubgraphError {
+        subgraph: Name::new_unchecked(name),
+        error,
+    })?;
+    subgraph
+        .validate_or_return_self()
+        .map_err(|(_, error)| SubgraphError {
+            subgraph: Name::new_unchecked(name),
+            error,
+        })
 }
 
 #[allow(dead_code)]
-fn build_schema<B: SchemaBlueprint>(
+fn build_schema(
     schema: &Schema,
-    blueprint: &B,
+    blueprint: &FederationBlueprint,
 ) -> Result<FederationSchema, FederationError> {
     let mut federation_schema = FederationSchema::new_uninitialized(schema.clone())?;
 
@@ -267,35 +272,33 @@ fn build_schema<B: SchemaBlueprint>(
             .get_directive_definition(&directive.name)
             .is_none()
         {
-            blueprint.on_missing_directive_definition(&mut federation_schema, directive)?;
+            FederationBlueprint::on_missing_directive_definition(
+                &mut federation_schema,
+                directive,
+            )?;
         }
     }
 
     // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-    // TODO: We may need to do the same for `@core` on Fed 1 schemas.
     if federation_schema
         .get_directive_definition(&name!("link"))
         .is_some()
     {
-        federation_schema
-            .schema
-            .schema_definition
-            .make_mut()
-            .directives
-            .insert(
-                0,
-                Component::new(Directive {
-                    name: name!("link"),
-                    arguments: vec![Node::new(Argument {
-                        name: name!("url"),
-                        value: "https://specs.apollo.dev/link/v1.0".into(),
-                    })],
-                }),
-            );
+        LinkSpecDefinition::latest().add_to_schema(&mut federation_schema, /*alias*/ None)?;
+    } else {
+        // This must be a Fed 1 schema.
+        LinkSpecDefinition::fed1_latest()
+            .add_to_schema(&mut federation_schema, /*alias*/ None)?;
+
+        // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
+        //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
+        add_fed1_link_to_schema(&mut federation_schema)?;
     }
 
     // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
     federation_schema.collect_links_metadata()?;
+
+    FederationBlueprint::on_directive_definition_and_schema_parsed(&mut federation_schema)?;
 
     // Also, the backfilled definitions mean we can collect deep references.
     federation_schema.collect_deep_references()?;
@@ -304,23 +307,20 @@ fn build_schema<B: SchemaBlueprint>(
     // Right now, this is down here because it eagerly evaluates directive usages for SubgraphMetadata, whereas the JS
     // code was lazy and we could call this hook to lazily use federation directives before actually adding their
     // definitions.
-    blueprint.on_constructed(&mut federation_schema)?;
+    FederationBlueprint::on_constructed(&mut federation_schema)?;
+
+    // TODO: This should really happen inside `FederationSchema::validate_or_return_self`, but that code is running in the
+    // production QP. Once we have validation tests ported over from JS, this can move to the correct location.
+    blueprint.on_validation(&mut federation_schema)?;
 
     Ok(federation_schema)
 }
 
 #[cfg(test)]
 mod tests {
-<<<<<<< HEAD
-    use super::*;
-=======
     use apollo_compiler::name;
 
     use super::*;
-    use crate::link::federation_spec_definition::add_fed1_link_to_schema;
-    use crate::schema::ValidFederationSchema;
-    use crate::subgraph::SubgraphError;
->>>>>>> dev
 
     #[test]
     fn detects_federation_1_subgraphs_correctly() {
@@ -355,8 +355,6 @@ mod tests {
 
         assert!(metadata.is_fed_2_schema());
     }
-<<<<<<< HEAD
-=======
 
     #[test]
     fn injects_missing_directive_definitions_fed_1_0() {
@@ -709,83 +707,4 @@ mod tests {
             Some(name!("MySubscription")).as_ref()
         );
     }
-
-    fn build_subgraph(
-        name: &str,
-        source: &Schema,
-        with_root_type_renaming: bool,
-    ) -> Result<ValidFederationSchema, SubgraphError> {
-        let blueprint = FederationBlueprint::new(with_root_type_renaming);
-        let subgraph = build_schema(source, &blueprint).map_err(|error| SubgraphError {
-            subgraph: Name::new_unchecked(name),
-            error,
-        })?;
-        subgraph
-            .validate_or_return_self()
-            .map_err(|(_, error)| SubgraphError {
-                subgraph: Name::new_unchecked(name),
-                error,
-            })
-    }
-
-    fn build_schema(
-        schema: &Schema,
-        blueprint: &FederationBlueprint,
-    ) -> Result<FederationSchema, FederationError> {
-        let mut federation_schema = FederationSchema::new_uninitialized(schema.clone())?;
-
-        // First, copy types over from the underlying schema AST to make sure we have built-ins that directives may reference
-        federation_schema.collect_shallow_references();
-
-        // Backfill missing directive definitions. This is primarily making sure we have a definition for `@link`.
-        for directive in &schema.schema_definition.directives {
-            if federation_schema
-                .get_directive_definition(&directive.name)
-                .is_none()
-            {
-                FederationBlueprint::on_missing_directive_definition(
-                    &mut federation_schema,
-                    directive,
-                )?;
-            }
-        }
-
-        // If there's a use of `@link`, and we successfully added its definition, add the bootstrap directive
-        if federation_schema
-            .get_directive_definition(&name!("link"))
-            .is_some()
-        {
-            LinkSpecDefinition::latest()
-                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
-        } else {
-            // This must be a Fed 1 schema.
-            LinkSpecDefinition::fed1_latest()
-                .add_to_schema(&mut federation_schema, /*alias*/ None)?;
-
-            // PORT_NOTE: JS doesn't actually add the 1.0 federation spec link to the schema. In
-            //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
-            add_fed1_link_to_schema(&mut federation_schema)?;
-        }
-
-        // Now that we have the definition for `@link` and an application, the bootstrap directive detection should work.
-        federation_schema.collect_links_metadata()?;
-
-        FederationBlueprint::on_directive_definition_and_schema_parsed(&mut federation_schema)?;
-
-        // Also, the backfilled definitions mean we can collect deep references.
-        federation_schema.collect_deep_references()?;
-
-        // TODO: In JS this happens inside the schema constructor; we should consider if that's the right thing to do here
-        // Right now, this is down here because it eagerly evaluates directive usages for SubgraphMetadata, whereas the JS
-        // code was lazy and we could call this hook to lazily use federation directives before actually adding their
-        // definitions.
-        FederationBlueprint::on_constructed(&mut federation_schema)?;
-
-        // TODO: This should really happen inside `FederationSchema::validate_or_return_self`, but that code is running in the
-        // production QP. Once we have validation tests ported over from JS, this can move to the correct location.
-        blueprint.on_validation(&mut federation_schema)?;
-
-        Ok(federation_schema)
-    }
->>>>>>> dev
 }
