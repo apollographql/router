@@ -187,7 +187,7 @@ impl Invalidation {
 
                 f64_histogram!(
                     "apollo.router.cache.invalidation.duration",
-                    "Duration of the invalidation event execution.",
+                    "Duration of the invalidation event execution, in seconds.",
                     start.elapsed().as_secs_f64()
                 );
                 res
