@@ -20,7 +20,7 @@ use crate::plugins::telemetry::consts::{
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
-const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
+const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 1000;
 
 static CONFIGURED_POOL_SIZE: AtomicUsize = AtomicUsize::new(0);
 
