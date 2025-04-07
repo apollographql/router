@@ -6,6 +6,7 @@ expression: plan.usage_reporting
   "operationName": null,
   "operationSignature": "{me{name{first last}}}",
   "errorKey": null,
+  "pqId": null,
   "referencedFieldsByType": {
     "Name": {
       "fieldNames": [

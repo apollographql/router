@@ -423,7 +423,7 @@ where
                     let _ = context.insert(APOLLO_OPERATION_ID, usage_reporting.get_operation_id());
                     let _ = context.insert(
                         "apollo_operation_signature",
-                        usage_reporting.get_stats_report_key(None),
+                        usage_reporting.get_stats_report_key(),
                     );
                 }
             })

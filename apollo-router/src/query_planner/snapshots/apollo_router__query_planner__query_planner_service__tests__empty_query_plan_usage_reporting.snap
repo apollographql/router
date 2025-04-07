@@ -6,6 +6,7 @@ expression: usage_reporting
   "operationName": null,
   "operationSignature": "{__schema{queryType{name}}}",
   "errorKey": null,
+  "pqId": null,
   "referencedFieldsByType": {
     "Query": {
       "fieldNames": [

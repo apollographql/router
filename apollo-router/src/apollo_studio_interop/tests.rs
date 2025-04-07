@@ -5,7 +5,7 @@ use super::*;
 use crate::Configuration;
 
 fn assert_expected_signature(actual: &UsageReporting, expected_sig: &str) {
-    assert_eq!(actual.get_stats_report_key(None), expected_sig);
+    assert_eq!(actual.get_stats_report_key(), expected_sig);
 }
 
 macro_rules! assert_extended_references {
@@ -307,6 +307,7 @@ fn apollo_operation_id_hash() {
         operation_name: Some("IgnitionMeQuery".to_string()),
         operation_signature: Some("query IgnitionMeQuery{me{id}}".to_string()),
         error_key: None,
+        pq_id: None,
         referenced_fields_by_type: HashMap::new(),
     };
 

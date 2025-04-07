@@ -172,6 +172,8 @@ pub(crate) struct UsageReporting {
     pub(crate) operation_signature: Option<String>,
     /// The error key to use for the stats report, or None if there is no error
     pub(crate) error_key: Option<String>,
+    /// The persisted query ID used to request this operation, or None if the query was not requested via PQ ID
+    pub(crate) pq_id: Option<String>,
     /// a list of all types and fields referenced in the query
     #[serde(default)]
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
@@ -183,23 +185,30 @@ impl UsageReporting {
             operation_name: None,
             operation_signature: None,
             error_key: Some(error_key),
+            pq_id: None,
             referenced_fields_by_type: HashMap::new(),
         }
     }
 
+    pub(crate) fn with_pq_id(&self, pq_id: Option<String>) -> UsageReporting {
+        let mut updated_usage_report = self.clone();
+        updated_usage_report.pq_id = pq_id;
+        updated_usage_report
+    }
+
     /// The `stats_report_key` is a unique identifier derived from schema and query.
-    /// Metric data  sent to Studio must be aggregated
+    /// Metric data sent to Studio must be aggregated
     /// via grouped key of (`client_name`, `client_version`, `stats_report_key`).
     /// For errors, the report key is of the form "## <error name>\n".
     /// For operations requested by PQ, the report key is of the form "pq# <pq id>".
     /// For operations not requested by PQ, the report key is of the form "# <op name>\n<op sig>".
     /// Note that this combination of operation name and signature is sometimes referred to in code as
     /// "operation signature" even though it also contains the operation name as the first line.
-    pub(crate) fn get_stats_report_key(&self, maybe_pq_id: Option<String>) -> String {
+    pub(crate) fn get_stats_report_key(&self) -> String {
         if let Some(error_key) = &self.error_key {
             format!("## {}\n", error_key)
-        } else if let Some(pq_id) = maybe_pq_id {
-            format!("pq# {}", pq_id)
+        } else if let Some(persisted_query_id) = &self.pq_id {
+            format!("pq# {}", persisted_query_id)
         } else {
             format!(
                 "# {}\n{}",
@@ -222,7 +231,7 @@ impl UsageReporting {
             // The correct string to hash in this case is e.g. "# # GraphQLParseFailure\n".
             format!("# # {}\n", self.error_key.as_ref().unwrap())
         } else {
-            self.get_stats_report_key(None)
+            self.get_stats_report_key()
         };
 
         let mut hasher = sha1::Sha1::new();
@@ -438,6 +447,7 @@ impl UsageGenerator<'_> {
             operation_name: self.get_operation_name(),
             operation_signature: self.generate_normalized_signature(),
             error_key: None,
+            pq_id: None,
             referenced_fields_by_type: self.generate_apollo_reporting_refs(),
         }
     }

@@ -603,7 +603,7 @@ impl PluginPrivate for Telemetry {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.get_stats_report_key(None).as_str(),
+                        usage_reporting.get_stats_report_key().as_str(),
                     );
                 }
                 // To expose trace_id or not
@@ -1427,7 +1427,8 @@ impl Telemetry {
                     ),
                     stats: HashMap::from([(
                         usage_reporting
-                            .get_stats_report_key(maybe_pq_id.clone())
+                            .with_pq_id(maybe_pq_id.clone())
+                            .get_stats_report_key()
                             .to_string(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
