@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::time::Instant;
 
 use crate::compute_job::ComputeJobType;
@@ -41,22 +42,23 @@ impl Drop for JobWatcher {
         current_span.record("job.outcome", self.outcome.to_string());
         current_span.record("otel.status_code", otel_status);
 
-        let queue_duration = self.queue_start.elapsed();
-        f64_histogram!(
-            "apollo.router.compute_jobs.queue.jobs",
-            "Information about the jobs",
-            queue_duration.as_secs_f64(),
+        let full_duration = self.queue_start.elapsed();
+        f64_histogram_with_unit!(
+            "apollo.router.compute_jobs.duration",
+            "Total job processing time",
+            "s",
+            full_duration.as_secs_f64(),
             "job.type" = self.compute_job_type.to_string(),
             "job.outcome" = self.outcome.to_string()
         );
     }
 }
 
-pub(super) struct QueueActiveMetric {
+pub(super) struct ActiveComputeMetric {
     compute_job_type: ComputeJobType,
 }
 
-impl QueueActiveMetric {
+impl ActiveComputeMetric {
     // create metric (auto-increments and decrements)
     pub(super) fn register(compute_job_type: ComputeJobType) -> Self {
         let s = Self { compute_job_type };
@@ -66,17 +68,40 @@ impl QueueActiveMetric {
 
     fn incr(&self, value: i64) {
         i64_up_down_counter_with_unit!(
-            "apollo.router.compute_jobs.active",
+            "apollo.router.compute_jobs.execution.active_count",
             "Number of computation jobs in progress",
-            "s",
+            "{job}",
             value,
             job.type = self.compute_job_type.to_string()
         );
     }
 }
 
-impl Drop for QueueActiveMetric {
+impl Drop for ActiveComputeMetric {
     fn drop(&mut self) {
         self.incr(-1);
     }
+}
+
+pub(super) fn observe_queue_wait_duration(
+    compute_job_type: ComputeJobType,
+    queue_duration: Duration,
+) {
+    f64_histogram_with_unit!(
+        "apollo.router.compute_jobs.queue.wait.duration",
+        "Time spent by the job in the compute queue",
+        "s",
+        queue_duration.as_secs_f64(),
+        "job.type" = compute_job_type.to_string()
+    );
+}
+
+pub(super) fn observe_compute_duration(compute_job_type: ComputeJobType, job_duration: Duration) {
+    f64_histogram_with_unit!(
+        "apollo.router.compute_jobs.execution.duration",
+        "Time to execute the job, after it has been pulled from the queue",
+        "s",
+        job_duration.as_secs_f64(),
+        "job.type" = compute_job_type.to_string()
+    );
 }

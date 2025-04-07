@@ -9,12 +9,14 @@ use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
 
+use self::metrics::ActiveComputeMetric;
 use self::metrics::JobWatcher;
 use self::metrics::Outcome;
-use self::metrics::QueueActiveMetric;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 pub(crate) use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
+use crate::compute_job::metrics::observe_compute_duration;
+use crate::compute_job::metrics::observe_queue_wait_duration;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
@@ -136,26 +138,12 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                 let mut receiver = queue.receiver();
                 loop {
                     let job = receiver.blocking_recv();
-                    let queue_duration = job.queue_start.elapsed();
-                    f64_histogram_with_unit!(
-                        "apollo.router.compute_jobs.queue.wait.duration",
-                        "Time spent in the compute queue by the job",
-                        "s",
-                        queue_duration.as_secs_f64(),
-                        "job.type" = job.ty.to_string()
-                    );
+                    observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
 
-                    let _active_metric = QueueActiveMetric::register(job.ty);
+                    let _active_metric = ActiveComputeMetric::register(job.ty);
                     let job_start = Instant::now();
                     (job.job_fn)();
-                    let job_duration = job_start.elapsed();
-                    f64_histogram_with_unit!(
-                        "apollo.router.compute_jobs.execution.duration",
-                        "Time spent executing the job",
-                        "s",
-                        job_duration.as_secs_f64(),
-                        "job.type" = job.ty.to_string()
-                    );
+                    observe_compute_duration(job.ty, job_start.elapsed());
                 }
             });
         }
