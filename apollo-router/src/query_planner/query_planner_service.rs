@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Instant;
 
@@ -58,6 +59,25 @@ use crate::spec::operation_limits::OperationLimits;
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
+
+const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
+    "APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK";
+/// Should we enforce the non-local selections limit? Default true, can be toggled off with an
+/// environment variable.
+///
+/// Disabling this check is very much not advisable and we don't expect that anyone will need to do
+/// it. In the extremely unlikely case that the new protection breaks someone's legitimate queries,
+/// though, they could temporarily disable this individual limit so they can still benefit from the
+/// other new limits, until we improve the detection.
+pub(crate) fn non_local_selections_check_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let disabled =
+            std::env::var(ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK).as_deref() == Ok("true");
+
+        !disabled
+    })
+}
 
 /// A query planner that calls out to the apollo-federation crate.
 ///
@@ -139,6 +159,7 @@ impl QueryPlannerService {
             let query_plan_options = QueryPlanOptions {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
+                non_local_selections_limit_enabled: non_local_selections_check_enabled(),
             };
 
             let result = operation
