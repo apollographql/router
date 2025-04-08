@@ -13,15 +13,74 @@ use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::FederationError;
 use crate::schema::SubgraphMetadata;
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::utils::FallibleIterator;
+
+// TODO: How should we serialize these? Would be nice to use thiserror for templating, but these aren't really errors.
+#[derive(Clone, Debug)]
+enum UpgradeChange {
+    ExternalOnTypeExtensionRemoval {
+        field: FieldDefinitionPosition,
+    },
+    TypeExtensionRemoval {
+        ty: ObjectTypeDefinitionPosition,
+    },
+    ExternalOnInterfaceRemoval {
+        field: InterfaceFieldDefinitionPosition,
+    },
+    ExternalOnObjectTypeRemoval {
+        ty: ObjectTypeDefinitionPosition,
+    },
+    UnusedExternalRemoval {
+        field: FieldDefinitionPosition,
+    },
+    TypeWithOnlyUnusedExternalsRemoval {
+        ty: ObjectTypeDefinitionPosition,
+    },
+    InactiveProvidesOrRequiresRemoval {
+        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
+    },
+    InactiveProvidesOrRequiresFieldsRemoval {
+        updated_directive: ObjectOrInterfaceFieldDirectivePosition,
+    },
+    ShareableFieldAddition {
+        field: FieldDefinitionPosition,
+    },
+    ShareableTypeAddition {
+        ty: ObjectTypeDefinitionPosition,
+        declaring_subgraphs: Vec<Name>,
+    },
+    KeyOnInterfaceRemoval {
+        ty: InterfaceTypeDefinitionPosition,
+    },
+    ProvidesOrRequiresOnInterfaceFieldRemoval {
+        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
+    },
+    ProvidesOnNonCompositeRemoval {
+        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
+        target_type: Name,
+    },
+    FieldsArgumentCoercionToString {
+        updated_directive: ObjectOrInterfaceFieldDirectivePosition,
+    },
+    RemovedTagOnExternal {
+        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
+    },
+}
+
+impl std::fmt::Display for UpgradeChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
+}
 
 #[derive(Clone, Debug)]
 struct SchemaUpgrader<'a> {
     schema: FederationSchema,
     original_subgraph: &'a Subgraph<Expanded>,
-    subgraphs: &'a [Subgraph<Expanded>],
+    subgraphs: &'a [&'a mut Subgraph<Expanded>],
     #[allow(unused)]
     object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
@@ -35,14 +94,14 @@ struct TypeInfo {
 
 #[allow(unused)]
 pub(crate) fn upgrade_subgraphs_if_necessary(
-    subgraphs: &mut [Subgraph<Expanded>],
-) -> Result<(), FederationError> {
+    subgraphs: &[&mut Subgraph<Expanded>],
+) -> Result<HashMap<Name, Vec<UpgradeChange>>, FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
         .all(|subgraph| subgraph.metadata().is_fed_2_schema())
     {
-        return Ok(());
+        return Ok(Default::default());
     }
 
     let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
@@ -79,7 +138,7 @@ impl<'a> SchemaUpgrader<'a> {
     #[allow(unused)]
     fn new(
         original_subgraph: &'a Subgraph<Expanded>,
-        subgraphs: &'a [Subgraph<Expanded>],
+        subgraphs: &'a [&'a mut Subgraph<Expanded>],
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
         Ok(SchemaUpgrader {
@@ -353,5 +412,286 @@ impl<'a> SchemaUpgrader<'a> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &'static str = r#"@link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+
+    #[test]
+    fn upgrades_complex_schema() {
+        let mut s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            type Query {
+                products: [Product!]! @provides(fields: "upc description")
+            }
+
+            interface I @key(fields: "upc") {
+                upc: ID!
+                description: String @external
+            }
+
+            extend type Product implements I @key(fields: "upc") {
+                upc: ID! @external
+                name: String @external
+                inventory: Int @requires(fields: "upc")
+                description: String @external
+            }
+
+            # A type with a genuine 'graphqQL' extension, to ensure the extend don't get removed.
+            type Random {
+                x: Int @provides(fields: "x")
+            }
+
+            extend type Random {
+                y: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        // Note that no changes are really expected on that 2nd schema: it is just there to make the example not throw due to
+        // then Product type extension having no "base".
+        let mut s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            type Product @key(fields: "upc") {
+            upc: ID!
+            name: String
+            description: String
+            }            
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let changes =
+            upgrade_subgraphs_if_necessary(&vec![&mut s1, &mut s2]).expect("upgrades schema");
+        let s1_changes: Vec<_> = changes
+            .get("s1")
+            .expect("s1 changes")
+            .into_iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert!(changes.get("s2").is_none());
+
+        assert!(s1_changes.contains(
+            &r#"Removed @external from field "Product.upc" as it is a key of an extension type"#.to_string()
+        ));
+
+        assert!(
+            s1_changes.contains(
+                &r#"Switched type "Product" from an extension to a definition"#.to_string()
+            )
+        );
+
+        assert!(s1_changes.contains(
+            &r#"Removed @external field "Product.name" as it was not used in any @key, @provides or @requires"#.to_string()
+        ));
+
+        assert!(s1_changes.contains(
+            &r#"Removed @external directive on interface type field "I.description": @external is nonsensical on interface fields"#.to_string()
+        ));
+
+        assert!(s1_changes.contains(
+            &r#"Removed directive @requires(fields: "upc") on "Product.inventory": none of the fields were truly @external"#.to_string()
+        ));
+
+        assert!(s1_changes.contains(
+            &r#"Updated directive @provides(fields: "upc description") on "Query.products" to @provides(fields: "description"): removed fields that were not truly @external"#.to_string()
+        ));
+
+        assert!(s1_changes.contains(
+            &r#"Removed @key on interface "I": while allowed by federation 0.x, @key on interfaces were completely ignored/had no effect"#.to_string()
+        ));
+
+        assert!(s1_changes.contains(
+            &r#"Removed @provides directive on field "Random.x" as it is of non-composite type "Int": while not rejected by federation 0.x, such @provide is nonsensical and was ignored"#.to_string()
+        ));
+
+        assert_eq!(
+            s1.schema().schema().to_string(),
+            r#"
+            schema
+                FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
+            {
+                query: Query
+            }
+
+            type Query {
+                products: [Product!]! @provides(fields: "description")
+            }
+
+            interface I {
+                upc: ID!
+                description: String
+            }
+
+            type Product implements I
+                @key(fields: "upc")
+            {
+                upc: ID!
+                inventory: Int
+                description: String @external
+            }
+
+            type Random {
+                x: Int
+            }
+
+            extend type Random {
+                y: Int
+            }
+        "#
+            .replace(
+                "FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED",
+                FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
+            )
+        );
+    }
+
+    #[test]
+    fn update_federation_directive_non_string_arguments() {
+        let mut s = Subgraph::parse(
+            "s",
+            "",
+            r#"
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: id) @key(fields: ["id", "x"]) {
+                id: String
+                x: Int
+            }  
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let changes = upgrade_subgraphs_if_necessary(&vec![&mut s]).expect("upgrades schema");
+        let s_changes: Vec<_> = changes
+            .get("s")
+            .expect("s changes")
+            .into_iter()
+            .map(|c| c.to_string())
+            .collect();
+
+        assert_eq!(
+            s_changes,
+            vec![
+                r#"Coerced "fields" argument for directive @key for "A" into a string: coerced from @key(fields: id) to @key(fields: "id")"#,
+                r#"Coerced "fields" argument for directive @key for "A" into a string: coerced from @key(fields: ["id", "x"]) to @key(fields: "id x")"#,
+            ]
+        );
+
+        assert_eq!(
+            s.schema().schema().to_string(),
+            r#"
+            schema
+                FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
+            {
+                query: Query
+            }
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @key(fields: "id x") {
+                id: String
+                x: Int
+            }
+        "#
+            .replace(
+                "FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED",
+                FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED
+            )
+        );
+    }
+
+    #[test]
+    fn remove_tag_on_external_field_if_found_on_definition() {
+        let mut s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            type Query {
+                a: A @provides(fields: "y")
+            }
+
+            type A @key(fields: "id") {
+                id: String
+                x: Int
+                y: Int @external @tag(name: "a tag")
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let mut s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            type A @key(fields: "id") {
+                id: String
+                y: Int @tag(name: "a tag")
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let changes =
+            upgrade_subgraphs_if_necessary(&vec![&mut s1, &mut s2]).expect("upgrades schema");
+        let s1_changes: Vec<_> = changes
+            .get("s1")
+            .expect("s1 changes")
+            .into_iter()
+            .map(|c| c.to_string())
+            .collect();
+        assert_eq!(
+            s1_changes,
+            vec![
+                r#"Removed @tag(name: "a tag") application on @external "A.y" as the @tag application is on another definition"#
+            ]
+        );
+
+        let type_a_in_s1 = s1.schema().schema().get_object("A").unwrap();
+        let type_a_in_s2 = s2.schema().schema().get_object("A").unwrap();
+
+        assert_eq!(type_a_in_s1.directives.get_all("tag").count(), 0);
+        assert_eq!(
+            type_a_in_s2
+                .directives
+                .get_all("tag")
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>(),
+            vec![r#"@tag(name: "a tag")"#]
+        );
+    }
+
+    #[test]
+    fn reject_interface_object_usage_if_not_all_subgraphs_are_fed2() {
+        // Note that this test both validates the rejection of fed1 subgraph when @interfaceObject is used somewhere, but also
+        // illustrate why we do so: fed1 schema can use @key on interface for backward compatibility, but it is ignored and
+        // the schema upgrader removes them. Given that actual support for @key on interfaces is necesarry to make @interfaceObject
+        // work, it would be really confusing to not reject the example below right away, since it "looks" like it the @key on
+        // the interface in the 2nd subgraph should work, but it actually won't.
+
+        // TODO
     }
 }
