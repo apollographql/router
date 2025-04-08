@@ -27,31 +27,34 @@ fn join_method(
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut warnings = vec![];
 
-    static EMPTY_STRING: String = String::new();
-    let separator = method_args
+    let Some(separator) = method_args
         .and_then(|args| args.args.first())
         .and_then(|s| match &**s {
             LitExpr::String(s) => Some(s),
             _ => None,
         })
-        .unwrap_or_else(|| {
-            warnings.push(ApplyToError::new(
-                format!(
-                    "Method ->{} requires a string argument",
-                    method_name.as_ref()
-                ),
-                input_path.to_vec(),
-                method_name.range(),
-            ));
-            &EMPTY_STRING
-        });
+    else {
+        warnings.push(ApplyToError::new(
+            format!(
+                "Method ->{} requires a string argument",
+                method_name.as_ref()
+            ),
+            input_path.to_vec(),
+            method_name.range(),
+        ));
+        return (None, warnings);
+    };
 
-    fn to_string(value: &JSON) -> String {
+    fn to_string(value: &JSON) -> (String, Option<String>) {
         match value {
-            JSON::Bool(b) => b.then_some("true").unwrap_or("false").to_string(),
-            JSON::Number(number) => number.to_string(),
-            JSON::String(byte_string) => byte_string.as_str().to_string(),
-            JSON::Null | JSON::Array(_) | JSON::Object(_) => "".to_string(),
+            JSON::Bool(b) => (b.then_some("true").unwrap_or("false").to_string(), None),
+            JSON::Number(number) => (number.to_string(), None),
+            JSON::String(byte_string) => (byte_string.as_str().to_string(), None),
+            JSON::Null => ("".to_string(), None),
+            JSON::Array(_) | JSON::Object(_) => (
+                "".to_string(),
+                Some("Method ->join requires an array of scalars values as input".to_string()),
+            ),
         }
     }
 
@@ -59,10 +62,30 @@ fn join_method(
         JSON::Array(values) => values
             .iter()
             .map(to_string)
+            .map(|(value, err)| {
+                if let Some(err) = err {
+                    warnings.push(ApplyToError::new(
+                        err.to_string(),
+                        input_path.to_vec(),
+                        method_name.range(),
+                    ));
+                }
+                value
+            })
             .collect::<Vec<_>>()
             .join(separator),
         // Single values are emitted as strings with no separator
-        _ => to_string(data),
+        _ => {
+            let (value, err) = to_string(data);
+            if let Some(err) = err {
+                warnings.push(ApplyToError::new(
+                    err.to_string(),
+                    input_path.to_vec(),
+                    method_name.range(),
+                ));
+            }
+            value
+        }
     };
 
     (Some(JSON::String(joined.into())), warnings)
@@ -179,6 +202,25 @@ mod tests {
         assert_eq!(
             selection!(&format!("$->join('{}')", separator)).apply_to(&input),
             (Some(expected), vec![]),
+        );
+    }
+
+    #[rstest::rstest]
+    #[case(json!({"a": 1}), json!(""), vec!["Method ->join requires an array of scalars values as input"])]
+    #[case(json!([{"a": 1}, {"a": 2}]), json!(","), vec!["Method ->join requires an array of scalars values as input"])]
+    #[case(json!([[1, 2]]), json!(""), vec!["Method ->join requires an array of scalars values as input"])]
+    fn join_warnings(
+        #[case] input: JSON,
+        #[case] expected: JSON,
+        #[case] expected_warnings: Vec<&str>,
+    ) {
+        use itertools::Itertools;
+
+        let (result, warnings) = selection!("$->join(',')").apply_to(&input);
+        assert_eq!(result, Some(expected));
+        assert_eq!(
+            warnings.iter().map(|w| w.message()).collect_vec(),
+            expected_warnings
         );
     }
 
