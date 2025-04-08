@@ -46,3 +46,4 @@ pub(crate) mod telemetry;
 #[cfg(test)]
 pub(crate) mod test;
 pub(crate) mod traffic_shaping;
+pub(crate) mod error_counting_metrics;
