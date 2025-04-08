@@ -30,12 +30,12 @@ pub struct Validated {
     metadata: SubgraphMetadata,
 }
 
-trait SubgraphMetadataState {
+trait HasMetadata {
     fn metadata(&self) -> &SubgraphMetadata;
     fn schema(&self) -> &FederationSchema;
 }
 
-impl SubgraphMetadataState for Expanded {
+impl HasMetadata for Expanded {
     fn metadata(&self) -> &SubgraphMetadata {
         &self.metadata
     }
@@ -45,7 +45,7 @@ impl SubgraphMetadataState for Expanded {
     }
 }
 
-impl SubgraphMetadataState for Validated {
+impl HasMetadata for Validated {
     fn metadata(&self) -> &SubgraphMetadata {
         &self.metadata
     }
@@ -220,13 +220,13 @@ impl Subgraph<Validated> {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(&self) -> Vec<KeyDirective<'_>> {
+    pub(crate) fn key_directive_applications(&self) -> Vec<KeyDirective> {
         todo!("Validated @key directives should be made available after validation")
     }
 }
 
 #[allow(private_bounds)]
-impl<S: SubgraphMetadataState> Subgraph<S> {
+impl<S: HasMetadata> Subgraph<S> {
     pub(crate) fn metadata(&self) -> &SubgraphMetadata {
         self.state.metadata()
     }
