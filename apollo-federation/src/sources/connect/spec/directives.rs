@@ -31,7 +31,7 @@ use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::ObjectFieldDefinitionPosition;
 use crate::sources::connect::id::ObjectTypeDefinitionDirectivePosition;
 use crate::sources::connect::json_selection::JSONSelection;
-use crate::sources::connect::models::Header;
+use crate::sources::connect::models::http_json_transport::Header;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 
 macro_rules! internal {
