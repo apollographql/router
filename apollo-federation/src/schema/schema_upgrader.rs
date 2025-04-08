@@ -518,7 +518,7 @@ mod tests {
             &r#"Removed @provides directive on field "Random.x" as it is of non-composite type "Int": while not rejected by federation 0.x, such @provide is nonsensical and was ignored"#.to_string()
         ));
 
-        assert_eq!(
+        insta::assert_snapshot!(
             s1.schema().schema().to_string(),
             r#"
             schema
@@ -596,7 +596,7 @@ mod tests {
             ]
         );
 
-        assert_eq!(
+        insta::assert_snapshot!(
             s.schema().schema().to_string(),
             r#"
             schema
@@ -831,7 +831,7 @@ mod tests {
         // router that supports the build pipeline they're upgrading to, but that
         // mechanism isn't in place yet.
         // - Trevor
-        assert_eq!(
+        insta::assert_snapshot!(
             subgraph.schema().schema().to_string(),
             r#"
             schema
@@ -842,7 +842,6 @@ mod tests {
             }
         "#
         );
-        // TODO: Check if SDL assertions are better done with assert_snapshot
     }
 
     #[ignore = "not yet implemented"]
