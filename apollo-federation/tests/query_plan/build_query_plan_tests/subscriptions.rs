@@ -221,16 +221,19 @@ fn trying_to_use_skip_with_a_subscription_results_in_an_error() {
         "#,
     );
 
-    let document = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        r#"
+    // This is invalid per https://github.com/graphql/graphql-spec/pull/860
+    let document = Valid::assume_valid(
+        ExecutableDocument::parse(
+            planner.api_schema().schema(),
+            r#"
         subscription MySubscription($v: Boolean!) {
           onNewUser @skip(if: $v) { id name }
         }
         "#,
-        "trying_to_use_skip_with_a_subcription_results_in_an_error.graphql",
-    )
-    .unwrap();
+            "trying_to_use_skip_with_a_subcription_results_in_an_error.graphql",
+        )
+        .unwrap(),
+    );
 
     planner
         .build_query_plan(&document, Some(name!(MySubscription)), Default::default())
@@ -266,16 +269,19 @@ fn trying_to_use_include_with_a_subscription_results_in_an_error() {
         "#,
     );
 
-    let document = ExecutableDocument::parse_and_validate(
-        planner.api_schema().schema(),
-        r#"
+    // This is invalid per https://github.com/graphql/graphql-spec/pull/860
+    let document = Valid::assume_valid(
+        ExecutableDocument::parse(
+            planner.api_schema().schema(),
+            r#"
         subscription MySubscription($v: Boolean!) {
           onNewUser @include(if: $v) { id name }
         }
         "#,
-        "trying_to_use_include_with_a_subcription_results_in_an_error.graphql",
-    )
-    .unwrap();
+            "trying_to_use_include_with_a_subcription_results_in_an_error.graphql",
+        )
+        .unwrap(),
+    );
 
     planner
         .build_query_plan(&document, Some(name!(MySubscription)), Default::default())
