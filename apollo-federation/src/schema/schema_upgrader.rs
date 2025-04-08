@@ -11,17 +11,17 @@ use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
-use crate::ValidFederationSubgraph;
-use crate::ValidFederationSubgraphs;
 use crate::error::FederationError;
 use crate::schema::SubgraphMetadata;
+use crate::subgraph::typestate::Expanded;
+use crate::subgraph::typestate::Subgraph;
 use crate::utils::FallibleIterator;
 
 #[derive(Clone, Debug)]
 struct SchemaUpgrader<'a> {
     schema: FederationSchema,
-    original_subgraph: &'a ValidFederationSubgraph,
-    subgraphs: &'a ValidFederationSubgraphs,
+    original_subgraph: &'a Subgraph<Expanded>,
+    subgraphs: &'a [Subgraph<Expanded>],
     #[allow(unused)]
     object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
 }
@@ -35,51 +35,40 @@ struct TypeInfo {
 
 #[allow(unused)]
 pub(crate) fn upgrade_subgraphs_if_necessary(
-    subgraphs: ValidFederationSubgraphs,
+    subgraphs: &mut [Subgraph<Expanded>],
 ) -> Result<(), FederationError> {
-    let mut federation_subgraphs = ValidFederationSubgraphs::new();
-
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
-        .subgraphs
-        .values()
-        .all(|subgraph| subgraph.schema.is_fed_2())
+        .iter()
+        .all(|subgraph| subgraph.metadata().is_fed_2_schema())
     {
         return Ok(());
     }
 
     let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
-    for subgraph in subgraphs.subgraphs.values() {
-        if let Some(subgraph_metadata) = subgraph.schema.subgraph_metadata() {
-            for pos in subgraph.schema.get_types() {
-                if matches!(
-                    pos,
-                    TypeDefinitionPosition::Object(_) | TypeDefinitionPosition::Interface(_)
-                ) {
-                    object_type_map
-                        .entry(pos.type_name().clone())
-                        .or_default()
-                        .insert(
-                            subgraph.name.clone(),
-                            TypeInfo {
-                                pos: pos.clone(),
-                                metadata: subgraph_metadata.clone(),
-                            },
-                        );
-                }
+    for subgraph in subgraphs.iter() {
+        for pos in subgraph.schema().get_types() {
+            if matches!(
+                pos,
+                TypeDefinitionPosition::Object(_) | TypeDefinitionPosition::Interface(_)
+            ) {
+                object_type_map
+                    .entry(pos.type_name().clone())
+                    .or_default()
+                    .insert(
+                        subgraph.name.clone(),
+                        TypeInfo {
+                            pos: pos.clone(),
+                            metadata: subgraph.metadata().clone(), // TODO: Prefer not to clone
+                        },
+                    );
             }
         }
     }
-    for (_name, subgraph) in subgraphs.subgraphs.iter() {
-        if subgraph.schema.is_fed_2() {
-            federation_subgraphs.add(ValidFederationSubgraph {
-                name: subgraph.name.clone(),
-                url: subgraph.url.clone(),
-                schema: subgraph.schema.clone(),
-            })?;
-        } else {
-            let mut upgrader = SchemaUpgrader::new(subgraph, &subgraphs, &object_type_map)?;
-            federation_subgraphs.add(upgrader.upgrade()?)?;
+    for subgraph in subgraphs.iter() {
+        if !subgraph.schema().is_fed_2() {
+            let mut upgrader = SchemaUpgrader::new(subgraph, subgraphs, &object_type_map)?;
+            upgrader.upgrade()?;
         }
     }
     // TODO: Return federation_subgraphs
@@ -89,12 +78,12 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
 impl<'a> SchemaUpgrader<'a> {
     #[allow(unused)]
     fn new(
-        original_subgraph: &'a ValidFederationSubgraph,
-        subgraphs: &'a ValidFederationSubgraphs,
+        original_subgraph: &'a Subgraph<Expanded>,
+        subgraphs: &'a [Subgraph<Expanded>],
         object_type_map: &'a HashMap<Name, HashMap<String, TypeInfo>>,
     ) -> Result<Self, FederationError> {
         Ok(SchemaUpgrader {
-            schema: (*original_subgraph.schema).clone(),
+            schema: original_subgraph.schema().clone(), // TODO: Don't think we should be cloning here
             original_subgraph,
             subgraphs,
             object_type_map,
@@ -102,7 +91,7 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     #[allow(unused)]
-    fn upgrade(&mut self) -> Result<ValidFederationSubgraph, FederationError> {
+    fn upgrade(&mut self) -> Result<Subgraph<Expanded>, FederationError> {
         self.pre_upgrade_validations();
 
         self.fix_federation_directives_arguments();
@@ -298,12 +287,12 @@ impl<'a> SchemaUpgrader<'a> {
                                 .is_external(&target)
                             {
                                 let used_in_other_definitions =
-                                    self.subgraphs.subgraphs.iter().fallible_any(
-                                        |(name, subgraph)| -> Result<bool, FederationError> {
-                                            if self.original_subgraph.name.as_str() != name.as_ref() {
+                                    self.subgraphs.iter().fallible_any(
+                                        |subgraph| -> Result<bool, FederationError> {
+                                            if self.original_subgraph.name != subgraph.name {
                                                 // check to see if the field is external in the other subgraphs
                                                 if let Some(other_metadata) =
-                                                    &subgraph.schema.subgraph_metadata
+                                                    &subgraph.schema().subgraph_metadata
                                                 {
                                                     if !other_metadata
                                                         .external_metadata()
@@ -311,7 +300,7 @@ impl<'a> SchemaUpgrader<'a> {
                                                     {
                                                         // at this point, we need to check to see if there is a @tag directive on the other subgraph that matches the current application
                                                         let other_applications = subgraph
-                                                            .schema
+                                                            .schema()
                                                             .tag_directive_applications()?;
                                                         return other_applications.iter().fallible_any(
                                                             |other_app_result| -> Result<bool, FederationError> {
