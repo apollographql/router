@@ -18,9 +18,9 @@ use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::utils::FallibleIterator;
 
-// TODO: How should we serialize these? Would be nice to use thiserror for templating, but these aren't really errors.
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
-enum UpgradeChange {
+pub(crate) enum UpgradeChange {
     ExternalOnTypeExtensionRemoval {
         field: FieldDefinitionPosition,
     },
@@ -71,7 +71,7 @@ enum UpgradeChange {
 }
 
 impl std::fmt::Display for UpgradeChange {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         todo!()
     }
 }
@@ -419,8 +419,9 @@ impl<'a> SchemaUpgrader<'a> {
 mod tests {
     use super::*;
 
-    const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &'static str = r#"@link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
+    const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
 
+    #[ignore = "not yet implemented"]
     #[test]
     fn upgrades_complex_schema() {
         let mut s1 = Subgraph::parse(
@@ -474,15 +475,14 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let changes =
-            upgrade_subgraphs_if_necessary(&vec![&mut s1, &mut s2]).expect("upgrades schema");
+        let changes = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
         let s1_changes: Vec<_> = changes
             .get("s1")
             .expect("s1 changes")
-            .into_iter()
+            .iter()
             .map(|c| c.to_string())
             .collect();
-        assert!(changes.get("s2").is_none());
+        assert!(!changes.contains_key("s2"));
 
         assert!(s1_changes.contains(
             &r#"Removed @external from field "Product.upc" as it is a key of an extension type"#.to_string()
@@ -559,6 +559,7 @@ mod tests {
         );
     }
 
+    #[ignore = "not yet implemented"]
     #[test]
     fn update_federation_directive_non_string_arguments() {
         let mut s = Subgraph::parse(
@@ -579,11 +580,11 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let changes = upgrade_subgraphs_if_necessary(&vec![&mut s]).expect("upgrades schema");
+        let changes = upgrade_subgraphs_if_necessary(&[&mut s]).expect("upgrades schema");
         let s_changes: Vec<_> = changes
             .get("s")
             .expect("s changes")
-            .into_iter()
+            .iter()
             .map(|c| c.to_string())
             .collect();
 
@@ -620,6 +621,7 @@ mod tests {
         );
     }
 
+    #[ignore = "not yet implemented"]
     #[test]
     fn remove_tag_on_external_field_if_found_on_definition() {
         let mut s1 = Subgraph::parse(
@@ -655,12 +657,11 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let changes =
-            upgrade_subgraphs_if_necessary(&vec![&mut s1, &mut s2]).expect("upgrades schema");
+        let changes = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
         let s1_changes: Vec<_> = changes
             .get("s1")
             .expect("s1 changes")
-            .into_iter()
+            .iter()
             .map(|c| c.to_string())
             .collect();
         assert_eq!(
@@ -684,6 +685,7 @@ mod tests {
         );
     }
 
+    #[ignore = "not yet implemented"]
     #[test]
     fn reject_interface_object_usage_if_not_all_subgraphs_are_fed2() {
         // Note that this test both validates the rejection of fed1 subgraph when @interfaceObject is used somewhere, but also
@@ -692,6 +694,226 @@ mod tests {
         // work, it would be really confusing to not reject the example below right away, since it "looks" like it the @key on
         // the interface in the 2nd subgraph should work, but it actually won't.
 
-        // TODO
+        let mut s1 = Subgraph::parse("s1", "", r#"
+            extend schema
+                @link(url: "https://specs.apollo.dev/federation/v2.3", import: [ "@key", "@interfaceObject"])
+
+            type Query {
+                a: A
+            }
+
+            type A @key(fields: "id") @interfaceObject {
+                id: String
+                x: Int
+            }
+        "#)
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let mut s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            interface A @key(fields: "id") {
+                id: String
+                y: Int
+            }
+
+            type X implements A @key(fields: "id") {
+                id: String
+                y: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let errors = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect_err("should fail");
+
+        assert_eq!(
+            errors.to_string(),
+            r#"The @interfaceObject directive can only be used if all subgraphs have federation 2 subgraph schema (schema with a `@link` to "https://specs.apollo.dev/federation" version 2.0 or newer): @interfaceObject is used in subgraph "s1" but subgraph "s2" is not a federation 2 subgraph schema."#
+        );
+    }
+
+    #[ignore = "not yet implemented"]
+    #[test]
+    fn handles_addition_of_shareable_when_external_is_used_on_type() {
+        let mut s1 = Subgraph::parse(
+            "s1",
+            "",
+            r#"
+            type Query {
+                t1: T
+            }
+
+            type T @key(fields: "id") {
+                id: String
+                x: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let mut s2 = Subgraph::parse(
+            "s2",
+            "",
+            r#"
+            type Query {
+                t2: T
+            }
+
+            type T @external {
+                x: Int
+            }
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let _ = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
+
+        // 2 things must happen here:
+        // 1. the @external on type `T` in s2 should be removed, as @external on types were no-ops in fed1 (but not in fed2 anymore, hence the removal)
+        // 2. field `T.x` in s1 must be marked @shareable since it is resolved by s2 (since again, it's @external annotation is ignored).
+
+        assert!(
+            s2.schema()
+                .schema()
+                .types
+                .get("T")
+                .is_some_and(|t| !t.directives().has("external"))
+        );
+        assert!(
+            s1.schema()
+                .schema()
+                .type_field("T", "x")
+                .is_ok_and(|f| f.directives.has("shareable"))
+        );
+    }
+
+    #[ignore = "not yet implemented"]
+    #[test]
+    fn fully_upgrades_schema_with_no_link_directives() {
+        let mut subgraph = Subgraph::parse(
+            "subgraph",
+            "",
+            r#"
+            type Query {
+                hello: String
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let _ = upgrade_subgraphs_if_necessary(&[&mut subgraph]).expect("upgrades schema");
+        // Note: this test mostly exists for dev awareness. By design, this will
+        // always require updating when the fed spec version is updated, so hopefully
+        // you're reading this comment. Existing schemas which don't include a @link
+        // directive usage will be upgraded to the latest version of the federation
+        // spec. The downstream effect of this auto-upgrading behavior is:
+        //
+        // GraphOS users who select the new build track you're going to introduce will
+        // immediately start composing with the latest specs without having to update
+        // their @link federation spec version in any of their subgraphs. For this to
+        // be ok, they need to first update to a router version which supports
+        // whatever changes you've introduced in the new spec version. Take care to
+        // ensure that things are released in the correct order.
+        //
+        // Ideally, in the future we ensure that GraphOS users are on a version of
+        // router that supports the build pipeline they're upgrading to, but that
+        // mechanism isn't in place yet.
+        // - Trevor
+        assert_eq!(
+            subgraph.schema().schema().to_string(),
+            r#"
+            schema
+                @link(url: "https://specs.apollo.dev/link/v1.0")
+                @link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])
+            {
+                query: Query
+            }
+        "#
+        );
+        // TODO: Check if SDL assertions are better done with assert_snapshot
+    }
+
+    #[ignore = "not yet implemented"]
+    #[test]
+    fn does_not_add_shareable_to_subscriptions() {
+        let mut subgraph1 = Subgraph::parse(
+            "subgraph1",
+            "",
+            r#"
+            type Query {
+                hello: String
+            }
+
+            type Subscription {
+                update: String!
+            }   
+        "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let mut subgraph2 = Subgraph::parse(
+            "subgraph2",
+            "",
+            r#"
+            type Query {
+                hello: String
+            }
+
+            type Subscription {
+                update: String!
+            }
+            "#,
+        )
+        .expect("parses schema")
+        .expand_links()
+        .expect("expands schema");
+
+        let _ = upgrade_subgraphs_if_necessary(&[&mut subgraph1, &mut subgraph2])
+            .expect("upgrades schema");
+
+        assert!(
+            !subgraph1
+                .schema()
+                .schema()
+                .to_string()
+                .contains("update: String! @shareable")
+        );
+        assert!(
+            !subgraph2
+                .schema()
+                .schema()
+                .to_string()
+                .contains("update: String! @shareable")
+        );
+        assert!(
+            subgraph1
+                .schema()
+                .schema()
+                .types
+                .get("Subscription")
+                .is_some_and(|s| !s.directives().has("shareable"))
+        );
+        assert!(
+            subgraph2
+                .schema()
+                .schema()
+                .types
+                .get("Subscription")
+                .is_some_and(|s| !s.directives().has("shareable"))
+        );
     }
 }
