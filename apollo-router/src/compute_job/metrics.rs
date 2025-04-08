@@ -17,7 +17,9 @@ impl Outcome {
     fn as_otel_status(&self) -> &'static str {
         match self {
             Self::Executed => OTEL_STATUS_CODE_OK,
-            Self::Abandoned | Self::ExecutedError | Self::RejectedQueueFull => OTEL_STATUS_CODE_ERROR
+            Self::Abandoned | Self::ExecutedError | Self::RejectedQueueFull => {
+                OTEL_STATUS_CODE_ERROR
+            }
         }
     }
 }
@@ -118,27 +120,69 @@ pub(super) fn observe_compute_duration(compute_job_type: ComputeJobType, job_dur
 #[cfg(test)]
 mod tests {
     use crate::compute_job::ComputeJobType;
-    use crate::compute_job::metrics::{JobWatcher, Outcome};
-    use crate::metrics::FutureMetricsExt;
+    use crate::compute_job::metrics::ActiveComputeMetric;
+    use crate::compute_job::metrics::JobWatcher;
+    use crate::compute_job::metrics::Outcome;
 
-    #[tokio::test]
-    async fn test_job_watcher() {
-        async {
-            { let _job_watcher = JobWatcher::new(ComputeJobType::Introspection); }
-            assert_histogram_count!("apollo.router.compute_jobs.duration", 1, "job.type" = "Introspection", "job.outcome" = "Abandoned");
+    #[test]
+    fn test_job_watcher() {
+        let check_histogram_count =
+            |count: u64, job_type: &'static str, job_outcome: &'static str| {
+                assert_histogram_count!(
+                    "apollo.router.compute_jobs.duration",
+                    count,
+                    "job.type" = job_type,
+                    "job.outcome" = job_outcome
+                );
+            };
 
-            { let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
-                job_watcher.outcome = Outcome::RejectedQueueFull;}
-            assert_histogram_count!("apollo.router.compute_jobs.duration", 1, "job.type" = "QueryPlanning", "job.outcome" = "RejectedQueueFull");
-
-            { let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
-                job_watcher.outcome = Outcome::RejectedQueueFull;}
-            assert_histogram_count!("apollo.router.compute_jobs.duration", 2, "job.type" = "QueryPlanning", "job.outcome" = "RejectedQueueFull");
-
-            { let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
-                job_watcher.outcome = Outcome::Executed;}
-            assert_histogram_count!("apollo.router.compute_jobs.duration", 1, "job.type" = "QueryParsing", "job.outcome" = "Executed");
+        {
+            let _job_watcher = JobWatcher::new(ComputeJobType::Introspection);
         }
-        .with_metrics().await
+        check_histogram_count(1, "Introspection", "Abandoned");
+
+        {
+            let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
+            job_watcher.outcome = Outcome::Executed;
+        }
+        check_histogram_count(1, "QueryParsing", "Executed");
+
+        for count in 1..5 {
+            {
+                let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
+                job_watcher.outcome = Outcome::RejectedQueueFull;
+            }
+            check_histogram_count(count, "QueryPlanning", "RejectedQueueFull");
+        }
+    }
+
+    #[test]
+    fn test_active_compute_metric() {
+        let check_count = |count: i64, job_type: &'static str| {
+            assert_up_down_counter!(
+                "apollo.router.compute_jobs.execution.active_count",
+                count,
+                "job.type" = job_type
+            );
+        };
+
+        {
+            let _introspection_1 = ActiveComputeMetric::register(ComputeJobType::Introspection);
+            let _introspection_2 = ActiveComputeMetric::register(ComputeJobType::Introspection);
+            let introspection_3 = ActiveComputeMetric::register(ComputeJobType::Introspection);
+            check_count(3, "Introspection");
+
+            let _planning_1 = ActiveComputeMetric::register(ComputeJobType::QueryPlanning);
+            check_count(3, "Introspection");
+            check_count(1, "QueryPlanning");
+
+            drop(introspection_3);
+            check_count(2, "Introspection");
+            check_count(1, "QueryPlanning");
+        }
+
+        // block ended, so should have no ongoing computation
+        check_count(0, "Introspection");
+        check_count(0, "QueryPlanning");
     }
 }
