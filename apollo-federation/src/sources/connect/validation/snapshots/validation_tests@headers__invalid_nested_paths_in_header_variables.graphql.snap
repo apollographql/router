@@ -8,6 +8,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
         locations: [
+            13:47..13:52,
+            13:53..13:59,
             13:60..13:64,
         ],
     },
@@ -15,6 +17,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
+            18:17..18:28,
+            23:47..23:52,
+            23:53..23:58,
             23:59..23:79,
         ],
     },
@@ -22,6 +27,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
         locations: [
+            28:14..28:18,
+            33:45..33:50,
+            33:51..33:55,
             33:56..33:70,
         ],
     },
@@ -29,6 +37,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
         code: InvalidHeader,
         message: "In `@connect(http.headers:)` on `Object.newField`: `$this` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
+            47:47..47:52,
             47:53..47:73,
         ],
     },

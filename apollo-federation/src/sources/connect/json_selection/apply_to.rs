@@ -9,6 +9,7 @@ use serde_json_bytes::Value as JSON;
 use serde_json_bytes::json;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Located;
 use shape::location::SourceId;
 
 use super::helpers::json_merge;
@@ -702,7 +703,7 @@ impl ApplyToInternal for WithRange<PathList> {
                         )
                     };
 
-                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations)
+                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations().cloned())
                 } else {
                     rest.compute_output_shape(
                         field(&input_shape, key, source_id),
@@ -979,10 +980,10 @@ impl ApplyToInternal for SubSelection {
 fn field(shape: &Shape, key: &WithRange<Key>, source_id: &SourceId) -> Shape {
     if let ShapeCase::One(inner) = shape.case() {
         let mut new_fields = Vec::new();
-        for inner_field in inner {
+        for inner_field in inner.iter() {
             new_fields.push(field(inner_field, key, source_id));
         }
-        return Shape::one(new_fields, shape.locations.clone());
+        return Shape::one(new_fields, shape.locations().cloned());
     }
     if shape.is_none() || shape.is_null() {
         return Shape::none();
@@ -2776,7 +2777,7 @@ mod tests {
 
         assert_eq!(
             selection!("id name").shape().pretty_print(),
-            "{ id: $root.*.id, name: $root.*.name }",
+            "{ id: $root.id, name: $root.name }",
         );
 
         // // On hold until variadic $(...) is merged (PR #6456).
@@ -2793,7 +2794,7 @@ mod tests {
         //     // One<{...}, List<{...}>> everywhere a SubSelection appears.
         //     //
         //     // But then we don't know where the array indexes should go...
-        //     "{ thisOrThat: One<$root.data.*.maybe.this, $root.data.*.maybe.that> }",
+        //     "{ thisOrThat: One<$root.data.maybe.this, $root.data.maybe.that> }",
         // );
 
         assert_eq!(
@@ -2814,7 +2815,7 @@ mod tests {
             // $root.friend_ids.* }> (note the * meaning any array index),
             // because who's to say it's not the id field that should become the
             // List, rather than the friends field?
-            "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: { id: $root.*.friend_ids.* }, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+            "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: { id: $root.friend_ids.* }, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
         );
 
         // TODO: re-test when method type checking is re-enabled
@@ -2826,7 +2827,7 @@ mod tests {
         //         alias: arrayOfArrays { x y }
         //         ys: arrayOfArrays.y xs: arrayOfArrays.x
         //     "#).shape().pretty_print(),
-        //     "{ alias: { x: $root.*.arrayOfArrays.*.x, y: $root.*.arrayOfArrays.*.y }, friends: List<{ id: $root.*.friend_ids.* }>, id: $root.*.id, name: $root.*.name, xs: $root.*.arrayOfArrays.x, ys: $root.*.arrayOfArrays.y }",
+        //     "{ alias: { x: $root.arrayOfArrays.x, y: $root.arrayOfArrays.y }, friends: List<{ id: $root.friend_ids.* }>, id: $root.id, name: $root.name, xs: $root.arrayOfArrays.x, ys: $root.arrayOfArrays.y }",
         // );
         //
         // assert_eq!(

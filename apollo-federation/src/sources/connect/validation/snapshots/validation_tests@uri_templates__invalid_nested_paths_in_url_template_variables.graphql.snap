@@ -8,6 +8,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
         locations: [
+            10:49..10:54,
+            10:55..10:61,
             10:62..10:66,
         ],
     },
@@ -15,6 +17,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
+            13:17..13:28,
+            15:49..15:54,
+            15:55..15:60,
             15:61..15:81,
         ],
     },
@@ -22,6 +27,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
         locations: [
+            18:14..18:18,
+            20:47..20:52,
+            20:53..20:57,
             20:58..20:72,
         ],
     },
@@ -29,6 +37,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         code: InvalidUrl,
         message: "In `GET` in `@connect(http:)` on `Object.newField`: `$this` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
+            29:49..29:54,
             29:55..29:75,
         ],
     },

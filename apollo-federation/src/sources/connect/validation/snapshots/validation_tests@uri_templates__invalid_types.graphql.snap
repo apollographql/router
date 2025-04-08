@@ -9,7 +9,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         message: "In `GET` in `@connect(http:)` on `Query.argIsArray`: array values aren't valid here",
         locations: [
             8:16..8:29,
-            8:16..8:29,
+            10:41..10:46,
             10:47..10:50,
         ],
     },
@@ -20,6 +20,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
             36:1..38:2,
             14:22..14:27,
             14:17..14:27,
+            16:41..16:46,
             16:47..16:50,
         ],
     },
@@ -28,7 +29,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
         message: "In `GET` in `@connect(http:)` on `This.thisIsArray`: array values aren't valid here",
         locations: [
             22:5..22:32,
-            22:5..22:32,
+            25:41..25:46,
             25:47..25:54,
         ],
     },
@@ -39,6 +40,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
             40:1..42:2,
             28:15..28:21,
             28:5..28:31,
+            31:45..31:50,
             31:51..31:59,
         ],
     },

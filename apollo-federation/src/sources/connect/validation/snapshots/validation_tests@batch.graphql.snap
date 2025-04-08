@@ -30,6 +30,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
         message: "In `@connect(http: {body:})` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context",
         locations: [
             14:40..14:46,
+            14:47..14:49,
         ],
     },
     Message {
@@ -37,6 +38,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
         message: "In `POST` in `@connect(http:)` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context",
         locations: [
             19:31..19:37,
+            19:38..19:40,
         ],
     },
     Message {
@@ -44,6 +46,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
         message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context",
         locations: [
             37:29..37:34,
+            37:35..37:37,
         ],
     },
     Message {

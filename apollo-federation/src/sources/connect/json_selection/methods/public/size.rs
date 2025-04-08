@@ -1,7 +1,9 @@
 use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Located;
 use shape::location::SourceId;
 
 use crate::impl_arrow_method;
@@ -74,7 +76,7 @@ fn size_method(
 fn size_shape(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
-    mut input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_var_shapes: &IndexMap<&str, Shape>,
     source_id: &SourceId,
@@ -94,7 +96,7 @@ fn size_shape(
             Shape::int_value(value.len() as i64, method_name.shape_location(source_id))
         }
         ShapeCase::String(None) => Shape::int(method_name.shape_location(source_id)),
-        ShapeCase::Name(_, _) => Shape::int(method_name.shape_location(source_id)), // TODO: catch errors after name resolution
+        ShapeCase::Name(_) => Shape::int(method_name.shape_location(source_id)), // TODO: catch errors after name resolution
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 Shape::int_value(prefix.len() as i64, method_name.shape_location(source_id))
@@ -115,10 +117,9 @@ fn size_shape(
                 method_name.as_ref()
             ),
             {
-                input_shape
-                    .locations
-                    .extend(method_name.shape_location(source_id));
-                input_shape.locations
+                let mut locations = input_shape.locations().cloned().collect::<IndexSet<_>>();
+                locations.extend(method_name.shape_location(source_id));
+                locations.into_iter()
             },
         ),
     }

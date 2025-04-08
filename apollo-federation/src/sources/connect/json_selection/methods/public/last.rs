@@ -2,6 +2,7 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Located;
 use shape::location::SourceId;
 
 use crate::impl_arrow_method;
@@ -121,7 +122,7 @@ fn last_shape(
             }
         }
 
-        ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
+        ShapeCase::Name(_) => input_shape.any_item(method_name.shape_location(source_id)),
         ShapeCase::Unknown => Shape::unknown(method_name.shape_location(source_id)),
 
         _ => Shape::error_with_partial(
@@ -130,7 +131,7 @@ fn last_shape(
                 method_name.as_ref()
             ),
             input_shape.clone(),
-            input_shape.locations,
+            input_shape.locations().cloned(),
         ),
     }
 }

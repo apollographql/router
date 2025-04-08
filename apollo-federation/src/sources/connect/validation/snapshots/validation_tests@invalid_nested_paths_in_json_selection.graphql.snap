@@ -8,6 +8,8 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         code: InvalidBody,
         message: "In `@connect(http: {body:})` on `Query.scalar`: `$args.scalar` doesn't have a field named `blah`",
         locations: [
+            12:21..12:26,
+            12:27..12:33,
             12:34..12:38,
         ],
     },
@@ -15,6 +17,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         code: InvalidBody,
         message: "In `@connect(http: {body:})` on `Query.object`: `InputObject` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
+            16:17..16:28,
+            20:21..20:26,
+            20:27..20:32,
             20:33..20:53,
         ],
     },
@@ -22,6 +27,9 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         code: InvalidBody,
         message: "In `@connect(http: {body:})` on `Query.enum`: `Enum` doesn't have a field named `cantHaveFields`",
         locations: [
+            24:14..24:18,
+            28:19..28:24,
+            28:25..28:29,
             28:30..28:44,
         ],
     },
@@ -29,6 +37,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/invalid_n
         code: InvalidBody,
         message: "In `@connect(http: {body:})` on `Object.newField`: `$this` doesn't have a field named `fieldThatDoesntExist`",
         locations: [
+            40:21..40:26,
             40:27..40:47,
         ],
     },

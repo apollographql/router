@@ -2,6 +2,7 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Located;
 use shape::location::SourceId;
 
 use crate::impl_arrow_method;
@@ -83,7 +84,7 @@ fn first_shape(
     }
 
     // Location is not solely based on the method, but also the type the method is being applied to
-    let locations = input_shape.locations.iter().cloned().chain(location);
+    let locations = input_shape.locations().cloned().chain(location);
 
     match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
@@ -97,7 +98,7 @@ fn first_shape(
                 Shape::one([tail.clone(), Shape::none()], locations)
             }
         }
-        ShapeCase::Name(_, _) => input_shape.item(0, locations),
+        ShapeCase::Name(_) => input_shape.item(0, locations),
         ShapeCase::Unknown => Shape::unknown(locations),
         // When there is no obvious first element, ->first gives us the input
         // value itself, which has input_shape.

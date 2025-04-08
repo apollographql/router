@@ -2,6 +2,7 @@ use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::ShapeCase;
+use shape::location::Located;
 use shape::location::SourceId;
 
 use crate::impl_arrow_method;
@@ -113,7 +114,7 @@ fn map_shape(
                 named_var_shapes,
                 source_id,
             );
-            Shape::array(new_prefix, new_tail, input_shape.locations)
+            Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
         }
         _ => Shape::list(
             first_arg.compute_output_shape(
@@ -122,7 +123,7 @@ fn map_shape(
                 named_var_shapes,
                 source_id,
             ),
-            input_shape.locations,
+            input_shape.locations().cloned(),
         ),
     }
 }
