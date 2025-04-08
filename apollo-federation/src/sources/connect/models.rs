@@ -315,7 +315,7 @@ impl HttpJsonTransport {
         }
 
         Ok(Self {
-            source_url: source.map(|s| s.base_url.clone()),
+            source_url: source.and_then(|s| s.base_url.clone()),
             connect_template: connect_url.parse().map_err(|e: string_template::Error| {
                 FederationError::internal(format!(
                     "could not parse URL template: {message}",

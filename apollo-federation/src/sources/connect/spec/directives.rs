@@ -6,6 +6,7 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
+use super::schema::AUTHORITY_ARGUMENT_NAME;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
@@ -13,6 +14,10 @@ use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
+use super::schema::METHOD_ARGUMENT_NAME;
+use super::schema::PATH_ARGUMENT_NAME;
+use super::schema::QUERY_ARGUMENT_NAME;
+use super::schema::SCHEME_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
@@ -184,6 +189,11 @@ impl SourceHTTPArguments {
     ) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
+                let mut method = None;
+        let mut scheme = None;
+        let mut authority = None;
+        let mut path = None;
+        let mut query = None;
         for (name, value) in values {
             let name = name.as_str();
 
@@ -205,6 +215,36 @@ impl SourceHTTPArguments {
                         .try_collect()
                         .map_err(|err| internal!(err.to_string()))?,
                 );
+            } else if name == METHOD_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    METHOD_ARGUMENT_NAME
+                )))?;
+                method = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == SCHEME_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    SCHEME_ARGUMENT_NAME
+                )))?;
+                scheme = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == AUTHORITY_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    AUTHORITY_ARGUMENT_NAME
+                )))?;
+                authority = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == PATH_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    PATH_ARGUMENT_NAME
+                )))?;
+                path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == QUERY_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    QUERY_ARGUMENT_NAME
+                )))?;
+                query = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
@@ -213,10 +253,13 @@ impl SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_url: base_url.ok_or(internal!(
-                "missing `base_url` field in `@source` directive's `http` argument"
-            ))?,
+            base_url,
             headers: headers.unwrap_or_default(),
+            method,
+            scheme,
+            authority,
+            path,
+            query,
         })
     }
 }
@@ -290,6 +333,11 @@ impl ConnectHTTPArguments {
         let mut delete = None;
         let mut body = None;
         let mut headers = None;
+        let mut method = None;
+        let mut scheme = None;
+        let mut authority = None;
+        let mut path = None;
+        let mut query = None;
         for (name, value) in values {
             let name = name.as_str();
 
@@ -326,6 +374,36 @@ impl ConnectHTTPArguments {
                 delete = Some(value.as_str().ok_or(internal!(
                     "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
+            } else if name == METHOD_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    METHOD_ARGUMENT_NAME
+                )))?;
+                method = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == SCHEME_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    SCHEME_ARGUMENT_NAME
+                )))?;
+                scheme = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == AUTHORITY_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    AUTHORITY_ARGUMENT_NAME
+                )))?;
+                authority = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == PATH_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    PATH_ARGUMENT_NAME
+                )))?;
+                path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
+            } else if name == QUERY_ARGUMENT_NAME.as_str() {
+                let value = value.as_str().ok_or(internal!(format!(
+                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    QUERY_ARGUMENT_NAME
+                )))?;
+                query = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             }
         }
 
@@ -337,6 +415,11 @@ impl ConnectHTTPArguments {
             delete,
             body,
             headers: headers.unwrap_or_default(),
+            method,
+            scheme,
+            authority,
+            path,
+            query,
         })
     }
 }
