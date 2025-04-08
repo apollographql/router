@@ -5,12 +5,28 @@ use crate::compute_job::ComputeJobType;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
-#[derive(strum_macros::Display)]
+#[derive(Copy, Clone, strum_macros::IntoStaticStr)]
 pub(super) enum Outcome {
     Executed,
     ExecutedError,
     RejectedQueueFull,
     Abandoned,
+}
+
+impl Outcome {
+    fn as_otel_status(&self) -> &'static str {
+        match self {
+            Self::Executed => OTEL_STATUS_CODE_OK,
+            Self::Abandoned | Self::ExecutedError | Self::RejectedQueueFull => OTEL_STATUS_CODE_ERROR
+        }
+    }
+}
+
+impl From<Outcome> for opentelemetry::Value {
+    fn from(outcome: Outcome) -> Self {
+        let s: &'static str = outcome.into();
+        s.into()
+    }
 }
 
 pub(super) struct JobWatcher {
@@ -31,16 +47,9 @@ impl JobWatcher {
 
 impl Drop for JobWatcher {
     fn drop(&mut self) {
-        let otel_status = match self.outcome {
-            Outcome::Executed => OTEL_STATUS_CODE_OK,
-            Outcome::Abandoned | Outcome::ExecutedError | Outcome::RejectedQueueFull => {
-                OTEL_STATUS_CODE_ERROR
-            }
-        };
-
         let current_span = tracing::Span::current();
-        current_span.record("job.outcome", self.outcome.to_string());
-        current_span.record("otel.status_code", otel_status);
+        current_span.record::<str, &'static str>("job.outcome", self.outcome.into());
+        current_span.record("otel.status_code", self.outcome.as_otel_status());
 
         let full_duration = self.queue_start.elapsed();
         f64_histogram_with_unit!(
@@ -48,8 +57,8 @@ impl Drop for JobWatcher {
             "Total job processing time",
             "s",
             full_duration.as_secs_f64(),
-            "job.type" = self.compute_job_type.to_string(),
-            "job.outcome" = self.outcome.to_string()
+            "job.type" = self.compute_job_type,
+            "job.outcome" = self.outcome
         );
     }
 }
@@ -72,7 +81,7 @@ impl ActiveComputeMetric {
             "Number of computation jobs in progress",
             "{job}",
             value,
-            job.type = self.compute_job_type.to_string()
+            job.type = self.compute_job_type
         );
     }
 }
@@ -92,7 +101,7 @@ pub(super) fn observe_queue_wait_duration(
         "Time spent by the job in the compute queue",
         "s",
         queue_duration.as_secs_f64(),
-        "job.type" = compute_job_type.to_string()
+        "job.type" = compute_job_type
     );
 }
 
@@ -102,6 +111,34 @@ pub(super) fn observe_compute_duration(compute_job_type: ComputeJobType, job_dur
         "Time to execute the job, after it has been pulled from the queue",
         "s",
         job_duration.as_secs_f64(),
-        "job.type" = compute_job_type.to_string()
+        "job.type" = compute_job_type
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::compute_job::ComputeJobType;
+    use crate::compute_job::metrics::{JobWatcher, Outcome};
+    use crate::metrics::FutureMetricsExt;
+
+    #[tokio::test]
+    async fn test_job_watcher() {
+        async {
+            { let _job_watcher = JobWatcher::new(ComputeJobType::Introspection); }
+            assert_histogram_count!("apollo.router.compute_jobs.duration", 1, "job.type" = "Introspection", "job.outcome" = "Abandoned");
+
+            { let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
+                job_watcher.outcome = Outcome::RejectedQueueFull;}
+            assert_histogram_count!("apollo.router.compute_jobs.duration", 1, "job.type" = "QueryPlanning", "job.outcome" = "RejectedQueueFull");
+
+            { let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
+                job_watcher.outcome = Outcome::RejectedQueueFull;}
+            assert_histogram_count!("apollo.router.compute_jobs.duration", 2, "job.type" = "QueryPlanning", "job.outcome" = "RejectedQueueFull");
+
+            { let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
+                job_watcher.outcome = Outcome::Executed;}
+            assert_histogram_count!("apollo.router.compute_jobs.duration", 1, "job.type" = "QueryParsing", "job.outcome" = "Executed");
+        }
+        .with_metrics().await
+    }
 }

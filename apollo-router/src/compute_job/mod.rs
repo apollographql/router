@@ -100,7 +100,7 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
-#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::Display)]
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
 pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
@@ -114,6 +114,13 @@ impl From<ComputeJobType> for Priority {
             ComputeJobType::QueryParsing => Self::P4,  // medium
             ComputeJobType::Introspection => Self::P1, // low
         }
+    }
+}
+
+impl From<ComputeJobType> for opentelemetry::Value {
+    fn from(compute_job_type: ComputeJobType) -> Self {
+        let s: &'static str = compute_job_type.into();
+        s.into()
     }
 }
 
