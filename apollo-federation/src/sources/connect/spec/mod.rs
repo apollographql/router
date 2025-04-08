@@ -52,6 +52,14 @@ pub enum ConnectSpec {
     V0_2,
 }
 
+impl PartialOrd for ConnectSpec {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        let self_version: Version = (*self).into();
+        let other_version: Version = (*other).into();
+        self_version.partial_cmp(&other_version)
+    }
+}
+
 impl ConnectSpec {
     pub const fn as_str(self) -> &'static str {
         match self {

@@ -24,6 +24,12 @@ pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
 pub(crate) const HTTP_ARGUMENT_NAME: Name = name!("http");
 pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
+pub(crate) const METHOD_ARGUMENT_NAME: Name = name!("method");
+pub(crate) const SCHEME_ARGUMENT_NAME: Name = name!("scheme");
+pub(crate) const AUTHORITY_ARGUMENT_NAME: Name = name!("authority");
+pub(crate) const PATH_ARGUMENT_NAME: Name = name!("path");
+pub(crate) const QUERY_ARGUMENT_NAME: Name = name!("query");
+
 pub(crate) const HTTP_HEADER_MAPPING_NAME_IN_SPEC: Name = name!("HTTPHeaderMapping");
 pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME: Name = name!("from");

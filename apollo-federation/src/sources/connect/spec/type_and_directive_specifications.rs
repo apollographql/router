@@ -32,10 +32,15 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::sources::connect::spec::ConnectSpec;
+use crate::sources::connect::spec::schema::AUTHORITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::METHOD_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::PATH_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::QUERY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::SCHEME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
@@ -111,7 +116,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let connect_http_field_list = vec![
+    let mut connect_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: name!(GET),
@@ -165,6 +170,46 @@ pub(super) fn check_or_add(
             directives: Default::default(),
         },
     ];
+
+    if spec >= &ConnectSpec::V0_2 {
+        connect_http_field_list.extend([
+            InputValueDefinition {
+                description: None,
+                name: METHOD_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: SCHEME_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: AUTHORITY_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: PATH_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: QUERY_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+        ]);
+    }
 
     let mut connect_http_fields = IndexMap::with_hasher(Default::default());
     for field in connect_http_field_list {
@@ -260,7 +305,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let source_http_field_list = vec![
+    let mut source_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
@@ -279,6 +324,46 @@ pub(super) fn check_or_add(
             directives: Default::default(),
         },
     ];
+
+    if spec >= &ConnectSpec::V0_2 {
+        source_http_field_list.extend([
+            InputValueDefinition {
+                description: None,
+                name: METHOD_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: SCHEME_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: AUTHORITY_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: PATH_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: QUERY_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+        ]);
+    }
 
     let mut source_http_fields = IndexMap::with_hasher(Default::default());
     for field in source_http_field_list {
@@ -459,7 +544,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {
           query: Query
         }
@@ -501,12 +586,22 @@ mod tests {
           DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
+          method: connect__JSONSelection
+          scheme: connect__JSONSelection
+          authority: connect__JSONSelection
+          path: connect__JSONSelection
+          query: connect__JSONSelection
         }
 
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
+          method: connect__JSONSelection
+          scheme: connect__JSONSelection
+          authority: connect__JSONSelection
+          path: connect__JSONSelection
+          query: connect__JSONSelection
         }
-        "#);
+        "###);
     }
 }
