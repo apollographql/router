@@ -49,23 +49,27 @@ expression: "&connectors"
                     fragment: None,
                 },
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "posts",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
-                ],
-                query: [],
-            },
-            method: Get,
+            connect_template: Some(
+                URLTemplate {
+                    base: None,
+                    path: [
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "posts",
+                                        location: 1..6,
+                                    },
+                                ),
+                            ],
+                        },
+                    ],
+                    query: [],
+                },
+            ),
+            method: Some(
+                Get,
+            ),
             headers: {
                 "authtoken": From(
                     "x-auth-token",
@@ -86,6 +90,13 @@ expression: "&connectors"
                 ),
             },
             body: None,
+            method_expression: None,
+            scheme: None,
+            authority: None,
+            source_path: None,
+            source_query: None,
+            connect_path: None,
+            connect_query: None,
         },
         selection: Named(
             SubSelection {
@@ -185,23 +196,27 @@ expression: "&connectors"
                     fragment: None,
                 },
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "posts",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
-                ],
-                query: [],
-            },
-            method: Post,
+            connect_template: Some(
+                URLTemplate {
+                    base: None,
+                    path: [
+                        StringTemplate {
+                            parts: [
+                                Constant(
+                                    Constant {
+                                        value: "posts",
+                                        location: 1..6,
+                                    },
+                                ),
+                            ],
+                        },
+                    ],
+                    query: [],
+                },
+            ),
+            method: Some(
+                Post,
+            ),
             headers: {
                 "authtoken": From(
                     "x-auth-token",
@@ -286,6 +301,13 @@ expression: "&connectors"
                     },
                 ),
             ),
+            method_expression: None,
+            scheme: None,
+            authority: None,
+            source_path: None,
+            source_query: None,
+            connect_path: None,
+            connect_query: None,
         },
         selection: Named(
             SubSelection {

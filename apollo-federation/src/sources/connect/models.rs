@@ -282,7 +282,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -330,23 +330,27 @@ mod tests {
                             fragment: None,
                         },
                     ),
-                    connect_template: URLTemplate {
-                        base: None,
-                        path: [
-                            StringTemplate {
-                                parts: [
-                                    Constant(
-                                        Constant {
-                                            value: "users",
-                                            location: 1..6,
-                                        },
-                                    ),
-                                ],
-                            },
-                        ],
-                        query: [],
-                    },
-                    method: Get,
+                    connect_template: Some(
+                        URLTemplate {
+                            base: None,
+                            path: [
+                                StringTemplate {
+                                    parts: [
+                                        Constant(
+                                            Constant {
+                                                value: "users",
+                                                location: 1..6,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ],
+                            query: [],
+                        },
+                    ),
+                    method: Some(
+                        Get,
+                    ),
                     headers: {
                         "authtoken": From(
                             "x-auth-token",
@@ -367,6 +371,13 @@ mod tests {
                         ),
                     },
                     body: None,
+                    method_expression: None,
+                    scheme: None,
+                    authority: None,
+                    source_path: None,
+                    source_query: None,
+                    connect_path: None,
+                    connect_query: None,
                 },
                 selection: Named(
                     SubSelection {
@@ -454,23 +465,27 @@ mod tests {
                             fragment: None,
                         },
                     ),
-                    connect_template: URLTemplate {
-                        base: None,
-                        path: [
-                            StringTemplate {
-                                parts: [
-                                    Constant(
-                                        Constant {
-                                            value: "posts",
-                                            location: 1..6,
-                                        },
-                                    ),
-                                ],
-                            },
-                        ],
-                        query: [],
-                    },
-                    method: Get,
+                    connect_template: Some(
+                        URLTemplate {
+                            base: None,
+                            path: [
+                                StringTemplate {
+                                    parts: [
+                                        Constant(
+                                            Constant {
+                                                value: "posts",
+                                                location: 1..6,
+                                            },
+                                        ),
+                                    ],
+                                },
+                            ],
+                            query: [],
+                        },
+                    ),
+                    method: Some(
+                        Get,
+                    ),
                     headers: {
                         "authtoken": From(
                             "x-auth-token",
@@ -491,6 +506,13 @@ mod tests {
                         ),
                     },
                     body: None,
+                    method_expression: None,
+                    scheme: None,
+                    authority: None,
+                    source_path: None,
+                    source_query: None,
+                    connect_path: None,
+                    connect_query: None,
                 },
                 selection: Named(
                     SubSelection {
@@ -545,7 +567,7 @@ mod tests {
                 response_variables: {},
             },
         }
-        "#);
+        "###);
     }
 
     #[test]

@@ -553,21 +553,23 @@ mod tests {
             SourceDirectiveArguments {
                 name: "json",
                 http: SourceHTTPArguments {
-                    base_url: Url {
-                        scheme: "https",
-                        cannot_be_a_base: false,
-                        username: "",
-                        password: None,
-                        host: Some(
-                            Domain(
-                                "jsonplaceholder.typicode.com",
+                    base_url: Some(
+                        Url {
+                            scheme: "https",
+                            cannot_be_a_base: false,
+                            username: "",
+                            password: None,
+                            host: Some(
+                                Domain(
+                                    "jsonplaceholder.typicode.com",
+                                ),
                             ),
-                        ),
-                        port: None,
-                        path: "/",
-                        query: None,
-                        fragment: None,
-                    },
+                            port: None,
+                            path: "/",
+                            query: None,
+                            fragment: None,
+                        },
+                    ),
                     headers: {
                         "authtoken": From(
                             "x-auth-token",
@@ -587,6 +589,11 @@ mod tests {
                             ),
                         ),
                     },
+                    method: None,
+                    scheme: None,
+                    authority: None,
+                    path: None,
+                    query: None,
                 },
             },
         ]
@@ -609,7 +616,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             connects.unwrap(),
-            @r#"
+            @r###"
         [
             ConnectDirectiveArguments {
                 position: Field(
@@ -633,6 +640,11 @@ mod tests {
                         delete: None,
                         body: None,
                         headers: {},
+                        method: None,
+                        scheme: None,
+                        authority: None,
+                        path: None,
+                        query: None,
                     },
                 ),
                 selection: Named(
@@ -692,6 +704,11 @@ mod tests {
                         delete: None,
                         body: None,
                         headers: {},
+                        method: None,
+                        scheme: None,
+                        authority: None,
+                        path: None,
+                        query: None,
                     },
                 ),
                 selection: Named(
@@ -742,7 +759,7 @@ mod tests {
                 entity: false,
             },
         ]
-        "#
+        "###
         );
     }
 }
