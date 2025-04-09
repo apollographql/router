@@ -112,7 +112,7 @@ async fn test_basic() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_resources() -> Result<(), BoxError> {
     if !graph_os_enabled() {
-        panic!("Error: test skipped because GraphOS is not enabled");
+        return Ok(());
     }
     let mock_server = mock_otlp_server(1..).await;
     let config = include_str!("fixtures/otlp.router.yaml")

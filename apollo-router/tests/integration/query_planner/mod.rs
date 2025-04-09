@@ -29,6 +29,9 @@ async fn fed1_schema_with_new_qp() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn fed2_schema_with_new_qp() {
+    if !graph_os_enabled() {
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_METRICS_CONFIG)
         .supergraph("../examples/graphql/supergraph.graphql")
@@ -81,6 +84,9 @@ async fn invalid_schema_with_new_qp_fails_startup() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn valid_schema_with_new_qp_change_to_broken_schema_keeps_old_config() {
+    if !graph_os_enabled() {
+        return;
+    }
     let mut router = IntegrationTest::builder()
         .config(PROMETHEUS_METRICS_CONFIG)
         .supergraph("tests/fixtures/valid-supergraph.graphql")
