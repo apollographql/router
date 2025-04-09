@@ -204,75 +204,74 @@ impl HttpJsonTransport {
         &self,
         inputs: &IndexMap<String, Value>,
     ) -> (Option<String>, Vec<ApplyToError>) {
-        let mut warnings = vec![];
+        let Some(scheme) = self.scheme.as_ref() else {
+            return Default::default();
+        };
 
-        let scheme = self.scheme.as_ref().and_then(|s| {
-            let (s, w) = s.apply_with_vars(&json!({}), inputs);
-            warnings.extend(w);
-            s.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
-        });
-
+        let (scheme, warnings) = scheme.apply_with_vars(&json!({}), inputs);
+        let scheme = scheme
+            .as_ref()
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
         (scheme, warnings)
     }
 
     fn resolved_host(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(Option<String>, Vec<ApplyToError>), FederationError> {
-        let mut warnings = vec![];
+    ) -> (Option<String>, Vec<ApplyToError>) {
+        let Some(host) = self.host.as_ref() else {
+            return Default::default();
+        };
 
-        let host = self.host.as_ref().and_then(|a| {
-            let (a, w) = a.apply_with_vars(&json!({}), inputs);
-            warnings.extend(w);
-            a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
-        });
-
-        Ok((host, warnings))
+        let (host, warnings) = host.apply_with_vars(&json!({}), inputs);
+        let host = host
+            .as_ref()
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
+        (host, warnings)
     }
 
-    fn resolved_port(
-        &self,
-        inputs: &IndexMap<String, Value>,
-    ) -> Result<(Option<u16>, Vec<ApplyToError>), FederationError> {
-        let mut warnings = vec![];
+    fn resolved_port(&self, inputs: &IndexMap<String, Value>) -> (Option<u16>, Vec<ApplyToError>) {
+        let Some(port) = self.port.as_ref() else {
+            return Default::default();
+        };
 
-        let port = self.port.as_ref().and_then(|a| {
-            let (a, w) = a.apply_with_vars(&json!({}), inputs);
-            warnings.extend(w);
-            a.as_ref().and_then(|s| s.as_u64()).map(|s| s as u16)
-        });
-
-        Ok((port, warnings))
+        let (port, warnings) = port.apply_with_vars(&json!({}), inputs);
+        let port = port.as_ref().and_then(|s| s.as_u64()).map(|s| s as u16);
+        (port, warnings)
     }
 
     fn resolved_user(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(Option<String>, Vec<ApplyToError>), FederationError> {
-        let mut warnings = vec![];
+    ) -> (Option<String>, Vec<ApplyToError>) {
+        let Some(user) = self.user.as_ref() else {
+            return Default::default();
+        };
 
-        let user = self.user.as_ref().and_then(|a| {
-            let (a, w) = a.apply_with_vars(&json!({}), inputs);
-            warnings.extend(w);
-            a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
-        });
-
-        Ok((user, warnings))
+        let (user, warnings) = user.apply_with_vars(&json!({}), inputs);
+        let user = user
+            .as_ref()
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
+        (user, warnings)
     }
 
     fn resolved_password(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> Result<(Option<String>, Vec<ApplyToError>), FederationError> {
-        let mut warnings = vec![];
+    ) -> (Option<String>, Vec<ApplyToError>) {
+        let Some(password) = self.password.as_ref() else {
+            return Default::default();
+        };
 
-        let password = self.password.as_ref().and_then(|a| {
-            let (a, w) = a.apply_with_vars(&json!({}), inputs);
-            warnings.extend(w);
-            a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
-        });
-
-        Ok((password, warnings))
+        let (password, warnings) = password.apply_with_vars(&json!({}), inputs);
+        let password = password
+            .as_ref()
+            .and_then(|s| s.as_str())
+            .map(|s| s.to_string());
+        (password, warnings)
     }
 
     // PATH
@@ -418,7 +417,7 @@ impl HttpJsonTransport {
 
         // AUTHORITY
 
-        let (host, ws) = self.resolved_host(inputs)?;
+        let (host, ws) = self.resolved_host(inputs);
         warnings.extend(ws);
         if let Some(host) = host {
             base_url
@@ -426,7 +425,7 @@ impl HttpJsonTransport {
                 .map_err(|_| FederationError::internal(format!("Invalid URL host: {host}")))?;
         }
 
-        let (port, ws) = self.resolved_port(inputs)?;
+        let (port, ws) = self.resolved_port(inputs);
         warnings.extend(ws);
         if let Some(port) = port {
             base_url
@@ -434,7 +433,7 @@ impl HttpJsonTransport {
                 .map_err(|_| FederationError::internal(format!("Invalid URL port: {port}")))?;
         }
 
-        let (user, ws) = self.resolved_user(inputs)?;
+        let (user, ws) = self.resolved_user(inputs);
         warnings.extend(ws);
         if let Some(user) = user {
             base_url
@@ -442,7 +441,7 @@ impl HttpJsonTransport {
                 .map_err(|_| FederationError::internal(format!("Invalid URL user: {user}")))?;
         }
 
-        let (password, ws) = self.resolved_password(inputs)?;
+        let (password, ws) = self.resolved_password(inputs);
         warnings.extend(ws);
         if let Some(password) = password {
             base_url.set_password(Some(&password)).map_err(|_| {

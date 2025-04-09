@@ -329,11 +329,16 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
+    let base_url_type = if spec >= &ConnectSpec::V0_2 {
+        ty!(String)
+    } else {
+        ty!(String!)
+    };
     let mut source_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
-            ty: ty!(String!).into(),
+            ty: base_url_type.into(),
             default_value: None,
             directives: Default::default(),
         },
@@ -589,7 +594,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
           query: Query
         }
@@ -642,7 +647,7 @@ mod tests {
         }
 
         input connect__SourceHTTP {
-          baseURL: String!
+          baseURL: String
           headers: [connect__HTTPHeaderMapping!]
           method: connect__JSONSelection
           scheme: connect__JSONSelection
@@ -653,6 +658,6 @@ mod tests {
           path: connect__JSONSelection
           query: connect__JSONSelection
         }
-        "###);
+        "#);
     }
 }
