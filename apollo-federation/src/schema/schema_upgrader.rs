@@ -44,7 +44,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
         .iter()
         .all(|subgraph| subgraph.metadata().is_fed_2_schema())
     {
-        return Ok(Default::default());
+        return Ok(());
     }
 
     let mut object_type_map: HashMap<Name, HashMap<String, TypeInfo>> = Default::default();
