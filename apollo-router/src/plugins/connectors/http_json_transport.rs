@@ -33,14 +33,13 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let uri = make_uri(
-        transport.source_url.as_ref(),
-        &transport.connect_template,
-        &inputs,
-    )?;
+    let (uri, _todo) = transport
+        .make_uri(&inputs)
+        .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.to_string()))?;
 
+    let (method, _todo) = transport.method(&inputs);
     let request = http::Request::builder()
-        .method(transport.method.as_str())
+        .method(method.as_str())
         .uri(uri.as_str());
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
@@ -79,7 +78,7 @@ pub(crate) fn make_request(
             (None, None, "".into(), 0, vec![])
         };
 
-    match transport.method {
+    match method {
         HTTPMethod::Post | HTTPMethod::Patch | HTTPMethod::Put => {
             request = request.header(CONTENT_LENGTH, content_length);
         }
@@ -131,6 +130,7 @@ pub(crate) fn make_request(
     ))
 }
 
+#[allow(dead_code)]
 fn make_uri(
     source_url: Option<&Url>,
     template: &URLTemplate,
@@ -694,10 +694,10 @@ mod tests {
         let req = super::make_request(
             &HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
-                method: HTTPMethod::Post,
-                headers: Default::default(),
+                connect_template: URLTemplate::from_str("http://localhost:8080/").ok(),
+                method: Some(HTTPMethod::Post),
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
+                ..Default::default()
             },
             vars,
             &connect::Request {
@@ -753,10 +753,11 @@ mod tests {
         let req = super::make_request(
             &HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
-                method: HTTPMethod::Post,
+                connect_template: URLTemplate::from_str("http://localhost:8080/").ok(),
+                method: Some(HTTPMethod::Post),
                 headers,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
+                ..Default::default()
             },
             vars,
             &connect::Request {

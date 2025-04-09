@@ -9,6 +9,8 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::SourceSpan;
 use either::Either;
 use http::HeaderName;
+use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use url::Url;
 
 use super::super::JSONSelection;
@@ -22,19 +24,28 @@ use super::super::string_template;
 use super::super::variable::Namespace;
 use super::super::variable::VariableReference;
 use crate::error::FederationError;
+use crate::sources::connect::ApplyToError;
 use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
     pub source_url: Option<Url>,
-    pub connect_template: URLTemplate,
-    pub method: HTTPMethod,
+    pub connect_template: Option<URLTemplate>,
+    pub method: Option<HTTPMethod>,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
+
+    pub method_expression: Option<JSONSelection>,
+    pub scheme: Option<JSONSelection>,
+    pub authority: Option<JSONSelection>,
+    pub source_path: Option<JSONSelection>,
+    pub source_query: Option<JSONSelection>,
+    pub connect_path: Option<JSONSelection>,
+    pub connect_query: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {
@@ -43,17 +54,17 @@ impl HttpJsonTransport {
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
-            (HTTPMethod::Get, url)
+            (Some(HTTPMethod::Get), Some(url))
         } else if let Some(url) = &http.post {
-            (HTTPMethod::Post, url)
+            (Some(HTTPMethod::Post), Some(url))
         } else if let Some(url) = &http.patch {
-            (HTTPMethod::Patch, url)
+            (Some(HTTPMethod::Patch), Some(url))
         } else if let Some(url) = &http.put {
-            (HTTPMethod::Put, url)
+            (Some(HTTPMethod::Put), Some(url))
         } else if let Some(url) = &http.delete {
-            (HTTPMethod::Delete, url)
+            (Some(HTTPMethod::Delete), Some(url))
         } else {
-            return Err(FederationError::internal("missing http method"));
+            (None, None)
         };
 
         #[allow(clippy::mutable_key_type)]
@@ -69,21 +80,82 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_url: source.and_then(|s| s.base_url.clone()),
-            connect_template: connect_url.parse().map_err(|e: string_template::Error| {
-                FederationError::internal(format!(
-                    "could not parse URL template: {message}",
-                    message = e.message
-                ))
-            })?,
+            connect_template: connect_url
+                .map(|c| {
+                    c.parse().map_err(|e: string_template::Error| {
+                        FederationError::internal(format!(
+                            "could not parse URL template: {message}",
+                            message = e.message
+                        ))
+                    })
+                })
+                .transpose()?,
             method,
             headers,
             body: http.body.clone(),
+
+            method_expression: http
+                .method
+                .clone()
+                .or(source.and_then(|s| s.method.clone())),
+            scheme: http
+                .scheme
+                .clone()
+                .or(source.and_then(|s| s.scheme.clone())),
+            authority: http
+                .authority
+                .clone()
+                .or(source.and_then(|s| s.authority.clone())),
+            source_path: source.and_then(|s| s.path.clone()),
+            source_query: source.and_then(|s| s.query.clone()),
+            connect_path: http.path.clone(),
+            connect_query: http.query.clone(),
         })
     }
 
     pub(super) fn label(&self) -> String {
-        format!("http: {} {}", self.method.as_str(), self.connect_template)
+        format!("http: {} {}", self.method_attr(), self.url_attr())
     }
+
+    pub fn method_attr(&self) -> String {
+        self.method
+            .as_ref()
+            .map_or("dynamic", |m| m.as_str())
+            .to_string()
+    }
+
+    pub fn url_attr(&self) -> String {
+        self.connect_template
+            .as_ref()
+            .map_or("dynamic".to_string(), |u| u.to_string())
+    }
+
+    pub fn method(&self, inputs: &IndexMap<String, Value>) -> (HTTPMethod, Vec<ApplyToError>) {
+        self.method_expression
+            .as_ref()
+            .map(|m| {
+                let (data, apply_to_errors) = m.apply_with_vars(&json!({}), inputs);
+                let Some(method) = data
+                    .as_ref()
+                    .and_then(|s| s.as_str())
+                    .and_then(|s| HTTPMethod::from_str(s).ok())
+                else {
+                    return (
+                        HTTPMethod::default(),
+                        vec![ApplyToError::new(
+                            "Invalid HTTP method".to_string(),
+                            vec![],
+                            None,
+                        )],
+                    );
+                };
+                (method, apply_to_errors)
+            })
+            .or_else(|| Some((self.method.unwrap_or_default(), vec![])))
+            .unwrap_or_default()
+    }
+
+
 
     pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> {
         self.variable_references()
@@ -91,25 +163,46 @@ impl HttpJsonTransport {
     }
 
     pub(super) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
-        let url_selections = self.connect_template.expressions().map(|e| &e.expression);
         let header_selections = self
             .headers
             .iter()
             .flat_map(|(_, source)| source.expressions());
-        url_selections
-            .chain(header_selections)
+
+        let url_selections = self
+            .connect_template
+            .iter()
+            .flat_map(|url| url.expressions())
+            .map(|e| &e.expression);
+
+        header_selections
+            .chain(url_selections)
             .chain(self.body.iter())
+            .chain(self.method_expression.iter())
+            .chain(self.scheme.iter())
+            .chain(self.authority.iter())
+            .chain(self.source_path.iter())
+            .chain(self.source_query.iter())
+            .chain(self.connect_path.iter())
+            .chain(self.connect_query.iter())
             .flat_map(|b| {
                 b.external_var_paths()
                     .into_iter()
                     .flat_map(PathSelection::variable_reference)
             })
     }
+
+    pub fn make_uri(
+        &self,
+        _inputs: &IndexMap<String, Value>,
+    ) -> Result<(Url, Vec<ApplyToError>), FederationError> {
+        todo!()
+    }
 }
 
 /// The HTTP arguments needed for a connect request
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum HTTPMethod {
+    #[default]
     Get,
     Post,
     Patch,

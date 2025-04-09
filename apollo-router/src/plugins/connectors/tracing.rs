@@ -51,7 +51,6 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::expand::Connectors;
@@ -76,10 +75,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,

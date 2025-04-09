@@ -1,5 +1,5 @@
-mod keys;
 pub(super) mod http_json_transport;
+mod keys;
 
 use std::collections::HashMap;
 use std::sync::Arc;

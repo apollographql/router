@@ -189,7 +189,7 @@ impl SourceHTTPArguments {
     ) -> Result<Self, FederationError> {
         let mut base_url = None;
         let mut headers = None;
-                let mut method = None;
+        let mut method = None;
         let mut scheme = None;
         let mut authority = None;
         let mut path = None;

@@ -741,7 +741,6 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use insta::assert_debug_snapshot;
@@ -793,10 +792,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
@@ -876,10 +873,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$").unwrap(),
             entity_resolver: None,
@@ -985,10 +980,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -1106,10 +1099,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
@@ -1226,10 +1217,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
@@ -1327,10 +1316,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field { field }").unwrap(),
             entity_resolver: None,
@@ -1450,10 +1437,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
@@ -1608,10 +1593,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
@@ -1763,10 +1746,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("selected").unwrap(),
             entity_resolver: None,
@@ -1889,10 +1870,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
@@ -2002,10 +1981,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path?id={$this.id}".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path?id={$this.id}".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeSingle),
@@ -2078,10 +2055,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,

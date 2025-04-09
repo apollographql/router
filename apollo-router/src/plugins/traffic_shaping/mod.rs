@@ -579,7 +579,6 @@ mod test {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
@@ -777,10 +776,8 @@ mod test {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                connect_template: "/path".parse().ok(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -914,7 +911,7 @@ mod test {
             r#"
         all:
           deduplicate_query: true
-        subgraphs: 
+        subgraphs:
           products:
             deduplicate_query: false
         "#,
@@ -944,7 +941,7 @@ mod test {
             r#"
         all:
           experimental_http2: disable
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
           reviews:
@@ -988,7 +985,7 @@ mod test {
         all:
           experimental_http2: disable
           dns_resolution_strategy: ipv6_only
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
             dns_resolution_strategy: ipv6_then_ipv4
