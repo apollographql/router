@@ -163,17 +163,17 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
 }
 
 /// UsageReporting fields, that will be used to send stats to uplink/studio
-#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct UsageReporting {
     /// The operation name, or None if there is no operation name
-    pub(crate) operation_name: Option<String>,
+    operation_name: Option<String>,
     /// The normalized operation signature, or None if there is no valid signature
-    pub(crate) operation_signature: Option<String>,
+    operation_signature: Option<String>,
     /// The error key to use for the stats report, or None if there is no error
-    pub(crate) error_key: Option<String>,
+    error_key: Option<String>,
     /// The persisted query ID used to request this operation, or None if the query was not requested via PQ ID
-    pub(crate) pq_id: Option<String>,
+    pq_id: Option<String>,
     /// a list of all types and fields referenced in the query
     #[serde(default)]
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
@@ -182,18 +182,16 @@ pub(crate) struct UsageReporting {
 impl UsageReporting {
     pub(crate) fn for_error(error_key: String) -> UsageReporting {
         UsageReporting {
-            operation_name: None,
-            operation_signature: None,
             error_key: Some(error_key),
-            pq_id: None,
-            referenced_fields_by_type: HashMap::new(),
+            ..Default::default()
         }
     }
 
     pub(crate) fn with_pq_id(&self, pq_id: Option<String>) -> UsageReporting {
-        let mut updated_usage_report = self.clone();
-        updated_usage_report.pq_id = pq_id;
-        updated_usage_report
+        UsageReporting {
+            pq_id,
+            ..self.clone()
+        }
     }
 
     /// The `stats_report_key` is a unique identifier derived from schema and query.
@@ -228,12 +226,9 @@ impl UsageReporting {
     }
 
     pub(crate) fn get_operation_id(&self) -> String {
-        let sig_to_hash = if self.error_key.is_some() {
-            // To match the logic of Apollo's error key handling, we need to handle error keys specially.
-            // The correct string to hash in this case is e.g. "# # GraphQLParseFailure\n".
-            format!("# # {}\n", self.error_key.as_ref().unwrap())
-        } else {
-            self.get_stats_report_key()
+        let sig_to_hash = match &self.error_key {
+            Some(err_key) => format!("# # {}\n", err_key),
+            None => self.get_stats_report_key(),
         };
 
         let mut hasher = sha1::Sha1::new();
