@@ -13,68 +13,9 @@ use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::FederationError;
 use crate::schema::SubgraphMetadata;
-use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::utils::FallibleIterator;
-
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub(crate) enum UpgradeChange {
-    ExternalOnTypeExtensionRemoval {
-        field: FieldDefinitionPosition,
-    },
-    TypeExtensionRemoval {
-        ty: ObjectTypeDefinitionPosition,
-    },
-    ExternalOnInterfaceRemoval {
-        field: InterfaceFieldDefinitionPosition,
-    },
-    ExternalOnObjectTypeRemoval {
-        ty: ObjectTypeDefinitionPosition,
-    },
-    UnusedExternalRemoval {
-        field: FieldDefinitionPosition,
-    },
-    TypeWithOnlyUnusedExternalsRemoval {
-        ty: ObjectTypeDefinitionPosition,
-    },
-    InactiveProvidesOrRequiresRemoval {
-        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
-    },
-    InactiveProvidesOrRequiresFieldsRemoval {
-        updated_directive: ObjectOrInterfaceFieldDirectivePosition,
-    },
-    ShareableFieldAddition {
-        field: FieldDefinitionPosition,
-    },
-    ShareableTypeAddition {
-        ty: ObjectTypeDefinitionPosition,
-        declaring_subgraphs: Vec<Name>,
-    },
-    KeyOnInterfaceRemoval {
-        ty: InterfaceTypeDefinitionPosition,
-    },
-    ProvidesOrRequiresOnInterfaceFieldRemoval {
-        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
-    },
-    ProvidesOnNonCompositeRemoval {
-        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
-        target_type: Name,
-    },
-    FieldsArgumentCoercionToString {
-        updated_directive: ObjectOrInterfaceFieldDirectivePosition,
-    },
-    RemovedTagOnExternal {
-        removed_directive: ObjectOrInterfaceFieldDirectivePosition,
-    },
-}
-
-impl std::fmt::Display for UpgradeChange {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!()
-    }
-}
 
 #[derive(Clone, Debug)]
 struct SchemaUpgrader<'a> {
@@ -93,9 +34,11 @@ struct TypeInfo {
 }
 
 #[allow(unused)]
+// PORT_NOTE: In JS, this returns upgraded subgraphs along with a set of messages about what changed.
+// However, those messages were never used, so we have omitted them here.
 pub(crate) fn upgrade_subgraphs_if_necessary(
     subgraphs: &[&mut Subgraph<Expanded>],
-) -> Result<HashMap<Name, Vec<UpgradeChange>>, FederationError> {
+) -> Result<(), FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
     if subgraphs
         .iter()
@@ -475,48 +418,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let changes = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
-        let s1_changes: Vec<_> = changes
-            .get("s1")
-            .expect("s1 changes")
-            .iter()
-            .map(|c| c.to_string())
-            .collect();
-        assert!(!changes.contains_key("s2"));
-
-        assert!(s1_changes.contains(
-            &r#"Removed @external from field "Product.upc" as it is a key of an extension type"#.to_string()
-        ));
-
-        assert!(
-            s1_changes.contains(
-                &r#"Switched type "Product" from an extension to a definition"#.to_string()
-            )
-        );
-
-        assert!(s1_changes.contains(
-            &r#"Removed @external field "Product.name" as it was not used in any @key, @provides or @requires"#.to_string()
-        ));
-
-        assert!(s1_changes.contains(
-            &r#"Removed @external directive on interface type field "I.description": @external is nonsensical on interface fields"#.to_string()
-        ));
-
-        assert!(s1_changes.contains(
-            &r#"Removed directive @requires(fields: "upc") on "Product.inventory": none of the fields were truly @external"#.to_string()
-        ));
-
-        assert!(s1_changes.contains(
-            &r#"Updated directive @provides(fields: "upc description") on "Query.products" to @provides(fields: "description"): removed fields that were not truly @external"#.to_string()
-        ));
-
-        assert!(s1_changes.contains(
-            &r#"Removed @key on interface "I": while allowed by federation 0.x, @key on interfaces were completely ignored/had no effect"#.to_string()
-        ));
-
-        assert!(s1_changes.contains(
-            &r#"Removed @provides directive on field "Random.x" as it is of non-composite type "Int": while not rejected by federation 0.x, such @provide is nonsensical and was ignored"#.to_string()
-        ));
+        upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
 
         insta::assert_snapshot!(
             s1.schema().schema().to_string(),
@@ -580,21 +482,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let changes = upgrade_subgraphs_if_necessary(&[&mut s]).expect("upgrades schema");
-        let s_changes: Vec<_> = changes
-            .get("s")
-            .expect("s changes")
-            .iter()
-            .map(|c| c.to_string())
-            .collect();
-
-        assert_eq!(
-            s_changes,
-            vec![
-                r#"Coerced "fields" argument for directive @key for "A" into a string: coerced from @key(fields: id) to @key(fields: "id")"#,
-                r#"Coerced "fields" argument for directive @key for "A" into a string: coerced from @key(fields: ["id", "x"]) to @key(fields: "id x")"#,
-            ]
-        );
+        upgrade_subgraphs_if_necessary(&[&mut s]).expect("upgrades schema");
 
         insta::assert_snapshot!(
             s.schema().schema().to_string(),
@@ -657,19 +545,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let changes = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
-        let s1_changes: Vec<_> = changes
-            .get("s1")
-            .expect("s1 changes")
-            .iter()
-            .map(|c| c.to_string())
-            .collect();
-        assert_eq!(
-            s1_changes,
-            vec![
-                r#"Removed @tag(name: "a tag") application on @external "A.y" as the @tag application is on another definition"#
-            ]
-        );
+        upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
 
         let type_a_in_s1 = s1.schema().schema().get_object("A").unwrap();
         let type_a_in_s2 = s2.schema().schema().get_object("A").unwrap();
@@ -776,7 +652,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let _ = upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
+        upgrade_subgraphs_if_necessary(&[&mut s1, &mut s2]).expect("upgrades schema");
 
         // 2 things must happen here:
         // 1. the @external on type `T` in s2 should be removed, as @external on types were no-ops in fed1 (but not in fed2 anymore, hence the removal)
@@ -813,7 +689,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let _ = upgrade_subgraphs_if_necessary(&[&mut subgraph]).expect("upgrades schema");
+        upgrade_subgraphs_if_necessary(&[&mut subgraph]).expect("upgrades schema");
         // Note: this test mostly exists for dev awareness. By design, this will
         // always require updating when the fed spec version is updated, so hopefully
         // you're reading this comment. Existing schemas which don't include a @link
@@ -881,8 +757,7 @@ mod tests {
         .expand_links()
         .expect("expands schema");
 
-        let _ = upgrade_subgraphs_if_necessary(&[&mut subgraph1, &mut subgraph2])
-            .expect("upgrades schema");
+        upgrade_subgraphs_if_necessary(&[&mut subgraph1, &mut subgraph2]).expect("upgrades schema");
 
         assert!(
             !subgraph1
