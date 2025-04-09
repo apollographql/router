@@ -1,6 +1,7 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
@@ -115,7 +116,7 @@ impl Config {
                 .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
                 .with_timeout(batch_processor.max_export_timeout)
-                .with_metadata(metadata)
+                .with_metadata(metadata.clone())
                 .with_compression(opentelemetry_otlp::Compression::Gzip),
         )
         .build_metrics_exporter(
@@ -128,29 +129,61 @@ impl Config {
                     .build(),
             ),
         )?;
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio)
+
+        let realtime_exporter = MetricsExporterBuilder::Tonic(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_processor.max_export_timeout)
+                .with_metadata(metadata.clone())
+                .with_compression(opentelemetry_otlp::Compression::Gzip),
+        )
+        .build_metrics_exporter(
+            Box::new(CustomTemporalitySelector(
+                opentelemetry_sdk::metrics::data::Temporality::Delta,
+            )),
+            Box::new(
+                CustomAggregationSelector::builder()
+                    .boundaries(default_buckets())
+                    .build(),
+            ),
+        )?;
+        let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
+            .with_interval(Duration::from_secs(60))
+            .with_timeout(batch_processor.max_export_timeout)
+            .build();
+
+        let realtime_reader = PeriodicReader::builder(realtime_exporter, runtime::Tokio)
             .with_interval(batch_processor.scheduled_delay)
             .with_timeout(batch_processor.max_export_timeout)
             .build();
 
+        let resource = Resource::new([
+            KeyValue::new("apollo.router.id", router_id()),
+            KeyValue::new("apollo.graph.ref", reference.to_string()),
+            KeyValue::new("apollo.schema.id", schema_id.to_string()),
+            KeyValue::new(
+                "apollo.user.agent",
+                format!(
+                    "{}@{}",
+                    std::env!("CARGO_PKG_NAME"),
+                    std::env!("CARGO_PKG_VERSION")
+                ),
+            ),
+            KeyValue::new("apollo.client.host", hostname()?),
+            KeyValue::new("apollo.client.uname", get_uname()?),
+        ]);
+
         builder.apollo_meter_provider_builder = builder
             .apollo_meter_provider_builder
-            .with_reader(reader)
-            .with_resource(Resource::new([
-                KeyValue::new("apollo.router.id", router_id()),
-                KeyValue::new("apollo.graph.ref", reference.to_string()),
-                KeyValue::new("apollo.schema.id", schema_id.to_string()),
-                KeyValue::new(
-                    "apollo.user.agent",
-                    format!(
-                        "{}@{}",
-                        std::env!("CARGO_PKG_NAME"),
-                        std::env!("CARGO_PKG_VERSION")
-                    ),
-                ),
-                KeyValue::new("apollo.client.host", hostname()?),
-                KeyValue::new("apollo.client.uname", get_uname()?),
-            ]));
+            .with_reader(default_reader)
+            .with_resource(resource.clone());
+
+        builder.apollo_realtime_meter_provider_builder = builder
+            .apollo_realtime_meter_provider_builder
+            .with_reader(realtime_reader)
+            .with_resource(resource.clone());
         Ok(builder)
     }
 

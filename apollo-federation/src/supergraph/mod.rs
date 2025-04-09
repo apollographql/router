@@ -1661,7 +1661,9 @@ pub(crate) const FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME: Name = name!("repres
 pub(crate) const FEDERATION_REPRESENTATIONS_VAR_NAME: Name = name!("representations");
 
 const GRAPHQL_STRING_TYPE_NAME: Name = name!("String");
-const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
+pub(crate) const GRAPHQL_QUERY_TYPE_NAME: Name = name!("Query");
+pub(crate) const GRAPHQL_MUTATION_TYPE_NAME: Name = name!("Mutation");
+pub(crate) const GRAPHQL_SUBSCRIPTION_TYPE_NAME: Name = name!("Subscription");
 
 const ANY_TYPE_SPEC: ScalarTypeSpecification = ScalarTypeSpecification {
     name: FEDERATION_ANY_TYPE_NAME,
@@ -1711,8 +1713,8 @@ fn add_federation_operations(
     federation_spec_definition: &'static FederationSpecDefinition,
 ) -> Result<(), FederationError> {
     // the `_Any` and `_Service` Type
-    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
-    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+    ANY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
+    SERVICE_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
 
     // the `_Entity` Type
     let key_directive_definition =
@@ -1724,7 +1726,7 @@ fn add_federation_operations(
             name: FEDERATION_ENTITY_TYPE_NAME,
             members: |_| entity_members.clone(),
         }
-        .check_or_add(&mut subgraph.schema)?;
+        .check_or_add(&mut subgraph.schema, None)?;
     }
 
     // the `Query` Type
@@ -1732,7 +1734,7 @@ fn add_federation_operations(
         root_kind: SchemaRootDefinitionKind::Query,
     };
     if query_root_pos.try_get(subgraph.schema.schema()).is_none() {
-        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema)?;
+        QUERY_TYPE_SPEC.check_or_add(&mut subgraph.schema, None)?;
         query_root_pos.insert(
             &mut subgraph.schema,
             ComponentName::from(QUERY_TYPE_SPEC.name),
