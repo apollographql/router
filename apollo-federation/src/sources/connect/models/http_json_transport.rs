@@ -9,6 +9,7 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::SourceSpan;
 use either::Either;
 use http::HeaderName;
+use itertools::Itertools;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use url::Url;
@@ -155,8 +156,6 @@ impl HttpJsonTransport {
             .unwrap_or_default()
     }
 
-
-
     pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> {
         self.variable_references()
             .map(|var_ref| var_ref.namespace.namespace)
@@ -193,9 +192,175 @@ impl HttpJsonTransport {
 
     pub fn make_uri(
         &self,
-        _inputs: &IndexMap<String, Value>,
+        inputs: &IndexMap<String, Value>,
     ) -> Result<(Url, Vec<ApplyToError>), FederationError> {
-        todo!()
+        // scheme: self.schema or connect_template.base.scheme or baseURL.schema
+        // authority: self.authority or connect_template.base.authority or baseURL.authority
+        // path: (baseURL path + source path eval + connect_template path + connect path eval).join('/')
+        // query: (baseURL query + source query eval + connect_template query + connect query eval).join('&')
+
+        let mut warnings = vec![];
+
+        let scheme = self
+            .scheme
+            .as_ref()
+            .and_then(|s| {
+                let (s, w) = s.apply_with_vars(&json!({}), inputs);
+                warnings.extend(w);
+                s.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
+            })
+            .or_else(|| {
+                self.connect_template
+                    .as_ref()
+                    .and_then(|u| u.base.as_ref())
+                    .map(|u| u.scheme().to_string())
+            })
+            .or_else(|| self.source_url.as_ref().map(|u| u.scheme().to_string()))
+            .unwrap_or("GET".to_string());
+
+        let authority = self
+            .authority
+            .as_ref()
+            .and_then(|a| {
+                let (a, w) = a.apply_with_vars(&json!({}), inputs);
+                warnings.extend(w);
+                a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
+            })
+            .or_else(|| {
+                self.connect_template
+                    .as_ref()
+                    .and_then(|u| u.base.as_ref())
+                    .map(|u| u.authority().to_string())
+            })
+            .or_else(|| self.source_url.as_ref().map(|u| u.authority().to_string()))
+            .unwrap_or("GET".to_string());
+
+        let source_base_path = self
+            .source_url
+            .as_ref()
+            .map(|u| u.path().split('/').collect_vec())
+            .unwrap_or_default();
+        let source_path = self
+            .source_path
+            .as_ref()
+            .and_then(|p| {
+                let (p, w) = p.apply_with_vars(&json!({}), inputs);
+                warnings.extend(w);
+                p.as_ref().and_then(|s| s.as_array().clone()).map(|s| {
+                    s.iter()
+                        .map(|s| s.as_str().unwrap_or_default().to_string())
+                        .collect_vec()
+                })
+            })
+            .unwrap_or_default();
+        let connect_template_path = self
+            .connect_template
+            .as_ref()
+            .map(|u| u.interpolate_path(inputs))
+            .transpose()
+            .map_err(|e| FederationError::internal(format!("Invalid URL template: {e}")))?
+            .unwrap_or_default();
+        let connect_path = self
+            .connect_path
+            .as_ref()
+            .and_then(|p| {
+                let (p, w) = p.apply_with_vars(&json!({}), inputs);
+                warnings.extend(w);
+                p.as_ref().and_then(|s| s.as_array().clone()).map(|s| {
+                    s.iter()
+                        .map(|s| s.as_str().unwrap_or_default().to_string())
+                        .collect_vec()
+                })
+            })
+            .unwrap_or_default();
+
+        let source_base_query = self
+            .source_url
+            .as_ref()
+            .map(|u| {
+                u.query()
+                    .unwrap_or_default()
+                    .split("&")
+                    .map(|s| {
+                        let mut iter = s.splitn(2, '=');
+                        (
+                            iter.next().unwrap_or_default(),
+                            iter.next().unwrap_or_default(),
+                        )
+                    })
+                    .collect_vec()
+            })
+            .unwrap_or_default();
+        let source_query = self
+            .source_query
+            .as_ref()
+            .and_then(|q| {
+                let (q, w) = q.apply_with_vars(&json!({}), inputs);
+                warnings.extend(w);
+                q.as_ref().and_then(|s| s.as_object().clone()).map(|o| {
+                    o.iter()
+                        .map(|(k, v)| {
+                            (
+                                k.as_str().to_string(),
+                                v.as_str().unwrap_or_default().to_string(),
+                            )
+                        })
+                        .collect_vec()
+                })
+            })
+            .unwrap_or_default();
+        let connect_template_query = self
+            .connect_template
+            .as_ref()
+            .map(|u| u.interpolate_query(inputs))
+            .transpose()
+            .map_err(|e| FederationError::internal(format!("Invalid URL template: {e}")))?
+            .unwrap_or_default();
+        let connect_query = self
+            .connect_query
+            .as_ref()
+            .and_then(|q| {
+                let (q, w) = q.apply_with_vars(&json!({}), inputs);
+                warnings.extend(w);
+                q.as_ref().and_then(|s| s.as_object().clone()).map(|o| {
+                    o.iter()
+                        .map(|(k, v)| {
+                            (
+                                k.as_str().to_string(),
+                                v.as_str().unwrap_or_default().to_string(),
+                            )
+                        })
+                        .collect_vec()
+                })
+            })
+            .unwrap_or_default();
+
+        let mut url = Url::parse(&format!("{}://{}", scheme, authority))
+            .map_err(|e| FederationError::internal(format!("Invalid URL: {e}")))?;
+
+        {
+            let mut segments = url
+                .path_segments_mut()
+                .map_err(|_| FederationError::internal(format!("Invalid URL")))?;
+            segments.extend(source_base_path);
+            segments.extend(source_path);
+            segments.extend(connect_template_path);
+            segments.extend(connect_path);
+        }
+
+        let qps = source_base_query
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .chain(source_query.into_iter())
+            .chain(connect_template_query.into_iter())
+            .chain(connect_query.into_iter())
+            .collect_vec();
+
+        if !qps.is_empty() {
+            url.query_pairs_mut().extend_pairs(qps);
+        }
+
+        Ok((url, warnings))
     }
 }
 
@@ -417,3 +582,50 @@ impl Display for HeaderParseError<'_> {
 }
 
 impl Error for HeaderParseError<'_> {}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::collections::IndexMap;
+    use serde_json_bytes::json;
+    use url::Url;
+
+    use crate::sources::connect::JSONSelection;
+
+    #[test]
+    fn make_request() {
+        let transport = super::HttpJsonTransport {
+            source_url: Url::parse("http://example.com/a?z=1").ok(),
+            connect_template: "/{$args.c}?x={$args.x}".parse().ok(),
+            source_path: JSONSelection::parse("$(['b', $args.b2])").ok(),
+            connect_path: JSONSelection::parse("$(['d', $args.d2])").ok(),
+            source_query: JSONSelection::parse("y: $args.y").ok(),
+            connect_query: JSONSelection::parse("w: $args.w").ok(),
+            ..Default::default()
+        };
+        let inputs = IndexMap::from_iter([(
+            "$args".to_string(),
+            json!({"b2": "b2", "c": "c", "d2": "d2", "y": "y", "x": "x", "w": "w"}),
+        )]);
+        let (url, warnings) = transport.make_uri(&inputs).unwrap();
+        assert_eq!(warnings, vec![]);
+        assert_eq!(
+            url.to_string(),
+            "http://example.com/a/b/b2/c/d/d2?z=1&y=y&x=x&w=w"
+        );
+    }
+
+    #[test]
+    fn make_request_2() {
+        let transport = super::HttpJsonTransport {
+            scheme: JSONSelection::parse("$('http')").ok(),
+            authority: JSONSelection::parse("$('example.com')").ok(),
+            connect_path: JSONSelection::parse("$(['a', $args.a, ''])").ok(),
+            connect_query: JSONSelection::parse("$args { b }").ok(),
+            ..Default::default()
+        };
+        let inputs = IndexMap::from_iter([("$args".to_string(), json!({"a": "1", "b": "2"}))]);
+        let (url, warnings) = transport.make_uri(&inputs).unwrap();
+        assert_eq!(warnings, vec![]);
+        assert_eq!(url.to_string(), "http://example.com/a/1/?b=2");
+    }
+}
