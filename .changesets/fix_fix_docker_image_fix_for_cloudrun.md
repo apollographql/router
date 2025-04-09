@@ -8,4 +8,4 @@ For users of Google Cloud Platform (GCP) Cloud Run platform, using the router's 
 
 To avoid this issue, we've changed the script to use `#!/bin/bash` instead of `#!/usr/bin/env bash`, as we use a fixed Linux distribution in Docker which has the Bash binary located there. 
 
-By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/7198
