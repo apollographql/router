@@ -21,6 +21,8 @@ traces_per_query:
           operation_type: mutation
           operation_subtype: ""
           result: ""
+          client_library_name: ""
+          client_library_version: ""
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1
@@ -60,6 +62,8 @@ traces_per_query:
           operation_type: query
           operation_subtype: ""
           result: ""
+          client_library_name: ""
+          client_library_version: ""
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1
