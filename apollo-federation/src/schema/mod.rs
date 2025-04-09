@@ -53,7 +53,7 @@ pub(crate) mod referencer;
 pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
 
-fn compute_subgraph_metadata(
+pub(crate) fn compute_subgraph_metadata(
     schema: &FederationSchema,
 ) -> Result<Option<SubgraphMetadata>, FederationError> {
     Ok(
