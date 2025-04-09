@@ -1,6 +1,7 @@
 //! Implements GraphQL parsing/validation/usage counting of requests at the supergraph service
 //! stage.
 
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
