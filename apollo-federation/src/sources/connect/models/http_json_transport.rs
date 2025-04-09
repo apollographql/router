@@ -42,7 +42,10 @@ pub struct HttpJsonTransport {
 
     pub method_expression: Option<JSONSelection>,
     pub scheme: Option<JSONSelection>,
-    pub authority: Option<JSONSelection>,
+    pub host: Option<JSONSelection>,
+    pub port: Option<JSONSelection>,
+    pub user: Option<JSONSelection>,
+    pub password: Option<JSONSelection>,
     pub source_path: Option<JSONSelection>,
     pub source_query: Option<JSONSelection>,
     pub connect_path: Option<JSONSelection>,
@@ -103,10 +106,13 @@ impl HttpJsonTransport {
                 .scheme
                 .clone()
                 .or(source.and_then(|s| s.scheme.clone())),
-            authority: http
-                .authority
+            host: http.host.clone().or(source.and_then(|s| s.host.clone())),
+            port: http.port.clone().or(source.and_then(|s| s.port.clone())),
+            user: http.user.clone().or(source.and_then(|s| s.user.clone())),
+            password: http
+                .password
                 .clone()
-                .or(source.and_then(|s| s.authority.clone())),
+                .or(source.and_then(|s| s.password.clone())),
             source_path: source.and_then(|s| s.path.clone()),
             source_query: source.and_then(|s| s.query.clone()),
             connect_path: http.path.clone(),
@@ -178,7 +184,10 @@ impl HttpJsonTransport {
             .chain(self.body.iter())
             .chain(self.method_expression.iter())
             .chain(self.scheme.iter())
-            .chain(self.authority.iter())
+            .chain(self.host.iter())
+            .chain(self.port.iter())
+            .chain(self.user.iter())
+            .chain(self.password.iter())
             .chain(self.source_path.iter())
             .chain(self.source_query.iter())
             .chain(self.connect_path.iter())
@@ -190,56 +199,137 @@ impl HttpJsonTransport {
             })
     }
 
+    fn resolved_scheme(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> (Option<String>, Vec<ApplyToError>) {
+        let mut warnings = vec![];
+
+        let scheme = self.scheme.as_ref().and_then(|s| {
+            let (s, w) = s.apply_with_vars(&json!({}), inputs);
+            warnings.extend(w);
+            s.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
+        });
+
+        (scheme, warnings)
+    }
+
+    fn resolved_host(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Option<String>, Vec<ApplyToError>), FederationError> {
+        let mut warnings = vec![];
+
+        let host = self.host.as_ref().and_then(|a| {
+            let (a, w) = a.apply_with_vars(&json!({}), inputs);
+            warnings.extend(w);
+            a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
+        });
+
+        Ok((host, warnings))
+    }
+
+    fn resolved_port(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Option<u16>, Vec<ApplyToError>), FederationError> {
+        let mut warnings = vec![];
+
+        let port = self.port.as_ref().and_then(|a| {
+            let (a, w) = a.apply_with_vars(&json!({}), inputs);
+            warnings.extend(w);
+            a.as_ref().and_then(|s| s.as_u64()).map(|s| s as u16)
+        });
+
+        Ok((port, warnings))
+    }
+
+    fn resolved_user(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Option<String>, Vec<ApplyToError>), FederationError> {
+        let mut warnings = vec![];
+
+        let user = self.user.as_ref().and_then(|a| {
+            let (a, w) = a.apply_with_vars(&json!({}), inputs);
+            warnings.extend(w);
+            a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
+        });
+
+        Ok((user, warnings))
+    }
+
+    fn resolved_password(
+        &self,
+        inputs: &IndexMap<String, Value>,
+    ) -> Result<(Option<String>, Vec<ApplyToError>), FederationError> {
+        let mut warnings = vec![];
+
+        let password = self.password.as_ref().and_then(|a| {
+            let (a, w) = a.apply_with_vars(&json!({}), inputs);
+            warnings.extend(w);
+            a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
+        });
+
+        Ok((password, warnings))
+    }
+
+    fn base_url(&self) -> Url {
+        self.source_url
+            .as_ref()
+            .or_else(|| self.connect_template.as_ref().and_then(|u| u.base.as_ref()))
+            .map(|u| u.clone())
+            .unwrap_or_else(|| Url::parse("https://localhost").expect("always parses"))
+    }
+
     pub fn make_uri(
         &self,
         inputs: &IndexMap<String, Value>,
     ) -> Result<(Url, Vec<ApplyToError>), FederationError> {
-        // scheme: self.schema or connect_template.base.scheme or baseURL.schema
-        // authority: self.authority or connect_template.base.authority or baseURL.authority
-        // path: (baseURL path + source path eval + connect_template path + connect path eval).join('/')
-        // query: (baseURL query + source query eval + connect_template query + connect query eval).join('&')
-
         let mut warnings = vec![];
 
-        let scheme = self
-            .scheme
-            .as_ref()
-            .and_then(|s| {
-                let (s, w) = s.apply_with_vars(&json!({}), inputs);
-                warnings.extend(w);
-                s.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
-            })
-            .or_else(|| {
-                self.connect_template
-                    .as_ref()
-                    .and_then(|u| u.base.as_ref())
-                    .map(|u| u.scheme().to_string())
-            })
-            .or_else(|| self.source_url.as_ref().map(|u| u.scheme().to_string()))
-            .unwrap_or("GET".to_string());
+        let mut base_url = self.base_url();
 
-        let authority = self
-            .authority
-            .as_ref()
-            .and_then(|a| {
-                let (a, w) = a.apply_with_vars(&json!({}), inputs);
-                warnings.extend(w);
-                a.as_ref().and_then(|s| s.as_str()).map(|s| s.to_string())
-            })
-            .or_else(|| {
-                self.connect_template
-                    .as_ref()
-                    .and_then(|u| u.base.as_ref())
-                    .map(|u| u.authority().to_string())
-            })
-            .or_else(|| self.source_url.as_ref().map(|u| u.authority().to_string()))
-            .unwrap_or("GET".to_string());
+        let (scheme, ws) = self.resolved_scheme(inputs);
+        warnings.extend(ws);
+        if let Some(scheme) = scheme {
+            base_url
+                .set_scheme(&scheme)
+                .map_err(|_| FederationError::internal(format!("Invalid URL scheme: {scheme}")))?;
+        }
 
-        let source_base_path = self
-            .source_url
-            .as_ref()
-            .map(|u| u.path().split('/').collect_vec())
-            .unwrap_or_default();
+        let (host, ws) = self.resolved_host(inputs)?;
+        warnings.extend(ws);
+        if let Some(host) = host {
+            base_url
+                .set_host(Some(&host))
+                .map_err(|_| FederationError::internal(format!("Invalid URL host: {host}")))?;
+        }
+
+        let (port, ws) = self.resolved_port(inputs)?;
+        warnings.extend(ws);
+        if let Some(port) = port {
+            base_url
+                .set_port(Some(port))
+                .map_err(|_| FederationError::internal(format!("Invalid URL port: {port}")))?;
+        }
+
+        let (user, ws) = self.resolved_user(inputs)?;
+        warnings.extend(ws);
+        if let Some(user) = user {
+            base_url
+                .set_username(&user)
+                .map_err(|_| FederationError::internal(format!("Invalid URL user: {user}")))?;
+        }
+
+        let (password, ws) = self.resolved_password(inputs)?;
+        warnings.extend(ws);
+        if let Some(password) = password {
+            base_url.set_password(Some(&password)).map_err(|_| {
+                FederationError::internal(format!("Invalid URL password: {password}"))
+            })?;
+        }
+
         let source_path = self
             .source_path
             .as_ref()
@@ -274,23 +364,6 @@ impl HttpJsonTransport {
             })
             .unwrap_or_default();
 
-        let source_base_query = self
-            .source_url
-            .as_ref()
-            .map(|u| {
-                u.query()
-                    .unwrap_or_default()
-                    .split("&")
-                    .map(|s| {
-                        let mut iter = s.splitn(2, '=');
-                        (
-                            iter.next().unwrap_or_default(),
-                            iter.next().unwrap_or_default(),
-                        )
-                    })
-                    .collect_vec()
-            })
-            .unwrap_or_default();
         let source_query = self
             .source_query
             .as_ref()
@@ -335,32 +408,25 @@ impl HttpJsonTransport {
             })
             .unwrap_or_default();
 
-        let mut url = Url::parse(&format!("{}://{}", scheme, authority))
-            .map_err(|e| FederationError::internal(format!("Invalid URL: {e}")))?;
+        base_url
+            .path_segments_mut()
+            .map_err(|_| FederationError::internal(format!("Invalid URL")))?
+            .pop_if_empty()
+            .extend(source_path)
+            .extend(connect_template_path)
+            .extend(connect_path);
 
-        {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| FederationError::internal(format!("Invalid URL")))?;
-            segments.extend(source_base_path);
-            segments.extend(source_path);
-            segments.extend(connect_template_path);
-            segments.extend(connect_path);
-        }
-
-        let qps = source_base_query
+        let qps = source_query
             .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .chain(source_query.into_iter())
             .chain(connect_template_query.into_iter())
             .chain(connect_query.into_iter())
             .collect_vec();
 
         if !qps.is_empty() {
-            url.query_pairs_mut().extend_pairs(qps);
+            base_url.query_pairs_mut().extend_pairs(qps);
         }
 
-        Ok((url, warnings))
+        Ok((base_url, warnings))
     }
 }
 
@@ -586,14 +652,17 @@ impl Error for HeaderParseError<'_> {}
 #[cfg(test)]
 mod tests {
     use apollo_compiler::collections::IndexMap;
+    use insta::assert_snapshot;
     use serde_json_bytes::json;
     use url::Url;
 
     use crate::sources::connect::JSONSelection;
 
+    use super::HttpJsonTransport;
+
     #[test]
     fn make_request() {
-        let transport = super::HttpJsonTransport {
+        let transport = HttpJsonTransport {
             source_url: Url::parse("http://example.com/a?z=1").ok(),
             connect_template: "/{$args.c}?x={$args.x}".parse().ok(),
             source_path: JSONSelection::parse("$(['b', $args.b2])").ok(),
@@ -616,9 +685,9 @@ mod tests {
 
     #[test]
     fn make_request_2() {
-        let transport = super::HttpJsonTransport {
+        let transport = HttpJsonTransport {
             scheme: JSONSelection::parse("$('http')").ok(),
-            authority: JSONSelection::parse("$('example.com')").ok(),
+            host: JSONSelection::parse("$('example.com')").ok(),
             connect_path: JSONSelection::parse("$(['a', $args.a, ''])").ok(),
             connect_query: JSONSelection::parse("$args { b }").ok(),
             ..Default::default()
@@ -627,5 +696,405 @@ mod tests {
         let (url, warnings) = transport.make_uri(&inputs).unwrap();
         assert_eq!(warnings, vec![]);
         assert_eq!(url.to_string(), "http://example.com/a/1/?b=2");
+    }
+
+    // Previous make_uri() tests
+
+    macro_rules! this {
+        ($($value:tt)*) => {{
+            let mut map = IndexMap::with_capacity_and_hasher(1, Default::default());
+            map.insert("$this".to_string(), json!({ $($value)* }));
+            map
+        }};
+    }
+
+    #[test]
+    fn append_path() {
+        assert_eq!(
+            HttpJsonTransport {
+                source_url: Url::parse("https://localhost:8080/v1").ok(),
+                connect_template: "/hello/42".parse().ok(),
+                ..Default::default()
+            }
+            .make_uri(&Default::default())
+            .unwrap()
+            .0
+            .as_str(),
+            "https://localhost:8080/v1/hello/42"
+        );
+    }
+
+    #[test]
+    fn append_path_with_trailing_slash() {
+        assert_eq!(
+            HttpJsonTransport {
+                source_url: Url::parse("https://localhost:8080/").ok(),
+                connect_template: "/hello/42".parse().ok(),
+                ..Default::default()
+            }
+            .make_uri(&Default::default())
+            .unwrap()
+            .0
+            .as_str(),
+            "https://localhost:8080/hello/42"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_trailing_slash_and_base_path() {
+        assert_eq!(
+            HttpJsonTransport {
+                source_url: Url::parse("https://localhost:8080/v1/").ok(),
+                connect_template: "/hello/{$this.id}?id={$this.id}".parse().ok(),
+                ..Default::default()
+            }
+            .make_uri(&this! { "id": 42 })
+            .unwrap()
+            .0
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?id=42"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_and_base_path_and_params() {
+        assert_eq!(
+            HttpJsonTransport {
+                source_url: Url::parse("https://localhost:8080/v1?foo=bar").ok(),
+                connect_template: "/hello/{$this.id}?id={$this.id}".parse().ok(),
+                ..Default::default()
+            }
+            .make_uri(&this! { "id": 42 })
+            .unwrap()
+            .0
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
+        assert_eq!(
+            HttpJsonTransport {
+                source_url: Url::parse("https://localhost:8080/v1/?foo=bar").ok(),
+                connect_template: "/hello/{$this.id}?id={$this.id}".parse().ok(),
+                ..Default::default()
+            }
+            .make_uri(&this! { "id": 42 })
+            .unwrap()
+            .0
+            .as_str(),
+            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
+        );
+    }
+
+    #[test]
+    fn path_cases() {
+        let template = "http://localhost/users/{$this.user_id}?a={$this.b}&e={$this.f.g}"
+            .parse()
+            .ok();
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }.make_uri(&Default::default())
+                .unwrap().0
+                .as_str(),
+            @"http://localhost/users/?a=&e="
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }.make_uri(&this! {
+                "user_id": 123,
+                "b": "456",
+                "f": {"g": "abc"}
+            })
+            .unwrap().0
+            .as_str(),
+            @"http://localhost/users/123?a=456&e=abc"
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }.make_uri(&this! {
+                "user_id": 123,
+                "f": "not an object"
+            })
+            .unwrap().0
+            .as_str(),
+            @"http://localhost/users/123?a=&e="
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }.make_uri(&this! {
+                // The order of the variables should not matter.
+                "b": "456",
+                "user_id": "123"
+            })
+            .unwrap().0
+            .as_str(),
+            @"http://localhost/users/123?a=456&e="
+        );
+
+        assert_eq!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "user_id": "123",
+                "b": "a",
+                "f": {"g": "e"},
+                // Extra variables should be ignored.
+                "extra": "ignored"
+            })
+            .unwrap()
+            .0
+            .as_str(),
+            "http://localhost/users/123?a=a&e=e",
+        );
+    }
+
+    #[test]
+    fn multi_variable_parameter_values() {
+        let template =
+            "http://localhost/locations/xyz({$this.x},{$this.y},{$this.z})?required={$this.b},{$this.c};{$this.d}&optional=[{$this.e},{$this.f}]"
+                .parse()
+                .ok();
+
+        assert_eq!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "x": 1,
+                "y": 2,
+                "z": 3,
+                "b": 4,
+                "c": 5,
+                "d": 6,
+                "e": 7,
+                "f": 8,
+            })
+            .unwrap()
+            .0
+            .as_str(),
+            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C8%5D"
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "x": 1,
+                "y": 2,
+                "z": 3,
+                "b": 4,
+                "c": 5,
+                "d": 6,
+                "e": 7
+                // "f": 8,
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C%5D",
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "x": 1,
+                "y": 2,
+                "z": 3,
+                "b": 4,
+                "c": 5,
+                "d": 6,
+                // "e": 7,
+                "f": 8
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C8%5D",
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "x": 1,
+                "y": 2,
+                "z": 3,
+                "b": 4,
+                "c": 5,
+                "d": 6
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C%5D",
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                // "x": 1,
+                "y": 2,
+                "z": 3
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/locations/xyz(,2,3)?required=%2C%3B&optional=%5B%2C%5D",
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "x": 1,
+                "y": 2
+                // "z": 3,
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/locations/xyz(1,2,)?required=%2C%3B&optional=%5B%2C%5D"
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "b": 4,
+                // "c": 5,
+                "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4%2C%3B6&optional=%5B%2C%5D"
+        );
+
+        let line_template = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
+            .parse()
+            .ok();
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: line_template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "p1": {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                },
+                "p2": {
+                    "x": 4,
+                    "y": 5,
+                    "z": 6,
+                }
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/line/1,2,3/4,5,6"
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: line_template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "p1": {
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                },
+                "p2": {
+                    "x": 4,
+                    "y": 5,
+                    // "z": 6,
+                }
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/line/1,2,3/4,5,"
+        );
+
+        assert_snapshot!(
+            HttpJsonTransport {
+                connect_template: line_template.clone(),
+                ..Default::default()
+            }
+            .make_uri(&this! {
+                "p1": {
+                    "x": 1,
+                    // "y": 2,
+                    "z": 3,
+                },
+                "p2": {
+                    "x": 4,
+                    "y": 5,
+                    "z": 6,
+                }
+            })
+            .unwrap()
+            .0.as_str(),
+            @"http://localhost/line/1,,3/4,5,6"
+        );
+    }
+
+    /// Values are all strings, they can't have semantic value for HTTP. That means no dynamic paths,
+    /// no nested query params, etc. When we expand values, we have to make sure they're safe.
+    #[test]
+    fn parameter_encoding() {
+        let vars = &this! {
+            "path": "/some/path",
+            "question_mark": "a?b",
+            "ampersand": "a&b=b",
+            "hash": "a#b",
+        };
+
+        let template = "http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}"
+            .parse()
+            .expect("Failed to parse URL template");
+
+        let url = HttpJsonTransport {
+            connect_template: Some(template),
+            ..Default::default()
+        }
+        .make_uri(&vars)
+        .unwrap()
+        .0;
+
+        assert_eq!(
+            url.as_str(),
+            "http://localhost/%2Fsome%2Fpath/a%3Fb?a=a%26b%3Db&c=a%23b"
+        );
     }
 }

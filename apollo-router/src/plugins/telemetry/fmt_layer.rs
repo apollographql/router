@@ -266,6 +266,7 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::URLTemplate;
@@ -829,7 +830,7 @@ connector:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_url: None,
+                        method: Some(HTTPMethod::Get),
                         connect_template: URLTemplate::from_str("/test").ok(),
                         ..Default::default()
                     },
@@ -1179,7 +1180,7 @@ subgraph:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_url: None,
+                        method: Some(HTTPMethod::Get),
                         connect_template: URLTemplate::from_str("/test").ok(),
                         ..Default::default()
                     },

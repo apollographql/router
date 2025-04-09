@@ -26,7 +26,10 @@ pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
 pub(crate) const METHOD_ARGUMENT_NAME: Name = name!("method");
 pub(crate) const SCHEME_ARGUMENT_NAME: Name = name!("scheme");
-pub(crate) const AUTHORITY_ARGUMENT_NAME: Name = name!("authority");
+pub(crate) const HOST_ARGUMENT_NAME: Name = name!("host");
+pub(crate) const PORT_ARGUMENT_NAME: Name = name!("port");
+pub(crate) const USER_ARGUMENT_NAME: Name = name!("user");
+pub(crate) const PASSWORD_ARGUMENT_NAME: Name = name!("password");
 pub(crate) const PATH_ARGUMENT_NAME: Name = name!("path");
 pub(crate) const QUERY_ARGUMENT_NAME: Name = name!("query");
 
@@ -62,7 +65,10 @@ pub(crate) struct SourceHTTPArguments {
 
     pub(crate) method: Option<JSONSelection>,
     pub(crate) scheme: Option<JSONSelection>,
-    pub(crate) authority: Option<JSONSelection>,
+    pub(crate) host: Option<JSONSelection>,
+    pub(crate) port: Option<JSONSelection>,
+    pub(crate) user: Option<JSONSelection>,
+    pub(crate) password: Option<JSONSelection>,
     pub(crate) path: Option<JSONSelection>,
     pub(crate) query: Option<JSONSelection>,
 }
@@ -122,7 +128,10 @@ pub(crate) struct ConnectHTTPArguments {
 
     pub(crate) method: Option<JSONSelection>,
     pub(crate) scheme: Option<JSONSelection>,
-    pub(crate) authority: Option<JSONSelection>,
+    pub(crate) host: Option<JSONSelection>,
+    pub(crate) port: Option<JSONSelection>,
+    pub(crate) user: Option<JSONSelection>,
+    pub(crate) password: Option<JSONSelection>,
     pub(crate) path: Option<JSONSelection>,
     pub(crate) query: Option<JSONSelection>,
 }

@@ -32,16 +32,19 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::sources::connect::spec::ConnectSpec;
-use crate::sources::connect::spec::schema::AUTHORITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HOST_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::METHOD_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::PASSWORD_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::PATH_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::PORT_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::QUERY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SCHEME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::USER_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
     link: &Link,
@@ -189,7 +192,28 @@ pub(super) fn check_or_add(
             },
             InputValueDefinition {
                 description: None,
-                name: AUTHORITY_ARGUMENT_NAME.clone(),
+                name: HOST_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: PORT_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: USER_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: PASSWORD_ARGUMENT_NAME.clone(),
                 ty: Type::Named(json_selection_spec.name.clone()).into(),
                 default_value: None,
                 directives: Default::default(),
@@ -343,7 +367,28 @@ pub(super) fn check_or_add(
             },
             InputValueDefinition {
                 description: None,
-                name: AUTHORITY_ARGUMENT_NAME.clone(),
+                name: HOST_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: PORT_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: USER_ARGUMENT_NAME.clone(),
+                ty: Type::Named(json_selection_spec.name.clone()).into(),
+                default_value: None,
+                directives: Default::default(),
+            },
+            InputValueDefinition {
+                description: None,
+                name: PASSWORD_ARGUMENT_NAME.clone(),
                 ty: Type::Named(json_selection_spec.name.clone()).into(),
                 default_value: None,
                 directives: Default::default(),
@@ -588,7 +633,10 @@ mod tests {
           headers: [connect__HTTPHeaderMapping!]
           method: connect__JSONSelection
           scheme: connect__JSONSelection
-          authority: connect__JSONSelection
+          host: connect__JSONSelection
+          port: connect__JSONSelection
+          user: connect__JSONSelection
+          password: connect__JSONSelection
           path: connect__JSONSelection
           query: connect__JSONSelection
         }
@@ -598,7 +646,10 @@ mod tests {
           headers: [connect__HTTPHeaderMapping!]
           method: connect__JSONSelection
           scheme: connect__JSONSelection
-          authority: connect__JSONSelection
+          host: connect__JSONSelection
+          port: connect__JSONSelection
+          user: connect__JSONSelection
+          password: connect__JSONSelection
           path: connect__JSONSelection
           query: connect__JSONSelection
         }
