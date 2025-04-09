@@ -424,6 +424,14 @@ impl QueryPlannerError {
             _ => None,
         }
     }
+
+    pub(crate) fn is_pool_processing_error(&self) -> bool {
+        matches!(self, QueryPlannerError::PoolProcessing(_))
+    }
+
+    pub(crate) fn is_authz_error(&self) -> bool {
+        matches!(self, QueryPlannerError::Unauthorized(_))
+    }
 }
 
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]

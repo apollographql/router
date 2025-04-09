@@ -543,6 +543,12 @@ where
                             let e = Arc::new(error);
                             let err = e.clone();
                             tokio::spawn(async move {
+                                // Don't cache errors related to pool processing or authorization.
+                                if err.is_pool_processing_error()
+                                || err.is_authz_error() {
+                                    return;
+                                }
+                                // Do cache errors related to the query being invalid in some manner.
                                 entry.insert(Err(err)).await;
                             })
                             .instrument(tracing::info_span!(
