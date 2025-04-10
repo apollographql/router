@@ -2,26 +2,14 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::compute_job::ComputeJobType;
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
-use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
 #[derive(Copy, Clone, strum_macros::IntoStaticStr)]
 pub(super) enum Outcome {
     Executed,
-    ExecutedError,
+    ExecutedErrorResponse,
+    ExecutedErrorChannel,
     RejectedQueueFull,
     Abandoned,
-}
-
-impl Outcome {
-    fn as_otel_status(&self) -> &'static str {
-        match self {
-            Self::Executed => OTEL_STATUS_CODE_OK,
-            Self::Abandoned | Self::ExecutedError | Self::RejectedQueueFull => {
-                OTEL_STATUS_CODE_ERROR
-            }
-        }
-    }
 }
 
 impl From<Outcome> for opentelemetry::Value {

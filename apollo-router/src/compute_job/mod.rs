@@ -214,8 +214,11 @@ where
     Ok(async move {
         let result = rx.await;
         job_watcher.outcome = match &result {
-            Ok(_) => Outcome::Executed,
-            Err(_) => Outcome::ExecutedError,
+            Ok(Ok(_)) => Outcome::Executed,
+            // We don't know what the cardinality of errors are so we just say there was a response error
+            Ok(Err(_)) => Outcome::ExecutedErrorResponse,
+            // We got an error reading the response from the channel
+            Err(_) => Outcome::ExecutedErrorChannel,
         };
 
         match result {
