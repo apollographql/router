@@ -1,14 +1,17 @@
 //! Parsing and validation for `@connect(http:)`
 
 use std::fmt::Display;
+use std::ops::Range;
 use std::str::FromStr;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use apollo_compiler::parser::LineColumn;
 use multi_try::MultiTry;
 use shape::Shape;
 
+use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
@@ -130,12 +133,11 @@ impl<'schema> Http<'schema> {
     }
 
     pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
-        self.transport
-            .url
-            .expressions()
-            .map(|e| e.expression.external_variables())
-            .chain(self.body.as_ref().map(|b| b.selection.external_variables()))
-            .flatten()
+        self.transport.variables().chain(
+            self.body
+                .iter()
+                .flat_map(|b| b.selection.external_variables()),
+        )
     }
 }
 
@@ -248,10 +250,7 @@ impl Display for BodyCoordinate<'_> {
 struct Transport<'schema> {
     // TODO: once this is shared with `HttpJsonTransport`, this will be used
     #[allow(dead_code)]
-    method: HTTPMethod,
-    url: URLTemplate,
-    url_string: GraphQLString<'schema>,
-    coordinate: HttpMethodCoordinate<'schema>,
+    method_and_template: Option<MethodAndTemplate<'schema>>,
 }
 
 impl<'schema> Transport<'schema> {
@@ -272,7 +271,37 @@ impl<'schema> Transport<'schema> {
             })
             .peekable();
 
-        let Some((method, method_value)) = methods.next() else {
+        let method_and_template = methods
+            .next()
+            .map(|(method, node)| {
+                let method_and_template = MethodAndTemplate::parse(
+                    coordinate.connect_directive_coordinate,
+                    schema,
+                    method,
+                    node,
+                    source_name,
+                )?;
+
+                if methods.peek().is_some() {
+                    return Err(Message {
+                        code: Code::MultipleHttpMethods,
+                        message: format!("{coordinate} cannot specify more than one HTTP method."),
+                        locations: method_and_template
+                            .locations(schema)
+                            .into_iter()
+                            .chain(
+                                methods.filter_map(|(_, node)| node.line_column_range(source_map)),
+                            )
+                            .collect(),
+                    });
+                }
+
+                Ok(method_and_template)
+            })
+            .transpose()?;
+
+        // This can't be validated in the schema because all http fields are optional
+        if schema.connect_link.spec < ConnectSpec::V0_2 && method_and_template.is_none() {
             return Err(Message {
                 code: Code::MissingHttpMethod,
                 message: format!("{coordinate} must specify an HTTP method."),
@@ -281,25 +310,55 @@ impl<'schema> Transport<'schema> {
                     .into_iter()
                     .collect(),
             });
-        };
-
-        if methods.peek().is_some() {
-            let locations = method_value
-                .line_column_range(source_map)
-                .into_iter()
-                .chain(methods.filter_map(|(_, node)| node.line_column_range(source_map)))
-                .collect();
-            return Err(Message {
-                code: Code::MultipleHttpMethods,
-                message: format!("{coordinate} cannot specify more than one HTTP method."),
-                locations,
-            });
         }
 
+        Ok(Self {
+            method_and_template,
+        })
+    }
+
+    fn type_check(self, schema: &SchemaInfo) -> Vec<Message> {
+        self.method_and_template
+            .map(|m| m.type_check(schema))
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
+        self.method_and_template
+            .as_ref()
+            .map(|m| m.url.expressions())
+            .into_iter()
+            .flatten()
+            .flat_map(|e| e.expression.external_variables())
+    }
+}
+
+/// The `@connect(http.<METHOD>:)` arg
+struct MethodAndTemplate<'schema> {
+    // TODO: once this is shared with `HttpJsonTransport`, this will be used
+    #[allow(dead_code)]
+    method: HTTPMethod,
+    url: URLTemplate,
+    url_string: GraphQLString<'schema>,
+    coordinate: HttpMethodCoordinate<'schema>,
+}
+
+impl<'schema> MethodAndTemplate<'schema> {
+    fn parse(
+        connect: ConnectDirectiveCoordinate<'schema>,
+        schema: &'schema SchemaInfo<'schema>,
+        method: HTTPMethod,
+        node: &'schema Node<Value>,
+        source_name: Option<&SourceName<'schema>>,
+    ) -> Result<Self, Message> {
+        let source_map = &schema.sources;
+
         let coordinate = HttpMethodCoordinate {
-            connect: coordinate.connect_directive_coordinate,
+            connect,
             method,
-            node: method_value,
+            node,
         };
 
         let url_string =
@@ -312,6 +371,7 @@ impl<'schema> Transport<'schema> {
                     .into_iter()
                     .collect(),
             })?;
+
         let url = URLTemplate::from_str(url_string.as_str()).map_err(
             |string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
@@ -356,12 +416,21 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             });
         }
+
         Ok(Self {
             method,
             url,
             url_string,
             coordinate,
         })
+    }
+
+    fn locations(&self, schema: &'schema SchemaInfo<'schema>) -> Vec<Range<LineColumn>> {
+        self.coordinate
+            .node
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect()
     }
 
     /// Type-check the `@connect(http:<METHOD>:)` directive.
