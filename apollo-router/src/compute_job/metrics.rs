@@ -5,9 +5,9 @@ use crate::compute_job::ComputeJobType;
 
 #[derive(Copy, Clone, strum_macros::IntoStaticStr)]
 pub(super) enum Outcome {
-    Executed,
-    ExecutedErrorResponse,
-    ExecutedErrorChannel,
+    ExecutedOk,
+    ExecutedError,
+    ChannelError,
     RejectedQueueFull,
     Abandoned,
 }
@@ -127,7 +127,7 @@ mod tests {
 
         {
             let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
-            job_watcher.outcome = Outcome::Executed;
+            job_watcher.outcome = Outcome::ExecutedOk;
         }
         check_histogram_count(1, "QueryParsing", "Executed");
 
