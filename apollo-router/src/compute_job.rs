@@ -13,7 +13,11 @@ use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
-const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
+///
+/// This number is somewhat arbitrary and subject to change. Most compute jobs
+/// don't take a long time, so by making the queue quite big, it's capable of eating
+/// a sizable backlog during spikes.
+const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 1_000;
 
 /// By default, let this thread pool use all available resources if it can.
 /// In the worst case, we’ll have moderate context switching cost
