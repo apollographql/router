@@ -123,20 +123,20 @@ mod tests {
         {
             let _job_watcher = JobWatcher::new(ComputeJobType::Introspection);
         }
-        check_histogram_count(1, "Introspection", "Abandoned");
+        check_histogram_count(1, "Introspection", Outcome::Abandoned.into());
 
         {
             let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
             job_watcher.outcome = Outcome::ExecutedOk;
         }
-        check_histogram_count(1, "QueryParsing", "Executed");
+        check_histogram_count(1, "QueryParsing", Outcome::ExecutedOk.into());
 
         for count in 1..5 {
             {
                 let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
                 job_watcher.outcome = Outcome::RejectedQueueFull;
             }
-            check_histogram_count(count, "QueryPlanning", "RejectedQueueFull");
+            check_histogram_count(count, "QueryPlanning", Outcome::RejectedQueueFull.into());
         }
     }
 
