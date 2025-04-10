@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -18,6 +19,7 @@ use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(MatchMethod, match_method, match_shape);
 /// The match method Takes any number of pairs [key, value], and returns value for the first
@@ -86,7 +88,10 @@ pub(crate) fn match_shape(
     dollar_shape: Shape,
     named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
     if let Some(MethodArgs { args, .. }) = method_args {
         let mut result_union = Vec::new();
         let mut has_infallible_case = false;
@@ -102,13 +107,29 @@ pub(crate) fn match_shape(
                         }
                     };
 
-                    let value_shape = pair[1].compute_output_shape(
+                    let candidate_output = pair[0].compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
                         named_shapes,
                         source_id,
                     );
-                    result_union.push(value_shape);
+                    names.extend(candidate_output.names);
+                    if !candidate_output.shape.accepts(&input_shape) {
+                        // If the candidate shape does not accept the input
+                        // shape (i.e. the input shape does not satisfy/extend
+                        // the candidate shape), then we don't need to examine
+                        // the value shape, because it will never be returned.
+                        continue;
+                    }
+
+                    let value_output = pair[1].compute_output_shape(
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                        named_shapes,
+                        source_id,
+                    );
+                    names.extend(value_output.names);
+                    result_union.push(value_output.shape);
                 }
             }
         }
@@ -118,27 +139,36 @@ pub(crate) fn match_shape(
         }
 
         if result_union.is_empty() {
+            JSONShapeOutput::new(
+                Shape::error(
+                    format!(
+                        "Method ->{} requires at least one [candidate, value] pair",
+                        method_name.as_ref(),
+                    ),
+                    merge_ranges(
+                        method_name.range(),
+                        method_args.and_then(|args| args.range()),
+                    )
+                    .map(|range| source_id.location(range)),
+                ),
+                names,
+            )
+        } else {
+            JSONShapeOutput::new(
+                Shape::one(result_union, method_name.shape_location(source_id)),
+                names,
+            )
+        }
+    } else {
+        JSONShapeOutput::new(
             Shape::error(
                 format!(
                     "Method ->{} requires at least one [candidate, value] pair",
                     method_name.as_ref(),
                 ),
-                merge_ranges(
-                    method_name.range(),
-                    method_args.and_then(|args| args.range()),
-                )
-                .map(|range| source_id.location(range)),
-            )
-        } else {
-            Shape::one(result_union, method_name.shape_location(source_id))
-        }
-    } else {
-        Shape::error(
-            format!(
-                "Method ->{} requires at least one [candidate, value] pair",
-                method_name.as_ref(),
+                method_name.shape_location(source_id),
             ),
-            method_name.shape_location(source_id),
+            names,
         )
     }
 }

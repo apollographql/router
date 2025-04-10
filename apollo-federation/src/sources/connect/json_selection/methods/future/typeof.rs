@@ -11,15 +11,17 @@ use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(TypeOfMethod, typeof_method, typeof_shape);
 /// Given a JSON structure, returns a string representing the "type"
 ///
 /// Some examples:
-/// $->echo(true)       would result in "boolean"
-/// $->echo([1, 2, 3])       would result in "array"
-/// $->echo("hello")       would result in "string"
-/// $->echo(5)       would result in "number"
+/// $(true)->typeof       would result in "boolean"
+/// $([1, 2, 3])->typeof  would result in "array"
+/// $("hello")->typeof    would result in "string"
+/// $(5)->typeof          would result in "number"
+/// $(null)->typeof       would result in "null" (not "object")
 fn typeof_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
@@ -48,14 +50,14 @@ fn typeof_method(
 fn typeof_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
     // TODO Compute this union type once and clone it here.
     let locations = method_name.shape_location(source_id);
-    Shape::one(
+    let type_string_union = Shape::one(
         [
             Shape::string_value("null", locations.clone()),
             Shape::string_value("boolean", locations.clone()),
@@ -65,7 +67,9 @@ fn typeof_shape(
             Shape::string_value("object", locations.clone()),
         ],
         locations,
-    )
+    );
+
+    JSONShapeOutput::new(type_string_union, input_shape.names().cloned())
 }
 
 #[cfg(test)]

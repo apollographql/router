@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
@@ -13,6 +14,7 @@ use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(OrMethod, or_method, or_shape);
 /// Given 2 or more values to compare, returns true if any of the values are truthy or false if none of them are truthy.
@@ -63,50 +65,79 @@ fn or_shape(
     dollar_shape: Shape,
     named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
     match input_shape.case() {
         ShapeCase::Bool(Some(true)) => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return JSONShapeOutput::new(
+                Shape::bool_value(true, method_name.shape_location(source_id)),
+                names,
+            );
         }
         ShapeCase::Int(Some(value)) if *value != 0 => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return JSONShapeOutput::new(
+                Shape::bool_value(true, method_name.shape_location(source_id)),
+                names,
+            );
         }
         ShapeCase::String(Some(value)) if !value.is_empty() => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return JSONShapeOutput::new(
+                Shape::bool_value(true, method_name.shape_location(source_id)),
+                names,
+            );
         }
         ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-            return Shape::bool_value(true, method_name.shape_location(source_id));
+            return JSONShapeOutput::new(
+                Shape::bool_value(true, method_name.shape_location(source_id)),
+                names,
+            );
         }
         _ => {}
     };
 
     if let Some(MethodArgs { args, .. }) = method_args {
         for arg in args {
-            let arg_shape = arg.compute_output_shape(
+            let arg_output = arg.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
                 named_shapes,
                 source_id,
             );
-            match arg_shape.case() {
+            names.extend(arg_output.names);
+
+            match arg_output.shape.case() {
                 ShapeCase::Bool(Some(true)) => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return JSONShapeOutput::new(
+                        Shape::bool_value(true, method_name.shape_location(source_id)),
+                        names,
+                    );
                 }
                 ShapeCase::Int(Some(value)) if *value != 0 => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return JSONShapeOutput::new(
+                        Shape::bool_value(true, method_name.shape_location(source_id)),
+                        names,
+                    );
                 }
                 ShapeCase::String(Some(value)) if !value.is_empty() => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return JSONShapeOutput::new(
+                        Shape::bool_value(true, method_name.shape_location(source_id)),
+                        names,
+                    );
                 }
                 ShapeCase::Array { .. } | ShapeCase::Object { .. } => {
-                    return Shape::bool_value(true, method_name.shape_location(source_id));
+                    return JSONShapeOutput::new(
+                        Shape::bool_value(true, method_name.shape_location(source_id)),
+                        names,
+                    );
                 }
                 _ => {}
             }
         }
     }
 
-    Shape::bool(method_name.shape_location(source_id))
+    JSONShapeOutput::new(Shape::bool(method_name.shape_location(source_id)), names)
 }
 
 fn is_truthy(data: &JSON) -> bool {

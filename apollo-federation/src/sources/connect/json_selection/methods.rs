@@ -8,6 +8,7 @@ use super::MethodArgs;
 use super::VarsWithPathsMap;
 use super::immutable::InputPath;
 use super::location::WithRange;
+use super::shape::JSONShapeOutput;
 
 // Two kinds of methods: public ones and not-yet-public ones. The future ones
 // have proposed implementations and tests, and some are even used within the
@@ -79,7 +80,7 @@ macro_rules! impl_arrow_method {
                 dollar_shape: Shape,
                 named_shapes: &IndexMap<String, Shape>,
                 source_id: &SourceId,
-            ) -> Shape {
+            ) -> crate::sources::connect::json_selection::shape::JSONShapeOutput {
                 $shape_fn_name(
                     method_name,
                     method_args,
@@ -127,7 +128,7 @@ pub(super) trait ArrowMethodImpl {
         named_shapes: &IndexMap<String, Shape>,
         // The shared source name which can be used to produce Shape locations
         source_id: &SourceId,
-    ) -> Shape;
+    ) -> JSONShapeOutput;
 }
 
 // This Deref implementation allows us to call .apply(...) directly on the

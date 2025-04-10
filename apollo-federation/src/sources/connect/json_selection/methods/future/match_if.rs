@@ -15,6 +15,7 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::location::merge_ranges;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(MatchIfMethod, match_if_method, match_if_shape);
 /// Like ->match, but expects the first element of each pair to evaluate to a
@@ -79,7 +80,7 @@ fn match_if_shape(
     dollar_shape: Shape,
     named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
     use super::super::public::match_shape;
     // Since match_shape does not inspect the candidate expressions, we can
     // reuse it for ->matchIf, where the only functional difference is that the

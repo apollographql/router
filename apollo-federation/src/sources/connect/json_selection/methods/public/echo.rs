@@ -12,6 +12,7 @@ use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(EchoMethod, echo_method, echo_shape);
 /// Echo simply returns back whichever value is provided in it's arg.
@@ -56,13 +57,16 @@ fn echo_shape(
     dollar_shape: Shape,
     named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
     if let Some(first_arg) = method_args.and_then(|args| args.args.first()) {
         return first_arg.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id);
     }
-    Shape::error(
-        format!("Method ->{} requires one argument", method_name.as_ref()),
-        method_name.shape_location(source_id),
+    JSONShapeOutput::new(
+        Shape::error(
+            format!("Method ->{} requires one argument", method_name.as_ref()),
+            method_name.shape_location(source_id),
+        ),
+        [],
     )
 }
 

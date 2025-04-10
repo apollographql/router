@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -11,6 +12,8 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(HasMethod, has_method, has_shape);
 /// TODO: Split this into hasIndex and hasProperty on a separate PR
@@ -76,15 +79,26 @@ fn has_method(
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn has_shape(
     method_name: &WithRange<String>,
-    _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_shapes: &IndexMap<String, Shape>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
+    if let Some(MethodArgs { args, .. }) = method_args {
+        if let Some(first) = args.first() {
+            let output =
+                first.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id);
+            names.extend(output.names);
+        }
+    }
+
     // TODO We could be more clever here (sometimes) based on the input_shape
     // and argument shapes.
-    Shape::bool(method_name.shape_location(source_id))
+    JSONShapeOutput::new(Shape::bool(method_name.shape_location(source_id)), names)
 }
 
 #[cfg(test)]

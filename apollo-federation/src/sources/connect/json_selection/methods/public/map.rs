@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -15,6 +16,7 @@ use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(MapMethod, map_method, map_shape);
 /// "Map" is an array transform method very similar to the Array.map function you'd find in other languages.
@@ -89,44 +91,64 @@ fn map_shape(
     dollar_shape: Shape,
     named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
-        return Shape::error(
-            format!("Method ->{} requires one argument", method_name.as_ref()),
-            method_name.shape_location(source_id),
+        return JSONShapeOutput::new(
+            Shape::error(
+                format!("Method ->{} requires one argument", method_name.as_ref()),
+                method_name.shape_location(source_id),
+            ),
+            names,
         );
     };
-    match input_shape.case() {
+
+    names.extend(input_shape.names().cloned());
+
+    let output_shape = match input_shape.case() {
         ShapeCase::Array { prefix, tail } => {
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    first_arg.compute_output_shape(
+                    let output = first_arg.compute_output_shape(
                         shape.clone(),
                         dollar_shape.clone(),
                         named_shapes,
                         source_id,
-                    )
+                    );
+                    names.extend(output.names);
+                    output.shape
                 })
                 .collect::<Vec<_>>();
-            let new_tail = first_arg.compute_output_shape(
-                tail.clone(),
-                dollar_shape.clone(),
-                named_shapes,
-                source_id,
-            );
+            let new_tail = {
+                let output = first_arg.compute_output_shape(
+                    tail.clone(),
+                    dollar_shape.clone(),
+                    named_shapes,
+                    source_id,
+                );
+                names.extend(output.names);
+                output.shape
+            };
             Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
         }
         _ => Shape::list(
-            first_arg.compute_output_shape(
-                input_shape.any_item([]),
-                dollar_shape.clone(),
-                named_shapes,
-                source_id,
-            ),
+            {
+                let output = first_arg.compute_output_shape(
+                    input_shape.any_item([]),
+                    dollar_shape.clone(),
+                    named_shapes,
+                    source_id,
+                );
+                names.extend(output.names);
+                output.shape
+            },
             input_shape.locations().cloned(),
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]

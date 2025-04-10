@@ -3,6 +3,7 @@ use std::iter::empty;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -16,6 +17,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(SliceMethod, slice_method, slice_shape);
 /// Extracts part of an array given a set of indices and returns a new array.
@@ -119,13 +121,16 @@ fn slice_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
     // There are more clever shapes we could compute here (when start and end
     // are statically known integers and input_shape is an array or string with
     // statically known prefix elements, for example) but for now we play it
     // safe (and honest) by returning a new variable-length array whose element
     // shape is a union of the original element (prefix and tail) shapes.
-    match input_shape.case() {
+    let output_shape = match input_shape.case() {
         ShapeCase::Array { prefix, tail } => {
             let mut one_shapes = prefix.clone();
             if !tail.is_none() {
@@ -150,7 +155,9 @@ fn slice_shape(
                 locations.into_iter()
             },
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]

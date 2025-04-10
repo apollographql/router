@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::collections::IndexSet;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -33,7 +33,7 @@ impl JSONSelection {
         JSONShape { input, output }
     }
 
-    pub(crate) fn output_shape(&self, named_shapes: &IndexMap<String, Shape>) -> Shape {
+    pub(crate) fn output_shape(&self, named_shapes: &IndexMap<String, Shape>) -> JSONShapeOutput {
         let input_shape = if let Some(root_shape) = named_shapes.get("$root") {
             root_shape.with_name("$root", [])
         } else {
@@ -108,9 +108,9 @@ impl JSONShape {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct JSONShapeInput {
-    selection: Arc<JSONSelection>,
-    named_shapes: IndexMap<String, Shape>,
+pub(crate) struct JSONShapeInput {
+    pub(crate) selection: Arc<JSONSelection>,
+    pub(crate) named_shapes: IndexMap<String, Shape>,
 }
 
 impl JSONShapeInput {
@@ -133,20 +133,24 @@ impl JSONShapeInput {
     }
 
     pub(crate) fn compute(&self) -> JSONShapeOutput {
-        let output_shape = self.selection.output_shape(&self.named_shapes);
-        // TODO Make self.selection.output_shape return JSONShapeOutput so the
-        // names set can be populated.
-        JSONShapeOutput {
-            names: IndexSet::default(),
-            shape: output_shape,
-        }
+        self.selection.output_shape(&self.named_shapes)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct JSONShapeOutput {
-    names: IndexSet<shape::Name>,
-    shape: Shape,
+pub(crate) struct JSONShapeOutput {
+    pub(crate) shape: Shape,
+    pub(crate) names: MergeSet<shape::Name>,
+}
+
+impl JSONShapeOutput {
+    pub(crate) fn new(shape: Shape, names: impl IntoIterator<Item = shape::Name>) -> Self {
+        // TODO Process output shape for additional names?
+        Self {
+            shape,
+            names: MergeSet::new(names),
+        }
+    }
 }
 
 pub(crate) trait ComputeOutputShape {
@@ -169,7 +173,7 @@ pub(crate) trait ComputeOutputShape {
         named_shapes: &IndexMap<String, Shape>,
         // A shared source name to use for all locations originating from this `JSONSelection`
         source_id: &SourceId,
-    ) -> Shape;
+    ) -> JSONShapeOutput;
 }
 
 impl ComputeOutputShape for JSONSelection {
@@ -179,7 +183,7 @@ impl ComputeOutputShape for JSONSelection {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
         match self {
             Self::Named(selection) => {
                 selection.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id)
@@ -201,7 +205,7 @@ impl<T: ComputeOutputShape> ComputeOutputShape for WithRange<T> {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
         self.as_ref()
             .compute_output_shape(input_shape, dollar_shape, named_shapes, source_id)
     }
@@ -214,8 +218,11 @@ impl ComputeOutputShape for NamedSelection {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
         let mut output = Shape::empty_map();
+        let mut names = MergeSet::new([]);
+        names.extend(input_shape.names().cloned());
+        names.extend(dollar_shape.names().cloned());
 
         match self {
             Self::Field(alias_opt, key, selection) => {
@@ -226,40 +233,51 @@ impl ComputeOutputShape for NamedSelection {
                 output.insert(
                     output_key.to_string(),
                     if let Some(selection) = selection {
-                        selection.compute_output_shape(
+                        let selection_output = selection.compute_output_shape(
                             field_shape,
                             dollar_shape,
                             named_shapes,
                             source_id,
-                        )
+                        );
+                        names.extend(selection_output.names);
+                        selection_output.shape
                     } else {
+                        names.extend(field_shape.names().cloned());
                         field_shape
                     },
                 );
             }
+
             Self::Path { alias, path, .. } => {
-                let path_shape =
+                let path_output =
                     path.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id);
+                names.extend(path_output.names);
                 if let Some(alias) = alias {
-                    output.insert(alias.name().to_string(), path_shape);
+                    output.insert(alias.name().to_string(), path_output.shape);
                 } else {
-                    return path_shape;
+                    return JSONShapeOutput {
+                        shape: path_output.shape,
+                        names,
+                    };
                 }
             }
+
             Self::Group(alias, sub_selection) => {
-                output.insert(
-                    alias.name().to_string(),
-                    sub_selection.compute_output_shape(
-                        input_shape,
-                        dollar_shape,
-                        named_shapes,
-                        source_id,
-                    ),
+                let sub_output = sub_selection.compute_output_shape(
+                    input_shape,
+                    dollar_shape,
+                    named_shapes,
+                    source_id,
                 );
+                names.extend(sub_output.names);
+                output.insert(alias.name().to_string(), sub_output.shape);
             }
         };
 
-        Shape::object(output, Shape::none(), self.shape_location(source_id))
+        JSONShapeOutput {
+            shape: Shape::object(output, Shape::none(), self.shape_location(source_id)),
+            names,
+        }
     }
 }
 
@@ -270,7 +288,7 @@ impl ComputeOutputShape for PathSelection {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
         match self.path.as_ref() {
             PathList::Key(_, _) => {
                 // If this is a KeyPath, we need to evaluate the path starting
@@ -299,7 +317,15 @@ impl ComputeOutputShape for PathList {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
+        let mut names = MergeSet::new([]);
+        names.extend(input_shape.names().cloned());
+        names.extend(dollar_shape.names().cloned());
+
+        fn finish(shape: Shape, names: MergeSet<shape::Name>) -> JSONShapeOutput {
+            JSONShapeOutput { shape, names }
+        }
+
         match self {
             PathList::Var(ranged_var_name, tail) => {
                 let var_name = ranged_var_name.as_ref();
@@ -312,7 +338,11 @@ impl ComputeOutputShape for PathList {
                 } else {
                     Shape::name(var_name.as_str(), ranged_var_name.shape_location(source_id))
                 };
-                tail.compute_output_shape(var_shape, dollar_shape, named_shapes, source_id)
+
+                let output =
+                    tail.compute_output_shape(var_shape, dollar_shape, named_shapes, source_id);
+                names.extend(output.names);
+                finish(output.shape, names)
             }
 
             PathList::Key(key, rest) => {
@@ -325,7 +355,7 @@ impl ComputeOutputShape for PathList {
                     // want to call rest.compute_output_shape recursively with
                     // an input data shape corresponding to missing data, though
                     // it might do the right thing.
-                    return input_shape;
+                    return finish(input_shape, names);
                 }
 
                 if let ShapeCase::Array { prefix, tail } = input_shape.case() {
@@ -336,68 +366,97 @@ impl ComputeOutputShape for PathList {
                         .iter()
                         .map(|shape| {
                             if shape.is_none() {
+                                names.extend(shape.names().cloned());
                                 shape.clone()
                             } else {
-                                rest.compute_output_shape(
+                                let rest_output = rest.compute_output_shape(
                                     field(shape, key, source_id),
                                     dollar_shape.clone(),
                                     named_shapes,
                                     source_id,
-                                )
+                                );
+                                names.extend(rest_output.names);
+                                rest_output.shape
                             }
                         })
                         .collect::<Vec<_>>();
 
                     let mapped_rest = if tail.is_none() {
+                        names.extend(tail.names().cloned());
                         tail.clone()
                     } else {
-                        rest.compute_output_shape(
+                        let rest_output = rest.compute_output_shape(
                             field(tail, key, source_id),
                             dollar_shape.clone(),
                             named_shapes,
                             source_id,
-                        )
+                        );
+                        names.extend(rest_output.names);
+                        rest_output.shape
                     };
 
-                    Shape::array(mapped_prefix, mapped_rest, input_shape.locations().cloned())
+                    finish(
+                        Shape::array(mapped_prefix, mapped_rest, input_shape.locations().cloned()),
+                        names,
+                    )
                 } else {
-                    rest.compute_output_shape(
+                    let rest_output = rest.compute_output_shape(
                         field(&input_shape, key, source_id),
                         dollar_shape.clone(),
                         named_shapes,
                         source_id,
-                    )
+                    );
+                    names.extend(rest_output.names);
+                    finish(rest_output.shape, names)
                 }
             }
 
-            PathList::Expr(expr, tail) => tail.compute_output_shape(
-                expr.compute_output_shape(
+            PathList::Expr(expr, tail) => {
+                let expr_output = expr.compute_output_shape(
                     input_shape,
                     dollar_shape.clone(),
                     named_shapes,
                     source_id,
-                ),
-                dollar_shape.clone(),
-                named_shapes,
-                source_id,
-            ),
+                );
+                names.extend(expr_output.names);
+
+                let tail_output = tail.compute_output_shape(
+                    expr_output.shape,
+                    dollar_shape.clone(),
+                    named_shapes,
+                    source_id,
+                );
+                names.extend(tail_output.names);
+
+                finish(tail_output.shape, names)
+            }
 
             PathList::Method(method_name, _method_args, _tail) => {
                 if let Some(_method) = ArrowMethod::lookup(method_name.as_str()) {
                     // TODO: call method.shape here to re-enable method type-checking
                     //  call for each inner type of a One
-                    Shape::unknown(method_name.shape_location(source_id))
+                    finish(Shape::unknown(method_name.shape_location(source_id)), names)
                 } else {
                     let message = format!("Method ->{} not found", method_name.as_str());
-                    Shape::error(message.as_str(), method_name.shape_location(source_id))
+                    finish(
+                        Shape::error(message.as_str(), method_name.shape_location(source_id)),
+                        names,
+                    )
                 }
             }
 
             PathList::Selection(selection) => {
-                selection.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id)
+                let output = selection.compute_output_shape(
+                    input_shape,
+                    dollar_shape,
+                    named_shapes,
+                    source_id,
+                );
+                names.extend(output.names);
+                finish(output.shape, names)
             }
 
-            PathList::Empty => input_shape,
+            PathList::Empty => finish(input_shape, names),
         }
     }
 }
@@ -409,55 +468,75 @@ impl ComputeOutputShape for WithRange<LitExpr> {
         dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
         let locations = self.shape_location(source_id);
 
-        match self.as_ref() {
-            LitExpr::Null => Shape::null(locations),
-            LitExpr::Bool(value) => Shape::bool_value(*value, locations),
-            LitExpr::String(value) => Shape::string_value(value.as_str(), locations),
+        let mut names = MergeSet::new([]);
+        names.extend(input_shape.names().cloned());
+        names.extend(dollar_shape.names().cloned());
 
-            LitExpr::Number(value) => {
-                if let Some(n) = value.as_i64() {
-                    Shape::int_value(n, locations)
-                } else if value.is_f64() {
-                    Shape::float(locations)
-                } else {
-                    Shape::error("Number neither Int nor Float", locations)
-                }
-            }
+        fn finish(shape: Shape, names: MergeSet<shape::Name>) -> JSONShapeOutput {
+            JSONShapeOutput { shape, names }
+        }
+
+        match self.as_ref() {
+            LitExpr::Null => finish(Shape::null(locations), names),
+            LitExpr::Bool(value) => finish(Shape::bool_value(*value, locations), names),
+            LitExpr::String(value) => finish(Shape::string_value(value.as_str(), locations), names),
+
+            LitExpr::Number(value) => finish(
+                {
+                    if let Some(n) = value.as_i64() {
+                        Shape::int_value(n, locations)
+                    } else if value.is_f64() {
+                        Shape::float(locations)
+                    } else {
+                        Shape::error("Number neither Int nor Float", locations)
+                    }
+                },
+                names,
+            ),
 
             LitExpr::Object(map) => {
                 let mut fields = Shape::empty_map();
                 for (key, value) in map {
-                    fields.insert(
-                        key.as_string(),
-                        value.compute_output_shape(
-                            input_shape.clone(),
-                            dollar_shape.clone(),
-                            named_shapes,
-                            source_id,
-                        ),
-                    );
-                }
-                Shape::object(fields, Shape::none(), locations)
-            }
-
-            LitExpr::Array(vec) => {
-                let mut shapes = Vec::with_capacity(vec.len());
-                for value in vec {
-                    shapes.push(value.compute_output_shape(
+                    let output = value.compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
                         named_shapes,
                         source_id,
-                    ));
+                    );
+                    names.extend(output.names);
+                    fields.insert(key.as_string(), output.shape);
                 }
-                Shape::array(shapes, Shape::none(), locations)
+
+                finish(Shape::object(fields, Shape::none(), locations), names)
+            }
+
+            LitExpr::Array(vec) => {
+                let mut shapes = Vec::with_capacity(vec.len());
+
+                for value in vec {
+                    let output = value.compute_output_shape(
+                        input_shape.clone(),
+                        dollar_shape.clone(),
+                        named_shapes,
+                        source_id,
+                    );
+
+                    names.extend(output.names);
+
+                    shapes.push(output.shape);
+                }
+
+                finish(Shape::array(shapes, Shape::none(), locations), names)
             }
 
             LitExpr::Path(path) => {
-                path.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id)
+                let output =
+                    path.compute_output_shape(input_shape, dollar_shape, named_shapes, source_id);
+                names.extend(output.names);
+                finish(output.shape, names)
             }
         }
     }
@@ -470,7 +549,10 @@ impl ComputeOutputShape for SubSelection {
         _previous_dollar_shape: Shape,
         named_shapes: &IndexMap<String, Shape>,
         source_id: &SourceId,
-    ) -> Shape {
+    ) -> JSONShapeOutput {
+        let mut names = MergeSet::new([]);
+        names.extend(input_shape.names().cloned());
+
         // Just as SubSelection::apply_to_path calls apply_to_array when data is
         // an array, so compute_output_shape recursively computes the output
         // shapes of each array element shape.
@@ -478,17 +560,30 @@ impl ComputeOutputShape for SubSelection {
             let new_prefix = prefix
                 .iter()
                 .map(|shape| {
-                    self.compute_output_shape(shape.clone(), shape.clone(), named_shapes, source_id)
+                    let output = self.compute_output_shape(
+                        shape.clone(),
+                        shape.clone(),
+                        named_shapes,
+                        source_id,
+                    );
+                    names.extend(output.names);
+                    output.shape
                 })
                 .collect::<Vec<_>>();
 
             let new_tail = if tail.is_none() {
                 tail.clone()
             } else {
-                self.compute_output_shape(tail.clone(), tail.clone(), named_shapes, source_id)
+                let output =
+                    self.compute_output_shape(tail.clone(), tail.clone(), named_shapes, source_id);
+                names.extend(output.names);
+                output.shape
             };
 
-            return Shape::array(new_prefix, new_tail, self.shape_location(source_id));
+            return JSONShapeOutput {
+                names,
+                shape: Shape::array(new_prefix, new_tail, self.shape_location(source_id)),
+            };
         }
 
         // If the input shape is a named shape, it might end up being an array,
@@ -505,20 +600,21 @@ impl ComputeOutputShape for SubSelection {
         let mut all_shape = Shape::empty_object(self.shape_location(source_id));
 
         for named_selection in self.selections.iter() {
+            let named_output = named_selection.compute_output_shape(
+                input_shape.clone(),
+                dollar_shape.clone(),
+                named_shapes,
+                source_id,
+            );
+
+            names.extend(named_output.names);
+
             // Simplifying as we go with Shape::all keeps all_shape relatively
             // small in the common case when all named_selection items return an
             // object shape, since those object shapes can all be merged
             // together into one object.
             all_shape = Shape::all(
-                [
-                    all_shape,
-                    named_selection.compute_output_shape(
-                        input_shape.clone(),
-                        dollar_shape.clone(),
-                        named_shapes,
-                        source_id,
-                    ),
-                ],
+                [all_shape, named_output.shape],
                 self.shape_location(source_id),
             );
 
@@ -530,7 +626,10 @@ impl ComputeOutputShape for SubSelection {
             }
         }
 
-        all_shape
+        JSONShapeOutput {
+            names,
+            shape: all_shape,
+        }
     }
 }
 

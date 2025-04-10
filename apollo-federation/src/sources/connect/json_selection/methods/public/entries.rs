@@ -3,6 +3,7 @@ use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JSONMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -16,21 +17,22 @@ use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(EntriesMethod, entries_method, entries_shape);
 /// Returns the keys and values given an object.
 ///
 /// The simplest possible example:
 ///
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries
 /// would result in [{ "key": "a", "value": 1 }, { "key": "b", "value": "two" }, { "key": "c", "value": false },]
 ///
 /// You can also use .key to grab just the keys:
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key
 /// would result in ["a", "b", "c"]
 ///
 /// or you can also use .value to grab just the values:
-/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key     
+/// $->echo({"a": 1, "b": "two", "c": false, })->entries.key
 /// would result in [1, "two", false]
 fn entries_method(
     method_name: &WithRange<String>,
@@ -88,18 +90,25 @@ fn entries_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+
     if method_args.is_some() {
-        return Shape::error(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
+        return JSONShapeOutput::new(
+            Shape::error(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                method_name.shape_location(source_id),
             ),
-            method_name.shape_location(source_id),
+            names,
         );
     }
 
-    match input_shape.case() {
+    names.extend(input_shape.names().cloned());
+
+    let output_shape = match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
             let entry_shapes = fields
                 .iter()
@@ -160,7 +169,9 @@ fn entries_shape(
                 locations.into_iter()
             },
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]

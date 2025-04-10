@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -12,6 +13,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(LastMethod, last_method, last_shape);
 /// The "last" method is a utility function that can be run against an array to grab the final item from it
@@ -71,18 +73,25 @@ fn last_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+
     if method_args.is_some() {
-        return Shape::error(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
+        return JSONShapeOutput::new(
+            Shape::error(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                method_name.shape_location(source_id),
             ),
-            method_name.shape_location(source_id),
+            names,
         );
     }
 
-    match input_shape.case() {
+    names.extend(input_shape.names().cloned());
+
+    let output_shape = match input_shape.case() {
         ShapeCase::String(Some(value)) => {
             if let Some(last_char) = value.chars().last() {
                 Shape::string_value(
@@ -133,7 +142,9 @@ fn last_shape(
             input_shape.clone(),
             input_shape.locations().cloned(),
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]

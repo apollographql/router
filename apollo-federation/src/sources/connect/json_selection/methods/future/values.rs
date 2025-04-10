@@ -2,6 +2,7 @@ use std::iter::empty;
 
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
@@ -14,6 +15,7 @@ use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(ValuesMethod, values_method, values_shape);
 /// Given an object, returns an array of its values (aka property values).
@@ -68,8 +70,11 @@ fn values_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
-    match input_shape.case() {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
+    let output_shape = match input_shape.case() {
         ShapeCase::Object { fields, rest, .. } => {
             Shape::array(fields.values().cloned(), rest.clone(), empty())
         }
@@ -77,7 +82,9 @@ fn values_shape(
             "Method ->values requires an object input",
             method_name.shape_location(source_id),
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]

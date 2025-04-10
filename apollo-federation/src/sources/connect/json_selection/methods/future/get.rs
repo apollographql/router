@@ -2,6 +2,7 @@ use std::iter::empty;
 
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
@@ -18,6 +19,7 @@ use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::location::merge_ranges;
 use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
 /// For a string, gets the char at the specified index.
@@ -224,21 +226,26 @@ fn get_shape(
     dollar_shape: Shape,
     named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
     if let Some(MethodArgs { args, .. }) = method_args {
         if let Some(index_literal) = args.first() {
-            let index_shape = index_literal.compute_output_shape(
+            let index_output = index_literal.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
                 named_shapes,
                 source_id,
             );
-            return match index_shape.case() {
+            names.extend(index_output.names);
+
+            let output_shape = match index_output.shape.case() {
                 ShapeCase::String(value_opt) => match input_shape.case() {
                     ShapeCase::Object { fields, rest } => {
                         if let Some(literal_name) = value_opt {
                             if let Some(shape) = fields.get(literal_name.as_str()) {
-                                return shape.clone();
+                                return JSONShapeOutput::new(shape.clone(), names);
                             }
                         }
                         let mut value_shapes = fields.values().cloned().collect::<Vec<_>>();
@@ -275,7 +282,7 @@ fn get_shape(
                         ShapeCase::Array { prefix, tail } => {
                             if let Some(index) = value_opt {
                                 if let Some(item) = prefix.get(*index as usize) {
-                                    return item.clone();
+                                    return JSONShapeOutput::new(item.clone(), names);
                                 }
                             }
                             // If tail.is_none(), this will simplify to Shape::none().
@@ -323,12 +330,17 @@ fn get_shape(
                     index_literal.shape_location(source_id),
                 ),
             };
+
+            return JSONShapeOutput::new(output_shape, names);
         }
     }
 
-    Shape::error(
-        format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
-        method_name.shape_location(source_id),
+    JSONShapeOutput::new(
+        Shape::error(
+            format!("Method ->{} requires an argument", method_name.as_ref()).as_str(),
+            method_name.shape_location(source_id),
+        ),
+        names,
     )
 }
 

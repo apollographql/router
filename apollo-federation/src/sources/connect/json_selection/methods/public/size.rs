@@ -1,6 +1,7 @@
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -14,6 +15,7 @@ use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(SizeMethod, size_method, size_shape);
 /// Returns the number of items in an array, length of a string, or the number of properties in an array.
@@ -80,18 +82,25 @@ fn size_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+
     if method_args.is_some() {
-        return Shape::error(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
+        return JSONShapeOutput::new(
+            Shape::error(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                method_name.shape_location(source_id),
             ),
-            method_name.shape_location(source_id),
+            names,
         );
     }
 
-    match input_shape.case() {
+    names.extend(input_shape.names().cloned());
+
+    let output_shape = match input_shape.case() {
         ShapeCase::String(Some(value)) => {
             Shape::int_value(value.len() as i64, method_name.shape_location(source_id))
         }
@@ -122,7 +131,9 @@ fn size_shape(
                 locations.into_iter()
             },
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]

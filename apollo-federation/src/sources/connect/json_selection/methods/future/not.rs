@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::SourceId;
@@ -11,6 +12,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(NotMethod, not_method, not_shape);
 /// Given a value, inverses the boolean of that value. True becomes false, false becomes true.
@@ -51,8 +53,11 @@ fn not_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
-    match input_shape.case() {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
+    let output_shape = match input_shape.case() {
         ShapeCase::Bool(Some(value)) => {
             Shape::bool_value(!*value, method_name.shape_location(source_id))
         }
@@ -67,7 +72,9 @@ fn not_shape(
             Shape::bool_value(false, method_name.shape_location(source_id))
         }
         _ => Shape::bool(method_name.shape_location(source_id)),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 fn is_truthy(data: &JSON) -> bool {

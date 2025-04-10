@@ -65,7 +65,7 @@ impl JSONSelection {
     }
 
     pub fn shape(&self) -> Shape {
-        self.output_shape(&IndexMap::default())
+        self.output_shape(&IndexMap::default()).shape
     }
 }
 

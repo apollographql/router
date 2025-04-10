@@ -10,6 +10,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(
     JsonStringifyMethod,
@@ -62,12 +63,15 @@ fn json_stringify_method(
 fn json_stringify_shape(
     method_name: &WithRange<String>,
     _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
+    input_shape: Shape,
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
-    Shape::string(method_name.shape_location(source_id))
+) -> JSONShapeOutput {
+    JSONShapeOutput::new(
+        Shape::string(method_name.shape_location(source_id)),
+        input_shape.names().cloned(),
+    )
 }
 
 #[cfg(test)]

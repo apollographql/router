@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -11,6 +12,8 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(EqMethod, eq_method, eq_shape);
 /// Returns true if argument is equal to the applied to value or false if they are not equal.
@@ -51,13 +54,28 @@ fn eq_method(
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
 fn eq_shape(
     method_name: &WithRange<String>,
-    _method_args: Option<&MethodArgs>,
-    _input_shape: Shape,
-    _dollar_shape: Shape,
-    _named_shapes: &IndexMap<String, Shape>,
+    method_args: Option<&MethodArgs>,
+    input_shape: Shape,
+    dollar_shape: Shape,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
-    Shape::bool(method_name.shape_location(source_id))
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+    names.extend(input_shape.names().cloned());
+
+    if let Some(MethodArgs { args, .. }) = method_args {
+        for arg in args {
+            let output = arg.compute_output_shape(
+                input_shape.clone(),
+                dollar_shape.clone(),
+                named_shapes,
+                source_id,
+            );
+            names.extend(output.names);
+        }
+    }
+
+    JSONShapeOutput::new(Shape::bool(method_name.shape_location(source_id)), names)
 }
 
 #[cfg(test)]

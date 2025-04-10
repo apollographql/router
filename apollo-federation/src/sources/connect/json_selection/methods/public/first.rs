@@ -1,5 +1,6 @@
 use apollo_compiler::collections::IndexMap;
 use serde_json_bytes::Value as JSON;
+use shape::MergeSet;
 use shape::Shape;
 use shape::ShapeCase;
 use shape::location::Located;
@@ -12,6 +13,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::JSONShapeOutput;
 
 impl_arrow_method!(FirstMethod, first_method, first_shape);
 /// The "first" method is a utility function that can be run against an array to grab the 0th item from it
@@ -71,22 +73,29 @@ fn first_shape(
     _dollar_shape: Shape,
     _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
-) -> Shape {
+) -> JSONShapeOutput {
+    let mut names = MergeSet::new([]);
+
     let location = method_name.shape_location(source_id);
     if method_args.is_some() {
-        return Shape::error(
-            format!(
-                "Method ->{} does not take any arguments",
-                method_name.as_ref()
+        return JSONShapeOutput::new(
+            Shape::error(
+                format!(
+                    "Method ->{} does not take any arguments",
+                    method_name.as_ref()
+                ),
+                location,
             ),
-            location,
+            names,
         );
     }
+
+    names.extend(input_shape.names().cloned());
 
     // Location is not solely based on the method, but also the type the method is being applied to
     let locations = input_shape.locations().cloned().chain(location);
 
-    match input_shape.case() {
+    let output_shape = match input_shape.case() {
         ShapeCase::String(Some(value)) => Shape::string_value(&value[0..1], locations),
         ShapeCase::String(None) => Shape::string(locations),
         ShapeCase::Array { prefix, tail } => {
@@ -110,7 +119,9 @@ fn first_shape(
             input_shape.clone(),
             locations,
         ),
-    }
+    };
+
+    JSONShapeOutput::new(output_shape, names)
 }
 
 #[cfg(test)]
