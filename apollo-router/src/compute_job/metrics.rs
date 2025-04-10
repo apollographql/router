@@ -49,10 +49,6 @@ impl JobWatcher {
 
 impl Drop for JobWatcher {
     fn drop(&mut self) {
-        let current_span = tracing::Span::current();
-        current_span.record::<str, &'static str>("job.outcome", self.outcome.into());
-        current_span.record("otel.status_code", self.outcome.as_otel_status());
-
         let full_duration = self.queue_start.elapsed();
         f64_histogram_with_unit!(
             "apollo.router.compute_jobs.duration",
