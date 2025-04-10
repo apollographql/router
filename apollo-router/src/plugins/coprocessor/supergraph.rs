@@ -12,13 +12,13 @@ use tower_service::Service;
 
 use super::*;
 use crate::graphql;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::services::supergraph;
-use crate::json_ext::Value;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -1056,11 +1056,10 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let mut deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(
-                            &router::body::into_bytes(res.into_body()).await.unwrap(),
-                        )
-                        .unwrap();
+                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
                         PipelineStep::SupergraphResponse.to_string(),
@@ -1080,9 +1079,7 @@ mod tests {
                         .unwrap()
                         .insert(
                             "has_next".to_string(),
-                            Value::from(
-                                deserialized_response.has_next.unwrap_or_default(),
-                            ),
+                            Value::from(deserialized_response.has_next.unwrap_or_default()),
                         );
 
                     Ok(http::Response::builder()
@@ -1176,11 +1173,10 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-                    let mut deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(
-                            &router::body::into_bytes(res.into_body()).await.unwrap(),
-                        )
-                        .unwrap();
+                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
+                        &router::body::into_bytes(res.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
                         PipelineStep::SupergraphResponse.to_string(),
@@ -1200,9 +1196,7 @@ mod tests {
                         .unwrap()
                         .insert(
                             "has_next".to_string(),
-                            Value::from(
-                                deserialized_response.has_next.unwrap_or_default(),
-                            ),
+                            Value::from(deserialized_response.has_next.unwrap_or_default()),
                         );
 
                     Ok(http::Response::builder()

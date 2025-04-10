@@ -277,9 +277,8 @@ impl Request {
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        let urldecoded: Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
-                .map_err(serde_json::Error::custom)?;
+        let urldecoded: Value = serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+            .map_err(serde_json::Error::custom)?;
 
         Request::process_value(&urldecoded)
     }
