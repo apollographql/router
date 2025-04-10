@@ -341,4 +341,11 @@ async fn test_gauges_on_reload() {
             None,
         )
         .await;
+
+    router
+        .assert_metrics_contains(
+            r#"apollo_router_compute_jobs_active_jobs{job_type="QueryParsing",otel_scope_name="apollo/router"} 0"#,
+            None,
+        )
+        .await;
 }

@@ -63,7 +63,7 @@ impl ActiveComputeMetric {
 
     fn incr(&self, value: i64) {
         i64_up_down_counter_with_unit!(
-            "apollo.router.compute_jobs.execution.active_count",
+            "apollo.router.compute_jobs.active_jobs",
             "Number of computation jobs in progress",
             "{job}",
             value,
