@@ -1,13 +1,22 @@
+mod metrics;
+
+use std::any::Any;
 use std::future::Future;
 use std::panic::UnwindSafe;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
 
+use self::metrics::ActiveComputeMetric;
+use self::metrics::JobWatcher;
+use self::metrics::Outcome;
+use self::metrics::observe_compute_duration;
+use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
-pub(crate) use crate::ageing_priority_queue::Priority;
+use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
@@ -35,7 +44,35 @@ fn thread_pool_size() -> usize {
     }
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+pub(crate) enum ComputeJobType {
+    QueryParsing,
+    QueryPlanning,
+    Introspection,
+}
+
+impl From<ComputeJobType> for Priority {
+    fn from(job_type: ComputeJobType) -> Self {
+        match job_type {
+            ComputeJobType::QueryPlanning => Self::P8, // high
+            ComputeJobType::QueryParsing => Self::P4,  // medium
+            ComputeJobType::Introspection => Self::P1, // low
+        }
+    }
+}
+
+impl From<ComputeJobType> for opentelemetry::Value {
+    fn from(compute_job_type: ComputeJobType) -> Self {
+        let s: &'static str = compute_job_type.into();
+        s.into()
+    }
+}
+
+pub(crate) struct Job {
+    ty: ComputeJobType,
+    queue_start: Instant,
+    job_fn: Box<dyn FnOnce() + Send + 'static>,
+}
 
 fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
@@ -52,7 +89,12 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 let mut receiver = queue.receiver();
                 loop {
                     let job = receiver.blocking_recv();
-                    job();
+                    observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
+
+                    let _active_metric = ActiveComputeMetric::register(job.ty);
+                    let job_start = Instant::now();
+                    (job.job_fn)();
+                    observe_compute_duration(job.ty, job_start.elapsed());
                 }
             });
         }
@@ -62,20 +104,41 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
 
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
-    priority: Priority,
+    compute_job_type: ComputeJobType,
     job: F,
 ) -> impl Future<Output = std::thread::Result<T>>
 where
     F: FnOnce() -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
 {
+    let job_watcher = JobWatcher::new(compute_job_type);
+
     let (tx, rx) = oneshot::channel();
     let job = Box::new(move || {
         // Ignore the error if the oneshot receiver was dropped
         let _ = tx.send(std::panic::catch_unwind(job));
     });
-    queue().send(priority, job);
-    async { rx.await.expect("channel disconnected") }
+
+    let job = Job {
+        ty: compute_job_type,
+        job_fn: job,
+        queue_start: Instant::now(),
+    };
+    queue().send(compute_job_type.into(), job);
+    async move {
+        let result = rx.await;
+        // This local variable MUST exist
+        let mut local_job_watcher = job_watcher;
+        local_job_watcher.outcome = match &result {
+            Ok(Ok(_)) => Outcome::ExecutedOk,
+            Ok(Err(_)) => Outcome::ExecutedError,
+            Err(_) => Outcome::ChannelError,
+        };
+        match result {
+            Ok(r) => r,
+            Err(e) => Err(Box::new(e) as Box<dyn Any + Send>),
+        }
+    }
 }
 
 pub(crate) fn is_full() -> bool {
@@ -103,9 +166,9 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, || std::thread::current().id())
+        let job_thread = execute(ComputeJobType::QueryParsing, || std::thread::current().id())
             .await
-            .unwrap();
+            .expect("job panicked");
         assert_ne!(job_thread, test_thread)
     }
 
@@ -115,11 +178,11 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, || {
+        let one = execute(ComputeJobType::QueryPlanning, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         });
-        let two = execute(Priority::P8, || {
+        let two = execute(ComputeJobType::QueryPlanning, || {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         });

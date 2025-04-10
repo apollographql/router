@@ -24,6 +24,7 @@ use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::error::ValidationErrors;
@@ -116,7 +117,6 @@ impl QueryAnalysisLayer {
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        let priority = compute_job::Priority::P4; // Medium priority
         let job = move || {
             span.in_scope(|| {
                 Query::parse_document(
@@ -157,7 +157,7 @@ impl QueryAnalysisLayer {
         };
         // TODO: is this correct?
         let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(priority, job)
+        compute_job::execute(ComputeJobType::QueryParsing, job)
             .await
             .expect("Query::parse_document panicked")
     }
