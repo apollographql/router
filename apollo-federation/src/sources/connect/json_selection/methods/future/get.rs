@@ -17,6 +17,7 @@ use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::location::merge_ranges;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
 
 impl_arrow_method!(GetMethod, get_method, get_shape);
 /// For a string, gets the char at the specified index.
@@ -221,7 +222,7 @@ fn get_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
@@ -229,7 +230,7 @@ fn get_shape(
             let index_shape = index_literal.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
                 source_id,
             );
             return match index_shape.case() {

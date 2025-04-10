@@ -17,6 +17,7 @@ use crate::sources::connect::json_selection::lit_expr::LitExpr;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
 use crate::sources::connect::json_selection::location::merge_ranges;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
 
 impl_arrow_method!(MatchMethod, match_method, match_shape);
 /// The match method Takes any number of pairs [key, value], and returns value for the first
@@ -83,7 +84,7 @@ pub(crate) fn match_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     if let Some(MethodArgs { args, .. }) = method_args {
@@ -104,7 +105,7 @@ pub(crate) fn match_shape(
                     let value_shape = pair[1].compute_output_shape(
                         input_shape.clone(),
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        named_shapes,
                         source_id,
                     );
                     result_union.push(value_shape);

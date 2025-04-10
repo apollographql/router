@@ -66,7 +66,7 @@ fn values_shape(
     _method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     match input_shape.case() {

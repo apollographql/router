@@ -12,6 +12,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
 
 impl_arrow_method!(OrMethod, or_method, or_shape);
 /// Given 2 or more values to compare, returns true if any of the values are truthy or false if none of them are truthy.
@@ -60,7 +61,7 @@ fn or_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     match input_shape.case() {
@@ -84,7 +85,7 @@ fn or_shape(
             let arg_shape = arg.compute_output_shape(
                 input_shape.clone(),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
                 source_id,
             );
             match arg_shape.case() {

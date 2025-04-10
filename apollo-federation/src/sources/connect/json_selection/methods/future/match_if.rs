@@ -77,7 +77,7 @@ fn match_if_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     use super::super::public::match_shape;
@@ -89,7 +89,7 @@ fn match_if_shape(
         method_args,
         input_shape,
         dollar_shape,
-        named_var_shapes,
+        named_shapes,
         source_id,
     )
 }

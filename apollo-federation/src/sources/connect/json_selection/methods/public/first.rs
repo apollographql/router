@@ -69,7 +69,7 @@ fn first_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     let location = method_name.shape_location(source_id);

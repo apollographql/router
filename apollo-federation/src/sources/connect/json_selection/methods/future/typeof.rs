@@ -50,7 +50,7 @@ fn typeof_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     // TODO Compute this union type once and clone it here.

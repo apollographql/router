@@ -142,7 +142,7 @@ fn math_shape(
     _method_args: Option<&MethodArgs>,
     _input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     Shape::error("TODO: math_shape", method_name.shape_location(source_id))

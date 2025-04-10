@@ -86,7 +86,7 @@ fn entries_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     _dollar_shape: Shape,
-    _named_var_shapes: &IndexMap<&str, Shape>,
+    _named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     if method_args.is_some() {

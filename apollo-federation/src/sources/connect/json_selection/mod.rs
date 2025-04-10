@@ -8,6 +8,7 @@ mod methods;
 mod parser;
 mod pretty;
 mod selection_set;
+mod shape;
 
 pub use apply_to::*;
 // Pretty code is currently only used in tests, so this cfg is to suppress the

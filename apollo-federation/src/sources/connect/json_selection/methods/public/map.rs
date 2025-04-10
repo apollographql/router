@@ -14,6 +14,7 @@ use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::shape::ComputeOutputShape;
 
 impl_arrow_method!(MapMethod, map_method, map_shape);
 /// "Map" is an array transform method very similar to the Array.map function you'd find in other languages.
@@ -86,7 +87,7 @@ fn map_shape(
     method_args: Option<&MethodArgs>,
     input_shape: Shape,
     dollar_shape: Shape,
-    named_var_shapes: &IndexMap<&str, Shape>,
+    named_shapes: &IndexMap<String, Shape>,
     source_id: &SourceId,
 ) -> Shape {
     let Some(first_arg) = method_args.and_then(|args| args.args.first()) else {
@@ -103,7 +104,7 @@ fn map_shape(
                     first_arg.compute_output_shape(
                         shape.clone(),
                         dollar_shape.clone(),
-                        named_var_shapes,
+                        named_shapes,
                         source_id,
                     )
                 })
@@ -111,7 +112,7 @@ fn map_shape(
             let new_tail = first_arg.compute_output_shape(
                 tail.clone(),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
                 source_id,
             );
             Shape::array(new_prefix, new_tail, input_shape.locations().cloned())
@@ -120,7 +121,7 @@ fn map_shape(
             first_arg.compute_output_shape(
                 input_shape.any_item([]),
                 dollar_shape.clone(),
-                named_var_shapes,
+                named_shapes,
                 source_id,
             ),
             input_shape.locations().cloned(),
