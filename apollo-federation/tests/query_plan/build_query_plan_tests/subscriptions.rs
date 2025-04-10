@@ -1,5 +1,6 @@
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::name;
+use apollo_compiler::validation::Valid;
 use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
