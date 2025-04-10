@@ -316,26 +316,6 @@ where
                 })
                 .await;
             if entry.is_first() {
-                let doc = loop {
-                    match query_analysis
-                        .parse_document(&query, operation_name.as_deref())
-                        .await
-                    {
-                        Ok(doc) => break doc,
-                        Err(MaybeBackPressureError::PermanentError(error)) => {
-                            let e = Arc::new(QueryPlannerError::SpecError(error));
-                            tokio::spawn(async move {
-                                entry.insert(Err(e)).await;
-                            });
-                            continue 'all_cache_keys_loop;
-                        }
-                        Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                            // try again
-                        }
-                    }
-                };
-
                 loop {
                     let request = QueryPlannerRequest {
                         query: query.clone(),
