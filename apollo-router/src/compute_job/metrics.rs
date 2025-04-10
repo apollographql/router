@@ -144,7 +144,7 @@ mod tests {
     fn test_active_compute_metric() {
         let check_count = |count: i64, job_type: &'static str| {
             assert_up_down_counter!(
-                "apollo.router.compute_jobs.execution.active_count",
+                "apollo.router.compute_jobs.active_jobs",
                 count,
                 "job.type" = job_type
             );
