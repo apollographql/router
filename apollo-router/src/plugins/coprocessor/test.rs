@@ -3,6 +3,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use crate::json_ext::Object;
+    use crate::json_ext::Value;
     use futures::future::BoxFuture;
     use http::HeaderMap;
     use http::HeaderValue;
@@ -19,8 +21,6 @@ mod tests {
     use tower::ServiceExt;
 
     use super::super::*;
-    use crate::json_ext::Object;
-    use crate::json_ext::Value;
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -332,7 +332,7 @@ mod tests {
         let request = subgraph::Request::fake_builder().build();
 
         assert_eq!(
-            "couldn't deserialize coprocessor output body: missing field `message`",
+            "couldn't deserialize coprocessor output body: GraphQL response was malformed: missing required `message` property within error",
             service
                 .oneshot(request)
                 .await

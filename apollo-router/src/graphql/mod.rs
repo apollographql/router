@@ -136,12 +136,16 @@ impl Error {
                     reason: format!("invalid `extensions` within error: {}", err),
                 })?
                 .unwrap_or_default();
-        let message = extract_key_value_from_object!(object, "message", Value::String(s) => s)
-            .map_err(|err| MalformedResponseError {
-                reason: format!("invalid `message` within error: {}", err),
-            })?
-            .map(|s| s.as_str().to_string())
-            .unwrap_or_default();
+        let message =
+            match extract_key_value_from_object!(object, "message", Value::String(s) => s) {
+                Ok(Some(s)) => Ok(s.as_str().to_string()),
+                Ok(None) =>  Err(MalformedResponseError {
+                reason: "missing required `message` property within error".to_owned(),
+            }),
+                Err(err) => Err(MalformedResponseError {
+                    reason: format!("invalid `message` within error: {}", err),
+                }),
+            }?;
         let locations = extract_key_value_from_object!(object, "locations")
             .map(skip_invalid_locations)
             .map(serde_json_bytes::from_value)
