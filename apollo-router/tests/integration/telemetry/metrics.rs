@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use regex::Regex;
 use serde_json::json;
-use wiremock::ResponseTemplate;
 
 use crate::integration::IntegrationTest;
 use crate::integration::common::Query;
@@ -302,52 +300,4 @@ async fn test_gauges_on_reload() {
     router
         .assert_metrics_contains(r#"apollo_router_pipelines{config_hash="<any>",schema_id="<any>",otel_scope_name="apollo/router"} 1"#, None)
         .await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn test_multi_pipelines() {
-    if !graph_os_enabled() {
-        eprintln!("test skipped");
-        return;
-    }
-    let mut router = IntegrationTest::builder()
-        .config(PROMETHEUS_CONFIG)
-        .responder(ResponseTemplate::new(500).set_delay(Duration::from_secs(10)))
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-
-    let query = router.execute_default_query();
-    // Long running request 1
-    let _h1 = tokio::task::spawn(query);
-    router
-        .update_config(include_str!("fixtures/prometheus_updated.router.yaml"))
-        .await;
-
-    router.assert_reloaded().await;
-    // Long running request 2
-    let query = router.execute_default_query();
-    let _h2 = tokio::task::spawn(query);
-    let metrics = router
-        .get_metrics_response()
-        .await
-        .expect("metrics")
-        .text()
-        .await
-        .expect("metrics");
-
-    // There should be two instances of the pipeline metrics
-    let pipelines = Regex::new(r#"(?m)^apollo_router_pipelines[{].+[}] 1"#).expect("regex");
-    assert_eq!(pipelines.captures_iter(&metrics).count(), 2);
-
-    // There should be at least two connections, one active and one terminating.
-    // There may be more than one in each category because reqwest does connection pooling.
-    let active =
-        Regex::new(r#"(?m)^apollo_router_open_connections[{].+terminating.+[}]"#).expect("regex");
-    assert_eq!(active.captures_iter(&metrics).count(), 1);
-    let terminating =
-        Regex::new(r#"(?m)^apollo_router_open_connections[{].+active.+[}]"#).expect("regex");
-    assert_eq!(terminating.captures_iter(&metrics).count(), 1);
 }

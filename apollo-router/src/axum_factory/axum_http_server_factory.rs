@@ -330,6 +330,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
                 pipeline_ref.clone(),
                 main_listener,
+                configuration.supergraph.connection_shutdown_timeout,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
                 true,
@@ -371,6 +372,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                         let (server, shutdown_sender) = serve_router_on_listen_addr(
                             pipeline_ref.clone(),
                             listener,
+                            configuration.supergraph.connection_shutdown_timeout,
                             listen_addr.clone(),
                             router,
                             false,
