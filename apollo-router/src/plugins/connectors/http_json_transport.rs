@@ -1,21 +1,25 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::sources::connect::HTTPMethod;
 use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::URLTemplate;
+use apollo_federation::sources::connect::StringTemplate;
 use displaydoc::Display;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::Uri;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
+use http::uri::InvalidUri;
+use http::uri::InvalidUriParts;
+use http::uri::PathAndQuery;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
-use url::Url;
 
 use super::form_encoding::encode_json_as_form;
 use crate::plugins::connectors::mapping::Problem;
@@ -34,14 +38,14 @@ pub(crate) fn make_request(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let uri = make_uri(
-        transport.source_url.as_ref(),
+        transport.source_uri.as_ref(),
         &transport.connect_template,
         &inputs,
     )?;
 
     let request = http::Request::builder()
         .method(transport.method.as_str())
-        .uri(uri.as_str());
+        .uri(uri);
 
     // add the headers and if content-type is specified, we'll check that when constructing the body
     let (mut request, content_type) = add_headers(
@@ -132,33 +136,60 @@ pub(crate) fn make_request(
 }
 
 fn make_uri(
-    source_url: Option<&Url>,
-    template: &URLTemplate,
+    source_uri: Option<&Uri>,
+    template: &StringTemplate,
     inputs: &IndexMap<String, Value>,
-) -> Result<Url, HttpJsonTransportError> {
-    let mut url = source_url
-        .or(template.base.as_ref())
-        .ok_or(HttpJsonTransportError::NoBaseUrl)?
-        .clone();
-
-    url.path_segments_mut()
-        .map_err(|_| {
-            HttpJsonTransportError::InvalidUrl(url::ParseError::RelativeUrlWithCannotBeABaseBase)
-        })?
-        .pop_if_empty()
-        .extend(
-            template
-                .interpolate_path(inputs)
-                .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?,
-        );
-
-    let query_params = template
-        .interpolate_query(inputs)
+) -> Result<Uri, HttpJsonTransportError> {
+    let connect_uri = template
+        .interpolate_uri(inputs)
         .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?;
-    if !query_params.is_empty() {
-        url.query_pairs_mut().extend_pairs(query_params);
-    }
-    Ok(url)
+
+    let Some(source_uri) = source_uri else {
+        return Ok(connect_uri);
+    };
+
+    let Some(connect_path_and_query) = connect_uri.path_and_query() else {
+        return Ok(source_uri.clone());
+    };
+
+    // Extract source path and query
+    let source_path = source_uri.path();
+    let source_query = source_uri.query().unwrap_or("");
+
+    // Extract connect path and query
+    let connect_path = connect_path_and_query.path();
+    let connect_query = connect_path_and_query.query().unwrap_or("");
+
+    // Merge paths (ensuring proper slash handling)
+    let merged_path = if source_path.ends_with('/') {
+        format!("{}{}", source_path, connect_path.trim_start_matches('/'))
+    } else if connect_path.starts_with('/') {
+        format!("{}{}", source_path, connect_path)
+    } else {
+        format!("{}/{}", source_path, connect_path)
+    };
+
+    // Merge query parameters
+    let merged_query = if source_query.is_empty() {
+        connect_query.to_string()
+    } else if connect_query.is_empty() {
+        source_query.to_string()
+    } else {
+        format!("{}&{}", source_query, connect_query)
+    };
+
+    // Build the merged URI
+    let mut uri_parts = source_uri.clone().into_parts();
+    let merged_path_and_query = if merged_query.is_empty() {
+        merged_path
+    } else {
+        format!("{}?{}", merged_path, merged_query)
+    };
+
+    uri_parts.path_and_query = Some(PathAndQuery::from_str(&merged_path_and_query)?);
+
+    // Reconstruct the URI and convert to string
+    Uri::from_parts(uri_parts).map_err(HttpJsonTransportError::InvalidUri)
 }
 
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
@@ -207,7 +238,7 @@ fn add_headers(
 #[derive(Error, Display, Debug)]
 pub(crate) enum HttpJsonTransportError {
     /// Error building URI: {0:?}
-    NewUriError(#[from] Option<http::uri::InvalidUri>),
+    NewUriError(#[from] Option<InvalidUri>),
     /// Could not generate HTTP request: {0}
     InvalidNewRequest(#[source] http::Error),
     /// Could not serialize body: {0}
@@ -215,11 +246,9 @@ pub(crate) enum HttpJsonTransportError {
     /// Could not serialize body: {0}
     FormBodySerialization(&'static str),
     /// Error building URI: {0:?}
-    InvalidUrl(url::ParseError),
+    InvalidUri(#[from] InvalidUriParts),
     /// Could not generate URI from inputs: {0}
     TemplateGenerationError(String),
-    /// Either a source or a fully qualified URL must be provided to `@connect`
-    NoBaseUrl,
 }
 
 #[cfg(test)]
@@ -242,12 +271,12 @@ mod test_make_uri {
     fn append_path() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
                 &"/hello/42".parse().unwrap(),
                 &Default::default(),
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             "https://localhost:8080/v1/hello/42"
         );
     }
@@ -256,12 +285,12 @@ mod test_make_uri {
     fn append_path_with_trailing_slash() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/").unwrap()),
                 &"/hello/42".parse().unwrap(),
                 &Default::default(),
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             "https://localhost:8080/hello/42"
         );
     }
@@ -270,12 +299,12 @@ mod test_make_uri {
     fn append_path_test_with_trailing_slash_and_base_path() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1/").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1/").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &this! { "id": 42 },
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             "https://localhost:8080/v1/hello/42?id=42"
         );
     }
@@ -283,12 +312,12 @@ mod test_make_uri {
     fn append_path_test_with_and_base_path_and_params() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1?foo=bar").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1?foo=bar").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &this! {"id": 42 },
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             "https://localhost:8080/v1/hello/42?foo=bar&id=42"
         );
     }
@@ -296,12 +325,12 @@ mod test_make_uri {
     fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1/?foo=bar").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1/?foo=bar").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &this! {"id": 42 },
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             "https://localhost:8080/v1/hello/42?foo=bar&id=42"
         );
     }
@@ -315,7 +344,7 @@ mod test_make_uri {
         assert_snapshot!(
             make_uri(None, &template, &Default::default())
                 .unwrap()
-                .as_str(),
+                .to_string(),
             @"http://localhost/users/?a=&e="
         );
 
@@ -344,7 +373,7 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             @"http://localhost/users/123?a=&e="
         );
 
@@ -359,7 +388,7 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             @"http://localhost/users/123?a=456&e="
         );
 
@@ -404,8 +433,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
-            "http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C8%5D"
+            .to_string(),
+            "http://localhost/locations/xyz(1,2,3)?required=4,5;6&optional=[7,8]"
         );
 
         assert_snapshot!(
@@ -424,8 +453,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B7%2C%5D",
+            .to_string(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4,5;6&optional=[7,]",
         );
 
         assert_snapshot!(
@@ -444,8 +473,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C8%5D",
+            .to_string(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4,5;6&optional=[,8]",
         );
 
         assert_snapshot!(
@@ -462,8 +491,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C5%3B6&optional=%5B%2C%5D",
+            .to_string(),
+            @"http://localhost/locations/xyz(1,2,3)?required=4,5;6&optional=[,]",
         );
 
         assert_snapshot!(
@@ -477,8 +506,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(,2,3)?required=%2C%3B&optional=%5B%2C%5D",
+            .to_string(),
+            @"http://localhost/locations/xyz(,2,3)?required=,;&optional=[,]",
         );
 
         assert_snapshot!(
@@ -492,8 +521,8 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
-            @"http://localhost/locations/xyz(1,2,)?required=%2C%3B&optional=%5B%2C%5D"
+            .to_string(),
+            @"http://localhost/locations/xyz(1,2,)?required=,;&optional=[,]"
         );
 
         assert_snapshot!(
@@ -511,7 +540,7 @@ mod test_make_uri {
             )
             .unwrap()
             .to_string(),
-            @"http://localhost/locations/xyz(1,2,3)?required=4%2C%3B6&optional=%5B%2C%5D"
+            @"http://localhost/locations/xyz(1,2,3)?required=4,;6&optional=[,]"
         );
 
         let line_template = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
@@ -536,7 +565,7 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             @"http://localhost/line/1,2,3/4,5,6"
         );
 
@@ -558,7 +587,7 @@ mod test_make_uri {
             }
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             @"http://localhost/line/1,2,3/4,5,"
         );
 
@@ -580,7 +609,7 @@ mod test_make_uri {
                 }
             )
             .unwrap()
-            .as_str(),
+            .to_string(),
             @"http://localhost/line/1,,3/4,5,6"
         );
     }
@@ -602,7 +631,7 @@ mod test_make_uri {
         let url = make_uri(None, &template, vars).expect("Failed to generate URL");
 
         assert_eq!(
-            url.as_str(),
+            url.to_string(),
             "http://localhost/%2Fsome%2Fpath/a%3Fb?a=a%26b%3Db&c=a%23b"
         );
     }
@@ -693,8 +722,8 @@ mod tests {
 
         let req = super::make_request(
             &HttpJsonTransport {
-                source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                source_uri: None,
+                connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers: Default::default(),
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
@@ -752,8 +781,8 @@ mod tests {
 
         let req = super::make_request(
             &HttpJsonTransport {
-                source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                source_uri: None,
+                connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),

@@ -847,7 +847,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
     use router::body;
@@ -1219,8 +1219,8 @@ mod tests {
                     "label",
                 ),
                 transport: HttpJsonTransport {
-                    source_url: None,
-                    connect_template: URLTemplate::from_str("/test").unwrap(),
+                    source_uri: None,
+                    connect_template: StringTemplate::from_str("/test").unwrap(),
                     method: HTTPMethod::Get,
                     headers: Default::default(),
                     body: None,
@@ -1302,8 +1302,8 @@ mod tests {
                     "label",
                 ),
                 transport: HttpJsonTransport {
-                    source_url: None,
-                    connect_template: URLTemplate::from_str("/test").unwrap(),
+                    source_uri: None,
+                    connect_template: StringTemplate::from_str("/test").unwrap(),
                     method: HTTPMethod::Get,
                     headers: Default::default(),
                     body: None,

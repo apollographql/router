@@ -17,14 +17,14 @@ use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
 use either::Either;
 use http::HeaderName;
+use http::Uri;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
-use url::Url;
 
+use super::string_template::StringTemplate;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
-use super::URLTemplate;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::ConnectHTTPArguments;
@@ -277,8 +277,8 @@ fn determine_entity_resolver(
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
-    pub source_url: Option<Url>,
-    pub connect_template: URLTemplate,
+    pub source_uri: Option<Uri>,
+    pub connect_template: StringTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
@@ -315,7 +315,7 @@ impl HttpJsonTransport {
         }
 
         Ok(Self {
-            source_url: source.map(|s| s.base_url.clone()),
+            source_uri: source.map(|s| s.base_uri.clone()),
             connect_template: connect_url.parse().map_err(|e: string_template::Error| {
                 FederationError::internal(format!(
                     "could not parse URL template: {message}",
@@ -598,7 +598,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -629,38 +629,18 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        Url {
-                            scheme: "https",
-                            cannot_be_a_base: false,
-                            username: "",
-                            password: None,
-                            host: Some(
-                                Domain(
-                                    "jsonplaceholder.typicode.com",
-                                ),
-                            ),
-                            port: None,
-                            path: "/",
-                            query: None,
-                            fragment: None,
-                        },
+                    source_uri: Some(
+                        https://jsonplaceholder.typicode.com/,
                     ),
-                    connect_template: URLTemplate {
-                        base: None,
-                        path: [
-                            StringTemplate {
-                                parts: [
-                                    Constant(
-                                        Constant {
-                                            value: "users",
-                                            location: 1..6,
-                                        },
-                                    ),
-                                ],
-                            },
+                    connect_template: StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "/users",
+                                    location: 0..6,
+                                },
+                            ),
                         ],
-                        query: [],
                     },
                     method: Get,
                     headers: {
@@ -753,38 +733,18 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_url: Some(
-                        Url {
-                            scheme: "https",
-                            cannot_be_a_base: false,
-                            username: "",
-                            password: None,
-                            host: Some(
-                                Domain(
-                                    "jsonplaceholder.typicode.com",
-                                ),
-                            ),
-                            port: None,
-                            path: "/",
-                            query: None,
-                            fragment: None,
-                        },
+                    source_uri: Some(
+                        https://jsonplaceholder.typicode.com/,
                     ),
-                    connect_template: URLTemplate {
-                        base: None,
-                        path: [
-                            StringTemplate {
-                                parts: [
-                                    Constant(
-                                        Constant {
-                                            value: "posts",
-                                            location: 1..6,
-                                        },
-                                    ),
-                                ],
-                            },
+                    connect_template: StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "/posts",
+                                    location: 0..6,
+                                },
+                            ),
                         ],
-                        query: [],
                     },
                     method: Get,
                     headers: {
@@ -861,7 +821,7 @@ mod tests {
                 response_variables: {},
             },
         }
-        "#);
+        "###);
     }
 
     #[test]

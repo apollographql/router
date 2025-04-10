@@ -11,7 +11,6 @@ mod json_selection;
 mod models;
 pub(crate) mod spec;
 mod string_template;
-mod url_template;
 pub mod validation;
 pub(crate) mod variable;
 
@@ -25,7 +24,7 @@ pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use spec::ConnectSpec;
-pub use url_template::URLTemplate;
+pub use string_template::StringTemplate;
 pub use variable::Namespace;
 
 pub use self::models::Connector;

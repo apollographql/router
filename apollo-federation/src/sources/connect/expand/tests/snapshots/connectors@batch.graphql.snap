@@ -20,40 +20,18 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/api",
-                    query: None,
-                    fragment: None,
-                },
+            source_uri: Some(
+                http://localhost:4001/api,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users",
-                                    location: 1..6,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users",
+                            location: 0..6,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Get,
             headers: {},
@@ -103,40 +81,18 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             ),
         },
         transport: HttpJsonTransport {
-            source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/api",
-                    query: None,
-                    fragment: None,
-                },
+            source_uri: Some(
+                http://localhost:4001/api,
             ),
-            connect_template: URLTemplate {
-                base: None,
-                path: [
-                    StringTemplate {
-                        parts: [
-                            Constant(
-                                Constant {
-                                    value: "users-batch",
-                                    location: 1..12,
-                                },
-                            ),
-                        ],
-                    },
+            connect_template: StringTemplate {
+                parts: [
+                    Constant(
+                        Constant {
+                            value: "/users-batch",
+                            location: 0..12,
+                        },
+                    ),
                 ],
-                query: [],
             },
             method: Post,
             headers: {},

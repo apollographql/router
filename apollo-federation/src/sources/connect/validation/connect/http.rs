@@ -6,20 +6,22 @@ use std::str::FromStr;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
+use http::Uri;
 use multi_try::MultiTry;
 use shape::Shape;
 
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
-use crate::sources::connect::URLTemplate;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
 use crate::sources::connect::string_template::Expression;
+use crate::sources::connect::string_template::Part;
+use crate::sources::connect::string_template::StringTemplate;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::validation::connect::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::coordinates::ConnectHTTPCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
@@ -249,7 +251,7 @@ struct Transport<'schema> {
     // TODO: once this is shared with `HttpJsonTransport`, this will be used
     #[allow(dead_code)]
     method: HTTPMethod,
-    url: URLTemplate,
+    url: StringTemplate,
     url_string: GraphQLString<'schema>,
     coordinate: HttpMethodCoordinate<'schema>,
 }
@@ -312,7 +314,7 @@ impl<'schema> Transport<'schema> {
                     .into_iter()
                     .collect(),
             })?;
-        let url = URLTemplate::from_str(url_string.as_str()).map_err(
+        let url = StringTemplate::from_str(url_string.as_str()).map_err(
             |string_template::Error { message, location }| Message {
                 code: Code::InvalidUrl,
                 message: format!("In {coordinate}: {message}"),
@@ -323,11 +325,24 @@ impl<'schema> Transport<'schema> {
             },
         )?;
 
-        if let Some(base) = url.base.as_ref() {
-            validate_base_url(base, coordinate, coordinate.node, url_string, schema)?;
+        let base_url = url
+            .parts
+            .first()
+            .and_then(|part| {
+                if let Part::Constant(constant) = part {
+                    Uri::from_str(&constant.value).ok()
+                } else {
+                    // TODO: Once we allow skipping percent-encoding, if the first expression is not
+                    //  encoded, it _could_ be a base URL, so we should just skip the remaining checks
+                    None
+                }
+            })
+            .and_then(|uri| uri.scheme().is_some().then_some(uri));
+        if let Some(base_url) = base_url.as_ref() {
+            validate_base_url(base_url, coordinate, coordinate.node, url_string, schema)?;
         }
 
-        if source_name.is_some() && url.base.is_some() {
+        if source_name.is_some() && base_url.is_some() {
             return Err(Message {
                 code: Code::AbsoluteConnectUrlWithSource,
                 message: format!(
@@ -341,7 +356,7 @@ impl<'schema> Transport<'schema> {
                     .collect(),
             });
         }
-        if source_name.is_none() && url.base.is_none() {
+        if source_name.is_none() && base_url.is_none() {
             return Err(Message {
                 code: Code::RelativeConnectUrlWithoutSource,
                 message: format!(
@@ -368,6 +383,7 @@ impl<'schema> Transport<'schema> {
     ///
     /// TODO: Return input shapes for keys instead reparsing for `Connector::resolvable_key` later
     fn type_check(self, schema: &SchemaInfo) -> Vec<Message> {
+        // TODO: update context after each expression. Don't allow non `$config` options for base URLs
         let expression_context = Context::for_connect_request(
             schema,
             self.coordinate.connect,

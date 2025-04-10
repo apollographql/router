@@ -5,29 +5,66 @@
 //! (in [`crate::sources::connect::validation`]) is done only by composition.
 
 use std::fmt::Display;
+use std::fmt::Write;
 use std::ops::Range;
 use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
+use http::Uri;
 use itertools::Itertools;
+use percent_encoding::AsciiSet;
+use percent_encoding::CONTROLS;
+use percent_encoding::NON_ALPHANUMERIC;
+use percent_encoding::utf8_percent_encode;
 use serde_json_bytes::Value;
 
 use crate::sources::connect::JSONSelection;
 
+/// https://url.spec.whatwg.org/#fragment-percent-encode-set
+const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
+
+/// https://url.spec.whatwg.org/#path-percent-encode-set
+const PATH_SEGMENT: &AsciiSet = &FRAGMENT
+    .add(b'#')
+    .add(b'?')
+    .add(b'{')
+    .add(b'}')
+    .add(b'/')
+    .add(b'%')
+    .add(b'\\');
+
+// https://url.spec.whatwg.org/#query-state
+const QUERY: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'<')
+    .add(b'>')
+    .add(b'\'');
+
+const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
 /// A parsed string template, containing a series of [`Part`]s.
 ///
-/// The `Const` generic allows consumers to validate constant pieces of the string with a type of
-/// their choice. This is specifically just [`http::HeaderValue`] for headers right now.
+/// The `RenderTo` changes some behaviors depending on the type:
+/// - `String` is the most basic string template
+/// - [`HeaderValue`] does some validation that the output is a valid header value and can be
+///   more efficient in how it uses bytes.
+/// - [`Uri`] applies percent encoding as the result is built
 #[derive(Clone, Debug)]
-pub struct StringTemplate<Const = String> {
-    pub(crate) parts: Vec<Part<Const>>,
+pub struct StringTemplate {
+    pub(crate) parts: Vec<Part>,
 }
-impl<Const: FromStr> StringTemplate<Const> {
-    /// Parse a [`StringTemplate`]. If this template is nested within another string, provide an
-    /// `offset` to correct the locations.
-    ///
-    /// TODO: Remove the `offset` param once `URLTemplate` can leverage this more directly.
-    pub(crate) fn parse(input: &str, mut offset: usize) -> Result<Self, Error> {
+
+impl FromStr for StringTemplate {
+    type Err = Error;
+
+    fn from_str(input: &str) -> Result<Self, Error> {
+        let mut offset = 0;
         let mut chars = input.chars().peekable();
         let mut parts = Vec::new();
         while let Some(next) = chars.peek() {
@@ -65,24 +102,23 @@ impl<Const: FromStr> StringTemplate<Const> {
                 }));
                 offset += expression.len() + 1; // Account for closing brace
             } else {
-                let constant = chars
+                let value = chars
                     .by_ref()
                     .peeking_take_while(|c| *c != '{')
                     .collect::<String>();
-                let value = Const::from_str(&constant).map_err(|_unhelpful_err| Error {
-                    message: format!("invalid value `{constant}`"),
-                    location: offset..offset + constant.len(),
-                })?;
+                let len = value.len();
                 parts.push(Part::Constant(Constant {
                     value,
-                    location: offset..offset + constant.len(),
+                    location: offset..offset + len,
                 }));
-                offset += constant.len();
+                offset += len;
             }
         }
-        Ok(Self { parts })
+        Ok(StringTemplate { parts })
     }
+}
 
+impl StringTemplate {
     /// Get all the dynamic [`Expression`] pieces of the template for validation. If interpolating
     /// the entire template, use [`Self::interpolate`] instead.
     pub(crate) fn expressions(&self) -> impl Iterator<Item = &Expression> {
@@ -96,21 +132,57 @@ impl<Const: FromStr> StringTemplate<Const> {
     }
 }
 
-impl StringTemplate<String> {
+impl StringTemplate {
     /// Interpolation for when the constant type is a string. This can't be implemented for
     /// arbitrary generic types, so non-string consumers (headers) implement this themselves with
     /// any additional validations/transformations they need.
     pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
+        // TODO: accumulate the result instead of allocating a new string for each part, when possible
         self.parts
             .iter()
             .map(|part| part.interpolate(vars))
             .collect()
     }
+
+    /// Interpolate the expression as a URI, percent-encoding parts as needed.
+    pub fn interpolate_uri(&self, vars: &IndexMap<String, Value>) -> Result<Uri, Error> {
+        let mut result = String::new();
+        for part in &self.parts {
+            let new_part = part.interpolate(vars)?;
+
+            let encoding = if let Part::Constant(_) = part {
+                // We still need to %encode _some_ special characters for literals, but not all of them.
+                // TODO: parse each constant into components and properly encode additional symbols
+                //  for example, a literal domain can't accept the same characters as a path
+                FRAGMENT
+            } else if result.contains('#') {
+                FRAGMENT
+            } else if result.contains('?') {
+                UNRESERVED
+            } else {
+                PATH_SEGMENT
+            };
+            write!(
+                &mut result,
+                "{}",
+                utf8_percent_encode(new_part.as_str(), encoding)
+            )
+            .map_err(|err| Error {
+                // In practice this should never fail, but let's not panic just in case
+                message: format!("Error writing URI: {}", err),
+                location: part.location(),
+            })?;
+        }
+        Uri::from_str(&result).map_err(|err| Error {
+            message: format!("Invalid URI: {}", err),
+            location: 0..result.len(),
+        })
+    }
 }
 
 /// Expressions should be written the same as they were originally, even though we don't keep the
 /// original source around. So constants are written as-is and expressions are surrounded with `{ }`.
-impl<Const: Display> Display for StringTemplate<Const> {
+impl Display for StringTemplate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for part in &self.parts {
             match part {
@@ -143,14 +215,14 @@ impl std::error::Error for Error {}
 
 /// One piece of a [`StringTemplate`]
 #[derive(Clone, Debug)]
-pub(crate) enum Part<Const> {
+pub(crate) enum Part {
     /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
-    Constant(Constant<Const>),
+    Constant(Constant),
     /// A dynamic piece of a [`StringTemplate`], which came from inside `{ }` originally.
     Expression(Expression),
 }
 
-impl<T> Part<T> {
+impl Part {
     /// Get the original location of the part from the string which was parsed to form the
     /// [`StringTemplate`].
     fn location(&self) -> Range<usize> {
@@ -161,29 +233,13 @@ impl<T> Part<T> {
     }
 }
 
-/// These generics are a bit of a mess, but what they're saying is given a generic `Const` type,
-/// which again is `String` for the main use case but specialized occasionally (like [`http::HeaderValue`] for headers),
-/// we can interpolate the value of the part into that type.
-///
-/// For [`Constant`]s this is easy, just clone the value (thus `Const: Clone`).
-///
-/// For [`Expression`]s, we first need to interpolate the expression as normal (with [`ApplyTo`]),
-/// and then convert the resulting [`Value`] into the `Const` type. For that we require both
-/// `Const: FromStr` and `Const: TryFrom<String>` so we don't have to clone all `&str` into `String`s,
-/// nor borrow `String` just for them to be re-allocated. The `FromStrErr` and `TryFromStringError`
-/// are then required to capture the error types of those two conversion methods.
-///
-/// So for `Const = String` these are actually all no-ops with infallible conversions, but we allow
-/// for [`http::HeaderValue`] to fail.
-impl<Const, FromStrErr, TryFromStringError> Part<Const>
-where
-    Const: Clone,
-    Const: FromStr<Err = FromStrErr>,
-    FromStrErr: std::error::Error,
-    Const: TryFrom<String, Error = TryFromStringError>,
-    TryFromStringError: std::error::Error,
-{
-    pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<Const, Error> {
+impl Part {
+    /// Evaluate the expression of the part (if any) and return the resulting String.
+    ///
+    /// # Errors
+    ///
+    /// If the expression evaluates to an array or object.
+    pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
         match self {
             Part::Constant(Constant { value, .. }) => Ok(value.clone()),
             Part::Expression(Expression { expression, .. }) => {
@@ -191,22 +247,10 @@ where
                 let (value, _errs) = expression.apply_with_vars(&Value::Null, vars);
 
                 match value.unwrap_or(Value::Null) {
-                    Value::Null => Const::from_str("").map_err(|err| Error {
-                        message: err.to_string(),
-                        location: self.location(),
-                    }),
-                    Value::Bool(b) => Const::try_from(b.to_string()).map_err(|err| Error {
-                        message: err.to_string(),
-                        location: self.location(),
-                    }),
-                    Value::Number(n) => Const::try_from(n.to_string()).map_err(|err| Error {
-                        message: err.to_string(),
-                        location: self.location(),
-                    }),
-                    Value::String(s) => Const::from_str(s.as_str()).map_err(|err| Error {
-                        message: err.to_string(),
-                        location: self.location(),
-                    }),
+                    Value::Null => Ok(String::new()),
+                    Value::Bool(b) => Ok(b.to_string()),
+                    Value::Number(n) => Ok(n.to_string()),
+                    Value::String(s) => Ok(s.as_str().to_string()),
                     Value::Array(_) | Value::Object(_) => Err(Error {
                         message: "Expressions can't evaluate to arrays or objects.".to_string(),
                         location: self.location(),
@@ -219,9 +263,9 @@ where
 
 /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
 #[derive(Clone, Debug)]
-pub(crate) struct Constant<T> {
-    value: T,
-    location: Range<usize>,
+pub(crate) struct Constant {
+    pub(crate) value: String, // TODO: store string slices instead for improved performance?
+    pub(crate) location: Range<usize>,
 }
 
 /// A dynamic piece of a [`StringTemplate`], which came from inside `{ }` originally.
@@ -239,41 +283,30 @@ mod test_parse {
 
     #[test]
     fn simple_constant() {
-        let template =
-            StringTemplate::<String>::parse("text", 0).expect("simple template should be valid");
+        let template = StringTemplate::from_str("text").expect("simple template should be valid");
         assert_debug_snapshot!(template);
     }
 
     #[test]
     fn simple_expression() {
-        assert_debug_snapshot!(StringTemplate::<String>::parse("{$config.one}", 0).unwrap());
+        assert_debug_snapshot!(StringTemplate::from_str("{$config.one}").unwrap());
     }
     #[test]
     fn mixed_constant_and_expression() {
-        assert_debug_snapshot!(
-            StringTemplate::<String>::parse("text{$config.one}text", 0).unwrap()
-        );
-    }
-
-    #[test]
-    fn offset() {
-        assert_debug_snapshot!(
-            StringTemplate::<String>::parse("text{$config.one}text", 9).unwrap()
-        );
+        assert_debug_snapshot!(StringTemplate::from_str("text{$config.one}text").unwrap());
     }
 
     #[test]
     fn expressions_with_nested_braces() {
         assert_debug_snapshot!(
-            StringTemplate::<String>::parse("const{$config.one { two { three } }}another-const", 0)
-                .unwrap()
+            StringTemplate::from_str("const{$config.one { two { three } }}another-const").unwrap()
         );
     }
 
     #[test]
     fn missing_closing_braces() {
         assert_debug_snapshot!(
-            StringTemplate::<String>::parse("{$config.one", 0),
+            StringTemplate::from_str("{$config.one"),
             @r###"
         Err(
             Error {
@@ -295,7 +328,7 @@ mod test_interpolate {
     use super::*;
     #[test]
     fn test_interpolate() {
-        let template = StringTemplate::<String>::parse("before {$config.one} after", 0).unwrap();
+        let template = StringTemplate::from_str("before {$config.one} after").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "foo"}));
         assert_eq!(template.interpolate(&vars).unwrap(), "before foo after");
@@ -303,14 +336,14 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_missing_value() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let vars = IndexMap::default();
         assert_eq!(template.interpolate(&vars).unwrap(), "");
     }
 
     #[test]
     fn test_interpolate_value_array() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": ["one", "two"]}));
         assert_debug_snapshot!(
@@ -328,7 +361,7 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_bool() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": true}));
         assert_eq!(template.interpolate(&vars).unwrap(), "true");
@@ -336,7 +369,7 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_null() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": null}));
         assert_eq!(template.interpolate(&vars).unwrap(), "");
@@ -344,7 +377,7 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_number() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": 1}));
         assert_eq!(template.interpolate(&vars).unwrap(), "1");
@@ -352,7 +385,7 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_object() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": {}}));
         assert_debug_snapshot!(
@@ -370,7 +403,7 @@ mod test_interpolate {
 
     #[test]
     fn test_interpolate_value_string() {
-        let template = StringTemplate::<String>::parse("{$config.one}", 0).unwrap();
+        let template = StringTemplate::from_str("{$config.one}").unwrap();
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "string"}));
         assert_eq!(template.interpolate(&vars).unwrap(), "string");
@@ -384,8 +417,7 @@ mod test_get_expressions {
     #[test]
     fn test_variable_references() {
         let value =
-            StringTemplate::<String>::parse("a {$this.a.b.c} b {$args.a.b.c} c {$config.a.b.c}", 0)
-                .unwrap();
+            StringTemplate::from_str("a {$this.a.b.c} b {$args.a.b.c} c {$config.a.b.c}").unwrap();
         let references: Vec<_> = value
             .expressions()
             .map(|e| e.expression.to_string())

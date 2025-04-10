@@ -269,7 +269,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
@@ -319,7 +319,7 @@ router:
     on: request
     attributes:
       http.request.body.size: true
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -330,7 +330,7 @@ router:
     on: response
     attributes:
       http.response.body.size: true
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -346,7 +346,7 @@ supergraph:
     message: "my event message"
     level: info
     on: request
-    # Only log when the x-log-request header is `log` 
+    # Only log when the x-log-request header is `log`
     condition:
       eq:
         - "log"
@@ -830,8 +830,8 @@ connector:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_url: None,
-                        connect_template: URLTemplate::from_str("/test").unwrap(),
+                        source_uri: None,
+                        connect_template: StringTemplate::from_str("/test").unwrap(),
                         method: HTTPMethod::Get,
                         headers: Default::default(),
                         body: None,
@@ -1182,8 +1182,8 @@ subgraph:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_url: None,
-                        connect_template: URLTemplate::from_str("/test").unwrap(),
+                        source_uri: None,
+                        connect_template: StringTemplate::from_str("/test").unwrap(),
                         method: HTTPMethod::Get,
                         headers: Default::default(),
                         body: None,

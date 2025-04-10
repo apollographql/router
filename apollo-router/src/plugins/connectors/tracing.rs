@@ -45,6 +45,7 @@ fn connect_spec_counts(connectors: &Connectors) -> HashMap<String, u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -55,7 +56,7 @@ mod tests {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::expand::Connectors;
-    use url::Url;
+    use http::Uri;
 
     use crate::metrics::FutureMetricsExt as _;
     use crate::plugins::connectors::tracing::connect_spec_counts;
@@ -75,7 +76,7 @@ mod tests {
                 "label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/").unwrap()),
+                source_uri: Some(Uri::from_str("http://localhost/").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
