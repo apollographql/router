@@ -1,0 +1,28 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v1", http: { query: "$config.query" })
+  @source(
+    name: "v2"
+    http: { query: "$({ s: 's', i: 1, f: .9, b: false, n: null })" }
+  )
+  @source(name: "v3", http: { query: "bad" })
+  @source(name: "v4", http: { query: "$([])" })
+  @source(name: "v5", http: { query: "$('bad')" })
+
+type Query {
+  resources(s: String, i: Int, f: Float, b: Boolean): [String!]!
+    @connect(source: "v2", http: { query: "$args" }, selection: "$")
+    @connect(
+      source: "v2"
+      http: { query: "$({ s: 's', i: 1, f: .9, b: false, n: null })" }
+      selection: "$"
+    )
+    @connect(source: "v2", http: { query: "bad" }, selection: "$")
+    @connect(source: "v2", http: { query: "$('bad')" }, selection: "$")
+    @connect(source: "v2", http: { query: "$(['bad'])" }, selection: "$")
+    @connect(source: "v2", http: { query: "$config.query" }, selection: "$") # unknown
+    @connect(source: "v2", http: { query: "$args.s" }, selection: "$") # string, not allowed
+}

@@ -250,7 +250,7 @@ impl Display for BodyCoordinate<'_> {
 /// The `@connect(http.<METHOD>:)` arg
 struct Transport<'schema> {
     method_and_template: Option<MethodAndTemplate<'schema>>,
-    url_properties: UrlProperties,
+    url_properties: UrlProperties<'schema>,
 }
 
 impl<'schema> Transport<'schema> {
@@ -312,7 +312,7 @@ impl<'schema> Transport<'schema> {
             });
         }
 
-        let url_properties = UrlProperties::parse(coordinate.to_string(), schema, http_arg)?;
+        let url_properties = UrlProperties::parse_for_connector(coordinate, schema, http_arg)?;
 
         Ok(Self {
             method_and_template,
@@ -322,7 +322,7 @@ impl<'schema> Transport<'schema> {
 
     fn type_check(self, schema: &SchemaInfo) -> Vec<Message> {
         self.url_properties
-            .type_check()
+            .type_check(schema)
             .into_iter()
             .chain(
                 self.method_and_template

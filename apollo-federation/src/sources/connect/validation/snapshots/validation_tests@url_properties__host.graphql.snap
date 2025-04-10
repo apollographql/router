@@ -1,0 +1,39 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/url_properties/host.graphql
+---
+[
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(http:)`, argument `host` is invalid: `*.bad` must start with one of $config, $context",
+        locations: [
+            7:38..7:38,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@source(http:)`, argument `host` is invalid: number values aren't valid here",
+        locations: [
+            10:40..10:41,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect(http:)` on `Query.resources`, argument `host` is invalid: null values aren't valid here",
+        locations: [
+            13:13..13:22,
+            13:13..13:22,
+            15:49..15:50,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "In `@connect(http:)` on `Query.resources`, argument `host` is invalid: number values aren't valid here",
+        locations: [
+            13:27..13:30,
+            13:24..13:30,
+            16:49..16:50,
+        ],
+    },
+]

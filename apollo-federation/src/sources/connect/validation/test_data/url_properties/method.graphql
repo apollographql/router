@@ -1,0 +1,30 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v1", http: { baseURL: "http://localhost" })
+  @source(name: "get", http: { method: "$('GET')" })
+  @source(name: "post", http: { method: "$('POST')" })
+  @source(name: "put", http: { method: "$('PUT')" })
+  @source(name: "patch", http: { method: "$('PATCH')" })
+  @source(name: "delete", http: { method: "$('DELETE')" })
+  @source(name: "bad-1", http: { method: "$('other')" })
+  @source(name: "bad-2", http: { method: "other" })
+  @source(name: "bad-3", http: { method: "$(1)" })
+  @source(name: "bad-4", http: { method: "$({ a: 'bad' })" })
+  @source(name: "variable", http: { method: "$config.method" })
+
+type Query {
+  resources: [String!]!
+    @connect(source: "v1", http: { method: "$('GET')" }, selection: "$")
+    @connect(source: "v1", http: { method: "$('POST')" }, selection: "$")
+    @connect(source: "v1", http: { method: "$('PUT')" }, selection: "$")
+    @connect(source: "v1", http: { method: "$('PATCH')" }, selection: "$")
+    @connect(source: "v1", http: { method: "$('DELETE')" }, selection: "$")
+    @connect(source: "v1", http: { method: "$('other')" }, selection: "$")
+    @connect(source: "v1", http: { method: "other" }, selection: "$")
+    @connect(source: "v1", http: { method: "$(1)" }, selection: "$")
+    @connect(source: "v1", http: { method: "$({ a: 'bad' })" }, selection: "$")
+    @connect(source: "v1", http: { method: "$config.method" }, selection: "$")
+}

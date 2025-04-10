@@ -90,13 +90,13 @@ impl<'schema> SourceDirective<'schema> {
                 }
             }
 
-            let _ = UrlProperties::parse(
+            let _ = UrlProperties::parse_for_source(
                 source_http_argument_coordinate(&directive.name),
                 schema,
                 http_arg,
             )
             .map_err(|e| errors.push(e))
-            .map(|url_properties| errors.extend(url_properties.type_check()));
+            .map(|url_properties| errors.extend(url_properties.type_check(schema)));
 
             errors.extend(
                 Headers::parse(

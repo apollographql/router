@@ -1,0 +1,18 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.2"
+    import: ["@connect", "@source"]
+  )
+  @source(name: "v1", http: { host: "$('example.com')" })
+  @source(name: "v2", http: { host: "bad" })
+  @source(name: "v3", http: { host: "$config.host" })
+  @source(name: "v4", http: { host: "$('nope')" })
+  @source(name: "v5", http: { host: "$(1)" })
+
+type Query {
+  resources(s: String, i: Int, f: Float, b: Boolean): [String!]!
+    @connect(source: "v2", http: { host: "$('example.com')" }, selection: "$")
+    @connect(source: "v2", http: { host: "$args.s" }, selection: "$")
+    @connect(source: "v2", http: { host: "$args.i" }, selection: "$")
+    @connect(source: "v2", http: { host: "$config.host" }, selection: "$") # unknown
+}
