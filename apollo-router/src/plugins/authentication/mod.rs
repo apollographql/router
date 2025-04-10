@@ -479,8 +479,6 @@ impl Plugin for AuthenticationPlugin {
                 });
             }
 
-            tracing::info!(jwks=?router_conf.jwt.jwks, "JWT authentication using JWKSets from");
-
             let jwks_manager = JwksManager::new(list).await?;
 
             Some(Router {
