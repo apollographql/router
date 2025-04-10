@@ -38,7 +38,7 @@ use crate::context::context_key_from_deprecated;
 use crate::context::context_key_to_deprecated;
 use crate::error::Error;
 use crate::graphql;
-use crate::json_ext;
+use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugin::Plugin;
@@ -770,11 +770,11 @@ where
             .body
             .as_ref()
             .and_then(|b| serde_json::from_str(b).ok())
-            .unwrap_or(serde_json::Value::Null);
+            .unwrap_or(Value::Null);
         // Now we have some JSON, let's see if it's the right "shape" to create a graphql_response.
         // If it isn't, we create a graphql error response
-        let graphql_response: crate::graphql::Response = match body_as_value {
-            serde_json::Value::Null => crate::graphql::Response::builder()
+        let graphql_response = match body_as_value {
+            Value::Null => graphql::Response::builder()
                 .errors(vec![
                     Error::builder()
                         .message(co_processor_output.body.take().unwrap_or_default())
@@ -782,8 +782,8 @@ where
                         .build(),
                 ])
                 .build(),
-            _ => serde_json::from_value(body_as_value).unwrap_or_else(|error| {
-                crate::graphql::Response::builder()
+            _ => graphql::Response::from_value(body_as_value).unwrap_or_else(|error| {
+                graphql::Response::builder()
                     .errors(vec![
                         Error::builder()
                             .message(format!(
@@ -1138,29 +1138,28 @@ where
         let code = control.get_http_status()?;
 
         let res = {
-            let graphql_response: crate::graphql::Response =
-                match co_processor_output.body.unwrap_or(json_ext::Value::Null) {
-                    json_ext::Value::String(s) => crate::graphql::Response::builder()
+            let graphql_response = match co_processor_output.body.unwrap_or(Value::Null) {
+                Value::String(s) => graphql::Response::builder()
+                    .errors(vec![
+                        Error::builder()
+                            .message(s.as_str().to_owned())
+                            .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                            .build(),
+                    ])
+                    .build(),
+                value => graphql::Response::from_value(value).unwrap_or_else(|error| {
+                    graphql::Response::builder()
                         .errors(vec![
                             Error::builder()
-                                .message(s.as_str().to_owned())
-                                .extension_code(COPROCESSOR_ERROR_EXTENSION)
+                                .message(format!(
+                                    "couldn't deserialize coprocessor output body: {error}"
+                                ))
+                                .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
                                 .build(),
                         ])
-                        .build(),
-                    value => serde_json_bytes::from_value(value).unwrap_or_else(|error| {
-                        crate::graphql::Response::builder()
-                            .errors(vec![
-                                Error::builder()
-                                    .message(format!(
-                                        "couldn't deserialize coprocessor output body: {error}"
-                                    ))
-                                    .extension_code(COPROCESSOR_DESERIALIZATION_ERROR_EXTENSION)
-                                    .build(),
-                            ])
-                            .build()
-                    }),
-                };
+                        .build()
+                }),
+            };
 
             let mut http_response = http::Response::builder()
                 .status(code)
@@ -1197,8 +1196,7 @@ where
     // Finally, process our reply and act on the contents. Our processing logic is
     // that we replace "bits" of our incoming request with the updated bits if they
     // are present in our co_processor_output.
-
-    let new_body: crate::graphql::Request = match co_processor_output.body {
+    let new_body: graphql::Request = match co_processor_output.body {
         Some(value) => serde_json_bytes::from_value(value)?,
         None => body,
     };
@@ -1301,8 +1299,7 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body: crate::graphql::Response =
-        handle_graphql_response(body, co_processor_output.body)?;
+    let new_body = handle_graphql_response(body, co_processor_output.body)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1378,9 +1375,9 @@ pub(super) fn internalize_header_map(
 
 pub(super) fn handle_graphql_response(
     original_response_body: graphql::Response,
-    copro_response_body: Option<json_ext::Value>,
+    copro_response_body: Option<Value>,
 ) -> Result<graphql::Response, BoxError> {
-    let new_body: graphql::Response = match copro_response_body {
+    Ok(match copro_response_body {
         Some(value) => {
             let mut new_body = graphql::Response::from_value(value)?;
             // Needs to take back these 2 fields because it's skipped by serde
@@ -1388,17 +1385,15 @@ pub(super) fn handle_graphql_response(
             new_body.created_at = original_response_body.created_at;
             // Required because for subscription if data is Some(Null) it won't cut the subscription
             // And in some languages they don't have any differences between Some(Null) and Null
-            if original_response_body.data == Some(json_ext::Value::Null)
+            if original_response_body.data == Some(Value::Null)
                 && new_body.data.is_none()
                 && new_body.subscribed == Some(true)
             {
-                new_body.data = Some(serde_json_bytes::Value::Null);
+                new_body.data = Some(Value::Null);
             }
 
             new_body
         }
         None => original_response_body,
-    };
-
-    Ok(new_body)
+    })
 }
