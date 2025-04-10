@@ -434,7 +434,7 @@ impl QueryPlannerError {
     pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
         match self {
             QueryPlannerError::SpecError(e) => {
-                Some(UsageReporting::for_error(e.get_error_key().to_string()))
+                Some(UsageReporting::Error(e.get_error_key().to_string()))
             }
             _ => None,
         }

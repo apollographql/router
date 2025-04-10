@@ -32,6 +32,7 @@ use sha2::Digest;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::spec::Fragments;
 use crate::spec::Query;
@@ -162,35 +163,50 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
     }
 }
 
-/// UsageReporting fields, that will be used to send stats to uplink/studio
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Default)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct UsageReporting {
+pub(crate) struct UsageReportingOperationDetails {
     /// The operation name, or None if there is no operation name
     operation_name: Option<String>,
     /// The normalized operation signature, or None if there is no valid signature
     operation_signature: Option<String>,
-    /// The error key to use for the stats report, or None if there is no error
-    error_key: Option<String>,
-    /// The persisted query ID used to request this operation, or None if the query was not requested via PQ ID
-    pq_id: Option<String>,
     /// a list of all types and fields referenced in the query
     #[serde(default)]
-    pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+}
+
+/// UsageReporting fields, that will be used to send stats to uplink/studio
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum UsageReporting {
+    Operation(UsageReportingOperationDetails),
+    PersistedQuery {
+        operation_details: UsageReportingOperationDetails,
+        persisted_query_id: String,
+    },
+    Error(String),
 }
 
 impl UsageReporting {
     pub(crate) fn for_error(error_key: String) -> UsageReporting {
-        UsageReporting {
-            error_key: Some(error_key),
-            ..Default::default()
-        }
+        UsageReporting::Error(error_key)
     }
 
-    pub(crate) fn with_pq_id(&self, pq_id: Option<String>) -> UsageReporting {
-        UsageReporting {
-            pq_id,
-            ..self.clone()
+    pub(crate) fn with_pq_id(&self, maybe_pq_id: Option<String>) -> UsageReporting {
+        match self {
+            UsageReporting::Operation(op_details)
+            | UsageReporting::PersistedQuery {
+                operation_details: op_details,
+                ..
+            } => match maybe_pq_id {
+                Some(pq_id) => UsageReporting::PersistedQuery {
+                    operation_details: op_details.clone(),
+                    persisted_query_id: pq_id,
+                },
+                None => UsageReporting::Operation(op_details.clone()),
+            },
+            // PQ ID has no effect on errors
+            UsageReporting::Error { .. } => self.clone(),
         }
     }
 
@@ -203,52 +219,90 @@ impl UsageReporting {
     /// Note that this combination of operation name and signature is sometimes referred to in code as
     /// "operation signature" even though it also contains the operation name as the first line.
     pub(crate) fn get_stats_report_key(&self) -> String {
-        if let Some(error_key) = &self.error_key {
-            format!("## {}\n", error_key)
-        } else if let Some(persisted_query_id) = &self.pq_id {
-            format!("pq# {}", persisted_query_id)
-        } else {
-            let stats_report_key_op_name =
-                self.operation_name.as_deref().unwrap_or("-").to_string();
-            format!(
-                "# {}\n{}",
-                stats_report_key_op_name,
-                self.get_operation_signature()
-            )
+        match self {
+            UsageReporting::Operation(operation_details) => {
+                let stats_report_key_op_name = operation_details
+                    .operation_name
+                    .as_deref()
+                    .unwrap_or("-")
+                    .to_string();
+                format!(
+                    "# {}\n{}",
+                    stats_report_key_op_name,
+                    self.get_operation_signature(),
+                )
+            }
+            UsageReporting::PersistedQuery {
+                persisted_query_id, ..
+            } => {
+                format!("pq# {}", persisted_query_id)
+            }
+            UsageReporting::Error(error_key) => format!("## {}\n", error_key),
         }
     }
 
     pub(crate) fn get_operation_signature(&self) -> String {
-        self.operation_signature
-            .as_deref()
-            .unwrap_or("")
-            .to_string()
+        match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => operation_details
+                .operation_signature
+                .clone()
+                .unwrap_or("".to_string()),
+            UsageReporting::Error { .. } => "".to_string(),
+        }
     }
 
     pub(crate) fn get_operation_id(&self) -> String {
-        let sig_to_hash = match &self.error_key {
-            Some(err_key) => format!("# # {}\n", err_key),
-            None => self.get_stats_report_key(),
+        let string_to_hash = match self {
+            UsageReporting::Operation { .. } | UsageReporting::PersistedQuery { .. } => {
+                self.get_stats_report_key()
+            }
+            UsageReporting::Error(error_key) => format!("# # {}\n", error_key),
         };
 
         let mut hasher = sha1::Sha1::new();
-        hasher.update(sig_to_hash.as_bytes());
+        hasher.update(string_to_hash.as_bytes());
         let result = hasher.finalize();
         hex::encode(result)
     }
 
     pub(crate) fn get_operation_name(&self) -> String {
-        if let Some(op_name) = &self.operation_name {
-            op_name.clone()
-        } else if let Some(err_key) = &self.error_key {
-            format!("# {}", err_key)
-        } else {
-            "".to_string()
+        match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => operation_details
+                .operation_name
+                .clone()
+                .unwrap_or("".to_string()),
+            UsageReporting::Error(error_key) => format!("# {}", error_key),
         }
     }
 
-    pub(crate) fn is_error(&self) -> bool {
-        self.error_key.is_some()
+    pub(crate) fn get_referenced_fields(&self) -> HashMap<String, ReferencedFieldsForType> {
+        match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => operation_details.referenced_fields_by_type.clone(),
+            UsageReporting::Error { .. } => HashMap::default(),
+        }
+    }
+
+    pub(crate) fn get_query_metadata(&self) -> Option<QueryMetadata> {
+        match self {
+            UsageReporting::PersistedQuery {
+                persisted_query_id, ..
+            } => Some(QueryMetadata {
+                name: self.get_operation_name(),
+                signature: self.get_operation_signature(),
+                pq_id: persisted_query_id.clone(),
+            }),
+            // For now we only want to populate query metadata for PQ operations
+            _ => None,
+        }
     }
 }
 
@@ -440,13 +494,11 @@ struct UsageGenerator<'a> {
 
 impl UsageGenerator<'_> {
     fn generate_usage_reporting(&mut self) -> UsageReporting {
-        UsageReporting {
+        UsageReporting::Operation(UsageReportingOperationDetails {
             operation_name: self.get_operation_name(),
             operation_signature: self.generate_normalized_signature(),
-            error_key: None,
-            pq_id: None,
             referenced_fields_by_type: self.generate_apollo_reporting_refs(),
-        }
+        })
     }
 
     fn get_operation_name(&self) -> Option<String> {

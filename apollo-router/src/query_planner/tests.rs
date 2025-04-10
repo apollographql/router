@@ -84,7 +84,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         formatted_query_plan: Default::default(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
-        usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         estimated_size: Default::default(),
     };
 
@@ -141,7 +141,7 @@ async fn fetch_includes_operation_name() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
@@ -206,7 +206,7 @@ async fn fetch_makes_post_requests() {
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
@@ -340,7 +340,7 @@ async fn defer() {
                     }))),
                 }],
             }.into(),
-            usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+            usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
             query: Arc::new(Query::empty_for_tests()),
             query_metrics: Default::default(),
             estimated_size: Default::default(),
@@ -465,7 +465,7 @@ async fn defer_if_condition() {
 
     let query_plan = QueryPlan {
         root,
-        usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(
             Query::parse(
                 query,
@@ -634,7 +634,7 @@ async fn dependent_mutations() {
             }"#,
         )
         .unwrap(),
-        usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),
@@ -1856,7 +1856,7 @@ fn broken_plan_does_not_panic() {
         })
         .into(),
         formatted_query_plan: Default::default(),
-        usage_reporting: UsageReporting::for_error("this is a test report key".to_string()).into(),
+        usage_reporting: UsageReporting::Error("this is a test report key".to_string()).into(),
         query: Arc::new(Query::empty_for_tests()),
         query_metrics: Default::default(),
         estimated_size: Default::default(),

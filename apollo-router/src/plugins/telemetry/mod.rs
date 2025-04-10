@@ -94,7 +94,6 @@ use crate::metrics::meter_provider_internal;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::config::AttributeValue;
@@ -524,7 +523,7 @@ impl PluginPrivate for Telemetry {
 
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
-                                    .map(|u| u.is_error())
+                                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
                                     .unwrap_or(false)
                             }) {
                                 Self::update_apollo_metrics(
@@ -1408,6 +1407,7 @@ impl Telemetry {
                     .extensions()
                     .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
                     .map(|u| u.pq_id);
+                let usage_reporting_with_pq = usage_reporting.with_pq_id(maybe_pq_id.clone());
 
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
@@ -1426,10 +1426,7 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting
-                            .with_pq_id(maybe_pq_id.clone())
-                            .get_stats_report_key()
-                            .to_string(),
+                        usage_reporting_with_pq.get_stats_report_key().to_string(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
@@ -1465,17 +1462,11 @@ impl Telemetry {
                                 local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
-                                .referenced_fields_by_type
-                                .clone()
+                                .get_referenced_fields()
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
-                            // For now we only want to populate query metadata for PQ operations
-                            query_metadata: maybe_pq_id.as_ref().map(|pq_id| QueryMetadata {
-                                name: usage_reporting.get_operation_name(),
-                                signature: usage_reporting.get_operation_signature(),
-                                pq_id: pq_id.clone(),
-                            }),
+                            query_metadata: usage_reporting_with_pq.get_query_metadata(),
                         },
                     )]),
                 }
@@ -1764,7 +1755,10 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
 }
 
 fn licensed_operation_count(usage_reporting: &UsageReporting) -> u64 {
-    if usage_reporting.is_error() { 0 } else { 1 }
+    match usage_reporting {
+        UsageReporting::Error(_) => 0,
+        _ => 1,
+    }
 }
 
 fn convert(
