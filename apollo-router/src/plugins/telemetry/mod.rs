@@ -1403,11 +1403,11 @@ impl Telemetry {
                     .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
-                let maybe_pq_id = context
+                let pq_id = context
                     .extensions()
                     .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
                     .map(|u| u.pq_id);
-                let usage_reporting_with_pq = usage_reporting.with_pq_id(maybe_pq_id.clone());
+                let usage_reporting_with_pq = usage_reporting.with_pq_id(pq_id);
 
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
