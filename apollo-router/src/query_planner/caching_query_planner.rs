@@ -274,6 +274,9 @@ where
             config_mode_hash: _,
         } in all_cache_keys
         {
+            // NB: warmup query parsing has a very low priority so that real requests are
+            // prioritized. However, warmup query planning maintains its normal priority so
+            // that warmup doesn't take an excessively long time.
             let doc = loop {
                 match query_analysis
                     .parse_document(
