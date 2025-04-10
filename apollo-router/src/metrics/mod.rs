@@ -2097,4 +2097,55 @@ mod test {
         .with_metrics()
         .await;
     }
+
+    #[tokio::test]
+    async fn test_count_operation_errors_with_numeric_code_and_extended_config_enabled() {
+        async {
+            let config = ErrorsConfiguration {
+                preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
+                ..Default::default()
+            };
+
+            let context = Context::default();
+            let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
+            let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
+            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let _ = context.insert(CLIENT_NAME, "client-1".to_string());
+            let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
+
+            let error = graphql::Error::from_value(
+                "mySubgraph",
+                r#"
+                {
+                  "message": "some error",
+                  "extensions": {
+                    "code": 400,
+                    "service": "mySubgraph"
+                  },
+                  "path": ["obj", "field"]
+                }
+               "#.parse().unwrap())
+                .unwrap();
+
+            count_operation_errors(&[error], &context, &config);
+
+            assert_counter!(
+                "apollo.router.operations.error",
+                1,
+                "apollo.operation.id" = "some-id",
+                "graphql.operation.name" = "SomeOperation",
+                "graphql.operation.type" = "query",
+                "apollo.client.name" = "client-1",
+                "apollo.client.version" = "version-1",
+                "graphql.error.extensions.code" = "400",
+                "graphql.error.extensions.severity" = "ERROR",
+                "graphql.error.path" = "/obj/field",
+                "apollo.router.error.service" = "mySubgraph"
+            );
+
+            assert_counter!("apollo.router.graphql_error", 1, code = "400");
+        }
+            .with_metrics()
+            .await;
+    }
 }
