@@ -49,12 +49,6 @@ const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~');
 
 /// A parsed string template, containing a series of [`Part`]s.
-///
-/// The `RenderTo` changes some behaviors depending on the type:
-/// - `String` is the most basic string template
-/// - [`HeaderValue`] does some validation that the output is a valid header value and can be
-///   more efficient in how it uses bytes.
-/// - [`Uri`] applies percent encoding as the result is built
 #[derive(Clone, Debug)]
 pub struct StringTemplate {
     pub(crate) parts: Vec<Part>,
