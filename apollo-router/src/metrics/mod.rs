@@ -1441,7 +1441,6 @@ pub(crate) fn count_operation_errors(
         };
 
         if send_otlp_errors {
-            let code_str = code.unwrap_or_default();
             let severity_str = severity
                 .unwrap_or(tracing::Level::ERROR.as_str())
                 .to_string();
@@ -1454,7 +1453,7 @@ pub(crate) fn count_operation_errors(
                 "graphql.operation.type" = operation_kind.clone(),
                 "apollo.client.name" = client_name.clone(),
                 "apollo.client.version" = client_version.clone(),
-                "graphql.error.extensions.code" = code_str,
+                "graphql.error.extensions.code" = code.unwrap_or_default(),
                 "graphql.error.extensions.severity" = severity_str,
                 "graphql.error.path" = path,
                 "apollo.router.error.service" = service
@@ -1998,7 +1997,7 @@ mod test {
 
             let context = Context::default();
             count_operation_error_codes(
-                &["GRAPHQL_VALIDATION_FAILED", "MY_CUSTOM_ERROR"],
+                &["GRAPHQL_VALIDATION_FAILED", "MY_CUSTOM_ERROR", "400"],
                 &context,
                 &config,
             );
@@ -2029,6 +2028,19 @@ mod test {
                 "graphql.error.path" = "",
                 "apollo.router.error.service" = ""
             );
+            assert_counter_not_exists!(
+                "apollo.router.operations.error",
+                u64,
+                "apollo.operation.id" = "",
+                "graphql.operation.name" = "",
+                "graphql.operation.type" = "",
+                "apollo.client.name" = "",
+                "apollo.client.version" = "",
+                "graphql.error.extensions.code" = "400",
+                "graphql.error.extensions.severity" = "ERROR",
+                "graphql.error.path" = "",
+                "apollo.router.error.service" = ""
+            );
 
             assert_counter!(
                 "apollo.router.graphql_error",
@@ -2036,6 +2048,7 @@ mod test {
                 code = "GRAPHQL_VALIDATION_FAILED"
             );
             assert_counter!("apollo.router.graphql_error", 1, code = "MY_CUSTOM_ERROR");
+            assert_counter!("apollo.router.graphql_error", 1, code = "400");
         }
         .with_metrics()
         .await;
