@@ -9,6 +9,7 @@ use crate::Configuration;
 use crate::cache::storage::CacheStorage;
 use crate::compute_job;
 use crate::compute_job::ComputeBackPressureError;
+use crate::compute_job::ComputeJobType;
 use crate::graphql;
 use crate::query_planner::QueryKey;
 use crate::services::layers::query_analysis::ParsedDocument;
@@ -159,8 +160,7 @@ impl IntrospectionCache {
         }
         let schema = schema.clone();
         let doc = doc.clone();
-        let priority = compute_job::Priority::P1; // Low priority
-        let response = compute_job::execute(priority, move |_| {
+        let response = compute_job::execute(ComputeJobType::Introspection, move |_| {
             Self::execute_introspection(max_depth, &schema, &doc)
         })?
         // `expect()` propagates any panic that potentially happens in the closure, but:

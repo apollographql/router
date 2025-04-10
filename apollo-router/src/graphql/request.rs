@@ -137,7 +137,7 @@ impl Request {
     /// of some parameters to be specified that would be otherwise required
     /// for a real request.  It's usually enough for most testing purposes,
     /// especially when a fully constructed `Request` is difficult to construct.
-    /// While today, its paramters have the same optionality as its `new`
+    /// While today, its parameters have the same optionality as its `new`
     /// counterpart, that may change in future versions.
     fn fake_new(
         query: Option<String>,
