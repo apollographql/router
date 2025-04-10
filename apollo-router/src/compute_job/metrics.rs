@@ -8,8 +8,10 @@ pub(super) enum Outcome {
     ExecutedOk,
     ExecutedError,
     ChannelError,
-    RejectedQueueFull,
     Abandoned,
+
+    #[allow(dead_code)] // NB: `RejectedQueueFull` is unused for now
+    RejectedQueueFull,
 }
 
 impl From<Outcome> for opentelemetry::Value {
