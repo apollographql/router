@@ -274,16 +274,24 @@ where
             config_mode_hash: _,
         } in all_cache_keys
         {
-            let doc = match query_analysis
-                .parse_document(
-                    &query,
-                    operation_name.as_deref(),
-                    ComputeJobType::QueryParsingWarmup,
-                )
-                .await
-            {
-                Ok(doc) => doc,
-                Err(_) => continue,
+            let doc = loop {
+                match query_analysis
+                    .parse_document(
+                        &query,
+                        operation_name.as_deref(),
+                        ComputeJobType::QueryParsingWarmup,
+                    )
+                    .await
+                {
+                    Ok(doc) => break doc,
+                    Err(MaybeBackPressureError::PermanentError(_)) => {
+                        continue 'all_cache_keys_loop;
+                    }
+                    Err(MaybeBackPressureError::TemporaryError(ComputeBackPressureError)) => {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        // try again
+                    }
+                }
             };
 
             let caching_key = CachingQueryKey {
