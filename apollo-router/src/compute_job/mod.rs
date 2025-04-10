@@ -15,7 +15,7 @@ use self::metrics::Outcome;
 use self::metrics::observe_compute_duration;
 use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
-pub(crate) use crate::ageing_priority_queue::Priority;
+use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
 
