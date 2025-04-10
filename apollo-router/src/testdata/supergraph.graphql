@@ -68,6 +68,7 @@ enum link__Purpose {
 
 type Product
   @join__type(graph: INVENTORY, key: "upc")
+  @join__type(graph: INVENTORY, key: "upc inStock")
   @join__type(graph: PRODUCTS, key: "upc")
   @join__type(graph: REVIEWS, key: "upc") {
   upc: String!

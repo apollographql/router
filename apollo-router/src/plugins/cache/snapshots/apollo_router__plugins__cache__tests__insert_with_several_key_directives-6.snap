@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/plugins/cache/tests.rs
+expression: response
+---
+{
+  "data": {
+    "topProducts": [
+      {
+        "shippingEstimate": 15,
+        "price": 150
+      }
+    ]
+  }
+}

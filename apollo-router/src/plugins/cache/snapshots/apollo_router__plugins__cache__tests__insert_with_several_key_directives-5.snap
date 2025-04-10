@@ -9,7 +9,7 @@ expression: cache_keys
     "cache_control": "public"
   },
   {
-    "key": "version:1.0:subgraph:products:type:Query:hash:0a9c11d2f86fae30d5fdfe748e0be34c3d69dd26fa6520ee683d4d002e36e62a:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:products:type:Query:hash:2f654759ad6d59397aaac738ff12bab8e4c31467a369b255ef9b9838728b732c:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
     "status": "cached",
     "cache_control": "public"
   }

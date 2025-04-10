@@ -4,7 +4,7 @@ expression: cache_keys
 ---
 [
   {
-    "key": "version:1.0:subgraph:inventory:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:representation:7ae1cf67d5c484b3430662edab68bf613043333264470c8f5834fea277b4e060:hash:a7b76558fe61b2f89ee9ea8bac8eee0b702ba1f319eaace576ab6ccdd19cdc80:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
+    "key": "version:1.0:subgraph:inventory:type:Product:entity:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:representation:7ae1cf67d5c484b3430662edab68bf613043333264470c8f5834fea277b4e060:hash:1fc91476195815f017c84a9366856ce8b6ac3fc1770350448d8b283bd9f1e5fd:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c",
     "status": "new",
     "cache_control": "public"
   },

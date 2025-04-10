@@ -1426,13 +1426,13 @@ fn extract_cache_keys(
 
         let mut representation_entity_keys = IndexMap::new();
         for entity_key in entity_keys {
+            dbg!(&entity_key);
             // We remove it from original representation to not hash it both in entity_hash_key and representation_hash_key
-            let (key, value) = representation
-                .remove_entry(entity_key.as_str())
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: format!("can't get entity key {entity_key:?} in representations"),
-                })?;
-            representation_entity_keys.insert(key, value);
+            let entry = representation.remove_entry(entity_key.as_str());
+            // In case of several @key directives using different field set sometimes we don't have the related entity keys in representations
+            if let Some((key, value)) = entry {
+                representation_entity_keys.insert(key, value);
+            }
         }
 
         let hashed_representation = if representation.is_empty() {
@@ -1474,7 +1474,7 @@ fn get_entity_keys_from_supergraph_schema(
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<impl Iterator<Item = Name>, BoxError> {
+) -> Result<HashSet<Name>, BoxError> {
     let entity_keys = supergraph_schema
         .types
         .get(typename)
@@ -1488,7 +1488,6 @@ fn get_entity_keys_from_supergraph_schema(
                 .specified_argument_by_name("graph")
                 .and_then(|arg| arg.as_enum())
                 .and_then(|arg| subgraph_enums.get(arg.as_str()))?;
-
             if schema_subgraph_name == subgraph_name {
                 let mut parser = Parser::new();
                 directive
@@ -1516,7 +1515,7 @@ fn get_entity_keys_from_supergraph_schema(
                 .collect::<Vec<Name>>()
         });
 
-    Ok(entity_keys)
+    Ok(entity_keys.collect())
 }
 
 // Only hash the list of entity keys
