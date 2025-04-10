@@ -1981,7 +1981,6 @@ mod test {
             );
             assert_counter!("apollo.router.graphql_error", 1, code = "MY_CUSTOM_ERROR");
             assert_counter!("apollo.router.graphql_error", 1, code = "400");
-
         }
         .with_metrics()
         .await;
@@ -2124,8 +2123,11 @@ mod test {
                   },
                   "path": ["obj", "field"]
                 }
-               "#.parse().unwrap())
-                .unwrap();
+               "#
+                .parse()
+                .unwrap(),
+            )
+            .unwrap();
 
             count_operation_errors(&[error], &context, &config);
 
@@ -2145,7 +2147,7 @@ mod test {
 
             assert_counter!("apollo.router.graphql_error", 1, code = "400");
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 }
