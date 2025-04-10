@@ -1426,7 +1426,6 @@ fn extract_cache_keys(
 
         let mut representation_entity_keys = IndexMap::new();
         for entity_key in entity_keys {
-            dbg!(&entity_key);
             // We remove it from original representation to not hash it both in entity_hash_key and representation_hash_key
             let entry = representation.remove_entry(entity_key.as_str());
             // In case of several @key directives using different field set sometimes we don't have the related entity keys in representations
