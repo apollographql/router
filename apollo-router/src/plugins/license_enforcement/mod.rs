@@ -38,7 +38,7 @@ pub(crate) struct LicenseEnforcement {
 pub(crate) struct TpsLimitConf {
     /// The number of operations allowed during a certain interval
     pub(crate) capacity: NonZeroU64,
-    /// The interval as specied in the user's license; this is in milliseconds
+    /// The interval as specified in the user's license; this is in milliseconds
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     pub(crate) interval: Duration,

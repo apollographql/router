@@ -640,7 +640,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         // To guarantee that the selection is fully local from the provided vertex/type, we must have:
         // - no edge crossing subgraphs from that vertex.
         // - the type must be compositeType (mostly just ensuring the selection make sense).
-        // - everything in the selection must be avaiable in the type (which `rebaseOn` essentially validates).
+        // - everything in the selection must be available in the type (which `rebaseOn` essentially validates).
         // - the selection must not "type-cast" into any abstract type that has inconsistent runtimes acrosse subgraphs. The reason for the
         //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
         //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
@@ -913,11 +913,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     }
 
     /// Look at how many plans we'd have to generate and if it's "too much"
-    /// reduce it to something manageable by arbitrarilly throwing out options.
+    /// reduce it to something manageable by arbitrarily throwing out options.
     /// This effectively means that when a query has too many options,
     /// we give up on always finding the "best" query plan in favor of an "ok" query plan.
     ///
-    /// TODO: currently, when we need to reduce options, we do so somewhat arbitrarilly.
+    /// TODO: currently, when we need to reduce options, we do so somewhat arbitrarily.
     /// More precisely, we reduce the branches with the most options first
     /// and then drop the last option of the branch,
     /// repeating until we have a reasonable number of plans to consider.
@@ -1338,7 +1338,7 @@ fn test_prune_and_reorder_first_branch() {
         assert_eq!(branches, expected)
     }
     // Either the first branch had strictly more options than the second,
-    // so it is still at its correct potition after removing one option…
+    // so it is still at its correct position after removing one option…
     assert(
         &["abcdE", "fgh", "ijk", "lmn", "op"],
         &["abcd", "fgh", "ijk", "lmn", "op"],
