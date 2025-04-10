@@ -30,6 +30,7 @@ use crate::services::supergraph;
 
 pub(super) const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");
+const SCHEMA_SEVERAL_KEY: &str = include_str!("../../testdata/supergraph_several_key.graphql");
 #[derive(Debug)]
 pub(crate) struct MockStore {
     map: Arc<Mutex<HashMap<Bytes, Bytes>>>,
@@ -407,7 +408,7 @@ async fn insert_with_requires() {
 #[tokio::test]
 async fn insert_with_several_key_directives() {
     let valid_schema =
-        Arc::new(Schema::parse_and_validate(SCHEMA_REQUIRES, "test.graphql").unwrap());
+        Arc::new(Schema::parse_and_validate(SCHEMA_SEVERAL_KEY, "test.graphql").unwrap());
     let query = "query { topProducts { shippingEstimate price } }";
 
     let subgraphs = MockedSubgraphs([
@@ -475,7 +476,7 @@ async fn insert_with_several_key_directives() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
-        .schema(SCHEMA_REQUIRES)
+        .schema(SCHEMA_SEVERAL_KEY)
         .extra_plugin(entity_cache)
         .extra_plugin(subgraphs)
         .build_supergraph()
@@ -507,7 +508,7 @@ async fn insert_with_several_key_directives() {
     let service = TestHarness::builder()
         .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
         .unwrap()
-        .schema(SCHEMA_REQUIRES)
+        .schema(SCHEMA_SEVERAL_KEY)
         .extra_plugin(entity_cache)
         .build_supergraph()
         .await
