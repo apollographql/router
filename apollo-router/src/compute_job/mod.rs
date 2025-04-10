@@ -159,10 +159,10 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
             });
         }
         tracing::info!(
-                "ComputeJob thread pool created.  threads:{} queue capacity:{}",
-                pool_size,
-                QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size
-            );
+            threads = pool_size,
+            queue_capacity = QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size,
+            "ComputeJob thread pool created",
+        );
         AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
 }
