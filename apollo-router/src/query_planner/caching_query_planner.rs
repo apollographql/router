@@ -24,6 +24,7 @@ use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
@@ -274,7 +275,11 @@ where
         } in all_cache_keys
         {
             let doc = match query_analysis
-                .parse_document(&query, operation_name.as_deref())
+                .parse_document(
+                    &query,
+                    operation_name.as_deref(),
+                    ComputeJobType::QueryParsingWarmup,
+                )
                 .await
             {
                 Ok(doc) => doc,
