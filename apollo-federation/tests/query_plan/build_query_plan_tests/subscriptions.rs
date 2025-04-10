@@ -195,7 +195,7 @@ fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
 
 #[test]
 fn trying_to_use_skip_with_a_subscription_results_in_an_error() {
-    let planner = planner!(
+    let (api_schema, planner) = planner!(
     SubgraphA: r#"
             type Query {
                 me: User!
@@ -225,7 +225,7 @@ fn trying_to_use_skip_with_a_subscription_results_in_an_error() {
     // This is invalid per https://github.com/graphql/graphql-spec/pull/860
     let document = Valid::assume_valid(
         ExecutableDocument::parse(
-            planner.api_schema().schema(),
+            api_schema.schema(),
             r#"
         subscription MySubscription($v: Boolean!) {
           onNewUser @skip(if: $v) { id name }
@@ -243,7 +243,7 @@ fn trying_to_use_skip_with_a_subscription_results_in_an_error() {
 
 #[test]
 fn trying_to_use_include_with_a_subscription_results_in_an_error() {
-    let planner = planner!(
+    let (api_schema, planner) = planner!(
     SubgraphA: r#"
             type Query {
                 me: User!
@@ -273,7 +273,7 @@ fn trying_to_use_include_with_a_subscription_results_in_an_error() {
     // This is invalid per https://github.com/graphql/graphql-spec/pull/860
     let document = Valid::assume_valid(
         ExecutableDocument::parse(
-            planner.api_schema().schema(),
+            api_schema.schema(),
             r#"
         subscription MySubscription($v: Boolean!) {
           onNewUser @include(if: $v) { id name }
