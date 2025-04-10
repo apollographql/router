@@ -213,7 +213,11 @@ where
 
     Ok(async move {
         let result = rx.await;
-        job_watcher.outcome = match &result {
+
+        // This local variable MUST exist. Otherwise, only the field from the JobWatcher struct is moved and drop will occur before the outcome is set.
+        // This is predicated on all the fields in the struct being Copy!!!
+        let mut local_job_watcher = job_watcher;
+        local_job_watcher.outcome = match &result {
             Ok(Ok(_)) => Outcome::ExecutedOk,
             // We don't know what the cardinality of errors are so we just say there was a response error
             Ok(Err(_)) => Outcome::ExecutedError,
