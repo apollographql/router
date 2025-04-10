@@ -188,10 +188,6 @@ pub(crate) enum UsageReporting {
 }
 
 impl UsageReporting {
-    pub(crate) fn for_error(error_key: String) -> UsageReporting {
-        UsageReporting::Error(error_key)
-    }
-
     pub(crate) fn with_pq_id(&self, maybe_pq_id: Option<String>) -> UsageReporting {
         match self {
             UsageReporting::Operation(op_details)

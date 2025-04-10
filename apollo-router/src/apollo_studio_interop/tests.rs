@@ -379,7 +379,7 @@ fn test_get_stats_report_key() {
 
 #[test]
 fn test_get_operation_name() {
-    let usage_reporting_for_errors = UsageReporting::for_error("GraphQLParseFailure".into());
+    let usage_reporting_for_errors = UsageReporting::Error("GraphQLParseFailure".into());
     assert_eq!(
         "# GraphQLParseFailure",
         usage_reporting_for_errors.get_operation_name()

@@ -865,10 +865,8 @@ mod tests {
                 let query_plan: QueryPlan = QueryPlan {
                     formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    usage_reporting: UsageReporting::for_error(
-                        "this is a test report key".to_string(),
-                    )
-                    .into(),
+                    usage_reporting: UsageReporting::Error("this is a test report key".to_string())
+                        .into(),
                     query: Arc::new(Query::empty_for_tests()),
                     query_metrics: Default::default(),
                     estimated_size: Default::default(),

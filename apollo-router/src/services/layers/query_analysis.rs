@@ -359,7 +359,7 @@ impl QueryAnalysisLayer {
             }
             Err(MaybeBackPressureError::PermanentError(errors)) => {
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(Arc::new(UsageReporting::for_error(
+                    lock.insert(Arc::new(UsageReporting::Error(
                         errors.get_error_key().to_string(),
                     )))
                 });
@@ -383,7 +383,7 @@ impl QueryAnalysisLayer {
                 request.context.extensions().with_lock(|lock| {
                     let error_key = SpecError::ValidationError(ValidationErrors { errors: vec![] })
                         .get_error_key();
-                    lock.insert(Arc::new(UsageReporting::for_error(error_key.to_string())))
+                    lock.insert(Arc::new(UsageReporting::Error(error_key.to_string())))
                 });
                 Err(SupergraphResponse::builder()
                     .error(error.to_graphql_error())

@@ -1426,7 +1426,7 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting_with_pq.get_stats_report_key().to_string(),
+                        usage_reporting_with_pq.get_stats_report_key(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
