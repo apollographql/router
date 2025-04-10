@@ -1,0 +1,35 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:#?}\", result.errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/url_properties/invalid_mappings.graphql
+---
+[
+    Message {
+        code: InvalidUrlProperty,
+        message: "`@source(http:)` has invalid syntax in URL properties.\nThe `method` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `scheme` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `host` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `port` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `user` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `password` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `path` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `query` argument is invalid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            9:15..9:18,
+            10:15..10:18,
+            11:13..11:16,
+            12:13..12:16,
+            13:13..13:16,
+            14:17..14:20,
+            15:13..15:16,
+            16:14..16:17,
+        ],
+    },
+    Message {
+        code: InvalidUrlProperty,
+        message: "`@connect(http:)` on `Query.resources` has invalid syntax in URL properties.\nThe `method` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `scheme` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `host` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `port` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `user` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `password` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `path` argument is invalid: nom::error::ErrorKind::Eof: .\nThe `query` argument is invalid: nom::error::ErrorKind::Eof: .",
+        locations: [
+            25:17..25:20,
+            26:17..26:20,
+            27:15..27:18,
+            28:15..28:18,
+            29:15..29:18,
+            30:19..30:22,
+            31:15..31:18,
+            32:16..32:19,
+        ],
+    },
+]

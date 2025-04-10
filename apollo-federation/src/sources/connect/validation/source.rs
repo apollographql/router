@@ -7,6 +7,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Value;
 use hashbrown::HashMap;
 
+use super::connect::UrlProperties;
 use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -88,6 +89,14 @@ impl<'schema> SourceDirective<'schema> {
                     errors.push(url_error);
                 }
             }
+
+            let _ = UrlProperties::parse(
+                source_http_argument_coordinate(&directive.name),
+                schema,
+                http_arg,
+            )
+            .map_err(|e| errors.push(e))
+            .map(|url_properties| errors.extend(url_properties.type_check()));
 
             errors.extend(
                 Headers::parse(

@@ -268,6 +268,8 @@ pub enum Code {
     ConnectOnRoot,
     /// Using both `$batch` and `$this` is not allowed
     ConnectBatchAndThis,
+    /// Invalid URL property
+    InvalidUrlProperty,
 }
 
 impl Code {

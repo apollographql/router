@@ -11,6 +11,7 @@ use apollo_compiler::parser::LineColumn;
 use multi_try::MultiTry;
 use shape::Shape;
 
+use super::url_properties::UrlProperties;
 use crate::sources::connect::ConnectSpec;
 use crate::sources::connect::HTTPMethod;
 use crate::sources::connect::JSONSelection;
@@ -248,9 +249,8 @@ impl Display for BodyCoordinate<'_> {
 
 /// The `@connect(http.<METHOD>:)` arg
 struct Transport<'schema> {
-    // TODO: once this is shared with `HttpJsonTransport`, this will be used
-    #[allow(dead_code)]
     method_and_template: Option<MethodAndTemplate<'schema>>,
+    url_properties: UrlProperties,
 }
 
 impl<'schema> Transport<'schema> {
@@ -312,16 +312,24 @@ impl<'schema> Transport<'schema> {
             });
         }
 
+        let url_properties = UrlProperties::parse(coordinate.to_string(), schema, http_arg)?;
+
         Ok(Self {
             method_and_template,
+            url_properties,
         })
     }
 
     fn type_check(self, schema: &SchemaInfo) -> Vec<Message> {
-        self.method_and_template
-            .map(|m| m.type_check(schema))
+        self.url_properties
+            .type_check()
             .into_iter()
-            .flatten()
+            .chain(
+                self.method_and_template
+                    .map(|m| m.type_check(schema))
+                    .into_iter()
+                    .flatten(),
+            )
             .collect()
     }
 
