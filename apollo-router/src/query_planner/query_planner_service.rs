@@ -155,10 +155,10 @@ impl QueryPlannerService {
             compute_job::execute(ComputeJobType::QueryPlanning, move || {
                 let start = Instant::now();
 
-            let query_plan_options = QueryPlanOptions {
-                override_conditions: plan_options.override_conditions,
-                non_local_selections_limit_enabled: non_local_selections_check_enabled(),
-            };
+                let query_plan_options = QueryPlanOptions {
+                    override_conditions: plan_options.override_conditions,
+                    non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                };
 
                 let result = operation
                     .as_deref()
