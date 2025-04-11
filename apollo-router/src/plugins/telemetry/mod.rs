@@ -1190,7 +1190,7 @@ impl Telemetry {
             );
         }
 
-        if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
+        if rand::rng().gen_bool(field_level_instrumentation_ratio) {
             context
                 .extensions()
                 .with_lock(|lock| lock.insert(EnableSubgraphFtv1));

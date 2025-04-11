@@ -222,7 +222,7 @@ mod tests {
     async fn finish() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let body: RouterBody = body::from_bytes(
             std::iter::repeat(())
                 .map(|_| rng.gen_range(0u8..3))

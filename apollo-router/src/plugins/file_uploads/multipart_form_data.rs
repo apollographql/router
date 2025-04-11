@@ -29,7 +29,7 @@ pub(super) struct MultipartFormData {
 
 impl MultipartFormData {
     pub(super) fn new(map: MapFieldRaw, multipart: MultipartRequest) -> Self {
-        let boundary = format!("{:016x}", rand::thread_rng().next_u64());
+        let boundary = format!("{:016x}", rand::rng().next_u64());
         Self {
             boundary,
             map: Arc::new(map),
