@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+subscription:
+  enabled: true
+  queue_capacity: 100000
+  max_opened_subscriptions: 100
+  deduplication:
+    enabled: true
