@@ -1464,15 +1464,15 @@ fn take_matching_key_field_set(
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
 ) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
-    let key_field_sets =
-        collect_key_field_sets(typename, subgraph_name, &supergraph_schema, subgraph_enums)?;
-    let matched_key_field_set = find_matching_field_set(
-        representation,
-        &key_field_sets,
-    )
-    .ok_or_else(|| FetchError::MalformedRequest {
-        reason: format!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}"),
-    })?;
+    // find an entry in the `key_field_sets` that matches the `representation`.
+    let matched_key_field_set =
+        collect_key_field_sets(typename, subgraph_name, supergraph_schema, subgraph_enums)?
+        .find(|field_set| {
+            matches_selection_set(representation, &field_set.selection_set)
+        })
+        .ok_or_else(|| FetchError::MalformedRequest {
+            reason: format!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}"),
+        })?;
     take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
         FetchError::MalformedRequest {
             reason: format!("representation does not match the field set {matched_key_field_set}"),
@@ -1487,7 +1487,7 @@ fn collect_key_field_sets(
     subgraph_name: &str,
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
-) -> Result<Vec<apollo_compiler::executable::FieldSet>, FetchError> {
+) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet>, FetchError> {
     Ok(supergraph_schema
         .types
         .get(typename)
@@ -1520,19 +1520,7 @@ fn collect_key_field_sets(
             } else {
                 None
             }
-        })
-        .collect())
-}
-
-fn find_matching_field_set<'a>(
-    representation: &serde_json_bytes::Map<ByteString, Value>,
-    field_sets: &'a [apollo_compiler::executable::FieldSet],
-) -> Option<&'a apollo_compiler::executable::FieldSet> {
-    // find an entry in the `key_field_sets` that matches the `representation`.
-    field_sets.iter().find(|field_set| {
-        // Check if the representation matches the selection set.
-        matches_selection_set(representation, &field_set.selection_set)
-    })
+        }))
 }
 
 // Does the shape of `representation`  match the `selection_set`?
@@ -1575,9 +1563,7 @@ fn take_selection_set(
     for field in selection_set.root_fields(&Default::default()) {
         // Note: field sets can't have aliases.
         if field.selection_set.is_empty() {
-            let Some(value) = representation.remove(field.name.as_str()) else {
-                return None;
-            };
+            let value = representation.remove(field.name.as_str())?;
             // `value` must be a scalar.
             if matches!(value, Value::Object(_)) {
                 return None;
@@ -1586,19 +1572,15 @@ fn take_selection_set(
             result.insert(ByteString::from(field.name.as_str()), value);
             continue;
         } else {
-            let Some(value) = representation.get_mut(field.name.as_str()) else {
-                return None;
-            };
+            let value = representation.get_mut(field.name.as_str())?;
             // Update the sub-selection set.
             let Value::Object(sub_value) = value else {
                 return None;
             };
-            let Some(taken_part) = take_selection_set(sub_value, &field.selection_set) else {
-                return None;
-            };
+            let removed = take_selection_set(sub_value, &field.selection_set)?;
             result.insert(
                 ByteString::from(field.name.as_str()),
-                Value::Object(taken_part),
+                Value::Object(removed),
             );
         }
     }
