@@ -303,6 +303,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
         id: ConnectId {
@@ -472,6 +474,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     "connectors_Query_usersByCompany_0": Connector {
         id: ConnectId {
@@ -685,6 +689,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
@@ -1047,5 +1053,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
 }

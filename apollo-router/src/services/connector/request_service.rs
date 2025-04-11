@@ -407,6 +407,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 &request.context,
                 debug_request,
                 &debug,
+                request.supergraph_request,
             )
             .await)
         })

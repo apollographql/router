@@ -133,9 +133,16 @@ impl<'schema> Http<'schema> {
         self.transport
             .url
             .expressions()
-            .map(|e| e.expression.external_variables())
-            .chain(self.body.as_ref().map(|b| b.selection.external_variables()))
-            .flatten()
+            .flat_map(|e| {
+                e.expression
+                    .variable_references()
+                    .map(|var_ref| var_ref.namespace.namespace)
+            })
+            .chain(self.body.as_ref().into_iter().flat_map(|b| {
+                b.selection
+                    .variable_references()
+                    .map(|var_ref| var_ref.namespace.namespace)
+            }))
     }
 }
 

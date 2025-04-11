@@ -53,6 +53,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Args, shape_for_arguments(field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, Shape::unknown([])),
                 ]
                 .into_iter()
                 .collect();
@@ -74,6 +75,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, Shape::unknown([])),
                 ]
                 .into_iter()
                 .collect();
