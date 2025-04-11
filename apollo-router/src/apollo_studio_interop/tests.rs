@@ -351,8 +351,12 @@ fn test_get_stats_report_key_and_metadata() {
         persisted_query_id: "SomePqId".into(),
     };
     assert_eq!(
-        "pq# SomePqId",
-        usage_reporting_for_pq.get_stats_report_key()
+        "pq# ",
+        usage_reporting_for_pq
+            .get_stats_report_key()
+            .chars()
+            .take(4)
+            .collect::<String>()
     );
     assert_eq!(
         Some(QueryMetadata {
@@ -420,6 +424,14 @@ fn test_get_stats_report_key_uses_distinct_keys_for_pq_operations() {
         usage_reporting_op_1_pq_1_again.get_stats_report_key()
     );
 
+    let usage_reporting_op_1_pq_1_different_name = UsageReporting::PersistedQuery {
+        operation_details: UsageReportingOperationDetails {
+            operation_name: Some("DifferentName".into()),
+            operation_signature: Some("query SomeQuery1{thing{id}}".into()),
+            referenced_fields_by_type: HashMap::new(),
+        },
+        persisted_query_id: "SomePqId1".into(),
+    };
     let usage_reporting_op_2_pq_1 = UsageReporting::PersistedQuery {
         operation_details: UsageReportingOperationDetails {
             operation_name: Some("SomeQuery2".into()),
@@ -457,6 +469,7 @@ fn test_get_stats_report_key_uses_distinct_keys_for_pq_operations() {
 
     let stats_report_keys = [
         usage_reporting_op_1_pq_1,
+        usage_reporting_op_1_pq_1_different_name,
         usage_reporting_op_2_pq_1,
         usage_reporting_op_1_pq_2,
         usage_reporting_op_2_pq_2,

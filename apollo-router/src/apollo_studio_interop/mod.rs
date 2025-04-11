@@ -175,6 +175,29 @@ pub(crate) struct UsageReportingOperationDetails {
     referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
+impl UsageReportingOperationDetails {
+    fn operation_name_or_default(&self) -> String {
+        self.operation_name.as_deref().unwrap_or("").to_string()
+    }
+
+    fn operation_sig_or_default(&self) -> String {
+        self.operation_signature
+            .as_deref()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn get_signature_and_operation(&self) -> String {
+        let op_name = self.operation_name.as_deref().unwrap_or("-").to_string();
+        let op_sig = self
+            .operation_signature
+            .as_deref()
+            .unwrap_or("")
+            .to_string();
+        format!("# {}\n{}", op_name, op_sig)
+    }
+}
+
 /// UsageReporting fields, that will be used to send stats to uplink/studio
 #[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -203,7 +226,7 @@ impl UsageReporting {
     }
 
     /// The `stats_report_key` is a unique identifier derived from schema and query.
-    /// Metric data sent to Studio must be aggregated via grouped key of 
+    /// Metric data sent to Studio must be aggregated via grouped key of
     /// (`client_name`, `client_version`, `stats_report_key`).
     /// For errors, the report key is of the form "## <error name>\n".
     /// For operations not requested by PQ, the report key is of the form "# <op name>\n<op sig>".
@@ -215,62 +238,39 @@ impl UsageReporting {
     /// the "operation signature".
     pub(crate) fn get_stats_report_key(&self) -> String {
         match self {
-            UsageReporting::Operation { .. } | UsageReporting::Error { .. } => {
-                self.get_signature_and_operation()
-            },
+            UsageReporting::Operation(operation_details) => {
+                operation_details.get_signature_and_operation()
+            }
+            UsageReporting::Error(error_key) => {
+                format!("## {}\n", error_key)
+            }
             UsageReporting::PersistedQuery {
-                persisted_query_id, ..
+                operation_details,
+                persisted_query_id,
+                ..
             } => {
                 let string_to_hash = format!(
-                    "{}\n{}",
+                    "{}\n{}\n{}",
                     persisted_query_id,
-                    self.get_operation_signature()
+                    operation_details.operation_name_or_default(),
+                    operation_details.operation_sig_or_default()
                 );
                 format!("pq# {}", Self::hash_string(&string_to_hash))
             }
         }
     }
 
-    pub(crate) fn get_operation_signature(&self) -> String {
-        match self {
+    pub(crate) fn get_operation_id(&self) -> String {
+        let string_to_hash = match self {
             UsageReporting::Operation(operation_details)
             | UsageReporting::PersistedQuery {
                 operation_details, ..
-            } => operation_details
-                .operation_signature
-                .clone()
-                .unwrap_or("".to_string()),
-            UsageReporting::Error { .. } => "".to_string(),
-        }
-    }
-
-    fn get_signature_and_operation(&self) -> String {
-        match self {
-            UsageReporting::Operation(operation_details) | UsageReporting::PersistedQuery { operation_details, .. } => {
-                let op_name = operation_details
-                    .operation_name
-                    .as_deref()
-                    .unwrap_or("-")
-                    .to_string();
-                format!(
-                    "# {}\n{}",
-                    op_name,
-                    self.get_operation_signature(),
-                )
-            },
-            UsageReporting::Error(error_key) => format!("## {}\n", error_key),
-        }
-    }
-
-    pub(crate) fn get_operation_id(&self) -> String {
-        Self::hash_string(&self.get_signature_and_operation())
-    }
-
-    fn hash_string(string_to_hash: &String) -> String {
-        let mut hasher = sha1::Sha1::new();
-        hasher.update(string_to_hash.as_bytes());
-        let result = hasher.finalize();
-        hex::encode(result)
+            } => operation_details.get_signature_and_operation(),
+            UsageReporting::Error(error_key) => {
+                format!("# # {}\n", error_key)
+            }
+        };
+        Self::hash_string(&string_to_hash)
     }
 
     pub(crate) fn get_operation_name(&self) -> String {
@@ -278,10 +278,7 @@ impl UsageReporting {
             UsageReporting::Operation(operation_details)
             | UsageReporting::PersistedQuery {
                 operation_details, ..
-            } => operation_details
-                .operation_name
-                .clone()
-                .unwrap_or("".to_string()),
+            } => operation_details.operation_name_or_default(),
             UsageReporting::Error(error_key) => format!("# {}", error_key),
         }
     }
@@ -299,15 +296,24 @@ impl UsageReporting {
     pub(crate) fn get_query_metadata(&self) -> Option<QueryMetadata> {
         match self {
             UsageReporting::PersistedQuery {
-                persisted_query_id, ..
+                operation_details,
+                persisted_query_id,
+                ..
             } => Some(QueryMetadata {
-                name: self.get_operation_name(),
-                signature: self.get_operation_signature(),
+                name: operation_details.operation_name_or_default(),
+                signature: operation_details.operation_sig_or_default(),
                 pq_id: persisted_query_id.clone(),
             }),
             // For now we only want to populate query metadata for PQ operations
             UsageReporting::Operation { .. } | UsageReporting::Error { .. } => None,
         }
+    }
+
+    fn hash_string(string_to_hash: &String) -> String {
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(string_to_hash.as_bytes());
+        let result = hasher.finalize();
+        hex::encode(result)
     }
 }
 
