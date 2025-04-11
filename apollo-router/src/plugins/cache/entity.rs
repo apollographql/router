@@ -11,6 +11,7 @@ use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use http::header;
 use http::header::CACHE_CONTROL;
+use itertools::Itertools;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1609,25 +1610,42 @@ fn merge_representation(
     });
 }
 
+// Order-insensitive structural hash of the representation value
+pub(crate) fn hash_representation(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+) -> String {
+    let mut digest = Sha256::new();
+    fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
+        fields.iter().sorted_by(|a, b| a.0.cmp(&b.0)).for_each(|(k, v)| {
+            state.update(serde_json::to_string(k).unwrap().as_bytes());
+            state.update(":".as_bytes());
+            match v {
+                serde_json_bytes::Value::Object(obj) => {
+                    state.update("{".as_bytes());
+                    hash(state, obj);
+                    state.update("}".as_bytes());
+                }
+                _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
+            }
+        });
+    }
+    hash(&mut digest, representation);
+    hex::encode(digest.finalize().as_slice())
+}
+
 // Only hash the list of entity keys
 pub(crate) fn hash_entity_key(
     entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
 ) -> String {
     // We have to hash the representation because it can contains PII
-    let mut digest = Sha256::new();
-    digest.update(serde_json::to_string(&entity_keys).unwrap().as_bytes());
-    hex::encode(digest.finalize().as_slice())
+    hash_representation(entity_keys)
 }
 
 // Hash other representation variables except __typename and entity keys
 fn hash_other_representation(
     representation: &mut serde_json_bytes::Map<ByteString, Value>,
 ) -> String {
-    // We had to sort it to be deterministic
-    representation.sort_keys();
-    let mut digest = Sha256::new();
-    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-    hex::encode(digest.finalize().as_slice())
+    hash_representation(representation)
 }
 
 /// represents the result of a cache lookup for an entity type and key
