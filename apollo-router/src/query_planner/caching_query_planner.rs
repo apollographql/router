@@ -385,8 +385,10 @@ where
     type Error = CacheResolverError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
-        task::Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut task::Context<'_>) -> task::Poll<Result<(), Self::Error>> {
+        self.delegate
+            .poll_ready(cx)
+            .map_err(|err| CacheResolverError::RetrievalError(Arc::new(err)))
     }
 
     fn call(&mut self, request: query_planner::CachingRequest) -> Self::Future {

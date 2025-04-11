@@ -28,7 +28,6 @@ use http_body::Body as _;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
@@ -217,6 +216,7 @@ impl Service<RouterRequest> for RouterService {
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         // This service eventually calls `QueryAnalysisLayer::parse_document()`
         // which calls `compute_job::execute()`
+        // This makes me sad because it means we need two load_shed wrappers
         if crate::compute_job::is_full() {
             return Poll::Pending;
         }
@@ -942,7 +942,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
+        let router_service = ServiceBuilder::new().layer(content_negotiation::RouterLayer::default()).load_shed().service(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
             self.persisted_query_layer.clone(),

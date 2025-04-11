@@ -921,6 +921,10 @@ impl SupergraphCreator {
             .notify(self.config.notify.clone())
             .build();
 
+        let supergraph_service = ServiceBuilder::new()
+            .load_shed()
+            .service(supergraph_service);
+
         let shaping = self
             .plugins
             .iter()
