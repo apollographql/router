@@ -1464,12 +1464,8 @@ fn take_matching_key_field_set(
     supergraph_schema: &Valid<Schema>,
     subgraph_enums: &HashMap<String, String>,
 ) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
-    let key_field_sets = collect_key_field_sets(
-        typename,
-        subgraph_name,
-        &supergraph_schema,
-        subgraph_enums,
-    )?;
+    let key_field_sets =
+        collect_key_field_sets(typename, subgraph_name, &supergraph_schema, subgraph_enums)?;
     let matched_key_field_set = find_matching_field_set(
         representation,
         &key_field_sets,
@@ -1477,12 +1473,10 @@ fn take_matching_key_field_set(
     .ok_or_else(|| FetchError::MalformedRequest {
         reason: format!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}"),
     })?;
-    take_selection_set(
-        representation,
-        &matched_key_field_set.selection_set,
-    )
-    .ok_or_else(|| FetchError::MalformedRequest {
-        reason: format!("representation does not match the field set {matched_key_field_set}"),
+    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
+        FetchError::MalformedRequest {
+            reason: format!("representation does not match the field set {matched_key_field_set}"),
+        }
     })
 }
 
@@ -1533,7 +1527,7 @@ fn collect_key_field_sets(
 fn find_matching_field_set<'a>(
     representation: &serde_json_bytes::Map<ByteString, Value>,
     field_sets: &'a [apollo_compiler::executable::FieldSet],
-) -> Option<&'a apollo_compiler::executable::FieldSet>{
+) -> Option<&'a apollo_compiler::executable::FieldSet> {
     // find an entry in the `key_field_sets` that matches the `representation`.
     field_sets.iter().find(|field_set| {
         // Check if the representation matches the selection set.
@@ -1602,7 +1596,10 @@ fn take_selection_set(
             let Some(taken_part) = take_selection_set(sub_value, &field.selection_set) else {
                 return None;
             };
-            result.insert(ByteString::from(field.name.as_str()), Value::Object(taken_part));
+            result.insert(
+                ByteString::from(field.name.as_str()),
+                Value::Object(taken_part),
+            );
         }
     }
     Some(result)
@@ -1621,8 +1618,9 @@ fn merge_representation(
         };
 
         // Overlapping fields must be objects.
-        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value))
-        = (dest_value, src_value) {
+        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
+            (dest_value, src_value)
+        {
             // Merge sub-values
             merge_representation(dest_sub_value, src_sub_value);
         }
