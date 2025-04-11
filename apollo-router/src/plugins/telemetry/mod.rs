@@ -1403,11 +1403,15 @@ impl Telemetry {
                     .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
-                let pq_id = context
+                let maybe_pq_id = context
                     .extensions()
                     .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
                     .map(|u| u.pq_id);
-                let usage_reporting_with_pq = usage_reporting.with_pq_id(pq_id);
+                let usage_reporting = if let Some(pq_id) = maybe_pq_id {
+                    Arc::new(usage_reporting.with_pq_id(pq_id))
+                } else {
+                    usage_reporting
+                };
 
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
@@ -1426,7 +1430,7 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting_with_pq.get_stats_report_key(),
+                        usage_reporting.get_stats_report_key(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
@@ -1466,7 +1470,7 @@ impl Telemetry {
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
-                            query_metadata: usage_reporting_with_pq.get_query_metadata(),
+                            query_metadata: usage_reporting.get_query_metadata(),
                         },
                     )]),
                 }

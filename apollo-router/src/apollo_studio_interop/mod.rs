@@ -188,18 +188,14 @@ pub(crate) enum UsageReporting {
 }
 
 impl UsageReporting {
-    pub(crate) fn with_pq_id(&self, maybe_pq_id: Option<String>) -> UsageReporting {
+    pub(crate) fn with_pq_id(&self, persisted_query_id: String) -> UsageReporting {
         match self {
-            UsageReporting::Operation(op_details)
+            UsageReporting::Operation(operation_details)
             | UsageReporting::PersistedQuery {
-                operation_details: op_details,
-                ..
-            } => match maybe_pq_id {
-                Some(pq_id) => UsageReporting::PersistedQuery {
-                    operation_details: op_details.clone(),
-                    persisted_query_id: pq_id,
-                },
-                None => UsageReporting::Operation(op_details.clone()),
+                operation_details, ..
+            } => UsageReporting::PersistedQuery {
+                operation_details: operation_details.clone(),
+                persisted_query_id,
             },
             // PQ ID has no effect on errors
             UsageReporting::Error { .. } => self.clone(),
