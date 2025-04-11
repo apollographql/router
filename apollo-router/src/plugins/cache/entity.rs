@@ -770,7 +770,6 @@ impl CacheService {
                                     reason: e.to_string(),
                                 },
                             };
-                            println!("errrooooor !!!! {e:?}");
 
                             let graphql_error = e.to_graphql_error(None);
 
