@@ -1,10 +1,15 @@
 ---
-title: Deploying router to Google Cloud Run
-subtitle: ""
+title: Deploying GraphOs Router on Google Cloud Platform
+subtitle: Deploy router with Google Cloud Run
 description: Build and deploy Apollo GraphOS Router or Apollo Router Core to Google Cloud Platform (GCP) with Google Cloud Run.
 ---
 
-Learn how to deploy the router on Google Cloud Platform (GCP) with Cloud Run.
+Learn how to deploy the router for development on Google Cloud Platform (GCP) with Cloud Run.
+
+You will:
+- Build a router image with a Dockerfile.
+- Set up an Azure Container Registry and push your router image to it.
+- Create and deploy an Azure Container App for your router.
 
 <Note>
 
@@ -14,8 +19,10 @@ Not deploying to GCP? Try our deployment guides for [AWS](/graphos/routing/self-
 
 ## Prerequisites
 
-Before you start, set up the following tools:
+Before you start:
 
+1. [Set up a GraphQL API in GraphOS](/graphos/get-started/guides/graphql#step-1-set-up-your-graphql-api).
+    - Save your `APOLLO_KEY` and `APOLLO_GRAPH_REF`. You'll need them when deploying the router.
 1. Install [Docker](https://www.docker.com/get-started/) locally.
 1. Create a new [Google Cloud account](https://cloud.google.com/) or go to an existing account.
 1. Install the [gcloud CLI](https://cloud.google.com/sdk/docs/install), if not already installed, and log in to your GCP account.

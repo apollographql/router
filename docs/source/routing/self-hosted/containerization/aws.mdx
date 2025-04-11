@@ -1,10 +1,15 @@
 ---
-title: Deploying router to Amazon Web Services (AWS) 
-subtitle: Deploy with Amazon Elastic Container Service (ECS) and AWS Fargate 
-description: Build and deploy Apollo GraphOS Router or Apollo Router Core to AWS Fargate
+title: Deploying GraphOS Router on Amazon Web Services
+subtitle: Deploy router with Elastic Container Service (ECS) 
+description: Build and deploy Apollo GraphOS Router on Amazon Web Services (AWS) with Elastic Container Service (ECS)
 ---
 
-Learn how to deploy the router to AWS Fargate.
+Learn how to deploy the router for development on AWS with Elastic Container Service (ECS).
+
+You will:
+- Build a router image with a Dockerfile.
+- Set up an Elastic Cloud Registry and push your router image to it.
+- Create an ECS task definition for your router and deploy it.
 
 <Note>
 
@@ -14,6 +19,10 @@ Not deploying to AWS? Try our deployment guides for [GCP](/graphos/routing/self-
 
 ## Prerequisites
 
+Before you start:
+
+1. [Set up a GraphQL API in GraphOS](/graphos/get-started/guides/graphql#step-1-set-up-your-graphql-api).
+    - Save your `APOLLO_KEY` and `APOLLO_GRAPH_REF`. You'll need them when deploying the router.
 1. Install [Docker](https://www.docker.com/get-started/) locally.
 1. Set up you [AWS environment](https://aws.amazon.com/getting-started/guides/setup-environment/)
     - Install the AWS CLI.
