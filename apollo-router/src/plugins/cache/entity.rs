@@ -132,7 +132,7 @@ pub(crate) struct Subgraph {
     /// Redis configuration
     pub(crate) redis: Option<RedisCache>,
 
-    /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
+    /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
@@ -211,7 +211,7 @@ impl Plugin for EntityCache {
         if let Some(redis) = &init.config.subgraph.all.redis {
             let mut redis_config = redis.clone();
             let required_to_start = redis_config.required_to_start;
-            // we need to explicitely disable TTL reset because it is managed directly by this plugin
+            // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
             all = match RedisCacheStorage::new(redis_config).await {
                 Ok(storage) => Some(storage),
@@ -232,7 +232,7 @@ impl Plugin for EntityCache {
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
                 let required_to_start = redis.required_to_start;
-                // we need to explicitely disable TTL reset because it is managed directly by this plugin
+                // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
                 let storage = match RedisCacheStorage::new(redis_config).await {
