@@ -17,6 +17,7 @@ use self::metrics::observe_compute_duration;
 use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
+use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
@@ -98,7 +99,7 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 }
             });
         }
-        AgeingPriorityQueue::soft_bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
+        AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
 }
 
@@ -111,7 +112,7 @@ where
     F: FnOnce() -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
 {
-    let job_watcher = JobWatcher::new(compute_job_type);
+    let mut job_watcher = JobWatcher::new(compute_job_type);
 
     let (tx, rx) = oneshot::channel();
     let job = Box::new(move || {
@@ -124,8 +125,28 @@ where
         job_fn: job,
         queue_start: Instant::now(),
     };
-    queue().send(compute_job_type.into(), job);
+
+    let queue = queue();
+    let send_result = queue
+        .send(compute_job_type.into(), job)
+        .map_err(|err| match err {
+            SendError::QueueIsFull => {
+                job_watcher.outcome = Outcome::RejectedQueueFull;
+                Box::new(err) as Box<dyn Any + Send>
+            }
+            SendError::Disconnected => {
+                // This never panics because this channel can never be disconnected:
+                // the receiver is owned by `queue` which we can access here:
+                let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
+                unreachable!()
+            }
+        });
+
     async move {
+        // NB: have to return this error from here because we need to return an async closure, and
+        //  "no two async blocks, even if identical, have the same type"
+        send_result?;
+
         let result = rx.await;
         // This local variable MUST exist
         let mut local_job_watcher = job_watcher;

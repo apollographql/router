@@ -9,8 +9,6 @@ pub(super) enum Outcome {
     ExecutedError,
     ChannelError,
     Abandoned,
-
-    #[allow(dead_code)] // NB: `RejectedQueueFull` is unused for now
     RejectedQueueFull,
 }
 
