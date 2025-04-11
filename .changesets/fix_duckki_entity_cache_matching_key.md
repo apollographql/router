@@ -12,8 +12,4 @@ type Product @key(fields: "upc") @key(fields: "sku") {
 }
 ```
 
-<!-- [ROUTER-1244] -->
-
-[ROUTER-1244]: https://apollographql.atlassian.net/browse/ROUTER-1244?atlOrigin=eyJpIjoiNWRkNTljNzYxNjVmNDY3MDlhMDU5Y2ZhYzA5YTRkZjUiLCJwIjoiZ2l0aHViLWNvbS1KU1cifQ
-
 By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7228
