@@ -1,19 +1,31 @@
+mod metrics;
+
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
 
+use self::metrics::ActiveComputeMetric;
+use self::metrics::JobWatcher;
+use self::metrics::Outcome;
+use self::metrics::observe_compute_duration;
+use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
-pub(crate) use crate::ageing_priority_queue::Priority;
+use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
-const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 20;
+///
+/// This number is somewhat arbitrary and subject to change. Most compute jobs
+/// don't take a long time, so by making the queue quite big, it's capable of eating
+/// a sizable backlog during spikes.
+const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 1_000;
 
 /// By default, let this thread pool use all available resources if it can.
 /// In the worst case, we’ll have moderate context switching cost
@@ -92,7 +104,35 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
     }
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+#[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+pub(crate) enum ComputeJobType {
+    QueryParsing,
+    QueryPlanning,
+    Introspection,
+}
+
+impl From<ComputeJobType> for Priority {
+    fn from(job_type: ComputeJobType) -> Self {
+        match job_type {
+            ComputeJobType::QueryPlanning => Self::P8, // high
+            ComputeJobType::QueryParsing => Self::P4,  // medium
+            ComputeJobType::Introspection => Self::P1, // low
+        }
+    }
+}
+
+impl From<ComputeJobType> for opentelemetry::Value {
+    fn from(compute_job_type: ComputeJobType) -> Self {
+        let s: &'static str = compute_job_type.into();
+        s.into()
+    }
+}
+
+pub(crate) struct Job {
+    ty: ComputeJobType,
+    queue_start: Instant,
+    job_fn: Box<dyn FnOnce() + Send + 'static>,
+}
 
 pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
     static QUEUE: OnceLock<AgeingPriorityQueue<Job>> = OnceLock::new();
@@ -109,7 +149,12 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                 let mut receiver = queue.receiver();
                 loop {
                     let job = receiver.blocking_recv();
-                    job();
+                    observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
+
+                    let _active_metric = ActiveComputeMetric::register(job.ty);
+                    let job_start = Instant::now();
+                    (job.job_fn)();
+                    observe_compute_duration(job.ty, job_start.elapsed());
                 }
             });
         }
@@ -119,15 +164,17 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
 /// Returns a future that resolves to a `Result` that is `Ok` if `f` returned or `Err` if it panicked.
 pub(crate) fn execute<T, F>(
-    priority: Priority,
+    compute_job_type: ComputeJobType,
     job: F,
 ) -> Result<impl Future<Output = T>, ComputeBackPressureError>
 where
     F: FnOnce(JobStatus<'_, T>) -> T + Send + 'static,
     T: Send + 'static,
 {
+    let mut job_watcher = JobWatcher::new(compute_job_type);
+
     let (tx, rx) = oneshot::channel();
-    let wrapped_job = Box::new(move || {
+    let wrapped_job_fn = Box::new(move || {
         let status = JobStatus { result_sender: &tx };
         // `AssertUnwindSafe` here is correct because this `catch_unwind`
         // is paired with `resume_unwind` below, so the overall effect on unwind safety
@@ -140,25 +187,49 @@ where
             }
         }
     });
+
     let queue = queue();
-    queue.send(priority, wrapped_job).map_err(|e| match e {
-        SendError::QueueIsFull => {
-            u64_counter!(
-                "apollo.router.compute_jobs.queue_is_full",
-                "Number of requests rejected because the queue for compute jobs is full",
-                1u64
-            );
-            ComputeBackPressureError
-        }
-        SendError::Disconnected => {
-            // This never panics because this channel can never be disconnect:
-            // the receiver is owned by `queue` which we can access here:
-            let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
-            unreachable!("compute thread pool queue is disconnected")
-        }
-    })?;
+    let job = Job {
+        ty: compute_job_type,
+        job_fn: wrapped_job_fn,
+        queue_start: Instant::now(),
+    };
+
+    queue
+        .send(Priority::from(compute_job_type), job)
+        .map_err(|e| match e {
+            SendError::QueueIsFull => {
+                u64_counter!(
+                    "apollo.router.compute_jobs.queue_is_full",
+                    "Number of requests rejected because the queue for compute jobs is full",
+                    1u64
+                );
+                job_watcher.outcome = Outcome::RejectedQueueFull;
+                ComputeBackPressureError
+            }
+            SendError::Disconnected => {
+                // This never panics because this channel can never be disconnect:
+                // the receiver is owned by `queue` which we can access here:
+                let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
+                unreachable!("compute thread pool queue is disconnected")
+            }
+        })?;
+
     Ok(async move {
-        match rx.await {
+        let result = rx.await;
+
+        // This local variable MUST exist. Otherwise, only the field from the JobWatcher struct is moved and drop will occur before the outcome is set.
+        // This is predicated on all the fields in the struct being Copy!!!
+        let mut local_job_watcher = job_watcher;
+        local_job_watcher.outcome = match &result {
+            Ok(Ok(_)) => Outcome::ExecutedOk,
+            // We don't know what the cardinality of errors are so we just say there was a response error
+            Ok(Err(_)) => Outcome::ExecutedError,
+            // We got an error reading the response from the channel
+            Err(_) => Outcome::ChannelError,
+        };
+
+        match result {
             Ok(Ok(value)) => value,
             Ok(Err(panic_payload)) => {
                 // The `job` callback panicked.
@@ -209,9 +280,11 @@ mod tests {
     #[tokio::test]
     async fn test_executes_on_different_thread() {
         let test_thread = std::thread::current().id();
-        let job_thread = execute(Priority::P4, |_| std::thread::current().id())
-            .unwrap()
-            .await;
+        let job_thread = execute(ComputeJobType::QueryParsing, |_| {
+            std::thread::current().id()
+        })
+        .unwrap()
+        .await;
         assert_ne!(job_thread, test_thread)
     }
 
@@ -221,12 +294,12 @@ mod tests {
             return;
         }
         let start = Instant::now();
-        let one = execute(Priority::P8, |_| {
+        let one = execute(ComputeJobType::QueryPlanning, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1
         })
         .unwrap();
-        let two = execute(Priority::P8, |_| {
+        let two = execute(ComputeJobType::QueryPlanning, |_| {
             std::thread::sleep(Duration::from_millis(1_000));
             1 + 1
         })
@@ -241,7 +314,7 @@ mod tests {
     #[tokio::test]
     async fn test_cancel() {
         let (side_channel_sender, side_channel_receiver) = oneshot::channel();
-        let queue_receiver = execute(Priority::P1, move |status| {
+        let queue_receiver = execute(ComputeJobType::Introspection, move |status| {
             // We expect the first iteration to succeed,
             // but let’s add lots of margin for CI machines with super-busy CPU cores
             for _ in 0..1_000 {
