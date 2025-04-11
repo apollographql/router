@@ -253,7 +253,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                 .push(Key::new(FIELD_EXCEPTION_MESSAGE).string(error_msg.clone()));
 
             // NOTE: This is actually not the stacktrace of the exception. This is
-            // the "source chain". It represents the heirarchy of errors from the
+            // the "source chain". It represents the hierarchy of errors from the
             // app level to the lowest level such as IO. It does not represent all
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
@@ -269,7 +269,7 @@ impl field::Visit for SpanEventVisitor<'_, '_> {
                     attrs.push(KeyValue::new(FIELD_EXCEPTION_MESSAGE, error_msg.clone()));
 
                     // NOTE: This is actually not the stacktrace of the exception. This is
-                    // the "source chain". It represents the heirarchy of errors from the
+                    // the "source chain". It represents the hierarchy of errors from the
                     // app level to the lowest level such as IO. It does not represent all
                     // of the callsites in the code that led to the error happening.
                     // `std::error::Error::backtrace` is a nightly-only API and cannot be
@@ -395,7 +395,7 @@ impl field::Visit for SpanAttributeVisitor<'_> {
             self.record(Key::new(FIELD_EXCEPTION_MESSAGE).string(error_msg.clone()));
 
             // NOTE: This is actually not the stacktrace of the exception. This is
-            // the "source chain". It represents the heirarchy of errors from the
+            // the "source chain". It represents the hierarchy of errors from the
             // app level to the lowest level such as IO. It does not represent all
             // of the callsites in the code that led to the error happening.
             // `std::error::Error::backtrace` is a nightly-only API and cannot be
@@ -671,7 +671,7 @@ where
             return true;
         }
 
-        // if there's an exsting otel context set by the client request, and it is sampled,
+        // if there's an existing otel context set by the client request, and it is sampled,
         // then that trace is sampled
         let current_otel_context = opentelemetry::Context::current();
         if current_otel_context.span().span_context().is_sampled() {

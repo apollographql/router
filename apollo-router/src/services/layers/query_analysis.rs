@@ -27,6 +27,7 @@ use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -123,8 +124,7 @@ impl QueryAnalysisLayer {
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
 
-        let priority = compute_job::Priority::P4; // Medium priority
-        compute_job::execute(priority, move |_| {
+        compute_job::execute(ComputeJobType::QueryParsing, move |_| {
             span.in_scope(|| {
                 Query::parse_document(
                     &query,

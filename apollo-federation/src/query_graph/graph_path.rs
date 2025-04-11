@@ -257,7 +257,7 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
 ///
 /// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
 /// startup. It currently implements `Serialize` for debugging purposes. It should not implement
-/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// `Deserialize`, and, more specifically, it should not be used for caching until uniqueness is
 /// provided (i.e. the inner type is a `Uuid` or the like).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct OverrideId(usize);
