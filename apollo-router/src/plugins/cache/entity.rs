@@ -5,14 +5,12 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
-use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
 use http::header;
 use http::header::CACHE_CONTROL;
-use indexmap::IndexMap;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -1398,30 +1396,22 @@ fn extract_cache_keys(
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "__typename in representation is not a string".to_string(),
             })?;
-        let entity_keys = get_entity_keys_from_supergraph_schema(
+
+        // Split `representation` into two parts: the entity key part and the rest.
+        let representation_entity_key = take_matching_key_field_set(
+            representation,
             typename,
             subgraph_name,
             &supergraph_schema,
             subgraph_enums,
         )?;
 
-        let mut representation_entity_keys = IndexMap::new();
-        for entity_key in entity_keys {
-            // We remove it from original representation to not hash it both in entity_hash_key and representation_hash_key
-            let (key, value) = representation
-                .remove_entry(entity_key.as_str())
-                .ok_or_else(|| FetchError::MalformedRequest {
-                    reason: format!("can't get entity key {entity_key:?} in representations"),
-                })?;
-            representation_entity_keys.insert(key, value);
-        }
-
         let hashed_representation = if representation.is_empty() {
             String::new()
         } else {
             hash_other_representation(representation)
         };
-        let hashed_entity_key = hash_entity_key(&representation_entity_keys);
+        let hashed_entity_key = hash_entity_key(&representation_entity_key);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - entity cache version: current version of the hash
@@ -1439,24 +1429,47 @@ fn extract_cache_keys(
             }
         }
 
+        // Restore the `representation` back whole again
         representation.insert(TYPENAME, typename_value);
-        representation_entity_keys
-            .into_iter()
-            .for_each(|(key, val)| {
-                representation.insert(key, val);
-            });
+        merge_representation(representation, representation_entity_key);
+
         res.push(key);
     }
     Ok(res)
 }
 
-fn get_entity_keys_from_supergraph_schema<'a, 'b>(
-    typename: &'b str,
-    subgraph_name: &'b str,
-    supergraph_schema: &'a Valid<Schema>,
-    subgraph_enums: &'a HashMap<String, String>,
-) -> Result<impl Iterator<Item = Name> + use<'a, 'b>, BoxError> {
-    let entity_keys = supergraph_schema
+fn take_matching_key_field_set(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+    typename: &str,
+    subgraph_name: &str,
+    supergraph_schema: &Valid<Schema>,
+    subgraph_enums: &HashMap<String, String>,
+) -> Result<serde_json_bytes::Map<ByteString, Value>, FetchError> {
+    let key_field_sets =
+        collect_key_field_sets(typename, subgraph_name, &supergraph_schema, subgraph_enums)?;
+    let matched_key_field_set = find_matching_field_set(
+        representation,
+        &key_field_sets,
+    )
+    .ok_or_else(|| FetchError::MalformedRequest {
+        reason: format!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}"),
+    })?;
+    take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
+        FetchError::MalformedRequest {
+            reason: format!("representation does not match the field set {matched_key_field_set}"),
+        }
+    })
+}
+
+// Collect `@key` field sets on a `typename` in a `subgraph_name`.
+// - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
+fn collect_key_field_sets(
+    typename: &str,
+    subgraph_name: &str,
+    supergraph_schema: &Valid<Schema>,
+    subgraph_enums: &HashMap<String, String>,
+) -> Result<Vec<apollo_compiler::executable::FieldSet>, FetchError> {
+    Ok(supergraph_schema
         .types
         .get(typename)
         .ok_or_else(|| FetchError::MalformedRequest {
@@ -1489,20 +1502,115 @@ fn get_entity_keys_from_supergraph_schema<'a, 'b>(
                 None
             }
         })
-        .flat_map(|field_set| {
-            field_set
-                .selection_set
-                .root_fields(&Default::default())
-                .map(|f| f.name.clone())
-                .collect::<Vec<Name>>()
-        });
+        .collect())
+}
 
-    Ok(entity_keys)
+fn find_matching_field_set<'a>(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    field_sets: &'a [apollo_compiler::executable::FieldSet],
+) -> Option<&'a apollo_compiler::executable::FieldSet> {
+    // find an entry in the `key_field_sets` that matches the `representation`.
+    field_sets.iter().find(|field_set| {
+        // Check if the representation matches the selection set.
+        matches_selection_set(representation, &field_set.selection_set)
+    })
+}
+
+// Does the shape of `representation`  match the `selection_set`?
+fn matches_selection_set(
+    representation: &serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> bool {
+    for field in selection_set.root_fields(&Default::default()) {
+        // Note: field sets can't have aliases.
+        let Some(value) = representation.get(field.name.as_str()) else {
+            return false;
+        };
+
+        if field.selection_set.is_empty() {
+            // `value` must be a scalar.
+            if matches!(value, Value::Object(_)) {
+                return false;
+            }
+            continue;
+        }
+
+        // Check the sub-selection set.
+        let Value::Object(sub_value) = value else {
+            return false;
+        };
+        if !matches_selection_set(sub_value, &field.selection_set) {
+            return false;
+        }
+    }
+    true
+}
+
+// Removes the selection set from `representation` and returns the value corresponding to it.
+// - Returns None if the representation doesn't match the selection set.
+fn take_selection_set(
+    representation: &mut serde_json_bytes::Map<ByteString, Value>,
+    selection_set: &apollo_compiler::executable::SelectionSet,
+) -> Option<serde_json_bytes::Map<ByteString, Value>> {
+    let mut result = serde_json_bytes::Map::new();
+    for field in selection_set.root_fields(&Default::default()) {
+        // Note: field sets can't have aliases.
+        if field.selection_set.is_empty() {
+            let Some(value) = representation.remove(field.name.as_str()) else {
+                return None;
+            };
+            // `value` must be a scalar.
+            if matches!(value, Value::Object(_)) {
+                return None;
+            }
+            // Move the scalar field to the `result`.
+            result.insert(ByteString::from(field.name.as_str()), value);
+            continue;
+        } else {
+            let Some(value) = representation.get_mut(field.name.as_str()) else {
+                return None;
+            };
+            // Update the sub-selection set.
+            let Value::Object(sub_value) = value else {
+                return None;
+            };
+            let Some(taken_part) = take_selection_set(sub_value, &field.selection_set) else {
+                return None;
+            };
+            result.insert(
+                ByteString::from(field.name.as_str()),
+                Value::Object(taken_part),
+            );
+        }
+    }
+    Some(result)
+}
+
+// The inverse of `take_selection_set`.
+fn merge_representation(
+    dest: &mut serde_json_bytes::Map<ByteString, Value>,
+    source: serde_json_bytes::Map<ByteString, Value>,
+) {
+    source.into_iter().for_each(|(key, src_value)| {
+        // Note: field sets can't have aliases.
+        let Some(dest_value) = dest.get_mut(&key) else {
+            dest.insert(key, src_value);
+            return;
+        };
+
+        // Overlapping fields must be objects.
+        if let (Value::Object(dest_sub_value), Value::Object(src_sub_value)) =
+            (dest_value, src_value)
+        {
+            // Merge sub-values
+            merge_representation(dest_sub_value, src_sub_value);
+        }
+    });
 }
 
 // Only hash the list of entity keys
 pub(crate) fn hash_entity_key(
-    entity_keys: &IndexMap<ByteString, serde_json_bytes::Value>,
+    entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
 ) -> String {
     // We have to hash the representation because it can contains PII
     let mut digest = Sha256::new();
