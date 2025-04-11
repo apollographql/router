@@ -116,17 +116,13 @@ impl RequestInputs {
                 .unwrap_or_default()
                 .iter()
                 .filter_map(|(key, value)| {
-                    if headers_used.contains(key.as_str()) {
-                        return Some((
-                            key.as_str().into(),
-                            value
-                                .iter()
-                                .map(|s| Value::String(s.as_str().into()))
-                                .collect(),
-                        ));
-                    }
-
-                    None
+                    headers_used.contains(key.as_str()).then_some((
+                        key.as_str().into(),
+                        value
+                            .iter()
+                            .map(|s| Value::String(s.as_str().into()))
+                            .collect(),
+                    ))
                 })
                 .collect();
             let request_object = json!({
@@ -144,17 +140,13 @@ impl RequestInputs {
                         .unwrap_or_default()
                         .iter()
                         .filter_map(|(key, value)| {
-                            if headers_used.contains(key.as_str()) {
-                                return Some((
-                                    key.as_str().into(),
-                                    value
-                                        .iter()
-                                        .map(|s| Value::String(s.as_str().into()))
-                                        .collect(),
-                                ));
-                            }
-
-                            None
+                            headers_used.contains(key.as_str()).then_some((
+                                key.as_str().into(),
+                                value
+                                    .iter()
+                                    .map(|s| Value::String(s.as_str().into()))
+                                    .collect(),
+                            ))
                         })
                         .collect();
                 let response_object = json!({
