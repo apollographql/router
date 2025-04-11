@@ -645,7 +645,6 @@ impl InnerCacheService {
                         );
 
                         let mut response = self.service.call(request).await?;
-
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
                                 CacheControl::new(response.response.headers(), self.storage.ttl)?
@@ -753,6 +752,7 @@ impl InnerCacheService {
                                     reason: e.to_string(),
                                 },
                             };
+                            println!("errrooooor !!!! {e:?}");
 
                             let graphql_error = e.to_graphql_error(None);
 
@@ -1464,12 +1464,12 @@ fn take_matching_key_field_set(
 
 // Collect `@key` field sets on a `typename` in a `subgraph_name`.
 // - Returns a Vec of FieldSet, since there may be more than one @key directives in the subgraph.
-fn collect_key_field_sets(
-    typename: &str,
-    subgraph_name: &str,
-    supergraph_schema: &Valid<Schema>,
-    subgraph_enums: &HashMap<String, String>,
-) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet>, FetchError> {
+fn collect_key_field_sets<'a, 'b>(
+    typename: &'a str,
+    subgraph_name: &'b str,
+    supergraph_schema: &'a Valid<Schema>,
+    subgraph_enums: &'a HashMap<String, String>,
+) -> Result<impl Iterator<Item = apollo_compiler::executable::FieldSet> + use<'a, 'b>, FetchError> {
     Ok(supergraph_schema
         .types
         .get(typename)
@@ -1597,18 +1597,21 @@ pub(crate) fn hash_representation(
 ) -> String {
     let mut digest = Sha256::new();
     fn hash(state: &mut Sha256, fields: &serde_json_bytes::Map<ByteString, Value>) {
-        fields.iter().sorted_by(|a, b| a.0.cmp(&b.0)).for_each(|(k, v)| {
-            state.update(serde_json::to_string(k).unwrap().as_bytes());
-            state.update(":".as_bytes());
-            match v {
-                serde_json_bytes::Value::Object(obj) => {
-                    state.update("{".as_bytes());
-                    hash(state, obj);
-                    state.update("}".as_bytes());
+        fields
+            .iter()
+            .sorted_by(|a, b| a.0.cmp(b.0))
+            .for_each(|(k, v)| {
+                state.update(serde_json::to_string(k).unwrap().as_bytes());
+                state.update(":".as_bytes());
+                match v {
+                    serde_json_bytes::Value::Object(obj) => {
+                        state.update("{".as_bytes());
+                        hash(state, obj);
+                        state.update("}".as_bytes());
+                    }
+                    _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
                 }
-                _ => state.update(serde_json::to_string(v).unwrap().as_bytes()),
-            }
-        });
+            });
     }
     hash(&mut digest, representation);
     hex::encode(digest.finalize().as_slice())
@@ -1618,6 +1621,8 @@ pub(crate) fn hash_representation(
 pub(crate) fn hash_entity_key(
     entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
 ) -> String {
+    #[cfg(test)]
+    dbg!(&entity_keys);
     // We have to hash the representation because it can contains PII
     hash_representation(entity_keys)
 }
@@ -1842,9 +1847,9 @@ pub(crate) type CacheKeysContext = HashMap<SubgraphRequestId, Vec<CacheKeyContex
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(PartialEq, Eq, Hash, PartialOrd, Ord))]
 pub(crate) struct CacheKeyContext {
-    key: String,
-    status: CacheKeyStatus,
-    cache_control: String,
+    pub(super) key: String,
+    pub(super) status: CacheKeyStatus,
+    pub(super) cache_control: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

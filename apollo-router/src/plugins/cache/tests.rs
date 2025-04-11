@@ -11,6 +11,7 @@ use fred::prelude::RedisValue;
 use http::HeaderValue;
 use http::header::CACHE_CONTROL;
 use parking_lot::Mutex;
+use serde_json_bytes::ByteString;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
@@ -24,6 +25,7 @@ use crate::plugins::cache::entity::CONTEXT_CACHE_KEYS;
 use crate::plugins::cache::entity::CacheKeyContext;
 use crate::plugins::cache::entity::CacheKeysContext;
 use crate::plugins::cache::entity::Subgraph;
+use crate::plugins::cache::entity::hash_representation;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
@@ -299,8 +301,8 @@ async fn insert_with_requires() {
                 "variables": {
                     "representations": [
                         {
-                            "price": 150,
                             "weight": 5,
+                            "price": 150,
                             "upc": "1",
                             "__typename": "Product"
                         }
@@ -364,6 +366,19 @@ async fn insert_with_requires() {
     let cache_keys: CacheKeysContext = response.context.get(CONTEXT_CACHE_KEYS).unwrap().unwrap();
     let mut cache_keys: Vec<CacheKeyContext> = cache_keys.into_values().flatten().collect();
     cache_keys.sort();
+    let mut entity_key = serde_json_bytes::Map::new();
+    entity_key.insert(
+        ByteString::from("upc"),
+        serde_json_bytes::Value::String(ByteString::from("1")),
+    );
+    let hashed_entity_key = hash_representation(&entity_key);
+    let prefix_key =
+        format!("version:1.0:subgraph:inventory:type:Product:entity:{hashed_entity_key}");
+    assert!(
+        cache_keys
+            .iter()
+            .any(|cache_key| cache_key.key.starts_with(&prefix_key))
+    );
     insta::assert_json_snapshot!(cache_keys);
 
     insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
