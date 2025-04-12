@@ -1,5 +1,4 @@
 use apollo_compiler::collections::IndexMap;
-use serde_json_bytes::Value as JSON;
 use shape::Shape;
 use shape::location::SourceId;
 
@@ -11,6 +10,7 @@ use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 
 impl_arrow_method!(EchoMethod, echo_method, echo_shape);
 /// Echo simply returns back whichever value is provided in it's arg.

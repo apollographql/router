@@ -1,8 +1,11 @@
 use apollo_compiler::collections::IndexSet;
 use nom::Slice;
 use nom::character::complete::multispace0;
-use serde_json_bytes::Map as JSONMap;
-use serde_json_bytes::Value as JSON;
+// use serde_json_bytes::Map as RawJSONMap;
+use super::safe_json::Map as JSONMap;
+// use super::safe_json::SafeString;
+// use serde_json_bytes::Value as RawJSON;
+use super::safe_json::Value as JSON;
 
 use super::ParseResult;
 use super::location::Span;
@@ -92,7 +95,7 @@ pub(crate) fn json_merge(a: Option<&JSON>, b: Option<&JSON>) -> (Option<JSON>, V
             for key in IndexSet::from_iter(a.keys().chain(b.keys())) {
                 let (child_opt, child_errors) = json_merge(a.get(key), b.get(key));
                 if let Some(child) = child_opt {
-                    merged.insert(key.clone(), child);
+                    merged.insert(key.clone(), child); // TODO
                 }
                 errors.extend(child_errors);
             }

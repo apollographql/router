@@ -17,7 +17,7 @@ use nom::sequence::pair;
 use nom::sequence::preceded;
 use nom::sequence::terminated;
 use nom::sequence::tuple;
-use serde_json_bytes::Value as JSON;
+// use serde_json_bytes::Value as RawJSON;
 
 use super::helpers::spaces_or_comments;
 use super::known_var::KnownVariable;
@@ -32,6 +32,7 @@ use super::location::ranged_span;
 use crate::sources::connect::variable::VariableNamespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
+use crate::sources::connect::json_selection::safe_json::Value as JSON;
 
 // ParseResult is the internal type returned by most ::parse methods, as it is
 // convenient to use with nom's combinators. The top-level JSONSelection::parse
