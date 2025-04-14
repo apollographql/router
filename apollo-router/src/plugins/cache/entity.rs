@@ -132,11 +132,11 @@ pub(crate) struct Subgraph {
     /// Redis configuration
     pub(crate) redis: Option<RedisCache>,
 
-    /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
+    /// expiration for all keys for this subgraph, unless overridden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    pub(crate) enabled: bool,
+    pub(crate) enabled: Option<bool>,
 
     /// Context key used to separate cache sections per user
     pub(crate) private_id: Option<String>,
@@ -149,7 +149,7 @@ impl Default for Subgraph {
     fn default() -> Self {
         Self {
             redis: None,
-            enabled: true,
+            enabled: Some(true),
             ttl: Default::default(),
             private_id: Default::default(),
             invalidation: Default::default(),
@@ -211,7 +211,7 @@ impl Plugin for EntityCache {
         if let Some(redis) = &init.config.subgraph.all.redis {
             let mut redis_config = redis.clone();
             let required_to_start = redis_config.required_to_start;
-            // we need to explicitely disable TTL reset because it is managed directly by this plugin
+            // we need to explicitly disable TTL reset because it is managed directly by this plugin
             redis_config.reset_ttl = false;
             all = match RedisCacheStorage::new(redis_config).await {
                 Ok(storage) => Some(storage),
@@ -232,7 +232,7 @@ impl Plugin for EntityCache {
         for (subgraph, config) in &init.config.subgraph.subgraphs {
             if let Some(redis) = &config.redis {
                 let required_to_start = redis.required_to_start;
-                // we need to explicitely disable TTL reset because it is managed directly by this plugin
+                // we need to explicitly disable TTL reset because it is managed directly by this plugin
                 let mut redis_config = redis.clone();
                 redis_config.reset_ttl = false;
                 let storage = match RedisCacheStorage::new(redis_config).await {
@@ -367,15 +367,8 @@ impl Plugin for EntityCache {
             }
         };
 
-        let subgraph_ttl = self
-            .subgraphs
-            .get(name)
-            .ttl
-            .clone()
-            .map(|t| t.0)
-            .or_else(|| storage.ttl());
-        let subgraph_enabled =
-            self.enabled && (self.subgraphs.all.enabled || self.subgraphs.get(name).enabled);
+        let subgraph_ttl = self.subgraph_ttl(name, &storage);
+        let subgraph_enabled = self.subgraph_enabled(name);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
         let name = name.to_string();
@@ -517,6 +510,34 @@ impl EntityCache {
             subgraph_enums: Arc::new(get_subgraph_enums(&supergraph_schema)),
             supergraph_schema,
         })
+    }
+
+    // Returns boolean to know if cache is enabled for this subgraph
+    fn subgraph_enabled(&self, subgraph_name: &str) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match (
+            self.subgraphs.all.enabled,
+            self.subgraphs.get(subgraph_name).enabled,
+        ) {
+            (_, Some(x)) => x, // explicit per-subgraph setting overrides the `all` default
+            (Some(true) | None, None) => true, // unset defaults to true
+            (Some(false), None) => false,
+        }
+    }
+
+    // Returns the configured ttl for this subgraph
+    fn subgraph_ttl(&self, subgraph_name: &str, storage: &RedisCacheStorage) -> Option<Duration> {
+        self.subgraphs
+            .get(subgraph_name)
+            .ttl
+            .clone()
+            .map(|t| t.0)
+            .or_else(|| match self.subgraphs.all.ttl.clone() {
+                Some(ttl) => Some(ttl.0),
+                None => storage.ttl(),
+            })
     }
 }
 
@@ -1763,5 +1784,128 @@ impl Ord for CacheKeyStatus {
             (CacheKeyStatus::Cached, CacheKeyStatus::New) => std::cmp::Ordering::Less,
             (CacheKeyStatus::Cached, CacheKeyStatus::Cached) => std::cmp::Ordering::Equal,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::cache::tests::MockStore;
+    use crate::plugins::cache::tests::SCHEMA;
+
+    #[tokio::test]
+    async fn test_subgraph_enabled() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false
+            }
+        });
+
+        let mut entity_cache = EntityCache::with_mocks(
+            redis_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert!(entity_cache.subgraph_enabled("user"));
+        assert!(!entity_cache.subgraph_enabled("archive"));
+        let subgraph_config = serde_json::json!({
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": entity_cache.subgraphs.subgraphs.clone()
+        });
+        entity_cache.subgraphs = Arc::new(serde_json::from_value(subgraph_config).unwrap());
+        assert!(!entity_cache.subgraph_enabled("archive"));
+        assert!(entity_cache.subgraph_enabled("user"));
+        assert!(entity_cache.subgraph_enabled("orga"));
+    }
+
+    #[tokio::test]
+    async fn test_subgraph_ttl() {
+        let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
+        let mut redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+            .await
+            .unwrap();
+        let map = serde_json::json!({
+            "user": {
+                "private_id": "sub",
+                "ttl": "2s"
+            },
+            "orga": {
+                "private_id": "sub",
+                "enabled": true
+            },
+            "archive": {
+                "private_id": "sub",
+                "enabled": false,
+                "ttl": "5000ms"
+            }
+        });
+
+        let mut entity_cache = EntityCache::with_mocks(
+            redis_cache.clone(),
+            serde_json::from_value(map).unwrap(),
+            valid_schema.clone(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            entity_cache.subgraph_ttl("user", &redis_cache),
+            Some(Duration::from_secs(2))
+        );
+        assert!(entity_cache.subgraph_ttl("orga", &redis_cache).is_none());
+        assert_eq!(
+            entity_cache.subgraph_ttl("archive", &redis_cache),
+            Some(Duration::from_millis(5000))
+        );
+        // update global storage TTL
+        redis_cache.ttl = Some(Duration::from_secs(25));
+        assert_eq!(
+            entity_cache.subgraph_ttl("user", &redis_cache),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("orga", &redis_cache),
+            Some(Duration::from_secs(25))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("archive", &redis_cache),
+            Some(Duration::from_millis(5000))
+        );
+        entity_cache.subgraphs = Arc::new(SubgraphConfiguration {
+            all: Subgraph {
+                ttl: Some(Ttl(Duration::from_secs(42))),
+                ..Default::default()
+            },
+            subgraphs: entity_cache.subgraphs.subgraphs.clone(),
+        });
+        assert_eq!(
+            entity_cache.subgraph_ttl("user", &redis_cache),
+            Some(Duration::from_secs(2))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("orga", &redis_cache),
+            Some(Duration::from_secs(42))
+        );
+        assert_eq!(
+            entity_cache.subgraph_ttl("archive", &redis_cache),
+            Some(Duration::from_millis(5000))
+        );
     }
 }

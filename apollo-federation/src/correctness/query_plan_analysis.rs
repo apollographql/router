@@ -3,10 +3,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Name;
 use itertools::Itertools;
 
+use super::query_plan_soundness::check_requires;
 use super::response_shape::Clause;
 use super::response_shape::DefinitionVariant;
 use super::response_shape::Literal;
@@ -16,6 +18,8 @@ use super::response_shape::PossibleDefinitionsPerTypeCondition;
 use super::response_shape::ResponseShape;
 use super::response_shape::compute_response_shape_for_entity_fetch_operation;
 use super::response_shape::compute_response_shape_for_operation;
+use super::response_shape_compare::collect_definitions_for_type_condition;
+use super::response_shape_compare::collect_variants_for_boolean_condition;
 use crate::FederationError;
 use crate::SingleFederationError;
 use crate::bail;
@@ -115,9 +119,8 @@ impl ResponseShape {
 
     /// Add a new condition to a ResponseShape.
     /// - This method is intended for the top-level response shape.
-    fn add_boolean_conditions(&self, literals: &[Literal]) -> Self {
-        let added_clause = Clause::from_literals(literals);
-        self.concatenate_and_simplify_boolean_conditions(&Clause::default(), &added_clause)
+    pub(crate) fn add_boolean_conditions(&self, clause: &Clause) -> Self {
+        self.concatenate_and_simplify_boolean_conditions(&Clause::default(), clause)
     }
 }
 
@@ -127,6 +130,37 @@ impl ResponseShape {
 //   including its sub-nodes.
 // - They take the `state` parameter that represents everything that has been fetched so far,
 //   which is used to check the soundness property of the query plan.
+
+/// The common data used by `interpret_query_plan` function and its subroutines.
+/// - Contains the supergraph schema and all subgraph schemas.
+pub struct AnalysisContext<'a> {
+    supergraph_schema: ValidFederationSchema,
+    subgraphs_by_name: &'a IndexMap<Arc<str>, ValidFederationSchema>,
+}
+
+impl AnalysisContext<'_> {
+    pub fn new(
+        supergraph_schema: ValidFederationSchema,
+        subgraphs_by_name: &IndexMap<Arc<str>, ValidFederationSchema>,
+    ) -> AnalysisContext<'_> {
+        AnalysisContext {
+            supergraph_schema,
+            subgraphs_by_name,
+        }
+    }
+
+    pub fn supergraph_schema(&self) -> &ValidFederationSchema {
+        &self.supergraph_schema
+    }
+
+    pub fn subgraphs_by_name(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
+        self.subgraphs_by_name
+    }
+
+    fn get_subgraph_schema(&self, subgraph_name: &str) -> Option<&ValidFederationSchema> {
+        self.subgraphs_by_name.get(subgraph_name)
+    }
+}
 
 fn format_federation_error(e: FederationError) -> String {
     match e {
@@ -138,8 +172,10 @@ fn format_federation_error(e: FederationError) -> String {
     }
 }
 
+/// Computes the overall ResponseShape of the query plan while checking the soundness of each
+/// entity fetch.
 pub fn interpret_query_plan(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     root_type: &Name,
     plan: &QueryPlan,
 ) -> Result<ResponseShape, String> {
@@ -148,63 +184,63 @@ pub fn interpret_query_plan(
         // empty plan
         return Ok(state);
     };
-    interpret_top_level_plan_node(schema, &state, plan_node)
+    interpret_top_level_plan_node(context, &state, plan_node)
 }
 
 fn interpret_top_level_plan_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     node: &TopLevelPlanNode,
 ) -> Result<ResponseShape, String> {
     let conditions = vec![];
     match node {
-        TopLevelPlanNode::Fetch(fetch) => interpret_fetch_node(schema, state, &conditions, fetch),
+        TopLevelPlanNode::Fetch(fetch) => interpret_fetch_node(context, state, &conditions, fetch),
         TopLevelPlanNode::Sequence(sequence) => {
-            interpret_sequence_node(schema, state, &conditions, sequence)
+            interpret_sequence_node(context, state, &conditions, sequence)
         }
         TopLevelPlanNode::Parallel(parallel) => {
-            interpret_parallel_node(schema, state, &conditions, parallel)
+            interpret_parallel_node(context, state, &conditions, parallel)
         }
         TopLevelPlanNode::Flatten(flatten) => {
-            interpret_flatten_node(schema, state, &conditions, flatten)
+            interpret_flatten_node(context, state, &conditions, flatten)
         }
         TopLevelPlanNode::Condition(condition) => {
-            interpret_condition_node(schema, state, &conditions, condition)
+            interpret_condition_node(context, state, &conditions, condition)
         }
-        TopLevelPlanNode::Defer(defer) => interpret_defer_node(schema, state, &conditions, defer),
+        TopLevelPlanNode::Defer(defer) => interpret_defer_node(context, state, &conditions, defer),
         TopLevelPlanNode::Subscription(subscription) => {
-            interpret_subscription_node(schema, state, &conditions, subscription)
+            interpret_subscription_node(context, state, &conditions, subscription)
         }
     }
 }
 
 /// `conditions` are accumulated conditions to be applied at each fetch node's response shape.
 fn interpret_plan_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     node: &PlanNode,
 ) -> Result<ResponseShape, String> {
     match node {
-        PlanNode::Fetch(fetch) => interpret_fetch_node(schema, state, conditions, fetch),
+        PlanNode::Fetch(fetch) => interpret_fetch_node(context, state, conditions, fetch),
         PlanNode::Sequence(sequence) => {
-            interpret_sequence_node(schema, state, conditions, sequence)
+            interpret_sequence_node(context, state, conditions, sequence)
         }
         PlanNode::Parallel(parallel) => {
-            interpret_parallel_node(schema, state, conditions, parallel)
+            interpret_parallel_node(context, state, conditions, parallel)
         }
-        PlanNode::Flatten(flatten) => interpret_flatten_node(schema, state, conditions, flatten),
+        PlanNode::Flatten(flatten) => interpret_flatten_node(context, state, conditions, flatten),
         PlanNode::Condition(condition) => {
-            interpret_condition_node(schema, state, conditions, condition)
+            interpret_condition_node(context, state, conditions, condition)
         }
-        PlanNode::Defer(defer) => interpret_defer_node(schema, state, conditions, defer),
+        PlanNode::Defer(defer) => interpret_defer_node(context, state, conditions, defer),
     }
 }
 
-// `type_filter`: The type condition to apply to the response shape.
-// - This is from the previous path elements.
-// - It can be empty if there is no type conditions.
-// - Also, multiple type conditions can be accumulated (meaning the conjunction of them).
+/// `type_filter`: The type condition to apply to the response shape.
+/// - This is from the previous path elements.
+/// - It can be empty if there is no type conditions.
+/// - Also, multiple type conditions can be accumulated (meaning the conjunction of them).
 fn rename_at_path(
     schema: &ValidFederationSchema,
     response: &ResponseShape,
@@ -336,14 +372,14 @@ fn rename_at_path(
     }
 }
 
-fn apply_rewrites(
+fn apply_output_rewrite(
     schema: &ValidFederationSchema,
     response: &ResponseShape,
     rewrite: &FetchDataRewrite,
 ) -> Result<ResponseShape, String> {
     match rewrite {
         FetchDataRewrite::ValueSetter(_) => {
-            Err("apply_rewrites: unexpected value setter".to_string())
+            Err("apply_output_rewrite: unexpected value setter".to_string())
         }
         FetchDataRewrite::KeyRenamer(renamer) => rename_at_path(
             schema,
@@ -355,18 +391,33 @@ fn apply_rewrites(
     }
 }
 
+fn check_input_rewrite(rewrite: &FetchDataRewrite) -> Result<(), String> {
+    match rewrite {
+        FetchDataRewrite::KeyRenamer(rename) => Err(format!(
+            "check_input_rewrite: unexpected key renamer: {rename:?}"
+        )),
+        FetchDataRewrite::ValueSetter(_) => {
+            // This case is only created in `compute_input_rewrites_on_key_fetch`. It overwrites
+            // the existing `__typename` response value. But, it won't affect the response shape
+            // anyways. So, we can ignore it here.
+            Ok(())
+        }
+    }
+}
+
 fn interpret_fetch_node(
-    schema: &ValidFederationSchema,
-    _state: &ResponseShape,
+    context: &AnalysisContext,
+    state: &ResponseShape,
     conditions: &[Literal],
     fetch: &FetchNode,
 ) -> Result<ResponseShape, String> {
+    let schema = &context.supergraph_schema;
     let operation_doc = fetch
         .operation_document
         .as_parsed()
         .map_err(|e| e.to_string())?;
+    let boolean_clause = Clause::from_literals(conditions);
     let mut result = if !fetch.requires.is_empty() {
-        // TODO: check requires
         // Response shapes per entity selection
         let response_shapes =
             compute_response_shape_for_entity_fetch_operation(operation_doc, schema).map_err(
@@ -377,6 +428,24 @@ fn interpret_fetch_node(
                     )
                 },
             )?;
+
+        // Soundness check
+        // TODO: also check `context_rewrites` requirements.
+        let subgraph_name = &fetch.subgraph_name;
+        let Some(subgraph_schema) = context.get_subgraph_schema(subgraph_name) else {
+            return Err(format!(
+                "Subgraph schema not found for {subgraph_name}:\n{fetch}"
+            ));
+        };
+        check_requires(
+            context,
+            subgraph_schema,
+            state,
+            &boolean_clause,
+            &response_shapes,
+            &fetch.requires,
+        )
+        .map_err(|e| format!("{e}\nfetch node: {fetch}"))?;
 
         // Compute the merged result from the individual entity response shapes.
         merge_response_shapes(response_shapes.iter()).map_err(|e| {
@@ -393,9 +462,12 @@ fn interpret_fetch_node(
             )
         })
     }
-    .map(|rs| rs.add_boolean_conditions(conditions))?;
+    .map(|rs| rs.add_boolean_conditions(&boolean_clause))?;
+    for rewrite in fetch.input_rewrites.iter() {
+        check_input_rewrite(rewrite)?;
+    }
     for rewrite in &fetch.output_rewrites {
-        result = apply_rewrites(schema, &result, rewrite)?;
+        result = apply_output_rewrite(schema, &result, rewrite)?;
     }
     if !fetch.context_rewrites.is_empty() {
         result = remove_context_arguments(&fetch.context_rewrites, &result)?;
@@ -505,7 +577,7 @@ fn append_literal(conditions: &[Literal], literal: Literal) -> Vec<Literal> {
 }
 
 fn interpret_condition_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     condition: &ConditionNode,
@@ -517,7 +589,7 @@ fn interpret_condition_node(
             let literal = Literal::Pos(condition_variable.clone());
             let sub_conditions = append_literal(conditions, literal);
             Ok(interpret_plan_node(
-                schema,
+                context,
                 state,
                 &sub_conditions,
                 if_clause,
@@ -527,7 +599,7 @@ fn interpret_condition_node(
             let literal = Literal::Neg(condition_variable.clone());
             let sub_conditions = append_literal(conditions, literal);
             Ok(interpret_plan_node(
-                schema,
+                context,
                 state,
                 &sub_conditions,
                 else_clause,
@@ -538,8 +610,8 @@ fn interpret_condition_node(
             let lit_neg = Literal::Neg(condition_variable.clone());
             let sub_conditions_pos = append_literal(conditions, lit_pos);
             let sub_conditions_neg = append_literal(conditions, lit_neg);
-            let if_val = interpret_plan_node(schema, state, &sub_conditions_pos, if_clause)?;
-            let else_val = interpret_plan_node(schema, state, &sub_conditions_neg, else_clause)?;
+            let if_val = interpret_plan_node(context, state, &sub_conditions_pos, if_clause)?;
+            let else_val = interpret_plan_node(context, state, &sub_conditions_neg, else_clause)?;
             let mut result = if_val;
             result.merge_with(&else_val).map_err(|e| {
                 format!("Failed to merge response shapes from then and else clauses:\n{e}",)
@@ -551,7 +623,7 @@ fn interpret_condition_node(
 
 /// The inner recursive part of `interpret_flatten_node`.
 fn interpret_plan_node_at_path(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     type_condition: Option<&Vec<Name>>,
@@ -559,7 +631,7 @@ fn interpret_plan_node_at_path(
     node: &PlanNode,
 ) -> Result<Option<ResponseShape>, String> {
     let Some((first, rest)) = path.split_first() else {
-        return Ok(Some(interpret_plan_node(schema, state, conditions, node)?));
+        return Ok(Some(interpret_plan_node(context, state, conditions, node)?));
     };
     match first {
         FetchDataPathElement::Key(response_key, next_type_condition) => {
@@ -568,7 +640,7 @@ fn interpret_plan_node_at_path(
                 return Ok(None);
             };
             let response_defs = interpret_plan_node_for_matching_conditions(
-                schema,
+                context,
                 state_defs,
                 type_condition,
                 conditions,
@@ -589,7 +661,7 @@ fn interpret_plan_node_at_path(
                 return Err("flatten: unexpected multiple type conditions".to_string());
             }
             let type_condition = next_type_condition.as_ref();
-            interpret_plan_node_at_path(schema, state, conditions, type_condition, rest, node)
+            interpret_plan_node_at_path(context, state, conditions, type_condition, rest, node)
         }
         FetchDataPathElement::TypenameEquals(_type_name) => {
             Err("flatten: unexpected TypenameEquals variant".to_string())
@@ -601,7 +673,7 @@ fn interpret_plan_node_at_path(
 /// Interpret the plan node for all matching conditions.
 /// Returns a collection of definitions by the type and Boolean conditions.
 fn interpret_plan_node_for_matching_conditions(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state_defs: &PossibleDefinitions,
     type_condition: Option<&Vec<Name>>,
     boolean_conditions: &[Literal],
@@ -610,44 +682,37 @@ fn interpret_plan_node_for_matching_conditions(
     node: &PlanNode,
 ) -> Result<PossibleDefinitions, String> {
     // Note: `next_type_condition` is applied to the next key down the path.
-    let filter_type_cond = normalize_type_condition(schema, &type_condition)?;
+    let schema = &context.supergraph_schema;
+    let normalized_type_cond = normalize_type_condition(schema, &type_condition)?;
+
     let mut response_defs = PossibleDefinitions::default();
-    for (type_cond, defs_per_type_cond) in state_defs.iter() {
-        if let Some(filter_type_cond) = &filter_type_cond {
-            if !filter_type_cond.implies(type_cond) {
-                // Not applicable => skip
-                continue;
-            }
+    if let Some(type_cond) = normalized_type_cond {
+        // Type-conditioned fetching => only consider one type condition.
+        if let Some(response_per_type_cond) = interpret_plan_node_under_type_condition(
+            context,
+            state_defs,
+            &type_cond,
+            boolean_conditions,
+            next_type_condition,
+            next_path,
+            node,
+        )? {
+            response_defs.insert(type_cond, response_per_type_cond);
         }
-        let response_variants =
-            defs_per_type_cond
-                .conditional_variants()
-                .iter()
-                .filter_map(|variant| {
-                    let Some(sub_state) = variant.sub_selection_response_shape() else {
-                        return Some(Err(format!("No sub-selection for variant: {variant}")));
-                    };
-                    let sub_rs = interpret_plan_node_at_path(
-                        schema,
-                        sub_state,
-                        boolean_conditions,
-                        next_type_condition.as_ref(),
-                        next_path,
-                        node,
-                    );
-                    match sub_rs {
-                        Err(e) => Some(Err(e)),
-                        Ok(sub_rs) => sub_rs.map(|sub_rs| {
-                            Ok(variant.with_updated_sub_selection_response_shape(sub_rs))
-                        }),
-                    }
-                });
-        let response_variants: Result<Vec<_>, _> = response_variants.collect();
-        let response_variants = response_variants?;
-        if !response_variants.is_empty() {
-            let response_defs_per_type_cond =
-                defs_per_type_cond.with_updated_conditional_variants(response_variants);
-            response_defs.insert(type_cond.clone(), response_defs_per_type_cond);
+    } else {
+        // No type-conditioned fetching => consider each type condition separately.
+        for (type_cond, _defs_per_type_cond) in state_defs.iter() {
+            if let Some(response_per_type_cond) = interpret_plan_node_under_type_condition(
+                context,
+                state_defs,
+                type_cond,
+                boolean_conditions,
+                next_type_condition,
+                next_path,
+                node,
+            )? {
+                response_defs.insert(type_cond.clone(), response_per_type_cond);
+            }
         }
     }
     Ok(response_defs)
@@ -673,14 +738,110 @@ fn normalize_type_condition(
     Ok(Some(result))
 }
 
+fn interpret_plan_node_under_type_condition(
+    context: &AnalysisContext,
+    state_defs: &PossibleDefinitions,
+    type_cond: &NormalizedTypeCondition,
+    conditions: &[Literal],
+    next_type_condition: &Option<Vec<Name>>,
+    next_path: &[FetchDataPathElement],
+    node: &PlanNode,
+) -> Result<Option<PossibleDefinitionsPerTypeCondition>, String> {
+    // `state_defs` may have multiple overlapping type conditions. We merge them so that the plan
+    // node is interpreted in the merged state. That means the `requires` conditions can be checked
+    // against the one whole state, instead of split states.
+    let Some(merged_state_def) = collect_definitions_for_type_condition(state_defs, type_cond)
+        .map_err(|e| e.description().to_string())?
+    else {
+        // Logically, if no definitions are found for the given type condition (in case of
+        // type-conditioned fetching), that means this plan node is infeasible (kind of dead-code).
+        // However, since that's not expected to happen in our query plans, we report an error
+        // here.
+        return Err(format!(
+            "No matching definitions in state for type condition: {type_cond}"
+        ));
+    };
+    // Interpret the node under every Boolean combination.
+    let response_variants = merged_state_def
+        .conditional_variants()
+        .iter()
+        .filter_map(|variant| {
+            let sub_rs = interpret_plan_node_under_boolean_condition(
+                context,
+                &merged_state_def,
+                variant.boolean_clause(),
+                conditions,
+                next_type_condition,
+                next_path,
+                node,
+            );
+            match sub_rs {
+                Ok(None) => None,
+                Ok(Some(sub_rs)) => {
+                    Some(Ok(variant.with_updated_sub_selection_response_shape(sub_rs)))
+                }
+                Err(e) => Some(Err(e)),
+            }
+        });
+    let response_variants: Result<Vec<_>, _> = response_variants.collect();
+    let response_variants = response_variants?;
+    if !response_variants.is_empty() {
+        Ok(Some(
+            merged_state_def.with_updated_conditional_variants(response_variants),
+        ))
+    } else {
+        // None of the variants are applicable.
+        Ok(None)
+    }
+}
+
+fn interpret_plan_node_under_boolean_condition(
+    context: &AnalysisContext,
+    state_def: &PossibleDefinitionsPerTypeCondition,
+    variant_clause: &Clause,
+    conditions: &[Literal],
+    next_type_condition: &Option<Vec<Name>>,
+    next_path: &[FetchDataPathElement],
+    node: &PlanNode,
+) -> Result<Option<ResponseShape>, String> {
+    // We are considering variants that satisfy both the `variant_clause` and the fetch
+    // `conditions`. We concatenate them into a single full condition.
+    let Some(full_clause) = variant_clause.concatenate(&Clause::from_literals(conditions)) else {
+        // This variant's clause is false under the current conditions => skip infeasible variant
+        return Ok(None);
+    };
+    // Collect all applicable variants into a single merged one for the same reason as explained
+    // in the `interpret_plan_node_under_type_condition` function.
+    let Some(merged_variant) = collect_variants_for_boolean_condition(state_def, &full_clause)
+        .map_err(|e| e.description().to_string())?
+    else {
+        // We must have at least one variant for the given clause.
+        return Err(format!(
+            "Internal error: failed to collect applicable variants for full clause `{full_clause}`"
+        ));
+    };
+    let Some(sub_state) = merged_variant.sub_selection_response_shape() else {
+        // A sub-selection is expected at the FlattenNode path.
+        return Err(format!("No sub-selection for variant: {merged_variant}"));
+    };
+    interpret_plan_node_at_path(
+        context,
+        sub_state,
+        conditions,
+        next_type_condition.as_ref(),
+        next_path,
+        node,
+    )
+}
+
 fn interpret_flatten_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     flatten: &FlattenNode,
 ) -> Result<ResponseShape, String> {
     let response_shape = interpret_plan_node_at_path(
-        schema,
+        context,
         state,
         conditions,
         None, // no type condition at the top level
@@ -697,7 +858,7 @@ fn interpret_flatten_node(
 }
 
 fn interpret_sequence_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     sequence: &SequenceNode,
@@ -705,7 +866,7 @@ fn interpret_sequence_node(
     let mut state = state.clone();
     let mut response_shape = ResponseShape::new(state.default_type_condition().clone());
     for node in &sequence.nodes {
-        let node_rs = interpret_plan_node(schema, &state, conditions, node)?;
+        let node_rs = interpret_plan_node(context, &state, conditions, node)?;
 
         // Update both state and response_shape
         state.merge_with(&node_rs).map_err(|e| {
@@ -725,7 +886,7 @@ fn interpret_sequence_node(
 }
 
 fn interpret_parallel_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     parallel: &ParallelNode,
@@ -733,7 +894,7 @@ fn interpret_parallel_node(
     let mut response_shape = ResponseShape::new(state.default_type_condition().clone());
     for node in &parallel.nodes {
         // Note: Use the same original state for each parallel node
-        let node_rs = interpret_plan_node(schema, state, conditions, node)?;
+        let node_rs = interpret_plan_node(context, state, conditions, node)?;
         response_shape.merge_with(&node_rs).map_err(|e| {
             format!(
                 "Failed to merge response shapes in parallel node: {e}\
@@ -745,7 +906,7 @@ fn interpret_parallel_node(
 }
 
 fn interpret_defer_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     defer: &DeferNode,
@@ -753,7 +914,7 @@ fn interpret_defer_node(
     let mut response_shape;
     let mut state = state.clone();
     if let Some(primary_node) = &defer.primary.node {
-        response_shape = interpret_plan_node(schema, &state, conditions, primary_node)?;
+        response_shape = interpret_plan_node(context, &state, conditions, primary_node)?;
         // Update the `state` after the primary node
         state.merge_with(&response_shape).map_err(|e| {
             format!(
@@ -773,7 +934,7 @@ fn interpret_defer_node(
             continue;
         };
         // Note: Use the same state (after the primary) for each deferred node
-        let defer_rs = interpret_plan_node(schema, &state, conditions, node)?;
+        let defer_rs = interpret_plan_node(context, &state, conditions, node)?;
         response_shape.merge_with(&defer_rs).map_err(|e| {
             format!(
                 "Failed to merge response shapes in deferred node: {e}\
@@ -786,13 +947,13 @@ fn interpret_defer_node(
 }
 
 fn interpret_subscription_node(
-    schema: &ValidFederationSchema,
+    context: &AnalysisContext,
     state: &ResponseShape,
     conditions: &[Literal],
     subscription: &crate::query_plan::SubscriptionNode,
 ) -> Result<ResponseShape, String> {
     let mut response_shape =
-        interpret_fetch_node(schema, state, conditions, &subscription.primary)?;
+        interpret_fetch_node(context, state, conditions, &subscription.primary)?;
     if let Some(rest) = &subscription.rest {
         let mut state = state.clone();
         state.merge_with(&response_shape).map_err(|e| {
@@ -802,7 +963,7 @@ fn interpret_subscription_node(
                  primary response shape: {response_shape}",
             )
         })?;
-        let rest_rs = interpret_plan_node(schema, &state, conditions, rest)?;
+        let rest_rs = interpret_plan_node(context, &state, conditions, rest)?;
         response_shape.merge_with(&rest_rs).map_err(|e| {
             format!(
                 "Failed to merge response shapes in subscription node: {e}\

@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::task::Poll;
 use std::time::Instant;
 
@@ -25,6 +26,7 @@ use super::QueryKey;
 use crate::Configuration;
 use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::error::FederationErrorBridge;
 use crate::error::QueryPlannerError;
@@ -58,6 +60,25 @@ use crate::spec::operation_limits::OperationLimits;
 pub(crate) const RUST_QP_MODE: &str = "rust";
 const UNSUPPORTED_FED1: &str = "fed1";
 const INTERNAL_INIT_ERROR: &str = "internal";
+
+const ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK: &str =
+    "APOLLO_ROUTER_DISABLE_SECURITY_NON_LOCAL_SELECTIONS_CHECK";
+/// Should we enforce the non-local selections limit? Default true, can be toggled off with an
+/// environment variable.
+///
+/// Disabling this check is very much not advisable and we don't expect that anyone will need to do
+/// it. In the extremely unlikely case that the new protection breaks someone's legitimate queries,
+/// though, they could temporarily disable this individual limit so they can still benefit from the
+/// other new limits, until we improve the detection.
+pub(crate) fn non_local_selections_check_enabled() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        let disabled =
+            std::env::var(ENV_DISABLE_NON_LOCAL_SELECTIONS_CHECK).as_deref() == Ok("true");
+
+        !disabled
+    })
+}
 
 /// A query planner that calls out to the apollo-federation crate.
 ///
@@ -131,7 +152,6 @@ impl QueryPlannerService {
     ) -> Result<QueryPlanResult, MaybeBackPressureError<QueryPlannerError>> {
         let doc = doc.clone();
         let rust_planner = self.planner.clone();
-        let priority = compute_job::Priority::P8; // High priority
         let job = move |status: compute_job::JobStatus<'_, _>| -> Result<_, QueryPlannerError> {
             let start = Instant::now();
 
@@ -139,6 +159,8 @@ impl QueryPlannerService {
             let query_plan_options = QueryPlanOptions {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
+                non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                disabled_subgraph_names: Default::default(),
             };
 
             let result = operation
@@ -167,15 +189,9 @@ impl QueryPlannerService {
             let root_node = convert_root_query_plan_node(&plan);
             Ok((plan, root_node))
         };
-        let (plan, mut root_node) = compute_job::execute(priority, job)
+        let (plan, mut root_node) = compute_job::execute(ComputeJobType::QueryPlanning, job)
             .map_err(MaybeBackPressureError::TemporaryError)?
-            .await
-            // `expect()` propagates any panic that potentially happens in the closure, but:
-            //
-            // * We try to avoid such panics in the first place and consider them bugs
-            // * The panic handler in `apollo-router/src/executable.rs` exits the process
-            //   so this error case should never be reached.
-            .expect("query planner panicked")?;
+            .await?;
         if let Some(node) = &mut root_node {
             init_query_plan_root_node(node).map_err(QueryPlannerError::from)?;
         }
@@ -348,7 +364,7 @@ impl QueryPlannerService {
             })
         } else {
             failfast_debug!("empty query plan");
-            Err(QueryPlannerError::EmptyPlan(usage_reporting).into())
+            Err(QueryPlannerError::EmptyPlan(usage_reporting.get_stats_report_key()).into())
         }
     }
 }
@@ -422,7 +438,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
 
             f64_histogram!(
                 "apollo.router.query_planning.total.duration",
-                "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
+                "Duration of the time the router waited for a query plan, including both the queue time and planning time, in seconds.",
                 start.elapsed().as_secs_f64()
             );
 
@@ -578,7 +594,7 @@ pub(crate) struct QueryPlanResult {
 pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, elapsed: f64) {
     f64_histogram!(
         "apollo.router.query_planning.plan.duration",
-        "Duration of the query planning.",
+        "Duration of the query planning, in seconds.",
         elapsed,
         "planner" = planner
     );
@@ -710,10 +726,10 @@ mod tests {
 
         match err {
             MaybeBackPressureError::PermanentError(QueryPlannerError::EmptyPlan(
-                usage_reporting,
+                stats_report_key,
             )) => {
                 insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", usage_reporting);
+                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", stats_report_key);
                 });
             }
             e => {

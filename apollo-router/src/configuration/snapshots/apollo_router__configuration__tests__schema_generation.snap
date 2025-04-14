@@ -1790,6 +1790,10 @@ expression: "&schema"
           "description": "#/definitions/HeadersLocation",
           "nullable": true
         },
+        "connector": {
+          "$ref": "#/definitions/ConnectorHeadersConfiguration",
+          "description": "#/definitions/ConnectorHeadersConfiguration"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/HeadersLocation",
@@ -1912,6 +1916,25 @@ expression: "&schema"
         "response": {
           "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
           "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorHeadersConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
         }
       },
       "type": "object"
@@ -6145,6 +6168,7 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "description": "activates caching for this subgraph, overrides the global configuration",
+          "nullable": true,
           "type": "boolean"
         },
         "invalidation": {
@@ -7047,6 +7071,14 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
       "properties": {
+        "connection_shutdown_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "The timeout for shutting down connections during a router shutdown or a schema reload.",
+          "type": "string"
+        },
         "defer_support": {
           "default": true,
           "description": "Set to false to disable defer support",

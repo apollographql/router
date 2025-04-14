@@ -22,7 +22,6 @@ mod http;
 mod link;
 mod schema;
 mod source;
-mod variable;
 
 use std::fmt::Display;
 use std::ops::Range;
@@ -263,6 +262,12 @@ pub enum Code {
     UnknownConnectorsVersion,
     /// Feature unavailable
     FeatureUnavailable,
+    /// When `@connect` is applied to a type, `entity` can't be set to `false`
+    ConnectOnTypeMustBeEntity,
+    /// `@connect` cannot be applied to a query, mutation, or subscription root type
+    ConnectOnRoot,
+    /// Using both `$batch` and `$this` is not allowed
+    ConnectBatchAndThis,
 }
 
 impl Code {

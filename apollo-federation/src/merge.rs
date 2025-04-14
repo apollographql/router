@@ -1367,6 +1367,77 @@ fn add_core_feature_join(
         .types
         .insert(join_field_set_name, join_field_set_scalar);
 
+    // scalar join__FieldValue
+    let join_field_value_name = name!("join__FieldValue");
+    let join_field_value_scalar = ExtendedType::Scalar(Node::new(ScalarType {
+        directives: Default::default(),
+        name: join_field_value_name.clone(),
+        description: None,
+    }));
+    supergraph
+        .types
+        .insert(join_field_value_name, join_field_value_scalar);
+
+    // input join__ContextArgument {
+    //   name: String!
+    //   type: String!
+    //   context: String!
+    //   selection: join__FieldValue!
+    // }
+    let join_context_argument_name = name!("join__ContextArgument");
+    let join_context_argument_input = ExtendedType::InputObject(Node::new(InputObjectType {
+        description: None,
+        name: join_context_argument_name.clone(),
+        directives: Default::default(),
+        fields: vec![
+            (
+                name!("name"),
+                Component::new(InputValueDefinition {
+                    name: name!("name"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("type"),
+                Component::new(InputValueDefinition {
+                    name: name!("type"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("context"),
+                Component::new(InputValueDefinition {
+                    name: name!("context"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(String!).into(),
+                    default_value: None,
+                }),
+            ),
+            (
+                name!("selection"),
+                Component::new(InputValueDefinition {
+                    name: name!("selection"),
+                    description: None,
+                    directives: Default::default(),
+                    ty: ty!(join__FieldValue!).into(),
+                    default_value: None,
+                }),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    }));
+    supergraph
+        .types
+        .insert(join_context_argument_name, join_context_argument_input);
+
     let join_graph_directive_definition = join_graph_directive_definition();
     supergraph.directive_definitions.insert(
         join_graph_directive_definition.name.clone(),
@@ -1550,6 +1621,13 @@ fn join_field_directive_definition() -> DirectiveDefinition {
                 ty: ty!(Boolean).into(),
                 default_value: None,
             }),
+            Node::new(InputValueDefinition {
+                name: name!("contextArguments"),
+                description: None,
+                directives: Default::default(),
+                ty: ty!([join__ContextArgument!]).into(),
+                default_value: None,
+            }),
         ],
         locations: vec![
             DirectiveLocation::FieldDefinition,
@@ -1559,6 +1637,9 @@ fn join_field_directive_definition() -> DirectiveDefinition {
     }
 }
 
+// NOTE: the logic for constructing the contextArguments argument
+// is not trivial and is not implemented here. For connectors "expansion",
+// it's handled in carryover.rs.
 fn join_field_applied_directive(
     subgraph_name: &EnumValue,
     requires: Option<&str>,
