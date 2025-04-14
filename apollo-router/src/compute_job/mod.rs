@@ -9,8 +9,9 @@ use std::time::Instant;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
+use tracing::Instrument;
+use tracing::Span;
 use tracing::info_span;
-use tracing::{Instrument, Span};
 use tracing_core::Dispatch;
 use tracing_subscriber::util::SubscriberInitExt;
 
