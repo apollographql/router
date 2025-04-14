@@ -1255,6 +1255,7 @@ mod tests {
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
+                supergraph_request: Default::default(),
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {
@@ -1338,6 +1339,7 @@ mod tests {
                 transport_request,
                 key: response_key.clone(),
                 mapping_problems: vec![],
+                supergraph_request: Default::default(),
             };
             test_harness
                 .call_connector_request_service(connector_request, |request| Response {

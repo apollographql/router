@@ -6,9 +6,7 @@ use shape::location::SourceId;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
@@ -25,9 +23,8 @@ fn last_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    vars: &VarsWithPathsMap,
+    _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -44,23 +41,25 @@ fn last_method(
     }
 
     match data {
-        JSON::Array(array) => {
-            if let Some(last) = array.last() {
-                tail.apply_to_path(last, vars, input_path)
-            } else {
-                (None, vec![])
-            }
-        }
-
+        JSON::Array(array) => (array.last().cloned(), vec![]),
         JSON::String(s) => {
             if let Some(last) = s.as_str().chars().last() {
-                tail.apply_to_path(&JSON::String(last.to_string().into()), vars, input_path)
+                (Some(JSON::String(last.to_string().into())), vec![])
             } else {
                 (None, vec![])
             }
         }
-
-        _ => tail.apply_to_path(data, vars, input_path),
+        _ => (
+            Some(data.clone()),
+            vec![ApplyToError::new(
+                format!(
+                    "Method ->{} requires an array or string input",
+                    method_name.as_ref()
+                ),
+                input_path.to_vec(),
+                method_name.range(),
+            )],
+        ),
     }
 }
 #[allow(dead_code)] // method type-checking disabled until we add name resolution
@@ -93,6 +92,7 @@ fn last_shape(
                 Shape::none()
             }
         }
+
         ShapeCase::String(None) => Shape::one(
             [
                 Shape::string(method_name.shape_location(source_id)),
@@ -100,6 +100,7 @@ fn last_shape(
             ],
             method_name.shape_location(source_id),
         ),
+
         ShapeCase::Array { prefix, tail } => {
             if tail.is_none() {
                 if let Some(last) = prefix.last() {
@@ -119,10 +120,18 @@ fn last_shape(
                 )
             }
         }
+
         ShapeCase::Name(_, _) => input_shape.any_item(method_name.shape_location(source_id)),
-        // When there is no obvious last element, ->last gives us the input
-        // value itself, which has input_shape.
-        _ => input_shape.clone(),
+        ShapeCase::Unknown => Shape::unknown(method_name.shape_location(source_id)),
+
+        _ => Shape::error_with_partial(
+            format!(
+                "Method ->{} requires an array or string input",
+                method_name.as_ref()
+            ),
+            input_shape.clone(),
+            input_shape.locations,
+        ),
     }
 }
 
