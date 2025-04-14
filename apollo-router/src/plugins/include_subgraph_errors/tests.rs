@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use insta::with_settings;
 use serde_json::Map;
 use serde_json::Value;
 use serde_json::json;
@@ -9,8 +10,8 @@ use crate::graphql;
 use crate::plugins::test::PluginTestHarness;
 use crate::services::supergraph; // Required for collect
 
-const PRODUCT_ERROR_RESPONSE: &str = r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#;
-const ACCOUNT_ERROR_RESPONSE: &str = r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL"}}]}"#;
+const PRODUCT_ERROR_RESPONSE: &str = r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR", "service": "products"}}]}"#;
+const ACCOUNT_ERROR_RESPONSE: &str = r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL", "service": "accounts"}}]}"#;
 const VALID_RESPONSE: &str = r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#;
 
 async fn build_harness(
@@ -49,8 +50,19 @@ async fn run_test_case(
     // Collect the actual response body (potentially modified by the plugin)
     let actual_responses: Vec<graphql::Response> = response.response.body_mut().collect().await;
 
-    // Assert the collected body against a snapshot
-    insta::assert_yaml_snapshot!(snapshot_suffix, actual_responses);
+    let config = serde_yaml::to_string(config).expect("config to yaml");
+    let request = serde_json::to_string_pretty(
+        &serde_json::from_str::<Value>(mock_response).expect("request"),
+    )
+    .expect("request");
+
+    let description = format!("CONFIG:\n{}\n\nREQUEST:\n{}", config, request);
+    with_settings!({
+        description => description,
+    }, {
+        // Assert the collected body against a snapshot
+        insta::assert_yaml_snapshot!(snapshot_suffix, actual_responses);
+    });
 }
 
 #[tokio::test]
