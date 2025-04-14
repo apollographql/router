@@ -203,7 +203,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.61.0"
+version = "1.61.2"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.61.0"
+version = "1.61.2"
 dependencies = [
  "access-json",
  "ahash",
@@ -421,7 +421,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.61.0"
+version = "1.61.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -437,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.61.0"
+version = "1.61.2"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -1867,9 +1867,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-channel"
-version = "0.5.14"
+version = "0.5.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ba6d68e24814cb8de6bb986db8222d3a027d15872cabc0d18817bc3c0e4471"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -6569,9 +6569,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.38.1"
+version = "1.38.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb2caba9f80616f438e09748d5acda951967e1ea58508ef53d9c6402485a46df"
+checksum = "68722da18b0fc4a05fdc1120b302b82051265792a1e1b399086e9b204b10ad3d"
 dependencies = [
  "backtrace",
  "bytes",

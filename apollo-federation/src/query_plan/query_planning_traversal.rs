@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::Name;
 use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -44,12 +45,13 @@ use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::schema::ValidFederationSchema;
-use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::utils::logging::format_open_branch;
 use crate::utils::logging::snapshot;
+
+pub(crate) mod non_local_selections_estimation;
 
 #[cfg(feature = "snapshot_tracing")]
 mod snapshot_helper {
@@ -81,8 +83,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     /// subgraphs.
     // PORT_NOTE: Named `inconsistentAbstractTypesRuntimes` in the JS codebase, which was slightly
     // confusing.
-    pub(crate) abstract_types_with_inconsistent_runtime_types:
-        Arc<IndexSet<AbstractTypeDefinitionPosition>>,
+    pub(crate) abstract_types_with_inconsistent_runtime_types: Arc<IndexSet<Name>>,
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
     pub(crate) statistics: &'a QueryPlanningStatistics,
@@ -227,6 +228,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
+        non_local_selection_state: Option<&mut non_local_selections_estimation::State>,
     ) -> Result<Self, FederationError> {
         Self::new_inner(
             parameters,
@@ -235,6 +237,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             parameters.fetch_id_generator.clone(),
             root_kind,
             cost_processor,
+            non_local_selection_state,
             Default::default(),
             Default::default(),
             Default::default(),
@@ -254,6 +257,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         id_generator: Arc<FetchIdGenerator>,
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
+        non_local_selection_state: Option<&mut non_local_selections_estimation::State>,
         initial_context: OpGraphPathContext,
         excluded_destinations: ExcludedDestinations,
         excluded_conditions: ExcludedConditions,
@@ -310,6 +314,20 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
+
+        if let Some(non_local_selection_state) = non_local_selection_state {
+            if traversal
+                .check_non_local_selections_limit_exceeded_at_root(non_local_selection_state)?
+            {
+                return Err(SingleFederationError::QueryPlanComplexityExceeded {
+                    message: format!(
+                        "Number of non-local selections exceeds limit of {}",
+                        Self::MAX_NON_LOCAL_SELECTIONS,
+                    ),
+                }
+                .into());
+            }
+        }
 
         Ok(traversal)
     }
@@ -615,8 +633,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                             Some(type_condition) => Ok(self
                                 .parameters
                                 .abstract_types_with_inconsistent_runtime_types
-                                .iter()
-                                .any(|ty| ty.type_name() == type_condition.type_name())),
+                                .contains(type_condition.type_name())),
                             None => Ok(false),
                         }
                     }
@@ -1138,6 +1155,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             self.id_generator.clone(),
             self.root_kind,
             self.cost_processor,
+            None,
             context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),

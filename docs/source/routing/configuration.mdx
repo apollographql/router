@@ -1190,6 +1190,27 @@ supergraph:
   experimental_log_on_broken_pipe: true
 ```
 
+### Connection shutdown timeout
+
+When the Router schema or configuration updates all connections must be closed for resources to be freed.
+To ensure that long-lived connections do not hang on to resources, a maximum graceful shutdown timeout can be configured.
+
+```yaml title="router.yaml"
+supergraph:
+  connection_shutdown_timeout: 60s
+```
+
+The default value is 60 seconds.
+
+Note that if `early_cancel` is `false` (default), then requests in progress will still hold onto pipeline resources.
+Traffic shaping request timeouts should be used to prevent long-running requests.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router:
+    timeout: 60s
+```
+
 ### Plugins
 
 You can customize the router's behavior with [plugins](/router/customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
