@@ -29,7 +29,7 @@ where multiple spans' `Extensions` are acquired at the same time.
 
 By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7142
 
-### Connection shutdown timeout 1.x ([PR #7058](https://github.com/apollographql/router/pull/7058))
+### Connection shutdown timeout ([PR #7058](https://github.com/apollographql/router/pull/7058))
 
 When a connection is closed we call `graceful_shutdown` on hyper and then await for the connection to close.
 
