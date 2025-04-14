@@ -167,7 +167,7 @@ impl FetchDependencyGraphProcessor<QueryPlanCost, QueryPlanCost>
         node: &mut FetchDependencyGraphNode,
         _handled_conditions: &Conditions,
     ) -> Result<QueryPlanCost, FederationError> {
-        Ok(FETCH_COST + node.cost()?)
+        Ok(FETCH_COST + node.cost())
     }
 
     /// We don't take conditions into account in costing for now
@@ -302,7 +302,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 // Note that currently `ConditionNode` only works for variables
                 // (`ConditionNode.condition` is expected to be a variable name and nothing else).
                 // We could change that, but really, why have a trivial `ConditionNode`
-                // when we can optimise things righ away.
+                // when we can optimise things right away.
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
@@ -377,7 +377,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             sub_selection: if defer_info.deferred.is_empty() {
                 defer_info
                     .sub_selection
-                    .without_empty_branches()?
+                    .without_empty_branches()
                     .map(|filtered| executable::SelectionSet::try_from(filtered.as_ref()))
                     .transpose()?
                     .map(|selection_set| selection_set.serialize().no_indent().to_string())
@@ -397,7 +397,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
         Ok(Some(PlanNode::Defer(DeferNode {
             primary: PrimaryDeferBlock {
                 sub_selection: sub_selection
-                    .without_empty_branches()?
+                    .without_empty_branches()
                     .map(|filtered| executable::SelectionSet::try_from(filtered.as_ref()))
                     .transpose()?
                     .map(|selection_set| selection_set.serialize().no_indent().to_string()),

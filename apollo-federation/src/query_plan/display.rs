@@ -359,13 +359,8 @@ fn write_selections(
 
 fn write_requires_selections(
     state: &mut State<'_, '_>,
-    mut selections: &[requires_selection::Selection],
+    selections: &[requires_selection::Selection],
 ) -> fmt::Result {
-    if let Some(requires_selection::Selection::Field(field)) = selections.first() {
-        if field.name == "_entities" {
-            selections = &field.selections
-        }
-    }
     state.write("{")?;
 
     // Manually indent and write the newline
@@ -418,6 +413,12 @@ fn write_requires_selection(
         }
     }
     Ok(())
+}
+
+impl fmt::Display for requires_selection::Selection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write_requires_selection(&mut State::new(f), self)
+    }
 }
 
 /// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`

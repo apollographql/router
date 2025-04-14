@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
+use apollo_compiler::ast::OperationType;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
 
@@ -193,12 +194,27 @@ pub enum SingleFederationError {
     RequiresInvalidFields { message: String },
     #[error("{message}")]
     KeyFieldsSelectInvalidType { message: String },
-    #[error("{message}")]
-    RootQueryUsed { message: String },
-    #[error("{message}")]
-    RootMutationUsed { message: String },
-    #[error("{message}")]
-    RootSubscriptionUsed { message: String },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootQueryUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the mutation root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootMutationUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the subscription root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootSubscriptionUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
     #[error("{message}")]
     InvalidSubgraphName { message: String },
     #[error("{message}")]
@@ -499,6 +515,27 @@ impl SingleFederationError {
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
         }
     }
+
+    pub(crate) fn root_already_used(
+        operation_type: OperationType,
+        expected_name: Name,
+        found_name: Name,
+    ) -> Self {
+        match operation_type {
+            OperationType::Query => Self::RootQueryUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Mutation => Self::RootMutationUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Subscription => Self::RootSubscriptionUsed {
+                expected_name,
+                found_name,
+            },
+        }
+    }
 }
 
 impl From<InvalidNameError> for FederationError {
@@ -524,12 +561,16 @@ impl From<FederationSpecError> for FederationError {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, Default)]
 pub struct MultipleFederationErrors {
     pub errors: Vec<SingleFederationError>,
 }
 
 impl MultipleFederationErrors {
+    pub fn new() -> Self {
+        Self { errors: vec![] }
+    }
+
     pub fn push(&mut self, error: FederationError) {
         match error {
             FederationError::SingleFederationError(error) => {
@@ -643,7 +684,56 @@ impl FederationError {
         }
         .into()
     }
+
+    pub fn merge(self, other: Self) -> Self {
+        let mut result = MultipleFederationErrors::new();
+        result.push(self);
+        result.push(other);
+        result.into()
+    }
 }
+
+// Similar to `multi_try` crate, but with `FederationError` instead of `Vec<E>`.
+pub trait MultiTry<U> {
+    type Output;
+
+    fn and_try(self, other: Result<U, FederationError>) -> Self::Output;
+}
+
+impl<U> MultiTry<U> for Result<(), FederationError> {
+    type Output = Result<U, FederationError>;
+
+    fn and_try(self, other: Result<U, FederationError>) -> Result<U, FederationError> {
+        match (self, other) {
+            (Ok(_a), Ok(b)) => Ok(b),
+            (Ok(_a), Err(b)) => Err(b),
+            (Err(a), Ok(_b)) => Err(a),
+            (Err(a), Err(b)) => Err(a.merge(b)),
+        }
+    }
+}
+
+pub trait MultiTryAll: Sized + Iterator {
+    /// Apply `predicate` on all elements of the iterator, collecting all errors (if any).
+    /// - Returns Ok(()), if all elements are Ok.
+    /// - Otherwise, returns a FederationError with all errors.
+    /// - Note: Not to be confused with `try_for_each`, which stops on the first error.
+    fn try_for_all<F>(self, mut predicate: F) -> Result<(), FederationError>
+    where
+        F: FnMut(Self::Item) -> Result<(), FederationError>,
+    {
+        let mut errors = MultipleFederationErrors::new();
+        for item in self {
+            match predicate(item) {
+                Ok(()) => {}
+                Err(e) => errors.push(e),
+            }
+        }
+        errors.into_result()
+    }
+}
+
+impl<I: Iterator> MultiTryAll for I {}
 
 impl MultipleFederationErrors {
     /// Converts into `Result<(), FederationError>`.

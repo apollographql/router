@@ -5,37 +5,30 @@ use std::fmt::Formatter;
 use std::ops::Range;
 use std::str::FromStr;
 
-use apollo_compiler::Node;
-use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::schema::Component;
-use apollo_compiler::schema::ObjectType;
 use itertools::Itertools;
 
+use super::id::ConnectedElement;
 use crate::sources::connect::validation::Code;
 
 /// A variable context for Apollo Connectors. Variables are used within a `@connect` or `@source`
 /// [`Directive`], are used in a particular [`Phase`], and have a specific [`Target`].
 #[derive(Clone, PartialEq)]
 pub(crate) struct VariableContext<'schema> {
-    /// The object type containing the field the directive is on
-    pub(crate) object: &'schema Node<ObjectType>,
+    /// The field definition or type the directive is on
+    pub(crate) element: &'schema ConnectedElement<'schema>,
 
-    /// The field definition of the field the directive is on
-    pub(crate) field: &'schema Component<FieldDefinition>,
     pub(super) phase: Phase,
     pub(super) target: Target,
 }
 
 impl<'schema> VariableContext<'schema> {
     pub(crate) fn new(
-        object: &'schema Node<ObjectType>,
-        field: &'schema Component<FieldDefinition>,
+        element: &'schema ConnectedElement<'schema>,
         phase: Phase,
         target: Target,
     ) -> Self {
         Self {
-            object,
-            field,
+            element,
             phase,
             target,
         }
@@ -96,6 +89,7 @@ pub enum Namespace {
     Context,
     Status,
     This,
+    Batch,
 }
 
 impl Namespace {
@@ -106,6 +100,7 @@ impl Namespace {
             Self::Context => "$context",
             Self::Status => "$status",
             Self::This => "$this",
+            Self::Batch => "$batch",
         }
     }
 }
@@ -120,6 +115,7 @@ impl FromStr for Namespace {
             "$context" => Ok(Self::Context),
             "$status" => Ok(Self::Status),
             "$this" => Ok(Self::This),
+            "$batch" => Ok(Self::Batch),
             _ => Err(()),
         }
     }

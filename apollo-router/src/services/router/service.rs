@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -46,21 +45,18 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
-use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
 use crate::graphql;
 use crate::http_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_graphql_error;
+use crate::metrics::count_operation_error_codes;
+use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::telemetry::CLIENT_NAME;
-use crate::plugins::telemetry::CLIENT_VERSION;
-use crate::plugins::telemetry::apollo::OtlpErrorMetricsMode;
-use crate::plugins::telemetry::config::Conf;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
+use crate::plugins::telemetry::apollo::ErrorsConfiguration;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_URI;
@@ -71,7 +67,6 @@ use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionTy
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::protocols::multipart::Multipart;
 use crate::protocols::multipart::ProtocolMode;
-use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::router_factory::RouterFactory;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
@@ -95,6 +90,7 @@ use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PipelineHandle;
+use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
@@ -116,7 +112,7 @@ pub(crate) struct RouterService {
     // instance
     batching: Batching,
     supergraph_service: supergraph::BoxCloneService,
-    oltp_error_metrics_mode: OtlpErrorMetricsMode,
+    apollo_telemetry_config: ApolloTelemetryConfig,
 }
 
 impl RouterService {
@@ -126,7 +122,7 @@ impl RouterService {
         persisted_query_layer: Arc<PersistedQueryLayer>,
         query_analysis_layer: QueryAnalysisLayer,
         batching: Batching,
-        oltp_error_metrics_mode: OtlpErrorMetricsMode,
+        apollo_telemetry_config: ApolloTelemetryConfig,
     ) -> Self {
         let supergraph_service: supergraph::BoxCloneService =
             ServiceBuilder::new().buffered().service(sgb).boxed_clone();
@@ -137,7 +133,7 @@ impl RouterService {
             query_analysis_layer: Arc::new(query_analysis_layer),
             batching,
             supergraph_service,
-            oltp_error_metrics_mode,
+            apollo_telemetry_config,
         }
     }
 }
@@ -345,10 +341,10 @@ impl RouterService {
                     && (accepts_json || accepts_wildcard)
                 {
                     if !response.errors.is_empty() {
-                        Self::count_errors(
+                        count_operation_errors(
                             &response.errors,
                             &context,
-                            &self.oltp_error_metrics_mode,
+                            &self.apollo_telemetry_config.errors,
                         );
                     }
                     if let Some(value_completion) =
@@ -357,7 +353,7 @@ impl RouterService {
                         Self::count_value_completion_errors(
                             value_completion,
                             &context,
-                            &self.oltp_error_metrics_mode,
+                            &self.apollo_telemetry_config.errors,
                         );
                     }
 
@@ -395,10 +391,10 @@ impl RouterService {
                     }
 
                     if !response.errors.is_empty() {
-                        Self::count_errors(
+                        count_operation_errors(
                             &response.errors,
                             &context,
-                            &self.oltp_error_metrics_mode,
+                            &self.apollo_telemetry_config.errors,
                         );
                     }
 
@@ -426,10 +422,10 @@ impl RouterService {
 
                     Ok(RouterResponse { response, context })
                 } else {
-                    Self::count_error_codes(
-                        vec!["INVALID_ACCEPT_HEADER"],
+                    count_operation_error_codes(
+                        &["INVALID_ACCEPT_HEADER"],
                         &context,
-                        &self.oltp_error_metrics_mode,
+                        &self.apollo_telemetry_config.errors,
                     );
 
                     // this should be unreachable due to a previous check, but just to be sure...
@@ -682,6 +678,19 @@ impl RouterService {
                 }
             }
         };
+
+        if is_batch && self.batching.exceeds_batch_size(&result) {
+            return Err(TranslateError {
+                status: StatusCode::UNPROCESSABLE_ENTITY,
+                extension_code: "BATCH_LIMIT_EXCEEDED".to_string(),
+                extension_details: format!(
+                    "Batch limits exceeded: you provided a batch with {} entries, but the configured maximum router batch size is {}",
+                    result.len(),
+                    self.batching.maximum_size.unwrap_or_default()
+                ),
+            });
+        }
+
         Ok((result, is_batch))
     }
 
@@ -860,101 +869,17 @@ impl RouterService {
         Ok(graphql_requests)
     }
 
-    fn count_errors(
-        errors: &Vec<graphql::Error>,
-        context: &Context,
-        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
-    ) {
-        let unwrap_context_string = |context_key: &str| -> String {
-            context
-                .get::<_, String>(context_key)
-                .unwrap_or_default()
-                .unwrap_or_default()
-        };
-
-        let operation_id = unwrap_context_string(APOLLO_OPERATION_ID);
-        let operation_name = unwrap_context_string(OPERATION_NAME);
-        let operation_kind = unwrap_context_string(OPERATION_KIND);
-        let client_name = unwrap_context_string(CLIENT_NAME);
-        let client_version = unwrap_context_string(CLIENT_VERSION);
-
-        let mut map = HashMap::new();
-        for error in errors {
-            let code = error.extensions.get("code").and_then(|c| c.as_str());
-            let service = error
-                .extensions
-                .get("service")
-                .and_then(|s| s.as_str())
-                .unwrap_or_default()
-                .to_string();
-            let severity = error.extensions.get("severity").and_then(|s| s.as_str());
-            let path = match &error.path {
-                None => "".into(),
-                Some(path) => path.to_string(),
-            };
-            let entry = map.entry(code).or_insert(0u64);
-            *entry += 1;
-
-            if matches!(oltp_error_metrics_mode, OtlpErrorMetricsMode::Enabled) {
-                let code_str = code.unwrap_or_default().to_string();
-                let severity_str = severity
-                    .unwrap_or(tracing::Level::ERROR.as_str())
-                    .to_string();
-                u64_counter!(
-                    "apollo.router.operations.error",
-                    "Number of errors returned by operation",
-                    1,
-                    "apollo.operation.id" = operation_id.clone(),
-                    "graphql.operation.name" = operation_name.clone(),
-                    "graphql.operation.type" = operation_kind.clone(),
-                    "apollo.client.name" = client_name.clone(),
-                    "apollo.client.version" = client_version.clone(),
-                    "graphql.error.extensions.code" = code_str,
-                    "graphql.error.extensions.severity" = severity_str,
-                    "graphql.error.path" = path,
-                    "apollo.router.error.service" = service
-                );
-            }
-        }
-
-        for (code, count) in map {
-            count_graphql_error(count, code);
-        }
-    }
-
-    fn count_error_codes(
-        codes: Vec<&str>,
-        context: &Context,
-        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
-    ) {
-        let errors = codes
-            .iter()
-            .map(|c| {
-                let mut extensions = Object::new();
-                extensions.insert("code", Value::String((*c).into()));
-                graphql::Error {
-                    message: "".into(),
-                    locations: vec![],
-                    path: None,
-                    extensions,
-                }
-            })
-            .collect();
-
-        Self::count_errors(&errors, context, oltp_error_metrics_mode);
-    }
-
     fn count_value_completion_errors(
         value_completion: &Value,
         context: &Context,
-        oltp_error_metrics_mode: &OtlpErrorMetricsMode,
+        errors_config: &ErrorsConfiguration,
     ) {
         if let Some(vc_array) = value_completion.as_array() {
             let errors: Vec<graphql::Error> = vc_array
                 .iter()
                 .filter_map(graphql::Error::from_value_completion_value)
                 .collect();
-            Self::count_errors(&errors, context, oltp_error_metrics_mode);
+            count_operation_errors(&errors, context, errors_config);
         }
     }
 }
@@ -979,7 +904,7 @@ pub(crate) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
 pub(crate) struct RouterCreator {
     pub(crate) supergraph_creator: Arc<SupergraphCreator>,
     sb: Buffer<router::Request, BoxFuture<'static, router::ServiceResult>>,
-    _pipeline_handle: Arc<PipelineHandle>,
+    pipeline_handle: Arc<PipelineHandle>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -1003,6 +928,10 @@ impl RouterFactory for RouterCreator {
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn pipeline_ref(&self) -> Arc<PipelineRef> {
+        self.pipeline_handle.pipeline_ref.clone()
     }
 }
 
@@ -1042,24 +971,13 @@ impl RouterCreator {
         let config_hash = configuration.hash();
         let pipeline_handle = PipelineHandle::new(schema_id, launch_id, config_hash);
 
-        let oltp_error_metrics_mode: OtlpErrorMetricsMode =
-            match configuration.apollo_plugins.plugins.get("telemetry") {
-                Some(telemetry_config) => {
-                    match serde_json::from_value::<Conf>(telemetry_config.clone()) {
-                        Ok(conf) => conf.apollo.errors.experimental_otlp_error_metrics,
-                        _ => OtlpErrorMetricsMode::default(),
-                    }
-                }
-                _ => OtlpErrorMetricsMode::default(),
-            };
-
         let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             supergraph_creator.create(),
             apq_layer,
             persisted_query_layer,
             query_analysis_layer,
             configuration.batching.clone(),
-            oltp_error_metrics_mode,
+            TelemetryConfig::apollo(&configuration),
         ));
 
         // NOTE: This is the start of the router pipeline (router_service)
@@ -1080,7 +998,7 @@ impl RouterCreator {
         Ok(Self {
             supergraph_creator,
             sb,
-            _pipeline_handle: Arc::new(pipeline_handle),
+            pipeline_handle: Arc::new(pipeline_handle),
         })
     }
 

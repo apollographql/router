@@ -40,6 +40,7 @@ use crate::metrics::filter::FilterMeterProvider;
 pub(crate) enum MeterProviderType {
     PublicPrometheus,
     Apollo,
+    ApolloRealtime,
     Public,
     OtelDefault,
 }
@@ -369,7 +370,7 @@ macro_rules! aggregate_observable_instrument_fn {
                     }
                     // We must not set callback in the builder as it will leak memory.
                     // Instead we use callback registration on the meter provider as it allows unregistration
-                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail witha crptic message about different implementation.
+                    // Also we need to filter out no-op instruments as passing these to the meter provider as these will fail with a cryptic message about different implementations.
                     // Confusingly the implementation of as_any() on an instrument will return 'other stuff'. In particular no-ops return Arc<()>. This is why we need to check for this.
                     let delegate: $wrapper<$ty> = builder.try_init()?;
                     let registration = if delegate.clone().as_any().downcast_ref::<()>().is_some() {

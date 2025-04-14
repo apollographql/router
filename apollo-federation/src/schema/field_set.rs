@@ -1,5 +1,4 @@
 use apollo_compiler::Schema;
-use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
@@ -9,7 +8,6 @@ use apollo_compiler::validation::Valid;
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::operation::NamedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
 use crate::schema::ValidFederationSchema;
@@ -29,11 +27,6 @@ fn check_absence_of_aliases(selection_set: &SelectionSet) -> Result<(), Federati
     ) -> Result<(), FederationError> {
         for selection in selection_set.iter() {
             match selection {
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal(
-                        "check_absence_of_aliases(): unexpected fragment spread",
-                    ));
-                }
                 Selection::InlineFragment(frag) => check_absence_of_aliases(&frag.selection_set)?,
                 Selection::Field(field) => {
                     if let Some(alias) = &field.field.alias {
@@ -75,9 +68,11 @@ pub(crate) fn parse_field_set(
     )?;
 
     // A field set should not contain any named fragments.
-    let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
+    let fragments = Default::default();
     let selection_set =
-        SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
+        SelectionSet::from_selection_set(&field_set.selection_set, &fragments, schema, &||
+            // never cancel
+            Ok(()))?;
 
     // Validate that the field set has no aliases.
     check_absence_of_aliases(&selection_set)?;
@@ -202,9 +197,12 @@ pub(crate) fn validate_field_value(
     field_value.validate(schema.schema())?;
 
     // A field value should not contain any named fragments.
-    let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
+    let fragments = Default::default();
     let selection_set =
-        SelectionSet::from_selection_set(&field_value.selection_set, &named_fragments, schema)?;
+        SelectionSet::from_selection_set(&field_value.selection_set, &fragments, schema, &|| {
+            // never cancel
+            Ok(())
+        })?;
 
     // Validate that the field value has no aliases.
     check_absence_of_aliases(&selection_set)?;
@@ -219,21 +217,15 @@ mod tests {
     use crate::Supergraph;
     use crate::error::FederationError;
     use crate::query_graph::build_federated_query_graph;
-    use crate::subgraph::Subgraph;
 
     #[test]
     fn test_aliases_in_field_set() -> Result<(), FederationError> {
-        let sdl = r#"
-        type Query {
-            a: Int! @requires(fields: "r1: r")
-            r: Int! @external
-          }
-        "#;
-
-        let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
-        let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
-        let err = super::parse_field_set(&supergraph.schema, Name::new("Query").unwrap(), "r1: r")
-            .map(|_| "Unexpected success") // ignore the Ok value
+        // Note: `field-set-alias.graphqls` has multiple alias errors in the same field set.
+        let schema_str = include_str!("fixtures/field-set-alias.graphqls");
+        let supergraph = Supergraph::new(schema_str).expect("Expected supergraph schema to parse");
+        // Note: `Supergraph::new` does not error out on aliases in field sets.
+        // We call `parse_field_set` directly to test the alias error.
+        let err = super::parse_field_set(&supergraph.schema, Name::new("T").unwrap(), "r1: r")
             .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),
@@ -244,22 +236,12 @@ mod tests {
 
     #[test]
     fn test_aliases_in_field_set_via_build_federated_query_graph() -> Result<(), FederationError> {
-        // NB: This tests multiple alias errors in the same field set.
-        let sdl = r#"
-        type Query {
-            a: Int! @requires(fields: "r1: r s q1: q")
-            r: Int! @external
-            s: String! @external
-            q: String! @external
-          }
-        "#;
-
-        let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
-        let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
+        // Note: `field-set-alias.graphqls` has multiple alias errors in the same field set.
+        let schema_str = include_str!("fixtures/field-set-alias.graphqls");
+        let supergraph = Supergraph::new(schema_str).expect("Expected supergraph schema to parse");
         let api_schema = supergraph.to_api_schema(Default::default())?;
         // Testing via `build_federated_query_graph` function, which validates the @requires directive.
         let err = build_federated_query_graph(supergraph.schema, api_schema, None, None)
-            .map(|_| "Unexpected success") // ignore the Ok value
             .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),

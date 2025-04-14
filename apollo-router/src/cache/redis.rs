@@ -448,7 +448,7 @@ impl RedisCacheStorage {
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
-            // across multipe nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
+            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
             let len = keys.len();
             let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
             for (index, key) in keys.into_iter().enumerate() {
@@ -555,10 +555,14 @@ impl RedisCacheStorage {
         tracing::trace!("insert result {:?}", r);
     }
 
-    pub(crate) async fn delete<K: KeyType>(&self, keys: Vec<RedisKey<K>>) -> Option<u32> {
-        let mut h: HashMap<u16, Vec<String>> = HashMap::new();
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
+    /// `scan_with_namespaced_results` and already includes it.
+    pub(crate) async fn delete_from_scan_result(
+        &self,
+        keys: Vec<fred::types::RedisKey>,
+    ) -> Option<u32> {
+        let mut h: HashMap<u16, Vec<fred::types::RedisKey>> = HashMap::new();
         for key in keys.into_iter() {
-            let key = self.make_key(key);
             let hash = ClusterRouting::hash_key(key.as_bytes());
             let entry = h.entry(hash).or_default();
             entry.push(key);
@@ -581,11 +585,13 @@ impl RedisCacheStorage {
         Some(total)
     }
 
-    pub(crate) fn scan(
+    /// The keys returned in `ScanResult` do include the prefix from `namespace` configuration.
+    pub(crate) fn scan_with_namespaced_results(
         &self,
         pattern: String,
         count: Option<u32>,
     ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+        let pattern = self.make_key(RedisKey(pattern));
         if self.is_cluster {
             Box::pin(self.inner.next().scan_cluster(pattern, count, None))
         } else {

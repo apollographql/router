@@ -26,7 +26,7 @@ executors:
       - image: ghcr.io/apollographql/nightly/router:build
       - image: cimg/redis:7.4.2
       - image: openzipkin/zipkin:3.5.0
-      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.20.0
+      - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.21.1
     resource_class: 2xlarge
     environment:
       CARGO_BUILD_JOBS: 4
@@ -374,7 +374,7 @@ commands:
             fi
 
             if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
-              cargo binstall -y --version 0.14.21 cargo-deny
+              cargo binstall -y --version 0.18.2 cargo-deny
               cargo binstall -y --version 0.12.2 cargo-edit
               cargo binstall -y --version 0.12.0 cargo-fuzz
               cargo binstall -y --version 0.6.6 cargo-about
@@ -970,10 +970,17 @@ jobs:
                   cd artifacts && sha1sum *.tar.gz > sha1sums.txt
             - run:
                 name: Create GitHub Release
-                # We always create the version as a "pre-release" version.
-                # It is promoted to latest in a separate step in RELEASE_CHECKLIST.md
                 command: >
-                  gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/*
+                  case "$VERSION" in
+
+                    # If the VERSION contains a dash, consider it a pre-release version.
+                    # This is in-line with SemVer's expectations/designations!
+                    *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
+
+                    # In all other cases, publish it as the latest version.
+                    *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
+
+                  esac
             - run:
                 name: Docker build
                 command: |

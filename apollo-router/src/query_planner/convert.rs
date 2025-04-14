@@ -170,7 +170,7 @@ impl From<&'_ next::PrimaryDeferBlock> for plan::Primary {
         } = value;
         Self {
             node: option(node).map(Box::new),
-            subselection: sub_selection.as_ref().map(|s| s.to_string()),
+            subselection: sub_selection.clone(),
         }
     }
 }
@@ -204,7 +204,7 @@ impl From<&'_ next::DeferredDeferBlock> for plan::DeferredNode {
                     .collect(),
             ),
             node: option(node).map(Arc::new),
-            subselection: sub_selection.as_ref().map(|s| s.to_string()),
+            subselection: sub_selection.clone(),
         }
     }
 }
