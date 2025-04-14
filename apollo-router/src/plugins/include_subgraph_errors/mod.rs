@@ -75,7 +75,7 @@ impl Plugin for IncludeSubgraphErrors {
                             error.message = REDACTED_ERROR_MESSAGE.to_string();
                             error.extensions = Object::new(); // Clear all extensions
                         } else {
-                            tracing::trace!("Processing errors for subgraph '{}' based on config: {:?}", subgraph_name, effective_config);
+                            tracing::debug!("Processing errors for subgraph '{}' based on config: {:?}", subgraph_name, effective_config);
                             // Process errors based on the effective config
                             // 1. Redact message if needed
                             if effective_config.redact_message {
