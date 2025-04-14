@@ -2,6 +2,28 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.1.2] - 2025-04-14
+
+## 🐛 Fixes
+
+### Support @context/@fromContext when using Connectors ([PR #7132](https://github.com/apollographql/router/pull/7132))
+
+This fixes a bug that dropped the `@context` and `@fromContext` directives when introducing a connector.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/7132
+
+## 📃 Configuration
+
+### Add new configurable delivery pathway for high cardinality Apollo Studio metrics ([PR #7138](https://github.com/apollographql/router/pull/7138))
+
+This change provides a secondary pathway for new "realtime" Studio metrics whose delivery interval is configurable due to their higher cardinality. These metrics will respect `telemetry.apollo.batch_processor.scheduled_delay` as configured on the realtime path.
+
+All other Apollo metrics will maintain the previous hardcoded 60s send interval.
+
+By [@rregitsky](https://github.com/rregitsky) and [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7138
+
+
+
 # [2.1.1] - 2025-04-07
 
 ## 🔒 Security
