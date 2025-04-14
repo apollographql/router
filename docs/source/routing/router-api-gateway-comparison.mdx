@@ -14,7 +14,7 @@ When comparing the router to other API technologies in the market today, a natur
 Tools like Kong or your cloud provider offer capabilities to secure, manage, and monitor your API endpoints.
 These gateways usually live at the outermost edges of your companies infrastructure. Sometimes they are even required by your security team at all layers, so that traffic flows through the same secure layer of your tech stack regardless of business use case.
 
-The key distinction of GraphOS Router is that is not a point-to-point solution for endpoints. The GraphOS Router is an API schema-aware solution to handle the orchestration of many different operations, even if that requires making multiple dependent service calls to resolve an operation.
+The key distinction of GraphOS Router is that it is not a point-to-point solution for endpoints. The GraphOS Router is an API schema-aware solution to handle the orchestration of many different operations, even if that requires making multiple dependent service calls to resolve an operation.
 
 <Tip>
 
@@ -28,9 +28,9 @@ Read more in the [blog post](https://www.apollographql.com/blog/leveraging-graph
 First, let's define what we mean by "schema aware". The GraphOS Router runs all the client operations against a [supergraph](/intro/platform/).
 This means that requests processed by the router are not for any random service, but are restricted to what is defined and published by the connected services and what is defined in their API schema. In Apollo Federation, we call services connected to the GraphOS Router subgraphs.
 Subgraphs define the schema and capabilities they want to expose via type-safe API schema language called [GraphQL](https://graphql.com/), however the service itself could be either a REST or GraphQL API. A well-defined GraphQL schema does not just expose all the data available in a company, instead, a [demand-oriented schema](/graphos/schema-design/guides/demand-oriented-schema-design) gives clients access to all the operations they need to execute, but without over exposing your data.
-Since subgraphs are also the ones that define the capabilities the want to expose, the router can be the central location to enforce standardized rules or policies that are declared by subgraphs rather then the gateway, for example, [directive-based authN/Z](https://www.apollographql.com/docs/graphos/routing/security/authorization).
+Since subgraphs are also the ones that define the capabilities they want to expose, the router can be the central location to enforce standardized rules or policies that are declared by subgraphs rather then the gateway, for example, [directive-based authN/Z](https://www.apollographql.com/docs/graphos/routing/security/authorization).
 
-```graphql
+```graphql title="accounts-service-rest-api.graphql"
 type Query {
   bankAccounts: [BankAccount] @authenticated @requiresScopes(scopes: [["accounts:read", "user:read"], ["accounts:admin"]])
 }
@@ -53,12 +53,14 @@ gatewayConfig:
 
 ## API Orchestration
 Traditional API management tools are point-to-point solutions combined with a few other capabilities for discovery, but they do little handle the real complexity of APIs, which is understanding how to use them to power your clients.
-Our front-end teams are typically not involved in our API and service design so they are the ones left to deal with the complexity of connecting data pieces, chaining calls together and applying more performance optimizations when each API team has met their SLOs but calling all the APIs together is still to slow.
-This orchestration problem leads to more services for dedicated use cases which reduces our ability to reuse APIs in other scenarios (see [GraphQL as an Abstraction Layer](https://www.apollographql.com/docs/graphos/reference/guides/using-graphql-for-abstraction).
+Our front-end teams are typically not involved in our API and service design. They are the ones left to deal with the complexity of connecting data pieces, chaining calls together, and applying performance optimizations when each API team has met their SLOs, but calling all the APIs together is still to slow.
+This orchestration problem leads to more services for dedicated use cases, which reduces our ability to reuse APIs in other scenarios (*see* [GraphQL as an Abstraction Layer](https://www.apollographql.com/docs/graphos/reference/guides/using-graphql-for-abstraction)).
 
-GraphOS Router introduces a new concept for APIs, [Apollo Federation](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/federation). Federation is a declarative model, which means rather than just consuming and producing APIs as is, client teams instead define what data they need in their operations and subgraph teams define their API capabilities via the schema.
+GraphOS Router introduces a new concept for APIs, [Apollo Federation](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/federation). Federation is a declarative model, which means rather than just consuming and producing APIs as is, client teams instead declare what data they need in their operation definitions and subgraph teams define their API capabilities via the schema definitions.
 Then we run both the operation and API schemas through a process called [Query Planning](https://www.apollographql.com/docs/graphos/routing/about-router#subgraph-query-planner). The planner figures out what services we need to call and in which order to resolve a given operation.
 
+<img src="../images/get-started/qp.svg" class="dark:hidden" />
+<img src="../images/get-started/qp-dark.svg" class="hidden dark:block" />
 
 ## Support for non-GraphQL APIs
 
