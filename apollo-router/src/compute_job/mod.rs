@@ -137,7 +137,7 @@ impl From<ComputeJobType> for opentelemetry::Value {
 
 pub(crate) struct Job {
     subscriber: Dispatch,
-    span: Span,
+    parent_span: Span,
     ty: ComputeJobType,
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
@@ -161,7 +161,7 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
                     let job_type: &'static str = job.ty.into();
                     let age: &'static str = age.into();
                     let _subscriber = job.subscriber.set_default();
-                    job.span.in_scope(|| {
+                    job.parent_span.in_scope(|| {
                         let span = info_span!(
                             COMPUTE_JOB_EXECUTION_SPAN_NAME,
                             "job.type" = job_type,
@@ -219,7 +219,7 @@ where
         let queue = queue();
         let job = Job {
             subscriber: Dispatch::default(),
-            span: Span::current(),
+            parent_span: Span::current(),
             ty: compute_job_type,
             job_fn: wrapped_job_fn,
             queue_start: Instant::now(),
