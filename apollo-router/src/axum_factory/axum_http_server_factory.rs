@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::extract::Extension;
@@ -226,6 +226,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 all_routers.main.1,
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
+				configuration.server.http.header_read_timeout,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -268,6 +269,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             router,
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
+							configuration.server.http.header_read_timeout,
                             all_connections_stopped_sender.clone(),
                         );
                         (
