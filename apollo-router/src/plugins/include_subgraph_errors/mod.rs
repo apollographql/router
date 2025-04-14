@@ -93,7 +93,7 @@ impl Plugin for IncludeSubgraphErrors {
                                 .as_ref()
                                 .map_or(true, |allow| allow.contains(&service_key)); // Allowed if no allow list or if present in allow list
 
-                            if !is_service_denied && is_service_allowed {
+                            if !is_service_denied && is_service_allowed && !subgraph_name.is_empty() {
                                 error
                                     .extensions
                                     .entry(service_key)
