@@ -12,41 +12,10 @@ use std::str::FromStr;
 use apollo_compiler::collections::IndexMap;
 use http::Uri;
 use itertools::Itertools;
-use percent_encoding::AsciiSet;
-use percent_encoding::CONTROLS;
-use percent_encoding::NON_ALPHANUMERIC;
-use percent_encoding::utf8_percent_encode;
 use serde_json_bytes::Value;
 
+use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
-
-/// https://url.spec.whatwg.org/#fragment-percent-encode-set
-const FRAGMENT: &AsciiSet = &CONTROLS.add(b' ').add(b'"').add(b'<').add(b'>').add(b'`');
-
-/// https://url.spec.whatwg.org/#path-percent-encode-set
-const PATH_SEGMENT: &AsciiSet = &FRAGMENT
-    .add(b'#')
-    .add(b'?')
-    .add(b'{')
-    .add(b'}')
-    .add(b'/')
-    .add(b'%')
-    .add(b'\\');
-
-// https://url.spec.whatwg.org/#query-state
-const QUERY: &AsciiSet = &CONTROLS
-    .add(b' ')
-    .add(b'"')
-    .add(b'#')
-    .add(b'<')
-    .add(b'>')
-    .add(b'\'');
-
-const UNRESERVED: &AsciiSet = &NON_ALPHANUMERIC
-    .remove(b'-')
-    .remove(b'.')
-    .remove(b'_')
-    .remove(b'~');
 
 /// A parsed string template, containing a series of [`Part`]s.
 #[derive(Clone, Debug)]
@@ -131,45 +100,31 @@ impl StringTemplate {
     /// arbitrary generic types, so non-string consumers (headers) implement this themselves with
     /// any additional validations/transformations they need.
     pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
-        // TODO: accumulate the result instead of allocating a new string for each part, when possible
-        self.parts
-            .iter()
-            .map(|part| part.interpolate(vars))
-            .collect()
+        let mut result = String::new();
+        for part in &self.parts {
+            part.interpolate(vars, &mut result)?;
+        }
+        Ok(result)
     }
 
     /// Interpolate the expression as a URI, percent-encoding parts as needed.
     pub fn interpolate_uri(&self, vars: &IndexMap<String, Value>) -> Result<Uri, Error> {
-        let mut result = String::new();
+        let mut result = UriString::new();
         for part in &self.parts {
-            let new_part = part.interpolate(vars)?;
-
-            let encoding = if let Part::Constant(_) = part {
-                // We still need to %encode _some_ special characters for literals, but not all of them.
-                // TODO: parse each constant into components and properly encode additional symbols
-                //  for example, a literal domain can't accept the same characters as a path
-                FRAGMENT
-            } else if result.contains('#') {
-                FRAGMENT
-            } else if result.contains('?') {
-                UNRESERVED
-            } else {
-                PATH_SEGMENT
+            match part {
+                Part::Constant(constant) => {
+                    // We don't percent-encode constant strings, assuming the user knows what they want.
+                    // `Uri::from_str` will take care of encoding completely illegal characters
+                    result.write_trusted(&constant.value)
+                }
+                Part::Expression(_) => {
+                    part.interpolate(vars, &mut result)?;
+                }
             };
-            write!(
-                &mut result,
-                "{}",
-                utf8_percent_encode(new_part.as_str(), encoding)
-            )
-            .map_err(|err| Error {
-                // In practice this should never fail, but let's not panic just in case
-                message: format!("Error writing URI: {}", err),
-                location: part.location(),
-            })?;
         }
-        Uri::from_str(&result).map_err(|err| Error {
+        Uri::from_str(result.as_ref()).map_err(|err| Error {
             message: format!("Invalid URI: {}", err),
-            location: 0..result.len(),
+            location: 0..result.as_ref().len(),
         })
     }
 }
@@ -233,25 +188,35 @@ impl Part {
     /// # Errors
     ///
     /// If the expression evaluates to an array or object.
-    pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
+    pub(crate) fn interpolate<Output: Write>(
+        &self,
+        vars: &IndexMap<String, Value>,
+        mut output: Output,
+    ) -> Result<(), Error> {
         match self {
-            Part::Constant(Constant { value, .. }) => Ok(value.clone()),
+            Part::Constant(Constant { value, .. }) => output.write_str(value),
             Part::Expression(Expression { expression, .. }) => {
                 // TODO: do something with the ApplyTo errors
                 let (value, _errs) = expression.apply_with_vars(&Value::Null, vars);
 
                 match value.unwrap_or(Value::Null) {
-                    Value::Null => Ok(String::new()),
-                    Value::Bool(b) => Ok(b.to_string()),
-                    Value::Number(n) => Ok(n.to_string()),
-                    Value::String(s) => Ok(s.as_str().to_string()),
-                    Value::Array(_) | Value::Object(_) => Err(Error {
-                        message: "Expressions can't evaluate to arrays or objects.".to_string(),
-                        location: self.location(),
-                    }),
+                    Value::Null => Ok(()),
+                    Value::Bool(b) => write!(output, "{b}"),
+                    Value::Number(n) => write!(output, "{n}"),
+                    Value::String(s) => output.write_str(s.as_str()),
+                    Value::Array(_) | Value::Object(_) => {
+                        return Err(Error {
+                            message: "Expressions can't evaluate to arrays or objects.".to_string(),
+                            location: self.location(),
+                        });
+                    }
                 }
             }
         }
+        .map_err(|_err| Error {
+            message: "Error writing string".to_string(),
+            location: self.location(),
+        })
     }
 }
 
@@ -267,6 +232,95 @@ pub(crate) struct Constant {
 pub(crate) struct Expression {
     pub(crate) expression: JSONSelection,
     pub(crate) location: Range<usize>,
+}
+
+/// All the percent encoding rules we use for building URIs.
+///
+/// The [`AsciiSet`] type is an efficient type used by [`percent_encoding`],
+/// but the logic of it is a bit inverted from what we want.
+/// An [`AsciiSet`] lists all the characters which should be encoded, rather than those which
+/// should be allowed.
+/// Following security best practices, we instead define sets by what is
+/// explicitly allowed in a given context, so we use `remove()` to _add_ allowed characters to a context.
+mod encoding {
+    use std::fmt::Write;
+
+    use percent_encoding::AsciiSet;
+    use percent_encoding::NON_ALPHANUMERIC;
+    use percent_encoding::utf8_percent_encode;
+
+    /// Characters that never need to be percent encoded are allowed by this set.
+    /// https://www.rfc-editor.org/rfc/rfc3986#section-2.3
+    /// In other words, this is the most restrictive set, encoding everything that
+    /// should _sometimes_ be encoded. We can then explicitly allow additional characters
+    /// depending on the context.
+    const USER_INPUT: &AsciiSet = &NON_ALPHANUMERIC
+        .remove(b'-')
+        .remove(b'.')
+        .remove(b'_')
+        .remove(b'~');
+
+    pub(super) struct UriString {
+        value: String,
+    }
+
+    impl UriString {
+        pub(super) fn new() -> Self {
+            Self {
+                value: String::new(),
+            }
+        }
+
+        /// Write a bit of trusted input without encoding, like a constant piece of a template
+        pub(super) fn write_trusted(&mut self, s: &str) {
+            self.value.push_str(s)
+        }
+    }
+
+    impl Write for &mut UriString {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            write!(&mut self.value, "{}", utf8_percent_encode(s, USER_INPUT))
+        }
+    }
+
+    impl AsRef<str> for UriString {
+        fn as_ref(&self) -> &str {
+            &self.value
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use percent_encoding::utf8_percent_encode;
+
+        /// This test is basically checking our understanding of how `AsciiSet` works.
+        #[test]
+        fn unreserved_encodes_everything_but_unreserved() {
+            for i in 0..=255u8 {
+                let character = i as char;
+                let string = character.to_string();
+                let encoded = utf8_percent_encode(&string, UNRESERVED);
+                for encoded_char in encoded.into_iter().flat_map(|slice| slice.chars()) {
+                    if character.is_ascii_alphanumeric()
+                        || character == '-'
+                        || character == '.'
+                        || character == '_'
+                        || character == '~'
+                    {
+                        assert_eq!(
+                            encoded_char, character,
+                            "{character} should not have been encoded"
+                        );
+                    } else {
+                        assert!(
+                            encoded_char.is_ascii_alphanumeric() || encoded_char == '%', // percent encoding
+                            "{encoded_char} was not encoded"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
