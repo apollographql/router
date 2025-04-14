@@ -20,6 +20,7 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use crate::Configuration;
 use crate::Context;
@@ -124,9 +125,8 @@ impl QueryAnalysisLayer {
 
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
-
-        compute_job::execute(ComputeJobType::QueryParsing, move |_| {
-            span.in_scope(|| {
+        let compute_job_future = span.in_scope(||{
+            compute_job::execute(ComputeJobType::QueryParsing, move |_| {
                 Query::parse_document(
                     &query,
                     operation_name.as_deref(),
@@ -162,10 +162,13 @@ impl QueryAnalysisLayer {
                     Ok(doc)
                 })
             })
-        })
-        .map_err(MaybeBackPressureError::TemporaryError)?
-        .await
-        .map_err(MaybeBackPressureError::PermanentError)
+        });
+
+        compute_job_future
+            .map_err(MaybeBackPressureError::TemporaryError)?
+            .instrument(span)
+            .await
+            .map_err(MaybeBackPressureError::PermanentError)
     }
 
     /// Measure the number of selections that would be encountered if we walked the given selection
