@@ -4,6 +4,89 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.3] - 2025-04-14
+
+## 🐛 Fixes
+
+### Fix potential telemetry deadlock ([PR #7142](https://github.com/apollographql/router/pull/7142))
+
+The `tracing_subscriber` crate uses `RwLock`s to manage access to a `Span`'s `Extensions`. Deadlocks are possible when
+multiple threads access this lock, including with reentrant locks:
+```
+// Thread 1              |  // Thread 2
+let _rg1 = lock.read();  |
+                         |  // will block
+                         |  let _wg = lock.write();
+// may deadlock          |
+let _rg2 = lock.read();  |
+```
+
+This fix removes an opportunity for reentrant locking while extracting a Datadog identifier.
+
+There is also a potential for deadlocks when the root and active spans' `Extensions` are acquired at the same time, if
+multiple threads are attempting to access those `Extensions` but in a different order. This fix removes a few cases
+where multiple spans' `Extensions` are acquired at the same time.
+
+By [@carodewig](https://github.com/carodewig) in https://github.com/apollographql/router/pull/7142
+
+### Connection shutdown timeout ([PR #7058](https://github.com/apollographql/router/pull/7058))
+
+When a connection is closed we call `graceful_shutdown` on hyper and then await for the connection to close.
+
+Hyper 0.x has various issues around shutdown that may result in us waiting for extended periods for the connection to eventually be closed.
+
+This PR introduces a configurable timeout from the termination signal to actual termination, defaulted to 60 seconds. The connection is forcibly terminated after the timeout is reached.
+
+To configure, set the option in router yaml. It accepts human time durations:
+```
+supergraph:
+  connection_shutdown_timeout: 60s
+```
+
+Note that even after connections have been terminated the router will still hang onto pipelines if `early_cancel` has not been configured to true. The router is trying to complete the request. 
+
+Users can either set `early_cancel` to `true` 
+```
+supergraph:
+  early_cancel: true
+```
+
+AND/OR use traffic shaping timeouts:
+```
+traffic_shaping:
+  router:
+    timeout: 60s
+```
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/7058
+
+### Fix crash when an invalid query plan is generated ([PR #7214](https://github.com/apollographql/router/pull/7214))
+
+When an invalid query plan is generated, the router could panic and crash.
+This could happen if there are gaps in the GraphQL validation implementation.
+Now, even if there are unresolved gaps, the router will handle it gracefully and reject the request.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7214
+
+### Improve Error Message for Invalid JWT Header Values ([PR #7121](https://github.com/apollographql/router/pull/7121))
+
+Enhanced parsing error messages for JWT Authorization header values now provide developers with clear, actionable feedback while ensuring that no sensitive data is exposed.
+
+Examples of the updated error messages:
+```diff
+-         Header Value: '<invalid value>' is not correctly formatted. prefix should be 'Bearer'
++         Value of 'authorization' JWT header should be prefixed with 'Bearer'
+```
+
+```diff
+-         Header Value: 'Bearer' is not correctly formatted. Missing JWT
++         Value of 'authorization' JWT header has only 'Bearer' prefix but no JWT token
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/7121
+
+
+
 # [1.61.2] - 2025-04-07
 
 ## 🔒 Security
