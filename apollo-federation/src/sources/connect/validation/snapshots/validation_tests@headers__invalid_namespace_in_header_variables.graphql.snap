@@ -6,21 +6,21 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/headers/i
 [
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: unknown variable `$foo`, must be one of $config, $context",
+        message: "In `@source(http.headers:)`: unknown variable `$foo`, must be one of $config, $context, $request",
         locations: [
             11:49..11:53,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: $this is not valid here, must be one of $config, $context",
+        message: "In `@source(http.headers:)`: $this is not valid here, must be one of $config, $context, $request",
         locations: [
             12:62..12:67,
         ],
     },
     Message {
         code: InvalidHeader,
-        message: "In `@source(http.headers:)`: `config.bar` must start with one of $config, $context",
+        message: "In `@source(http.headers:)`: `config.bar` must start with one of $config, $context, $request",
         locations: [
             13:56..13:62,
         ],
