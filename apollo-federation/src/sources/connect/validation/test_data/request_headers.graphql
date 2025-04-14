@@ -29,4 +29,20 @@ type Query {
       }
       selection: "$"
     )
+  failOnInvalidRequestProperty: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/?something={$request.x}"
+        headers: [{ name: "x-my-header", value: "{$request.x}" }]
+      }
+      selection: "$"
+    )
+  failOnInvalidObject: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1/?something={$request.headers}"
+        headers: [{ name: "x-my-header", value: "{$request.headers}" }]
+      }
+      selection: "$"
+    )
 }
