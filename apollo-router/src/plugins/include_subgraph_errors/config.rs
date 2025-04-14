@@ -111,17 +111,6 @@ impl<'de> Deserialize<'de> for ErrorMode {
     }
 }
 
-#[derive(Clone, Debug, JsonSchema, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SubgraphConfigCommon {
-    /// Redact error messages for a subgraph
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) redact_message: Option<bool>,
-    /// Exclude specific extension keys from global allow/deny list
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) exclude_global_keys: Option<Vec<String>>,
-}
-
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(untagged)]
 pub(crate) enum SubgraphConfig {
@@ -131,23 +120,32 @@ pub(crate) enum SubgraphConfig {
     Allow {
         /// Allow specific extension keys for a subgraph. Will extending global allow list or override a global deny list
         allow_extensions_keys: Vec<String>,
-        /// Common configuration for a subgraph
-        #[serde(flatten)]
-        common: SubgraphConfigCommon,
+        /// Redact error messages for a subgraph
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redact_message: Option<bool>,
+        /// Exclude specific extension keys from global allow/deny list
+        #[serde(default)]
+        exclude_global_keys: Vec<String>,
     },
     /// Deny specific extension keys for a subgraph
     Deny {
         /// Allow specific extension keys for a subgraph. Will extending global deny list or override a global allow list
         deny_extensions_keys: Vec<String>,
-        /// Common configuration for a subgraph
-        #[serde(flatten)]
-        common: SubgraphConfigCommon,
+        /// Redact error messages for a subgraph
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redact_message: Option<bool>,
+        /// Exclude specific extension keys from global allow/deny list
+        #[serde(default)]
+        exclude_global_keys: Vec<String>,
     },
     /// Only common configuration options provided for a subgraph
     CommonOnly {
-        /// Common configuration for a subgraph
-        #[serde(flatten)]
-        common: SubgraphConfigCommon,
+        /// Redact error messages for a subgraph
+        #[serde(skip_serializing_if = "Option::is_none")]
+        redact_message: Option<bool>,
+        /// Exclude specific extension keys from global allow/deny list
+        #[serde(default)]
+        exclude_global_keys: Vec<String>,
     },
 }
 
@@ -186,16 +184,12 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
                     allow_extensions_keys: Option<Vec<String>>,
                     deny_extensions_keys: Option<Vec<String>>,
                     redact_message: Option<bool>,
-                    exclude_global_keys: Option<Vec<String>>,
+                    #[serde(default)]
+                    exclude_global_keys: Vec<String>,
                 }
 
                 let config: FullConfig =
                     Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))?;
-
-                let common = SubgraphConfigCommon {
-                    redact_message: config.redact_message,
-                    exclude_global_keys: config.exclude_global_keys,
-                };
 
                 match (config.allow_extensions_keys, config.deny_extensions_keys) {
                     (Some(_), Some(_)) => Err(de::Error::custom(
@@ -203,15 +197,20 @@ impl<'de> Deserialize<'de> for SubgraphConfig {
                     )),
                     (Some(allow), None) => Ok(SubgraphConfig::Allow {
                         allow_extensions_keys: allow,
-                        common,
+                        redact_message: config.redact_message,
+                        exclude_global_keys: config.exclude_global_keys,
                     }),
                     (None, Some(deny)) => Ok(SubgraphConfig::Deny {
                         deny_extensions_keys: deny,
-                        common,
+                        redact_message: config.redact_message,
+                        exclude_global_keys: config.exclude_global_keys,
                     }),
                     (None, None) => {
                         // If neither allow nor deny keys are present, it's CommonOnly
-                        Ok(SubgraphConfig::CommonOnly { common })
+                        Ok(SubgraphConfig::CommonOnly {
+                            redact_message: config.redact_message,
+                            exclude_global_keys: config.exclude_global_keys,
+                        })
                     }
                 }
             }

@@ -83,45 +83,29 @@ impl Plugin for IncludeSubgraphErrors {
                             }
 
                             // 2. Add 'service' extension (unless denied)
-                            let service_key = "service";
+                            let service_key = "service".to_string();
                             let is_service_denied = effective_config
                                 .deny_extensions_keys
                                 .as_ref()
-                                .map_or(false, |deny| deny.contains(service_key));
+                                .map_or(false, |deny| deny.contains(&service_key));
+                            let is_service_allowed = effective_config
+                                .allow_extensions_keys
+                                .as_ref()
+                                .map_or(true, |allow| allow.contains(&service_key)); // Allowed if no allow list or if present in allow list
 
-                            if !is_service_denied {
-                                // Also check if an allow list exists and if 'service' is in it
-                                let is_service_allowed = effective_config
-                                    .allow_extensions_keys
-                                    .as_ref()
-                                    .map_or(true, |allow| allow.contains(service_key)); // Allowed if no allow list or if present in allow list
-
-                                if is_service_allowed {
-                                    error
-                                        .extensions
-                                        .entry(service_key)
-                                        .or_insert(subgraph_name.clone().into());
-                                } else {
-                                    // If there's an allow list and 'service' is not in it, remove it
-                                    error.extensions.remove(service_key);
-                                }
-                            } else {
-                                // If explicitly denied, remove it
-                                error.extensions.remove(service_key);
+                            if !is_service_denied && is_service_allowed {
+                                error
+                                    .extensions
+                                    .entry(service_key)
+                                    .or_insert(subgraph_name.clone().into());
                             }
-
 
                             // 3. Filter extensions based on allow list
                             if let Some(allow_keys) = &effective_config.allow_extensions_keys {
                                 let mut original_extensions = std::mem::take(&mut error.extensions);
                                 for key in allow_keys {
                                     if let Some((key, value)) = original_extensions.remove_entry(key.as_str()) {
-                                        // Skip re-adding service if it was handled above
-                                        if key.as_str() != service_key {
-                                            error.extensions.insert(key, value);
-                                        } else if error.extensions.contains_key(service_key) {
-                                            // Ensure service key added above is preserved if it was allowed
-                                        }
+                                        error.extensions.insert(key, value);
                                     }
                                 }
                             }
@@ -129,10 +113,7 @@ impl Plugin for IncludeSubgraphErrors {
                             // 4. Remove extensions based on deny list (applied *after* allow list)
                             if let Some(deny_keys) = &effective_config.deny_extensions_keys {
                                 for key in deny_keys {
-                                    // We already handled the 'service' key explicitly above
-                                    if key != service_key {
-                                        error.extensions.remove(key.as_str());
-                                    }
+                                    error.extensions.remove(key.as_str());
                                 }
                             }
                         }
