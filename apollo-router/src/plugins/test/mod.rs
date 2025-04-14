@@ -2,8 +2,10 @@ mod router_ext;
 mod subgraph_ext;
 mod supergraph_ext;
 
-use std::any::{TypeId, type_name};
-use std::fmt::{Debug, Formatter};
+use std::any::TypeId;
+use std::any::type_name;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
@@ -20,7 +22,9 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::Configuration;
 use crate::Notify;
+use crate::plugin;
 use crate::plugin::DynPlugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
@@ -33,7 +37,6 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::{Configuration, plugin};
 
 /// Test harness for plugins
 /// The difference between this and the regular TestHarness is that this is more suited for unit testing.

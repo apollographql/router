@@ -1,6 +1,11 @@
-use super::config::{Config, ErrorMode, SubgraphConfig, SubgraphConfigCommon};
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+use super::config::Config;
+use super::config::ErrorMode;
+use super::config::SubgraphConfig;
+use super::config::SubgraphConfigCommon;
 use crate::error::ConfigurationError;
-use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EffectiveConfig {

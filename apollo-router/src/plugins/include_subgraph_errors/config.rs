@@ -1,8 +1,13 @@
-use schemars::JsonSchema;
-use serde::de::{self, Deserializer, MapAccess, Visitor};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
+use serde::de::Deserializer;
+use serde::de::MapAccess;
+use serde::de::Visitor;
+use serde::de::{self};
 
 /// Configuration for exposing errors that originate from subgraphs
 #[derive(Clone, Debug, JsonSchema, Default, Deserialize)]

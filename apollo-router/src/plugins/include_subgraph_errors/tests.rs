@@ -1,11 +1,13 @@
-use serde_json::{Map, Value, json};
+use futures::StreamExt;
+use serde_json::Map;
+use serde_json::Value;
+use serde_json::json;
 use tower::BoxError;
 
 use super::*; // Import items from mod.rs
 use crate::graphql;
 use crate::plugins::test::PluginTestHarness;
-use crate::services::supergraph;
-use futures::StreamExt; // Required for collect
+use crate::services::supergraph; // Required for collect
 
 const PRODUCT_ERROR_RESPONSE: &str = r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#;
 const ACCOUNT_ERROR_RESPONSE: &str = r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL"}}]}"#;

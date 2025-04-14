@@ -5,21 +5,25 @@ mod effective_config;
 mod tests;
 
 // Use items from modules
-use config::{Config, ErrorMode, SubgraphConfig};
-use effective_config::EffectiveConfig;
-
-use serde_json_bytes::ByteString;
 use std::sync::Arc;
+
+use config::Config;
+use config::ErrorMode;
+use config::SubgraphConfig;
+use effective_config::EffectiveConfig;
+use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use crate::graphql;
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::register_plugin;
 use crate::services::SupergraphResponse;
-use crate::services::fetch::{AddSubgraphNameExt, SubgraphNameExt};
+use crate::services::fetch::AddSubgraphNameExt;
+use crate::services::fetch::SubgraphNameExt;
 use crate::services::supergraph::BoxService;
-use crate::{graphql, register_plugin};
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
