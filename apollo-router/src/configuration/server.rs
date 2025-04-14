@@ -1,6 +1,8 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 
 const DEFAULT_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -37,16 +39,6 @@ impl Default for ServerHttpConfig {
 }
 
 #[buildstructor::buildstructor]
-impl ServerHttpConfig {
-    #[builder]
-    pub(crate) fn new(header_read_timeout: Option<Duration>) -> Self {
-        Self {
-            header_read_timeout: header_read_timeout.unwrap_or_default(),
-        }
-    }
-}
-
-#[buildstructor::buildstructor]
 impl Server {
     #[builder]
     pub(crate) fn new(http: Option<ServerHttpConfig>) -> Self {
@@ -65,6 +57,7 @@ impl Default for Server {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -74,21 +67,6 @@ mod tests {
         assert_eq!(
             server_config.http.header_read_timeout,
             default_duration_seconds
-        );
-    }
-
-    #[test]
-    fn it_builds_custom_server_configuration() {
-        let duration_seconds = Duration::from_secs(30);
-        let http_config = ServerHttpConfig::builder()
-            .header_read_timeout(duration_seconds)
-            .build();
-        let server_config = Server::builder()
-            .http(http_config)
-            .build();
-        assert_eq!(
-            server_config.http.header_read_timeout,
-            duration_seconds
         );
     }
 
@@ -115,10 +93,10 @@ mod tests {
     #[test]
     fn it_json_parses_specified_server_config_seconds_correctly() {
         let json_config = json!({
-            "http": {
-                "header_read_timeout": "30s"
-            }
-         });
+           "http": {
+               "header_read_timeout": "30s"
+           }
+        });
 
         let config: Server = serde_json::from_value(json_config).unwrap();
 

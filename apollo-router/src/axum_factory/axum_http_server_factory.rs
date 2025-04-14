@@ -6,11 +6,15 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 <<<<<<< HEAD
+<<<<<<< HEAD
 use std::time::Duration;
 use std::time::Instant;
 =======
 use std::time::{Duration, Instant};
 >>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
+=======
+use std::time::Instant;
+>>>>>>> de2127f5 (style: fix lint errors)
 
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
@@ -343,8 +347,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
 =======
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
+<<<<<<< HEAD
 				configuration.server.http.header_read_timeout,
 >>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
+=======
+                configuration.server.http.header_read_timeout,
+>>>>>>> de2127f5 (style: fix lint errors)
                 all_connections_stopped_sender.clone(),
             );
 
@@ -391,8 +399,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
 =======
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
+<<<<<<< HEAD
 							configuration.server.http.header_read_timeout,
 >>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
+=======
+                            configuration.server.http.header_read_timeout,
+>>>>>>> de2127f5 (style: fix lint errors)
                             all_connections_stopped_sender.clone(),
                         );
                         (

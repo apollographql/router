@@ -1122,7 +1122,10 @@ fn it_includes_default_header_read_timeout_when_server_config_omitted() {
 
     let config: Configuration = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.server.http.header_read_timeout, Duration::from_secs(10));
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(10)
+    );
 }
 
 #[test]
@@ -1137,7 +1140,10 @@ fn it_processes_specified_server_config_correctly() {
 
     let config: Configuration = serde_json::from_value(json_config).unwrap();
 
-    assert_eq!(config.server.http.header_read_timeout, Duration::from_secs(30));
+    assert_eq!(
+        config.server.http.header_read_timeout,
+        Duration::from_secs(30)
+    );
 }
 
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
