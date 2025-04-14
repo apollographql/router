@@ -3,10 +3,10 @@
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::OperationType;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::Selection;
+use apollo_compiler::name;
 use apollo_compiler::parser::Parser;
 use apollo_compiler::parser::SourceMap;
 use apollo_compiler::parser::SourceSpan;
@@ -18,6 +18,7 @@ use itertools::Itertools;
 
 use self::keys::EntityKeyChecker;
 use self::keys::field_set_error;
+use crate::link::Import;
 use crate::link::Link;
 use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
@@ -27,7 +28,9 @@ use crate::sources::connect::Connector;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
+use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 mod keys;
 
 pub(super) fn validate(
@@ -35,7 +38,9 @@ pub(super) fn validate(
     file_name: &str,
     fields_seen_by_connectors: Vec<(Name, Name)>,
 ) -> Vec<Message> {
-    let messages: Vec<Message> = verify_no_abstract_types_are_defined(schema).collect();
+    let messages: Vec<Message> = check_for_disallowed_type_definitions(schema)
+        .chain(check_conflicting_directives(schema))
+        .collect();
     if !messages.is_empty() {
         return messages;
     }
@@ -44,11 +49,16 @@ pub(super) fn validate(
         .collect()
 }
 
-fn verify_no_abstract_types_are_defined(schema: &SchemaInfo) -> impl Iterator<Item = Message> {
+fn check_for_disallowed_type_definitions(schema: &SchemaInfo) -> impl Iterator<Item = Message> {
+    let subscription_name = schema
+        .schema_definition
+        .subscription
+        .as_ref()
+        .map(|sub| &sub.name);
     schema
         .types
         .values()
-        .filter_map(|extended_type| match extended_type {
+        .filter_map(move |extended_type| match extended_type {
             ExtendedType::Union(union_type) => Some(abstract_type_error(
                 SourceSpan::recompose(union_type.location(), union_type.name.location()),
                 &schema.sources,
@@ -59,8 +69,62 @@ fn verify_no_abstract_types_are_defined(schema: &SchemaInfo) -> impl Iterator<It
                 &schema.sources,
                 "interface",
             )),
+            ExtendedType::Object(obj) if subscription_name.is_some_and(|name| name == &obj.name) => {
+                    Some(Message {
+                        code: Code::SubscriptionInConnectors,
+                        message: format!(
+                            "A subscription root type is not supported when using `@{connect_directive_name}`.",
+                            connect_directive_name = schema.connect_directive_name(),
+                        ),
+                        locations: obj.name.line_column_range(&schema.sources).into_iter().collect(),
+                    })
+            }
             _ => None,
         })
+}
+
+/// Certain federation directives are not allowed when using connectors.
+/// We produce errors for any which were imported, even if not used.
+fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
+    let Some((fed_link, fed_link_directive)) =
+        Link::for_identity(schema, &Identity::federation_identity())
+    else {
+        return Vec::new();
+    };
+
+    // TODO: make the `Link` code retain locations directly instead of reparsing stuff for validation
+    let imports = fed_link_directive
+        .specified_argument_by_name(&name!("import"))
+        .and_then(|arg| arg.as_list())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
+        .collect_vec();
+
+    let disallowed_imports = [CONTEXT_DIRECTIVE_NAME, FROM_CONTEXT_DIRECTIVE_NAME];
+    fed_link
+        .imports
+        .into_iter()
+        .filter_map(|import| {
+            disallowed_imports
+                .contains(&import.element)
+                .then(|| Message {
+                    code: Code::ConnectorsUnsupportedFederationDirective,
+                    message: format!(
+                        "The directive `@{import}` is not supported when using connectors.",
+                        import = import.alias.as_ref().unwrap_or(&import.element)
+                    ),
+                    locations: imports
+                        .iter()
+                        .find_map(|(value, reparsed)| {
+                            (*reparsed == *import).then(|| value.line_column_range(&schema.sources))
+                        })
+                        .flatten()
+                        .into_iter()
+                        .collect(),
+                })
+        })
+        .collect()
 }
 
 fn abstract_type_error(node: Option<SourceSpan>, source_map: &SourceMap, keyword: &str) -> Message {
@@ -91,13 +155,6 @@ fn check_seen_fields(
         .values()
         .filter_map(|extended_type| {
             if extended_type.is_built_in() {
-                return None;
-            }
-            // ignore root fields, we have different validations for them
-            if schema.root_operation(OperationType::Query) == Some(extended_type.name())
-                || schema.root_operation(OperationType::Mutation) == Some(extended_type.name())
-                || schema.root_operation(OperationType::Subscription) == Some(extended_type.name())
-            {
                 return None;
             }
             let coord = |(name, _): (&Name, _)| (extended_type.name().clone(), name.clone());
@@ -151,7 +208,7 @@ fn check_seen_fields(
             code: Code::ConnectorsUnresolvedField,
             message: format!(
                 "No connector resolves field `{parent_type}.{field_name}`. It must have a `@{connect_directive_name}` directive or appear in `@{connect_directive_name}(selection:)`.",
-                connect_directive_name = schema.connect_directive_name
+                connect_directive_name = schema.connect_directive_name()
             ),
             locations: field_def.line_column_range(&schema.sources).into_iter().collect(),
         }
@@ -237,7 +294,8 @@ fn resolvable_key_fields<'a>(
 fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message> {
     let mut messages = Vec::new();
 
-    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_spec) else {
+    let Ok(connectors) = Connector::from_schema(schema, subgraph_name, schema.connect_link.spec)
+    else {
         return messages;
     };
 
@@ -254,7 +312,7 @@ fn advanced_validations(schema: &SchemaInfo, subgraph_name: &str) -> Vec<Message
                 let variables = connector.variable_references().collect_vec();
                 messages.push(field_set_error(
                     &variables,
-                    connector.id.directive.field.type_name(),
+                    &connector.id.directive.coordinate(),
                 ))
             }
             Ok(Some(field_set)) => {

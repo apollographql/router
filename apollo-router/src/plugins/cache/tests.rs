@@ -28,7 +28,7 @@ use crate::plugins::cache::entity::Subgraph;
 use crate::services::subgraph;
 use crate::services::supergraph;
 
-const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
+pub(super) const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 const SCHEMA_REQUIRES: &str = include_str!("../../testdata/supergraph.graphql");
 #[derive(Debug)]
 pub(crate) struct MockStore {
@@ -157,35 +157,32 @@ async fn insert() {
     let valid_schema = Arc::new(Schema::parse_and_validate(SCHEMA, "test.graphql").unwrap());
     let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
 
-    let subgraphs = MockedSubgraphs([
-        ("user", MockSubgraph::builder().with_json(
-                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
-                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
-                    "__typename": "Organization",
-                    "id": "1"
-                } }}}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
-        ("orga", MockSubgraph::builder().with_json(
-            serde_json::json!{{
-                "query": "query($representations:[_Any!]!){_entities(representations:$representations){... on Organization{creatorUser{__typename id}}}}",
-            "variables": {
-                "representations": [
-                    {
-                        "id": "1",
+    let subgraphs = serde_json::json!({
+        "user": {
+            "query": {
+                "currentUser": {
+                    "activeOrganization": {
                         "__typename": "Organization",
+                        "id": "1",
                     }
-                ]
-            }}},
-            serde_json::json!{{"data": {
-                "_entities": [{
+                }
+            },
+            "headers": {"cache-control": "public"},
+        },
+        "orga": {
+            "entities": [
+                {
+                    "__typename": "Organization",
+                    "id": "1",
                     "creatorUser": {
                         "__typename": "User",
                         "id": 2
                     }
-                }]
-            }}}
-        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
-    ].into_iter().collect());
+                }
+            ],
+            "headers": {"cache-control": "public"},
+        },
+    });
 
     let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
         .await
@@ -196,7 +193,7 @@ async fn insert() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -206,7 +203,7 @@ async fn insert() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -219,11 +216,13 @@ async fn insert() {
         .unwrap();
 
     let service = TestHarness::builder()
-        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": { "all": true },
+            "experimental_mock_subgraphs": subgraphs,
+        }))
         .unwrap()
         .schema(SCHEMA)
         .extra_plugin(entity_cache)
-        .extra_plugin(subgraphs)
         .build_supergraph()
         .await
         .unwrap();
@@ -324,7 +323,7 @@ async fn insert_with_requires() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -334,7 +333,7 @@ async fn insert_with_requires() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -543,7 +542,7 @@ async fn private() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -553,7 +552,7 @@ async fn private() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -701,7 +700,7 @@ async fn no_data() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -711,7 +710,7 @@ async fn no_data() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -890,7 +889,7 @@ async fn missing_entities() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },
@@ -900,7 +899,7 @@ async fn missing_entities() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true,
+                enabled: true.into(),
                 ttl: None,
                 ..Default::default()
             },

@@ -419,13 +419,10 @@ where
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
                 {
-                    let _ = context.insert(
-                        APOLLO_OPERATION_ID,
-                        stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
-                    );
+                    let _ = context.insert(APOLLO_OPERATION_ID, usage_reporting.get_operation_id());
                     let _ = context.insert(
                         "apollo_operation_signature",
-                        usage_reporting.stats_report_key.clone(),
+                        usage_reporting.get_stats_report_key(),
                     );
                 }
             })
@@ -633,13 +630,6 @@ where
             }
         }
     }
-}
-
-fn stats_report_key_hash(stats_report_key: &str) -> String {
-    let mut hasher = sha1::Sha1::new();
-    hasher.update(stats_report_key.as_bytes());
-    let result = hasher.finalize();
-    hex::encode(result)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -874,11 +864,8 @@ mod tests {
                 let query_plan: QueryPlan = QueryPlan {
                     formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    usage_reporting: UsageReporting {
-                        stats_report_key: "this is a test report key".to_string(),
-                        referenced_fields_by_type: Default::default(),
-                    }
-                    .into(),
+                    usage_reporting: UsageReporting::Error("this is a test report key".to_string())
+                        .into(),
                     query: Arc::new(Query::empty_for_tests()),
                     query_metrics: Default::default(),
                     estimated_size: Default::default(),
@@ -935,14 +922,6 @@ mod tests {
                     .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>())
             );
         }
-    }
-
-    #[test]
-    fn apollo_operation_id_hash() {
-        assert_eq!(
-            "d1554552698157b05c2a462827fb4367a4548ee5",
-            stats_report_key_hash("# IgnitionMeQuery\nquery IgnitionMeQuery{me{id}}")
-        );
     }
 
     #[test(tokio::test)]

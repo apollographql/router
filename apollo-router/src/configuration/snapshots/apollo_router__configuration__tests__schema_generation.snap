@@ -314,6 +314,14 @@ expression: "&schema"
           "description": "Activates Batching (disabled by default)",
           "type": "boolean"
         },
+        "maximum_size": {
+          "default": null,
+          "description": "Maximum size for a batch",
+          "format": "uint",
+          "minimum": 0.0,
+          "nullable": true,
+          "type": "integer"
+        },
         "mode": {
           "$ref": "#/definitions/BatchingMode",
           "description": "#/definitions/BatchingMode"
@@ -1782,6 +1790,10 @@ expression: "&schema"
           "description": "#/definitions/HeadersLocation",
           "nullable": true
         },
+        "connector": {
+          "$ref": "#/definitions/ConnectorHeadersConfiguration",
+          "description": "#/definitions/ConnectorHeadersConfiguration"
+        },
         "subgraphs": {
           "additionalProperties": {
             "$ref": "#/definitions/HeadersLocation",
@@ -1904,6 +1916,25 @@ expression: "&schema"
         "response": {
           "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
           "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "ConnectorHeadersConfiguration": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/HeadersLocation",
+          "description": "#/definitions/HeadersLocation",
+          "nullable": true
+        },
+        "sources": {
+          "additionalProperties": {
+            "$ref": "#/definitions/HeadersLocation",
+            "description": "#/definitions/HeadersLocation"
+          },
+          "description": "Map of subgraph_name.connector_source_name to configuration",
+          "type": "object"
         }
       },
       "type": "object"
@@ -2167,6 +2198,12 @@ expression: "&schema"
           "minimum": 0.0,
           "nullable": true,
           "type": "integer"
+        },
+        "preview_connect_v0_2": {
+          "default": null,
+          "description": "Feature gate for connect spec v0.2. Set to `true` to enable the using the v0.2 spec during the preview phase.",
+          "nullable": true,
+          "type": "boolean"
         },
         "sources": {
           "additionalProperties": {
@@ -2682,6 +2719,10 @@ expression: "&schema"
           "description": "Redact subgraph errors to Apollo Studio",
           "type": "boolean"
         },
+        "redaction_policy": {
+          "$ref": "#/definitions/ErrorRedactionPolicy",
+          "description": "#/definitions/ErrorRedactionPolicy"
+        },
         "send": {
           "default": true,
           "description": "Send subgraph errors to Apollo Studio",
@@ -2715,6 +2756,25 @@ expression: "&schema"
         }
       ]
     },
+    "ErrorRedactionPolicy": {
+      "description": "Allow some error fields to be send to Apollo Studio even when `redact` is true.",
+      "oneOf": [
+        {
+          "description": "Applies redaction to all error details.",
+          "enum": [
+            "strict"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Modifies the `redact` setting by excluding the `extensions.code` field in errors from redaction.",
+          "enum": [
+            "extended"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ErrorRepr": {
       "oneOf": [
         {
@@ -2729,9 +2789,9 @@ expression: "&schema"
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
-        "experimental_otlp_error_metrics": {
-          "$ref": "#/definitions/OtlpErrorMetricsMode",
-          "description": "#/definitions/OtlpErrorMetricsMode"
+        "preview_extended_error_metrics": {
+          "$ref": "#/definitions/ExtendedErrorMetricsMode",
+          "description": "#/definitions/ExtendedErrorMetricsMode"
         },
         "subgraph": {
           "$ref": "#/definitions/SubgraphErrorConfig",
@@ -3083,6 +3143,25 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ExtendedErrorMetricsMode": {
+      "description": "Extended Open Telemetry error metrics mode",
+      "oneOf": [
+        {
+          "description": "Do not send extended OTLP error metrics",
+          "enum": [
+            "disabled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Send extended OTLP error metrics to Apollo Studio with additional dimensions [`extensions.service`, `extensions.code`]. If enabled, it's also recommended to enable `redaction_policy: extended` on subgraphs to send the `extensions.code` for subgraph errors.",
+          "enum": [
+            "enabled"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "FieldName": {
       "oneOf": [
@@ -3989,6 +4068,10 @@ expression: "&schema"
           },
           "type": "array"
         },
+        "on_error": {
+          "$ref": "#/definitions/OnError",
+          "description": "#/definitions/OnError"
+        },
         "sources": {
           "description": "Alternative sources to extract the JWT",
           "items": {
@@ -4394,6 +4477,13 @@ expression: "&schema"
         }
       ]
     },
+    "OnError": {
+      "enum": [
+        "Continue",
+        "Error"
+      ],
+      "type": "string"
+    },
     "Operation": {
       "oneOf": [
         {
@@ -4466,25 +4556,6 @@ expression: "&schema"
         }
       ]
     },
-    "OtlpErrorMetricsMode": {
-      "description": "Open Telemetry error metrics mode",
-      "oneOf": [
-        {
-          "description": "Do not store OTLP error metrics",
-          "enum": [
-            "disabled"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Send OTLP error metrics to Apollo Studio",
-          "enum": [
-            "enabled"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "PersistedQueries": {
       "additionalProperties": false,
       "description": "Persisted Queries (PQ) configuration",
@@ -4497,6 +4568,11 @@ expression: "&schema"
         "experimental_prewarm_query_plan_cache": {
           "$ref": "#/definitions/PersistedQueriesPrewarmQueryPlanCache",
           "description": "#/definitions/PersistedQueriesPrewarmQueryPlanCache"
+        },
+        "hot_reload": {
+          "default": false,
+          "description": "Enables hot reloading of the local persisted query manifests",
+          "type": "boolean"
         },
         "local_manifests": {
           "default": null,
@@ -6092,6 +6168,7 @@ expression: "&schema"
         "enabled": {
           "default": true,
           "description": "activates caching for this subgraph, overrides the global configuration",
+          "nullable": true,
           "type": "boolean"
         },
         "invalidation": {
@@ -6994,6 +7071,14 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configuration options pertaining to the supergraph server component.",
       "properties": {
+        "connection_shutdown_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 60
+          },
+          "description": "The timeout for shutting down connections during a router shutdown or a schema reload.",
+          "type": "string"
+        },
         "defer_support": {
           "default": true,
           "description": "Set to false to disable defer support",

@@ -310,10 +310,7 @@ fn cmd_plan(
     match result {
         Ok(_) => Ok(()),
         Err(CorrectnessError::FederationError(e)) => Err(e),
-        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!(
-            "Response shape from query plan does not match response shape from input operation:\n{}",
-            e.description()
-        )),
+        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!("{}", e.description())),
     }
 }
 
