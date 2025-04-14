@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "apollo-compiler",
  "apollo-federation",
@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -4024,7 +4024,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
