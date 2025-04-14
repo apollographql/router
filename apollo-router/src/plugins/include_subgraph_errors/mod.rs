@@ -11,7 +11,6 @@ use config::Config;
 use config::ErrorMode;
 use config::SubgraphConfig;
 use effective_config::EffectiveConfig;
-use serde_json_bytes::ByteString;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -114,12 +113,12 @@ impl Plugin for IncludeSubgraphErrors {
 
                             // 3. Filter extensions based on allow list
                             if let Some(allow_keys) = &effective_config.allow_extensions_keys {
-                                let original_extensions = std::mem::take(&mut error.extensions);
+                                let mut original_extensions = std::mem::take(&mut error.extensions);
                                 for key in allow_keys {
-                                    if let Some(value) = original_extensions.get(key.as_str()) {
+                                    if let Some((key, value)) = original_extensions.remove_entry(key.as_str()) {
                                         // Skip re-adding service if it was handled above
-                                        if key != service_key {
-                                            error.extensions.insert(ByteString::from(key.clone()), value.clone());
+                                        if key.as_str() != service_key {
+                                            error.extensions.insert(key, value);
                                         } else if error.extensions.contains_key(service_key) {
                                             // Ensure service key added above is preserved if it was allowed
                                         }
