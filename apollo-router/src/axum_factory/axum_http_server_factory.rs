@@ -5,8 +5,12 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+<<<<<<< HEAD
 use std::time::Duration;
 use std::time::Instant;
+=======
+use std::time::{Duration, Instant};
+>>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
 
 use axum::Router;
 use axum::error_handling::HandleErrorLayer;
@@ -333,8 +337,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 configuration.supergraph.connection_shutdown_timeout,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+<<<<<<< HEAD
                 true,
                 http_config.clone(),
+=======
+                configuration.limits.http1_max_request_headers,
+                configuration.limits.http1_max_request_buf_size,
+				configuration.server.http.header_read_timeout,
+>>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
                 all_connections_stopped_sender.clone(),
             );
 
@@ -375,8 +385,14 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             configuration.supergraph.connection_shutdown_timeout,
                             listen_addr.clone(),
                             router,
+<<<<<<< HEAD
                             false,
                             http_config.clone(),
+=======
+                            configuration.limits.http1_max_request_headers,
+                            configuration.limits.http1_max_request_buf_size,
+							configuration.server.http.header_read_timeout,
+>>>>>>> bca998b2 (feat: use server header_read_timeout when creating http_connection)
                             all_connections_stopped_sender.clone(),
                         );
                         (
