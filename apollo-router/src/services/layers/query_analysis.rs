@@ -17,6 +17,7 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use crate::Configuration;
 use crate::Context;
@@ -116,48 +117,49 @@ impl QueryAnalysisLayer {
         // Must be created *outside* of the spawn_blocking or the span is not connected to the
         // parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
-
-        let job = move || {
-            span.in_scope(|| {
+        let compute_job_future = span.in_scope(||{
+            let job = move || {
                 Query::parse_document(
                     &query,
                     operation_name.as_deref(),
                     schema.as_ref(),
                     conf.as_ref(),
                 )
-                .and_then(|doc| {
-                    let recursive_selections = Self::count_recursive_selections(
-                        &doc.executable,
-                        &mut Default::default(),
-                        &doc.operation.selection_set,
-                        0,
-                    );
-                    if recursive_selections.is_none() {
-                        if recursive_selections_check_enabled() {
-                            return Err(SpecError::ValidationError(ValidationErrors {
-                                errors: vec![GraphQLError {
-                                    message:
+                    .and_then(|doc| {
+                        let recursive_selections = Self::count_recursive_selections(
+                            &doc.executable,
+                            &mut Default::default(),
+                            &doc.operation.selection_set,
+                            0,
+                        );
+                        if recursive_selections.is_none() {
+                            if recursive_selections_check_enabled() {
+                                return Err(SpecError::ValidationError(ValidationErrors {
+                                    errors: vec![GraphQLError {
+                                        message:
                                         "Maximum recursive selections limit exceeded in this operation"
                                             .to_string(),
-                                    locations: Default::default(),
-                                    path: Default::default(),
-                                    extensions: Default::default(),
-                                }],
-                            }))
-                        }
-                        tracing::info!(
+                                        locations: Default::default(),
+                                        path: Default::default(),
+                                        extensions: Default::default(),
+                                    }],
+                                }))
+                            }
+                            tracing::info!(
                             operation_name = ?operation_name,
                             limit = Self::MAX_RECURSIVE_SELECTIONS,
                             "operation exceeded maximum recursive selections limit, but limit is forcefully disabled",
                         );
-                    }
-                    Ok(doc)
-                })
-            })
-        };
-        // TODO: is this correct?
-        let job = std::panic::AssertUnwindSafe(job);
-        compute_job::execute(ComputeJobType::QueryParsing, job)
+                        }
+                        Ok(doc)
+                    })
+            };
+            let job = std::panic::AssertUnwindSafe(job);
+            compute_job::execute(ComputeJobType::QueryParsing, job)
+        });
+
+        compute_job_future
+            .instrument(span)
             .await
             .expect("Query::parse_document panicked")
     }

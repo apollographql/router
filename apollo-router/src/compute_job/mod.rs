@@ -9,6 +9,10 @@ use std::time::Instant;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
+use tracing::info_span;
+use tracing::{Instrument, Span};
+use tracing_core::Dispatch;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use self::metrics::ActiveComputeMetric;
 use self::metrics::JobWatcher;
@@ -18,6 +22,8 @@ use self::metrics::observe_queue_wait_duration;
 use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
@@ -69,6 +75,8 @@ impl From<ComputeJobType> for opentelemetry::Value {
 }
 
 pub(crate) struct Job {
+    subscriber: Dispatch,
+    parent_span: Span,
     ty: ComputeJobType,
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
@@ -88,13 +96,25 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
 
                 let mut receiver = queue.receiver();
                 loop {
-                    let job = receiver.blocking_recv();
-                    observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
+                    let (job, age) = receiver.blocking_recv();
+                    let job_type: &'static str = job.ty.into();
+                    let age: &'static str = age.into();
+                    let _subscriber = job.subscriber.set_default();
+                    job.parent_span.in_scope(|| {
+                        let span = info_span!(
+                            COMPUTE_JOB_EXECUTION_SPAN_NAME,
+                            "job.type" = job_type,
+                            "job.age" = age
+                        );
+                        span.in_scope(|| {
+                            observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
 
-                    let _active_metric = ActiveComputeMetric::register(job.ty);
-                    let job_start = Instant::now();
-                    (job.job_fn)();
-                    observe_compute_duration(job.ty, job_start.elapsed());
+                            let _active_metric = ActiveComputeMetric::register(job.ty);
+                            let job_start = Instant::now();
+                            (job.job_fn)();
+                            observe_compute_duration(job.ty, job_start.elapsed());
+                        })
+                    })
                 }
             });
         }
@@ -111,34 +131,46 @@ where
     F: FnOnce() -> T + Send + UnwindSafe + 'static,
     T: Send + 'static,
 {
-    let job_watcher = JobWatcher::new(compute_job_type);
+    let compute_job_type_str: &'static str = compute_job_type.into();
+    let span = info_span!(
+        COMPUTE_JOB_SPAN_NAME,
+        "job.type" = compute_job_type_str,
+        "job.outcome" = tracing::field::Empty
+    );
+    span.in_scope(|| {
+        let job_watcher = JobWatcher::new(compute_job_type);
 
-    let (tx, rx) = oneshot::channel();
-    let job = Box::new(move || {
-        // Ignore the error if the oneshot receiver was dropped
-        let _ = tx.send(std::panic::catch_unwind(job));
-    });
+        let (tx, rx) = oneshot::channel();
+        let job = Box::new(move || {
+            // Ignore the error if the oneshot receiver was dropped
+            let _ = tx.send(std::panic::catch_unwind(job));
+        });
 
-    let job = Job {
-        ty: compute_job_type,
-        job_fn: job,
-        queue_start: Instant::now(),
-    };
-    queue().send(compute_job_type.into(), job);
-    async move {
-        let result = rx.await;
-        // This local variable MUST exist
-        let mut local_job_watcher = job_watcher;
-        local_job_watcher.outcome = match &result {
-            Ok(Ok(_)) => Outcome::ExecutedOk,
-            Ok(Err(_)) => Outcome::ExecutedError,
-            Err(_) => Outcome::ChannelError,
+        let job = Job {
+            subscriber: Dispatch::default(),
+            parent_span: Span::current(),
+            ty: compute_job_type,
+            job_fn: job,
+            queue_start: Instant::now(),
         };
-        match result {
-            Ok(r) => r,
-            Err(e) => Err(Box::new(e) as Box<dyn Any + Send>),
+        queue().send(compute_job_type.into(), job);
+
+        async move {
+            let result = rx.await;
+            // This local variable MUST exist
+            let mut local_job_watcher = job_watcher;
+            local_job_watcher.outcome = match &result {
+                Ok(Ok(_)) => Outcome::ExecutedOk,
+                Ok(Err(_)) => Outcome::ExecutedError,
+                Err(_) => Outcome::ChannelError,
+            };
+            match result {
+                Ok(r) => r,
+                Err(e) => Err(Box::new(e) as Box<dyn Any + Send>),
+            }
         }
-    }
+        .in_current_span()
+    })
 }
 
 pub(crate) fn is_full() -> bool {
@@ -161,7 +193,32 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
+    use tracing_futures::WithSubscriber;
+
     use super::*;
+    use crate::assert_snapshot_subscriber;
+
+    #[tokio::test]
+    async fn test_observability() {
+        // In this test we expect the logged message to have
+
+        async {
+            let span = info_span!("test_observability");
+            async {
+                tracing::info!("Outer");
+                let job = execute(ComputeJobType::QueryParsing, || {
+                    tracing::info!("Inner");
+                    1
+                });
+                let result = job.await.unwrap();
+                assert_eq!(result, 1);
+            }
+            .instrument(span)
+            .await;
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
+    }
 
     #[tokio::test]
     async fn test_executes_on_different_thread() {
