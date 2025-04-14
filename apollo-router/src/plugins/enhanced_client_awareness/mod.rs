@@ -1,0 +1,67 @@
+use schemars::JsonSchema;
+use serde::Deserialize;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
+use crate::services::supergraph;
+use crate::plugins::telemetry::CLIENT_LIBRARY_NAME;
+use crate::plugins::telemetry::CLIENT_LIBRARY_VERSION;
+
+const CLIENT_LIBRARY_KEY: &str = "clientLibrary";
+const CLIENT_LIBRARY_NAME_KEY: &str = "name";
+const CLIENT_LIBRARY_VERSION_KEY: &str = "version";
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct Config {
+    #[serde(default = "default_enable_client_library_metrics")]
+    enable_client_library_metrics: bool,
+}
+
+fn default_enable_client_library_metrics() -> bool {
+    true
+}
+
+struct EnhancedClientAwareness {
+    enabled: bool,
+}
+
+#[async_trait::async_trait]
+impl Plugin for EnhancedClientAwareness {
+    type Config = Config;
+
+    // This is invoked once after the router starts and compiled-in
+    // plugins are registered
+    async fn new (init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(EnhancedClientAwareness { enabled: init.config.enable_client_library_metrics })
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
+        if self.enabled {
+            ServiceBuilder::new()
+            .map_request(move |request: supergraph::Request| {
+                if let Some(client_library_metadata) = request.supergraph_request.body().extensions.get(CLIENT_LIBRARY_KEY) {
+                    if let Some(client_library_name) = client_library_metadata.get(CLIENT_LIBRARY_NAME_KEY) {
+                        let _ = request.context.insert(CLIENT_LIBRARY_NAME, client_library_name.to_string());
+                    };
+    
+                    if let Some(client_library_version) = client_library_metadata.get(CLIENT_LIBRARY_VERSION_KEY) {
+                        let _ = request.context.insert(CLIENT_LIBRARY_VERSION, client_library_version.to_string());
+                    };
+                };
+
+                return request
+            })
+            .service(service)
+            .boxed()
+
+        } else {
+            service
+        }
+    }
+}
+
+register_plugin!("apollo", "enhanced_client_awareness", EnhancedClientAwareness);
