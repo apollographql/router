@@ -160,6 +160,7 @@ impl QueryPlannerService {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
                 non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                disabled_subgraph_names: Default::default(),
             };
 
             let result = operation
