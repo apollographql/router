@@ -1022,7 +1022,6 @@ mod tests {
         );
     }
 
-
     // Expect that if we call the CQP twice, the second call will return cached data
     #[test(tokio::test)]
     async fn test_cache_works() {
@@ -1058,8 +1057,8 @@ mod tests {
             &configuration,
             IndexMap::default(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         let doc = Query::parse_document(
             "query ExampleQuery { me { name } }",
@@ -1067,7 +1066,7 @@ mod tests {
             &schema,
             &configuration,
         )
-            .unwrap();
+        .unwrap();
         let context = Context::new();
         context
             .extensions()
@@ -1080,7 +1079,7 @@ mod tests {
                     name
                   }
                 }"
-                    .to_string(),
+                .to_string(),
                 None,
                 context.clone(),
             ))
@@ -1094,7 +1093,7 @@ mod tests {
                     name
                   }
                 }"
-                    .to_string(),
+                .to_string(),
                 None,
                 context.clone(),
             ))
@@ -1131,8 +1130,8 @@ mod tests {
             &configuration,
             IndexMap::default(),
         )
-            .await
-            .unwrap();
+        .await
+        .unwrap();
 
         let doc = Query::parse_document(
             "query ExampleQuery { me { name } }",
@@ -1140,7 +1139,7 @@ mod tests {
             &schema,
             &configuration,
         )
-            .unwrap();
+        .unwrap();
 
         let context = Context::new();
         context
@@ -1154,7 +1153,7 @@ mod tests {
                     name
                   }
                 }"
-                    .to_string(),
+                .to_string(),
                 None,
                 context.clone(),
             ))
@@ -1167,7 +1166,7 @@ mod tests {
                     name
                   }
                 }"
-                    .to_string(),
+                .to_string(),
                 None,
                 context.clone(),
             ))
