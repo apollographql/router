@@ -16,13 +16,12 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing::Instrument;
 
-use crate::Configuration;
 use crate::apollo_studio_interop::UsageReporting;
-use crate::cache::DeduplicatingCache;
-use crate::cache::EntryError;
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
+use crate::cache::DeduplicatingCache;
+use crate::cache::EntryError;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::MaybeBackPressureError;
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
@@ -32,20 +31,21 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
-use crate::query_planner::QueryPlannerService;
 use crate::query_planner::fetch::SubgraphSchemas;
-use crate::services::QueryPlannerContent;
-use crate::services::QueryPlannerRequest;
-use crate::services::QueryPlannerResponse;
+use crate::query_planner::QueryPlannerService;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::query_planner;
 use crate::services::query_planner::PlanOptions;
+use crate::services::QueryPlannerContent;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
 use crate::spec::SchemaHash;
 use crate::spec::SpecError;
+use crate::Configuration;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
@@ -725,19 +725,18 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 #[cfg(test)]
 mod tests {
     use mockall::mock;
-    use mockall::predicate::*;
     use serde_json_bytes::json;
     use test_log::test;
     use tower::Service;
 
     use super::*;
-    use crate::Configuration;
-    use crate::Context;
     use crate::apollo_studio_interop::UsageReporting;
     use crate::json_ext::Object;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
     use crate::spec::Schema;
+    use crate::Configuration;
+    use crate::Context;
 
     mock! {
         #[derive(Debug)]
@@ -1047,7 +1046,7 @@ mod tests {
         });
 
         let configuration = Default::default();
-        let schema = include_str!("testdata/starstuff.graphql");
+        let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
@@ -1120,7 +1119,7 @@ mod tests {
             });
 
         let configuration = Default::default();
-        let schema = include_str!("testdata/starstuff.graphql");
+        let schema = include_str!("../testdata/starstuff@current.graphql");
         let schema = Arc::new(Schema::parse(schema, &configuration).unwrap());
 
         let mut planner = CachingQueryPlanner::new(
