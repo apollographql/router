@@ -1452,7 +1452,7 @@ fn take_matching_key_field_set(
             matches_selection_set(representation, &field_set.selection_set)
         })
         .ok_or_else(|| FetchError::MalformedRequest {
-            reason: format!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}"),
+            reason: format!("representation does not match any key field set for type {typename} in subgraph {subgraph_name}"),
         })?;
     take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
         FetchError::MalformedRequest {
