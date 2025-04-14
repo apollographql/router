@@ -1217,7 +1217,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1253,7 +1253,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1289,7 +1289,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
