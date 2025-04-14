@@ -194,7 +194,7 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
 async fn subgraph(
     request: http::Request<hyper::body::Incoming>,
 ) -> Result<http::Response<RouterBody>, hyper::Error> {
-    // Read the request body and prompty ignore it
+    // Read the request body and promptly ignore it
     request
         .into_body()
         .collect()

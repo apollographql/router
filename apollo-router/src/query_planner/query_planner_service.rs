@@ -160,6 +160,7 @@ impl QueryPlannerService {
                 override_conditions: plan_options.override_conditions,
                 check_for_cooperative_cancellation: Some(&check),
                 non_local_selections_limit_enabled: non_local_selections_check_enabled(),
+                disabled_subgraph_names: Default::default(),
             };
 
             let result = operation
@@ -363,7 +364,7 @@ impl QueryPlannerService {
             })
         } else {
             failfast_debug!("empty query plan");
-            Err(QueryPlannerError::EmptyPlan(usage_reporting).into())
+            Err(QueryPlannerError::EmptyPlan(usage_reporting.get_stats_report_key()).into())
         }
     }
 }
@@ -725,10 +726,10 @@ mod tests {
 
         match err {
             MaybeBackPressureError::PermanentError(QueryPlannerError::EmptyPlan(
-                usage_reporting,
+                stats_report_key,
             )) => {
                 insta::with_settings!({sort_maps => true}, {
-                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", usage_reporting);
+                    insta::assert_json_snapshot!("empty_query_plan_usage_reporting", stats_report_key);
                 });
             }
             e => {

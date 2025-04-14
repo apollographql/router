@@ -822,7 +822,7 @@ impl FetchDependencyGraph {
         // 1. is for the same subgraph
         // 2. has the same merge_at
         // 3. is for the same entity type (we don't reuse nodes for different entities just yet,
-        //    as this can create unecessary dependencies that gets in the way of some optimizations;
+        //    as this can create unnecessary dependencies that gets in the way of some optimizations;
         //    the final optimizations in `reduceAndOptimize` will however later merge nodes
         //    on the same subgraph and mergeAt when possible).
         // 4. is not part of our conditions or our conditions ancestors
@@ -940,7 +940,7 @@ impl FetchDependencyGraph {
             return true;
         }
 
-        // No risk of inifite loop as the graph is acyclic:
+        // No risk of infinite loop as the graph is acyclic:
         let mut to_check = haystack.clone();
         while let Some(next) = to_check.pop() {
             for parent in self.parents_of(next) {
@@ -3851,7 +3851,7 @@ fn compute_nodes_for_op_path_element<'a>(
         // If the operation contains other directives or a non-trivial type condition,
         // we need to preserve it and so we add operation.
         // Otherwise, we just skip it as a minor optimization (it makes the subgraph query
-        // slighly smaller and on complex queries, it might also deduplicate similar selections).
+        // slightly smaller and on complex queries, it might also deduplicate similar selections).
         return Ok(ComputeNodesStackItem {
             tree: &child.tree,
             node_id: stack_item.node_id,
