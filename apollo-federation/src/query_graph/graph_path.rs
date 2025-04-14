@@ -3975,19 +3975,10 @@ impl SimultaneousPathsWithLazyIndirectPaths {
     /// For a given "input" path (identified by an idx in `paths`), each of its indirect options.
     fn indirect_options(
         &mut self,
-        updated_context: &OpGraphPathContext,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
     ) -> Result<OpIndirectPaths, FederationError> {
-        // Note that the provided context will usually be one we had during construction (the
-        // `updated_context` will be `self.context` updated by whichever operation we're looking at,
-        // but only operation elements with a @skip/@include will change the context so it's pretty
-        // rare), which is why we save recomputation by caching the computed value in that case, but
-        // in case it's different, we compute without caching.
-        if *updated_context != self.context {
-            self.compute_indirect_paths(path_index, condition_resolver, override_conditions)?;
-        }
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths[path_index] {
             Ok(indirect_paths.clone())
         } else {
@@ -4134,12 +4125,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             if let OpPathElement::Field(operation_field) = operation_element {
                 // Add whatever options can be obtained by taking some non-collecting edges first.
                 let paths_with_non_collecting_edges = self
-                    .indirect_options(
-                        &updated_context,
-                        path_index,
-                        condition_resolver,
-                        override_conditions,
-                    )?
+                    .indirect_options(path_index, condition_resolver, override_conditions)?
                     .filter_non_collecting_paths_for_field(operation_field)?;
                 if !paths_with_non_collecting_edges.paths.is_empty() {
                     debug!(
@@ -4292,12 +4278,8 @@ pub(crate) fn create_initial_options(
     );
 
     if initial_type.is_federated_root_type() {
-        let initial_options = lazy_initial_path.indirect_options(
-            &initial_context,
-            0,
-            condition_resolver,
-            override_conditions,
-        )?;
+        let initial_options =
+            lazy_initial_path.indirect_options(0, condition_resolver, override_conditions)?;
         let options = initial_options
             .paths
             .iter()
