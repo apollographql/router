@@ -6,7 +6,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
-### Support @context/@fromContext when using Connectors ([PR #7132](https://github.com/apollographql/router/pull/7132))
+### Support `@context`/`@fromContext` when using Connectors ([PR #7132](https://github.com/apollographql/router/pull/7132))
 
 This fixes a bug that dropped the `@context` and `@fromContext` directives when introducing a connector.
 
