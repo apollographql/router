@@ -9,10 +9,9 @@ subgraphs:
           @source(
             name: "json"
             http: {
-              host: "$$config.host"
-              port: "$$config.port"
+              origin: "$$config.host"
               path: "$(['api', 'v1'])"
-              query: "q: $(1)"
+              queryParams: "q: $(1)"
             }
           )
 
@@ -23,7 +22,7 @@ subgraphs:
               http: {
                 GET: "/users"
                 path: "$([$$args.req, $$args.opt])"
-                query: "repeated: $$args.repeated"
+                queryParams: "repeated: $$args.repeated"
               }
               selection: "$"
             )
