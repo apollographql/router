@@ -32,7 +32,7 @@ use crate::sources::connect::validation::expression::scalars;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers::Headers;
-use crate::sources::connect::validation::http::url::validate_base_url;
+use crate::sources::connect::validation::http::url::validate_url_scheme;
 use crate::sources::connect::validation::source::SourceName;
 
 /// A valid, parsed (but not type-checked) `@connect(http:)`.
@@ -325,51 +325,32 @@ impl<'schema> Transport<'schema> {
             },
         )?;
 
-        let base_url = url
-            .parts
-            .first()
-            .and_then(|part| {
-                if let Part::Constant(constant) = part {
-                    Uri::from_str(&constant.value).ok()
-                } else {
-                    // TODO: Once we allow skipping percent-encoding, if the first expression is not
-                    //  encoded, it _could_ be a base URL, so we should just skip the remaining checks
-                    None
-                }
-            })
-            .and_then(|uri| uri.scheme().is_some().then_some(uri));
-        if let Some(base_url) = base_url.as_ref() {
-            validate_base_url(base_url, coordinate, coordinate.node, url_string, schema)?;
-        }
-
-        if source_name.is_some() && base_url.is_some() {
-            return Err(Message {
-                code: Code::AbsoluteConnectUrlWithSource,
-                message: format!(
-                    "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                    raw_value = coordinate.node
-                ),
-                locations: coordinate
-                    .node
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
-        }
-        if source_name.is_none() && base_url.is_none() {
-            return Err(Message {
-                code: Code::RelativeConnectUrlWithoutSource,
-                message: format!(
-                    "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
-                    raw_value = coordinate.node,
-                    source_directive_name = schema.source_directive_name(),
-                ),
-                locations: coordinate
-                    .node
-                    .line_column_range(source_map)
-                    .into_iter()
-                    .collect(),
-            });
+        if source_name.is_some() {
+            return if url_string.as_str().starts_with("http://")
+                || url_string.as_str().starts_with("https://")
+            {
+                Err(Message {
+                    code: Code::AbsoluteConnectUrlWithSource,
+                    message: format!(
+                        "{coordinate} contains the absolute URL {raw_value} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to be relative.",
+                        raw_value = coordinate.node
+                    ),
+                    locations: coordinate
+                        .node
+                        .line_column_range(source_map)
+                        .into_iter()
+                        .collect(),
+                })
+            } else {
+                Ok(Self {
+                    method,
+                    url,
+                    url_string,
+                    coordinate,
+                })
+            };
+        } else {
+            validate_absolute_connect_url(&url, coordinate, coordinate.node, url_string, schema)?;
         }
         Ok(Self {
             method,
@@ -409,4 +390,64 @@ impl<'schema> Transport<'schema> {
         }
         messages
     }
+}
+
+/// Additional validation rules when using `@connect` without `source:`
+fn validate_absolute_connect_url(
+    url: &StringTemplate,
+    coordinate: HttpMethodCoordinate,
+    value: &Node<Value>,
+    str_value: GraphQLString,
+    schema: &SchemaInfo,
+) -> Result<(), Message> {
+    let relative_url_error = || Message {
+        code: Code::RelativeConnectUrlWithoutSource,
+        message: format!(
+            "{coordinate} specifies the relative URL {raw_value}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL including scheme (e.g. https://), or add a `@{source_directive_name}`.",
+            raw_value = coordinate.node,
+            source_directive_name = schema.source_directive_name(),
+        ),
+        locations: coordinate
+            .node
+            .line_column_range(&schema.sources)
+            .into_iter()
+            .collect(),
+    };
+
+    let Some(Part::Constant(first)) = url.parts.first() else {
+        return Err(relative_url_error());
+    };
+
+    let Some((_scheme, without_scheme)) = first.value.split_once("://") else {
+        return Err(relative_url_error());
+    };
+
+    if url.parts.len() > 1
+        && !without_scheme.contains('/')
+        && !without_scheme.contains('?')
+        && !without_scheme.contains('#')
+    {
+        return Err(Message {
+            code: Code::InvalidUrl,
+            message: format!(
+                "{coordinate} must not contain dynamic pieces in the domain section (before the first `/`, `?`, or `#`).",
+            ),
+            locations: str_value
+                .line_col_for_subslice(first.location.clone(), schema)
+                .into_iter()
+                .collect(),
+        });
+    }
+
+    let base_url = Uri::from_str(&first.value).map_err(|err| Message {
+        code: Code::InvalidUrl,
+        message: format!("In {coordinate}: {err}"),
+        locations: str_value
+            .line_col_for_subslice(first.location.clone(), schema)
+            .into_iter()
+            .collect(),
+    })?;
+    validate_url_scheme(&base_url, coordinate, value, str_value, schema)?;
+
+    Ok(())
 }

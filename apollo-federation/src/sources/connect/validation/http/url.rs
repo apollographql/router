@@ -10,7 +10,7 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
-pub(crate) fn validate_base_url(
+pub(crate) fn validate_url_scheme(
     url: &Uri,
     coordinate: impl Display,
     value: &Node<Value>,

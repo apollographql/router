@@ -153,7 +153,7 @@ fn parse_url<Coordinate: Display + Copy>(
             .into_iter()
             .collect(),
     })?;
-    http::url::validate_base_url(&url, coordinate, value, str_value, schema)
+    http::url::validate_url_scheme(&url, coordinate, value, str_value, schema)
 }
 
 type DirectiveName = Name;
