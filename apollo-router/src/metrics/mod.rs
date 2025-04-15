@@ -78,6 +78,7 @@ use std::sync::OnceLock;
 #[cfg(test)]
 use futures::FutureExt;
 use serde_json_bytes::Value;
+
 use crate::Context;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::context::OPERATION_KIND;
@@ -1393,7 +1394,7 @@ pub(crate) fn count_operation_errors(
     for error in errors {
         let code = error.extensions.get("code").and_then(|c| match c {
             Value::String(s) => Some(s.as_str().to_owned()),
-            Value::Bool(b)   => Some(format!("{b}")),
+            Value::Bool(b) => Some(format!("{b}")),
             Value::Number(n) => Some(n.to_string()),
             Value::Null | Value::Array(_) | Value::Object(_) => None,
         });
@@ -1555,7 +1556,9 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 mod test {
     use opentelemetry::KeyValue;
     use opentelemetry::metrics::MeterProvider;
-    use serde_json_bytes::{json, Value};
+    use serde_json_bytes::Value;
+    use serde_json_bytes::json;
+
     use crate::Context;
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
@@ -2106,7 +2109,7 @@ mod test {
                 json!({"inner": "myCode"}),
             ];
 
-            let errors = codes.map (|code|
+            let errors = codes.map(|code| {
                 graphql::Error::from_value(
                     "mySubgraph",
                     json!(
@@ -2118,9 +2121,10 @@ mod test {
                       },
                       "path": ["obj", "field"]
                     }
-                    )
-                ).unwrap()
-            );
+                    ),
+                )
+                .unwrap()
+            });
 
             count_operation_errors(&errors, &context, &config);
 
@@ -2216,7 +2220,7 @@ mod test {
                 Value::Null,
             ];
 
-            let errors = codes.map (|code|
+            let errors = codes.map(|code| {
                 graphql::Error::from_value(
                     "mySubgraph",
                     json!(
@@ -2228,9 +2232,10 @@ mod test {
                       },
                       "path": ["obj", "field"]
                     }
-                    )
-                ).unwrap()
-            );
+                    ),
+                )
+                .unwrap()
+            });
 
             count_operation_errors(&errors, &context, &config);
 
@@ -2266,7 +2271,7 @@ mod test {
 
             assert_counter!("apollo.router.graphql_error", 2);
         }
-            .with_metrics()
-            .await;
+        .with_metrics()
+        .await;
     }
 }
