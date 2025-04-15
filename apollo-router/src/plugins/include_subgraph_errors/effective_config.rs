@@ -20,10 +20,12 @@ impl TryFrom<Config> for EffectiveConfig {
     type Error = ConfigurationError;
 
     fn try_from(config: Config) -> Result<Self, Self::Error> {
-        let mut effective_config = EffectiveConfig::default();
+        let mut effective_config = EffectiveConfig {
+            default: Self::default_config(&config),
+            ..Default::default()
+        };
 
         // Determine global defaults
-        effective_config.default = Self::default_config(&config);
         let default_config = &effective_config.default;
 
         // Calculate effective config for each specific subgraph
@@ -48,12 +50,7 @@ impl TryFrom<Config> for EffectiveConfig {
                                 allow_list.extend(sub_allow.iter().cloned());
                                 (true, redact, Some(allow_list), None)
                             }
-                            None => (
-                                true,
-                                redact,
-                                Some(sub_allow.iter().cloned().collect()),
-                                None,
-                            ),
+                            None => (true, redact, Some(sub_allow.to_vec()), None),
                         }
                     }
                     SubgraphConfig::Deny {
@@ -72,7 +69,7 @@ impl TryFrom<Config> for EffectiveConfig {
                                 deny_list.extend(sub_deny.clone());
                                 (true, redact, None, Some(deny_list))
                             }
-                            None => (true, redact, None, Some(sub_deny.iter().cloned().collect())),
+                            None => (true, redact, None, Some(sub_deny.to_vec())),
                         }
                     }
                     SubgraphConfig::Included(enabled) => (
@@ -184,12 +181,11 @@ impl EffectiveConfig {
                     ),
                 ),
             };
-        let default_config = SubgraphEffectiveConfig {
+        SubgraphEffectiveConfig {
             include_errors: global_include_errors,
             redact_message: global_redact_message,
             allow_extensions_keys: global_allow_keys,
             deny_extensions_keys: global_deny_keys,
-        };
-        default_config
+        }
     }
 }

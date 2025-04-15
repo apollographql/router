@@ -134,11 +134,11 @@ impl IncludeSubgraphErrors {
                 let is_service_denied = effective_config
                     .deny_extensions_keys
                     .as_ref()
-                    .map_or(false, |deny| deny.contains(&service_key));
+                    .is_some_and(|deny| deny.contains(&service_key));
                 let is_service_allowed = effective_config
                     .allow_extensions_keys
                     .as_ref()
-                    .map_or(true, |allow| allow.contains(&service_key)); // Allowed if no allow list or if present in allow list
+                    .is_none_or(|allow| allow.contains(&service_key)); // Allowed if no allow list or if present in allow list
 
                 if !is_service_denied && is_service_allowed {
                     error
