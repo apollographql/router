@@ -8,7 +8,7 @@ pub mod expand;
 mod header;
 mod id;
 mod json_selection;
-mod models;
+pub mod models;
 pub(crate) mod spec;
 mod string_template;
 mod url_template;
