@@ -1451,8 +1451,11 @@ fn take_matching_key_field_set(
         .find(|field_set| {
             matches_selection_set(representation, &field_set.selection_set)
         })
-        .ok_or_else(|| FetchError::MalformedRequest {
-            reason: format!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}"),
+        .ok_or_else(|| {
+            tracing::trace!("representation does not match any key field set for typename {typename} in subgraph {subgraph_name}");
+            FetchError::MalformedRequest {
+                reason: format!("unexpected critical internal error for typename {typename} in subgraph {subgraph_name}"),
+            }
         })?;
     take_selection_set(representation, &matched_key_field_set.selection_set).ok_or_else(|| {
         FetchError::MalformedRequest {
@@ -1620,8 +1623,7 @@ pub(crate) fn hash_representation(
 pub(crate) fn hash_entity_key(
     entity_keys: &serde_json_bytes::Map<ByteString, serde_json_bytes::Value>,
 ) -> String {
-    #[cfg(test)]
-    dbg!(&entity_keys);
+    tracing::trace!("entity keys: {entity_keys:?}");
     // We have to hash the representation because it can contains PII
     hash_representation(entity_keys)
 }
