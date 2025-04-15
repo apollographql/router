@@ -96,9 +96,9 @@ impl StringTemplate {
 }
 
 impl StringTemplate {
-    /// Interpolation for when the constant type is a string. This can't be implemented for
-    /// arbitrary generic types, so non-string consumers (headers) implement this themselves with
-    /// any additional validations/transformations they need.
+    /// Interpolate the expressions in the template into a basic string.
+    ///
+    /// For URIs, use [`Self::interpolate_uri`] instead.
     pub(crate) fn interpolate(&self, vars: &IndexMap<String, Value>) -> Result<String, Error> {
         let mut result = String::new();
         for part in &self.parts {
