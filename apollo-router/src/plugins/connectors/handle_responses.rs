@@ -631,7 +631,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
@@ -729,7 +729,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("$.data { id }").unwrap(),
@@ -832,8 +832,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
-                method: Some(HTTPMethod::Post),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Post,
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
                 ..Default::default()
             },
@@ -947,7 +947,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
@@ -1061,7 +1061,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
@@ -1313,7 +1313,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: selection.clone(),

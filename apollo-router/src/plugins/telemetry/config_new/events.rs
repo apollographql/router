@@ -1219,7 +1219,7 @@ mod tests {
                 ),
                 transport: HttpJsonTransport {
                     source_url: None,
-                    connect_template: URLTemplate::from_str("/test").ok(),
+                    connect_template: URLTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 },
                 selection: JSONSelection::empty(),
@@ -1300,7 +1300,7 @@ mod tests {
                 ),
                 transport: HttpJsonTransport {
                     source_url: None,
-                    connect_template: URLTemplate::from_str("/test").ok(),
+                    connect_template: URLTemplate::from_str("/test").unwrap(),
                     ..Default::default()
                 },
                 selection: JSONSelection::empty(),

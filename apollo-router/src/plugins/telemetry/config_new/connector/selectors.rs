@@ -348,7 +348,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str(TEST_URL_TEMPLATE).ok(),
+                connect_template: URLTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::empty(),

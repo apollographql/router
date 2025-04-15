@@ -830,8 +830,8 @@ connector:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        method: Some(HTTPMethod::Get),
-                        connect_template: URLTemplate::from_str("/test").ok(),
+                        method: HTTPMethod::Get,
+                        connect_template: URLTemplate::from_str("/test").unwrap(),
                         ..Default::default()
                     },
                     selection: JSONSelection::empty(),
@@ -1180,8 +1180,8 @@ subgraph:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        method: Some(HTTPMethod::Get),
-                        connect_template: URLTemplate::from_str("/test").ok(),
+                        method: HTTPMethod::Get,
+                        connect_template: URLTemplate::from_str("/test").unwrap(),
                         ..Default::default()
                     },
                     selection: JSONSelection::empty(),

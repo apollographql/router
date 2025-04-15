@@ -24,14 +24,9 @@ pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
 pub(crate) const HTTP_ARGUMENT_NAME: Name = name!("http");
 pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
 
-pub(crate) const METHOD_ARGUMENT_NAME: Name = name!("method");
-pub(crate) const SCHEME_ARGUMENT_NAME: Name = name!("scheme");
-pub(crate) const HOST_ARGUMENT_NAME: Name = name!("host");
-pub(crate) const PORT_ARGUMENT_NAME: Name = name!("port");
-pub(crate) const USER_ARGUMENT_NAME: Name = name!("user");
-pub(crate) const PASSWORD_ARGUMENT_NAME: Name = name!("password");
+pub(crate) const ORIGIN_ARGUMENT_NAME: Name = name!("origin");
 pub(crate) const PATH_ARGUMENT_NAME: Name = name!("path");
-pub(crate) const QUERY_ARGUMENT_NAME: Name = name!("query");
+pub(crate) const QUERY_PARAMS_ARGUMENT_NAME: Name = name!("queryParams");
 
 pub(crate) const HTTP_HEADER_MAPPING_NAME_IN_SPEC: Name = name!("HTTPHeaderMapping");
 pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
@@ -63,14 +58,9 @@ pub(crate) struct SourceHTTPArguments {
     /// Can be overridden by name with headers in a @connect directive.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 
-    pub(crate) method: Option<JSONSelection>,
-    pub(crate) scheme: Option<JSONSelection>,
-    pub(crate) host: Option<JSONSelection>,
-    pub(crate) port: Option<JSONSelection>,
-    pub(crate) user: Option<JSONSelection>,
-    pub(crate) password: Option<JSONSelection>,
+    pub(crate) origin: Option<JSONSelection>,
     pub(crate) path: Option<JSONSelection>,
-    pub(crate) query: Option<JSONSelection>,
+    pub(crate) query_params: Option<JSONSelection>,
 }
 
 /// Arguments to the `@connect` directive
@@ -126,12 +116,7 @@ pub(crate) struct ConnectHTTPArguments {
     /// Overrides headers from the associated @source by name.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 
-    pub(crate) method: Option<JSONSelection>,
-    pub(crate) scheme: Option<JSONSelection>,
-    pub(crate) host: Option<JSONSelection>,
-    pub(crate) port: Option<JSONSelection>,
-    pub(crate) user: Option<JSONSelection>,
-    pub(crate) password: Option<JSONSelection>,
+    pub(crate) origin: Option<JSONSelection>,
     pub(crate) path: Option<JSONSelection>,
-    pub(crate) query: Option<JSONSelection>,
+    pub(crate) query_params: Option<JSONSelection>,
 }

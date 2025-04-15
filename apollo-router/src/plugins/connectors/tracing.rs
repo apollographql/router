@@ -75,7 +75,7 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: Some(Url::parse("http://localhost/").unwrap()),
-                connect_template: "/path".parse().ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),

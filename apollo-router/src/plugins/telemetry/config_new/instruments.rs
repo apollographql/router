@@ -3365,8 +3365,9 @@ mod tests {
                                             connect_template: URLTemplate::from_str(
                                                 url_template.as_str(),
                                             )
-                                            .ok(),
-                                            method: HTTPMethod::from_str(http_method.as_str()).ok(),
+                                            .unwrap(),
+                                            method: HTTPMethod::from_str(http_method.as_str())
+                                                .unwrap(),
                                             ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
@@ -3426,8 +3427,9 @@ mod tests {
                                             connect_template: URLTemplate::from_str(
                                                 url_template.as_str(),
                                             )
-                                            .ok(),
-                                            method: HTTPMethod::from_str(http_method.as_str()).ok(),
+                                            .unwrap(),
+                                            method: HTTPMethod::from_str(http_method.as_str())
+                                                .unwrap(),
                                             ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),

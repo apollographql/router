@@ -35,7 +35,7 @@ pub(crate) fn make_request(
         .make_uri(&inputs)
         .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.to_string()))?;
 
-    let (method, _todo) = transport.method(&inputs);
+    let method = transport.method;
     let request = http::Request::builder()
         .method(method.as_str())
         .uri(uri.as_str());
@@ -279,8 +279,8 @@ mod tests {
         let req = super::make_request(
             &HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").ok(),
-                method: Some(HTTPMethod::Post),
+                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                method: HTTPMethod::Post,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
                 ..Default::default()
             },
@@ -338,8 +338,8 @@ mod tests {
         let req = super::make_request(
             &HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str("http://localhost:8080/").ok(),
-                method: Some(HTTPMethod::Post),
+                connect_template: URLTemplate::from_str("http://localhost:8080/").unwrap(),
+                method: HTTPMethod::Post,
                 headers,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
                 ..Default::default()

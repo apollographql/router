@@ -36,21 +36,16 @@ use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NA
 #[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
     pub source_url: Option<Url>,
-    pub connect_template: Option<URLTemplate>,
-    pub method: Option<HTTPMethod>,
+    pub connect_template: URLTemplate,
+    pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
 
-    pub method_expression: Option<JSONSelection>,
-    pub scheme: Option<JSONSelection>,
-    pub host: Option<JSONSelection>,
-    pub port: Option<JSONSelection>,
-    pub user: Option<JSONSelection>,
-    pub password: Option<JSONSelection>,
+    pub origin: Option<JSONSelection>,
     pub source_path: Option<JSONSelection>,
-    pub source_query: Option<JSONSelection>,
+    pub source_query_params: Option<JSONSelection>,
     pub connect_path: Option<JSONSelection>,
-    pub connect_query: Option<JSONSelection>,
+    pub connect_query_params: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {
@@ -59,17 +54,17 @@ impl HttpJsonTransport {
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
-            (Some(HTTPMethod::Get), Some(url))
+            (HTTPMethod::Get, url)
         } else if let Some(url) = &http.post {
-            (Some(HTTPMethod::Post), Some(url))
+            (HTTPMethod::Post, url)
         } else if let Some(url) = &http.patch {
-            (Some(HTTPMethod::Patch), Some(url))
+            (HTTPMethod::Patch, url)
         } else if let Some(url) = &http.put {
-            (Some(HTTPMethod::Put), Some(url))
+            (HTTPMethod::Put, url)
         } else if let Some(url) = &http.delete {
-            (Some(HTTPMethod::Delete), Some(url))
+            (HTTPMethod::Delete, url)
         } else {
-            (None, None)
+            return Err(FederationError::internal("missing http method"));
         };
 
         #[allow(clippy::mutable_key_type)]
@@ -85,39 +80,24 @@ impl HttpJsonTransport {
 
         Ok(Self {
             source_url: source.and_then(|s| s.base_url.clone()),
-            connect_template: connect_url
-                .map(|c| {
-                    c.parse().map_err(|e: string_template::Error| {
-                        FederationError::internal(format!(
-                            "could not parse URL template: {message}",
-                            message = e.message
-                        ))
-                    })
-                })
-                .transpose()?,
+            connect_template: connect_url.parse().map_err(|e: string_template::Error| {
+                FederationError::internal(format!(
+                    "could not parse URL template: {message}",
+                    message = e.message
+                ))
+            })?,
             method,
             headers,
             body: http.body.clone(),
 
-            method_expression: http
-                .method
+            origin: http
+                .origin
                 .clone()
-                .or(source.and_then(|s| s.method.clone())),
-            scheme: http
-                .scheme
-                .clone()
-                .or(source.and_then(|s| s.scheme.clone())),
-            host: http.host.clone().or(source.and_then(|s| s.host.clone())),
-            port: http.port.clone().or(source.and_then(|s| s.port.clone())),
-            user: http.user.clone().or(source.and_then(|s| s.user.clone())),
-            password: http
-                .password
-                .clone()
-                .or(source.and_then(|s| s.password.clone())),
+                .or(source.and_then(|s| s.origin.clone())),
             source_path: source.and_then(|s| s.path.clone()),
-            source_query: source.and_then(|s| s.query.clone()),
+            source_query_params: source.and_then(|s| s.query_params.clone()),
             connect_path: http.path.clone(),
-            connect_query: http.query.clone(),
+            connect_query_params: http.query_params.clone(),
         })
     }
 
@@ -125,42 +105,14 @@ impl HttpJsonTransport {
         format!("http: {} {}", self.method_attr(), self.url_attr())
     }
 
+    /// HTTP methods for use in tracing attributes
     pub fn method_attr(&self) -> String {
-        self.method
-            .as_ref()
-            .map_or("dynamic", |m| m.as_str())
-            .to_string()
+        self.method.to_string()
     }
 
+    /// URL template for use in tracing attributes
     pub fn url_attr(&self) -> String {
-        self.connect_template
-            .as_ref()
-            .map_or("dynamic".to_string(), |u| u.to_string())
-    }
-
-    pub fn method(&self, inputs: &IndexMap<String, Value>) -> (HTTPMethod, Vec<ApplyToError>) {
-        self.method_expression
-            .as_ref()
-            .map(|m| {
-                let (data, apply_to_errors) = m.apply_with_vars(&json!({}), inputs);
-                let Some(method) = data
-                    .as_ref()
-                    .and_then(|s| s.as_str())
-                    .and_then(|s| HTTPMethod::from_str(s).ok())
-                else {
-                    return (
-                        HTTPMethod::default(),
-                        vec![ApplyToError::new(
-                            "Invalid HTTP method".to_string(),
-                            vec![],
-                            None,
-                        )],
-                    );
-                };
-                (method, apply_to_errors)
-            })
-            .or_else(|| Some((self.method.unwrap_or_default(), vec![])))
-            .unwrap_or_default()
+        self.connect_template.to_string()
     }
 
     pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> {
@@ -174,25 +126,16 @@ impl HttpJsonTransport {
             .iter()
             .flat_map(|(_, source)| source.expressions());
 
-        let url_selections = self
-            .connect_template
-            .iter()
-            .flat_map(|url| url.expressions())
-            .map(|e| &e.expression);
+        let url_selections = self.connect_template.expressions().map(|e| &e.expression);
 
         header_selections
             .chain(url_selections)
             .chain(self.body.iter())
-            .chain(self.method_expression.iter())
-            .chain(self.scheme.iter())
-            .chain(self.host.iter())
-            .chain(self.port.iter())
-            .chain(self.user.iter())
-            .chain(self.password.iter())
+            .chain(self.origin.iter())
             .chain(self.source_path.iter())
-            .chain(self.source_query.iter())
+            .chain(self.source_query_params.iter())
             .chain(self.connect_path.iter())
-            .chain(self.connect_query.iter())
+            .chain(self.connect_query_params.iter())
             .flat_map(|b| {
                 b.external_var_paths()
                     .into_iter()
@@ -200,78 +143,20 @@ impl HttpJsonTransport {
             })
     }
 
-    fn resolved_scheme(
+    fn resolved_origin(
         &self,
         inputs: &IndexMap<String, Value>,
     ) -> (Option<String>, Vec<ApplyToError>) {
-        let Some(scheme) = self.scheme.as_ref() else {
+        let Some(origin) = self.origin.as_ref() else {
             return Default::default();
         };
 
-        let (scheme, warnings) = scheme.apply_with_vars(&json!({}), inputs);
-        let scheme = scheme
+        let (origin, warnings) = origin.apply_with_vars(&json!({}), inputs);
+        let origin = origin
             .as_ref()
             .and_then(|s| s.as_str())
             .map(|s| s.to_string());
-        (scheme, warnings)
-    }
-
-    fn resolved_host(
-        &self,
-        inputs: &IndexMap<String, Value>,
-    ) -> (Option<String>, Vec<ApplyToError>) {
-        let Some(host) = self.host.as_ref() else {
-            return Default::default();
-        };
-
-        let (host, warnings) = host.apply_with_vars(&json!({}), inputs);
-        let host = host
-            .as_ref()
-            .and_then(|s| s.as_str())
-            .map(|s| s.to_string());
-        (host, warnings)
-    }
-
-    fn resolved_port(&self, inputs: &IndexMap<String, Value>) -> (Option<u16>, Vec<ApplyToError>) {
-        let Some(port) = self.port.as_ref() else {
-            return Default::default();
-        };
-
-        let (port, warnings) = port.apply_with_vars(&json!({}), inputs);
-        let port = port.as_ref().and_then(|s| s.as_u64()).map(|s| s as u16);
-        (port, warnings)
-    }
-
-    fn resolved_user(
-        &self,
-        inputs: &IndexMap<String, Value>,
-    ) -> (Option<String>, Vec<ApplyToError>) {
-        let Some(user) = self.user.as_ref() else {
-            return Default::default();
-        };
-
-        let (user, warnings) = user.apply_with_vars(&json!({}), inputs);
-        let user = user
-            .as_ref()
-            .and_then(|s| s.as_str())
-            .map(|s| s.to_string());
-        (user, warnings)
-    }
-
-    fn resolved_password(
-        &self,
-        inputs: &IndexMap<String, Value>,
-    ) -> (Option<String>, Vec<ApplyToError>) {
-        let Some(password) = self.password.as_ref() else {
-            return Default::default();
-        };
-
-        let (password, warnings) = password.apply_with_vars(&json!({}), inputs);
-        let password = password
-            .as_ref()
-            .and_then(|s| s.as_str())
-            .map(|s| s.to_string());
-        (password, warnings)
+        (origin, warnings)
     }
 
     // PATH
@@ -303,11 +188,8 @@ impl HttpJsonTransport {
     ) -> Result<(Vec<String>, Vec<ApplyToError>), FederationError> {
         let connect_template_path = self
             .connect_template
-            .as_ref()
-            .map(|u| u.interpolate_path(inputs))
-            .transpose()
-            .map_err(|e| FederationError::internal(format!("Invalid URL template: {e}")))?
-            .unwrap_or_default();
+            .interpolate_path(inputs)
+            .map_err(|e| FederationError::internal(format!("Invalid URL template: {e}")))?;
 
         Ok((connect_template_path, vec![]))
     }
@@ -339,7 +221,7 @@ impl HttpJsonTransport {
         let mut warnings = vec![];
 
         let source_query = self
-            .source_query
+            .source_query_params
             .as_ref()
             .and_then(|q| {
                 let (q, w) = q.apply_with_vars(&json!({}), inputs);
@@ -358,11 +240,8 @@ impl HttpJsonTransport {
     fn resolved_connect_template_query(&self, inputs: &IndexMap<String, Value>) -> QueryPairResult {
         let connect_template_query = self
             .connect_template
-            .as_ref()
-            .map(|u| u.interpolate_query(inputs))
-            .transpose()
+            .interpolate_query(inputs)
             .map_err(|e| FederationError::internal(format!("Invalid URL template: {e}")))?
-            .unwrap_or_default()
             .into_iter()
             .map(|(key, value)| (key, Some(value)))
             .collect_vec();
@@ -374,7 +253,7 @@ impl HttpJsonTransport {
         let mut warnings = vec![];
 
         let connect_query = self
-            .connect_query
+            .connect_query_params
             .as_ref()
             .and_then(|q| {
                 let (q, w) = q.apply_with_vars(&json!({}), inputs);
@@ -393,7 +272,7 @@ impl HttpJsonTransport {
     fn base_url(&self) -> Url {
         self.source_url
             .as_ref()
-            .or_else(|| self.connect_template.as_ref().and_then(|u| u.base.as_ref()))
+            .or(self.connect_template.base.as_ref())
             .cloned()
             // invalid is reserved: https://www.rfc-editor.org/rfc/rfc6761.html#section-6.4
             .unwrap_or_else(|| Url::parse("https://invalid").expect("always parses"))
@@ -404,49 +283,16 @@ impl HttpJsonTransport {
         inputs: &IndexMap<String, Value>,
     ) -> Result<(Url, Vec<ApplyToError>), FederationError> {
         let mut warnings = vec![];
-
         let mut base_url = self.base_url();
 
-        let (scheme, ws) = self.resolved_scheme(inputs);
+        // ORIGIN
+
+        let (origin, ws) = self.resolved_origin(inputs);
         warnings.extend(ws);
-        if let Some(scheme) = scheme {
+        if let Some(origin) = origin {
             base_url
-                .set_scheme(&scheme)
-                .map_err(|_| FederationError::internal(format!("Invalid URL scheme: {scheme}")))?;
-        }
-
-        // AUTHORITY
-
-        let (host, ws) = self.resolved_host(inputs);
-        warnings.extend(ws);
-        if let Some(host) = host {
-            base_url
-                .set_host(Some(&host))
-                .map_err(|_| FederationError::internal(format!("Invalid URL host: {host}")))?;
-        }
-
-        let (port, ws) = self.resolved_port(inputs);
-        warnings.extend(ws);
-        if let Some(port) = port {
-            base_url
-                .set_port(Some(port))
-                .map_err(|_| FederationError::internal(format!("Invalid URL port: {port}")))?;
-        }
-
-        let (user, ws) = self.resolved_user(inputs);
-        warnings.extend(ws);
-        if let Some(user) = user {
-            base_url
-                .set_username(&user)
-                .map_err(|_| FederationError::internal(format!("Invalid URL user: {user}")))?;
-        }
-
-        let (password, ws) = self.resolved_password(inputs);
-        warnings.extend(ws);
-        if let Some(password) = password {
-            base_url.set_password(Some(&password)).map_err(|_| {
-                FederationError::internal("Invalid URL password".to_string()) // DO NOT LOG PASSWORD
-            })?;
+                .set_host(Some(&origin))
+                .map_err(|_| FederationError::internal(format!("Invalid URL origin: {origin}")))?;
         }
 
         // PATH
@@ -763,7 +609,6 @@ mod tests {
     use url::Url;
 
     use super::HttpJsonTransport;
-    use crate::sources::connect::HTTPMethod;
     use crate::sources::connect::JSONSelection;
     use crate::sources::connect::URLTemplate;
 
@@ -771,11 +616,11 @@ mod tests {
     fn combine_new_and_old_apis() {
         let transport = HttpJsonTransport {
             source_url: Url::parse("http://example.com/a?z=1").ok(),
-            connect_template: "/{$args.c}?x={$args.x}".parse().ok(),
+            connect_template: "/{$args.c}?x={$args.x}".parse().unwrap(),
             source_path: JSONSelection::parse("$(['b', $args.b2])").ok(),
             connect_path: JSONSelection::parse("$(['d', $args.d2])").ok(),
-            source_query: JSONSelection::parse("y: $args.y").ok(),
-            connect_query: JSONSelection::parse("w: $args.w").ok(),
+            source_query_params: JSONSelection::parse("y: $args.y").ok(),
+            connect_query_params: JSONSelection::parse("w: $args.w").ok(),
             ..Default::default()
         };
         let inputs = IndexMap::from_iter([(
@@ -793,16 +638,15 @@ mod tests {
     #[test]
     fn only_new_api() {
         let transport = HttpJsonTransport {
-            scheme: JSONSelection::parse("$('http')").ok(),
-            host: JSONSelection::parse("$('example.com')").ok(),
+            origin: JSONSelection::parse("$('example.com')").ok(),
             connect_path: JSONSelection::parse("$(['a', $args.a, ''])").ok(),
-            connect_query: JSONSelection::parse("$args { b }").ok(),
+            connect_query_params: JSONSelection::parse("$args { b }").ok(),
             ..Default::default()
         };
         let inputs = IndexMap::from_iter([("$args".to_string(), json!({"a": "1", "b": "2"}))]);
         let (url, warnings) = transport.make_uri(&inputs).unwrap();
         assert_eq!(warnings, vec![]);
-        assert_eq!(url.to_string(), "http://example.com/a/1/?b=2");
+        assert_eq!(url.to_string(), "https://example.com/a/1/?b=2");
     }
 
     // -------------------------------------------------------------------------
@@ -822,7 +666,7 @@ mod tests {
         assert_eq!(
             HttpJsonTransport {
                 source_url: Url::parse("https://localhost:8080/v1").ok(),
-                connect_template: "/hello/42".parse().ok(),
+                connect_template: "/hello/42".parse().unwrap(),
                 ..Default::default()
             }
             .make_uri(&Default::default())
@@ -838,7 +682,7 @@ mod tests {
         assert_eq!(
             HttpJsonTransport {
                 source_url: Url::parse("https://localhost:8080/").ok(),
-                connect_template: "/hello/42".parse().ok(),
+                connect_template: "/hello/42".parse().unwrap(),
                 ..Default::default()
             }
             .make_uri(&Default::default())
@@ -854,7 +698,7 @@ mod tests {
         assert_eq!(
             HttpJsonTransport {
                 source_url: Url::parse("https://localhost:8080/v1/").ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().ok(),
+                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             }
             .make_uri(&this! { "id": 42 })
@@ -870,7 +714,7 @@ mod tests {
         assert_eq!(
             HttpJsonTransport {
                 source_url: Url::parse("https://localhost:8080/v1?foo=bar").ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().ok(),
+                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             }
             .make_uri(&this! { "id": 42 })
@@ -886,7 +730,7 @@ mod tests {
         assert_eq!(
             HttpJsonTransport {
                 source_url: Url::parse("https://localhost:8080/v1/?foo=bar").ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().ok(),
+                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             }
             .make_uri(&this! { "id": 42 })
@@ -899,9 +743,10 @@ mod tests {
 
     #[test]
     fn path_cases() {
-        let template = "http://localhost/users/{$this.user_id}?a={$this.b}&e={$this.f.g}"
-            .parse()
-            .ok();
+        let template: URLTemplate =
+            "http://localhost/users/{$this.user_id}?a={$this.b}&e={$this.f.g}"
+                .parse()
+                .unwrap();
 
         assert_snapshot!(
             HttpJsonTransport {
@@ -975,10 +820,10 @@ mod tests {
 
     #[test]
     fn multi_variable_parameter_values() {
-        let template =
+        let template: URLTemplate =
             "http://localhost/locations/xyz({$this.x},{$this.y},{$this.z})?required={$this.b},{$this.c};{$this.d}&optional=[{$this.e},{$this.f}]"
                 .parse()
-                .ok();
+                .unwrap();
 
         assert_eq!(
             HttpJsonTransport {
@@ -1107,9 +952,9 @@ mod tests {
             @"http://localhost/locations/xyz(1,2,3)?required=4%2C%3B6&optional=%5B%2C%5D"
         );
 
-        let line_template = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
+        let line_template: URLTemplate = "http://localhost/line/{$this.p1.x},{$this.p1.y},{$this.p1.z}/{$this.p2.x},{$this.p2.y},{$this.p2.z}"
             .parse()
-            .ok();
+            .unwrap();
 
         assert_snapshot!(
             HttpJsonTransport {
@@ -1194,7 +1039,7 @@ mod tests {
             .expect("Failed to parse URL template");
 
         let url = HttpJsonTransport {
-            connect_template: Some(template),
+            connect_template: template,
             ..Default::default()
         }
         .make_uri(vars)
@@ -1208,74 +1053,24 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // method
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn test_method() {
-        let transport = HttpJsonTransport::default();
-
-        assert_eq!(transport.method(&Default::default()).0.as_str(), "GET");
-
-        let transport = HttpJsonTransport {
-            method: Some(HTTPMethod::Get),
-            method_expression: JSONSelection::parse("$('POST')").ok(),
-            ..Default::default()
-        };
-
-        assert_eq!(transport.method(&Default::default()).0.as_str(), "POST");
-
-        let transport = HttpJsonTransport {
-            method_expression: JSONSelection::parse("$this.method").ok(),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            transport.method(&this! { "method": "PUT" }).0.as_str(),
-            "PUT"
-        );
-    }
-
-    // -------------------------------------------------------------------------
-    // host/port/user/password
+    // origin
     // -------------------------------------------------------------------------
 
     #[test]
     fn test_host_port_user_password() {
         let mut transport = HttpJsonTransport::default();
-        let data = this! { "host": "example.com", "port": 8080, "user": "me", "password": "1234" };
+        let data = this! { "origin": "example.com:8080" };
 
         assert_eq!(
             transport.make_uri(&Default::default()).unwrap().0.as_str(),
             "https://invalid/"
         );
 
-        transport.host = JSONSelection::parse("$this.host").ok();
-
-        assert_eq!(
-            transport.make_uri(&data).unwrap().0.as_str(),
-            "https://example.com/"
-        );
-
-        transport.port = JSONSelection::parse("$this.port").ok();
+        transport.origin = JSONSelection::parse("$this.host").ok();
 
         assert_eq!(
             transport.make_uri(&data).unwrap().0.as_str(),
             "https://example.com:8080/"
-        );
-
-        transport.user = JSONSelection::parse("$this.user").ok();
-
-        assert_eq!(
-            transport.make_uri(&data).unwrap().0.as_str(),
-            "https://me@example.com:8080/"
-        );
-
-        transport.password = JSONSelection::parse("$this.password").ok();
-
-        assert_eq!(
-            transport.make_uri(&data).unwrap().0.as_str(),
-            "https://me:1234@example.com:8080/"
         );
     }
 
@@ -1332,7 +1127,7 @@ mod tests {
             "https://invalid/segment/a/c"
         );
 
-        transport.connect_template = URLTemplate::from_str("/foo/bar").ok();
+        transport.connect_template = URLTemplate::from_str("/foo/bar").unwrap();
         assert_eq!(
             transport.make_uri(&data).unwrap().0.as_str(),
             "https://invalid/segment/foo/bar/a/c"
@@ -1354,9 +1149,9 @@ mod tests {
            "object": { "key": "value" }
         };
 
-        transport.source_query =
+        transport.source_query_params =
             JSONSelection::parse("a: $('a') b: $(42) c: $(false) d: $(null)").ok();
-        transport.connect_query = JSONSelection::parse(
+        transport.connect_query_params = JSONSelection::parse(
             "e: $this.encoded f: $this.number g: $this.bool h: $this.array i: $this.object",
         )
         .ok();

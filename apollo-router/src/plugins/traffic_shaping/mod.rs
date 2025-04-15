@@ -775,8 +775,8 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
-                connect_template: "/path".parse().ok(),
+                source_url: Url::parse("http://localhost/api").ok(),
+                connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
