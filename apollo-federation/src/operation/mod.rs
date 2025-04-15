@@ -77,7 +77,7 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 ///
 /// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
 /// startup. It currently implements `Serialize` for debugging purposes. It should not implement
-/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// `Deserialize`, and, more specifically, it should not be used for caching until uniqueness is
 /// provided (i.e. the inner type is a `Uuid` or the like).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct SelectionId(usize);
@@ -1324,7 +1324,7 @@ impl SelectionSet {
     /// so we can efficiently generate query plans. In order to prevent the query planner from spending time
     /// exploring those useless __typename options, we "remove" the unnecessary __typename selections from the
     /// operation. Since we need to ensure that the __typename field will still need to be queried, we "tag"
-    /// one of the "sibling" selections (using "attachement") to remember that __typename needs to be added
+    /// one of the "sibling" selections (using "attachment") to remember that __typename needs to be added
     /// back eventually. The core query planning algorithm will ignore that tag, and because __typename has been
     /// otherwise removed, we'll save any related work. As we build the final query plan, we'll check back for
     /// those "tags" and add back the __typename selections. As this only happen after the query planning
@@ -1698,7 +1698,7 @@ impl SelectionSet {
     ///
     /// The final selections are optional. If `path` ends on a leaf field, then no followup
     /// selections would make sense.
-    /// When final selections are provided, unecessary fragments will be automatically removed
+    /// When final selections are provided, unnecessary fragments will be automatically removed
     /// at the junction between the path and those final selections.
     ///
     /// For instance, suppose that we have:
@@ -2144,12 +2144,12 @@ fn compute_aliases_for_non_merging_fields(
                         };
                     }
                 } else {
-                    // We need to alias the new occurence.
+                    // We need to alias the new occurrence.
                     let alias = gen_alias_name(response_name, &seen_response_names);
 
                     // Given how we generate aliases, it's is very unlikely that the generated alias will conflict with any of the other response name
                     // at the level, but it's theoretically possible. By adding the alias to the seen names, we ensure that in the remote change that
-                    // this ever happen, we'll avoid the conflict by giving another alias to the followup occurence.
+                    // this ever happen, we'll avoid the conflict by giving another alias to the followup occurrence.
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
                             let mut p = path.clone();

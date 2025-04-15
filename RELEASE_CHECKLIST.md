@@ -283,7 +283,7 @@ Start following the steps below to start a release PR.  The process is **not ful
     git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-15. Programatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
+15. Programmatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
 
     > Note: This file could totally be created by the `xtask` if we merely decide convention for it and whether we want it checked in or not.  It will be used again later in process and, in theory, by CI.  Definitely not suggesting this should live on as regex.
 
