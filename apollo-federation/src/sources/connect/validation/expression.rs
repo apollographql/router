@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
@@ -23,6 +24,17 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+
+static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
+    Shape::record(
+        [(
+            "headers".to_string(),
+            Shape::dict(Shape::list(Shape::string([]), []), []),
+        )]
+        .into(),
+        [],
+    )
+});
 
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
@@ -53,6 +65,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Args, shape_for_arguments(field_def)),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
                 ]
                 .into_iter()
                 .collect();
@@ -74,6 +87,7 @@ impl<'schema> Context<'schema> {
                     (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
                     (Namespace::Config, Shape::unknown([])),
                     (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
                 ]
                 .into_iter()
                 .collect();
@@ -97,6 +111,7 @@ impl<'schema> Context<'schema> {
         let var_lookup: IndexMap<Namespace, Shape> = [
             (Namespace::Config, Shape::unknown([])),
             (Namespace::Context, Shape::unknown([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
         ]
         .into_iter()
         .collect();
