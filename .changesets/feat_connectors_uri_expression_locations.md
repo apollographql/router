@@ -1,4 +1,4 @@
-### Expressions can now be used anywhere within Connectors URIs
+### Expressions can now be used in more locations in Connectors URIs
 
 Previously, we only allowed expressions in very specific locations:
 
@@ -6,8 +6,9 @@ Previously, we only allowed expressions in very specific locations:
 2. A query parameter's _value_, like `/users?id={$args.id}`
 
 Expressions can now be used anywhere in or after the path of the URI.
-For example, you could do `@connect(http: {GET: "/users?{$args.filterName}={$args.filterValue}"})`.
-The result of the expression will _always_ be percent encoded.
+For example, you could do
+`@connect(http: {GET: "/users?{$args.filterName}={$args.filterValue}#{$args.fragmentStuff}"})`.
+The result of any expression will _always_ be percent encoded.
 
 Parts of this feature will only be available when composing with Apollo Federation 2.11 or above (currently in preview).
 
