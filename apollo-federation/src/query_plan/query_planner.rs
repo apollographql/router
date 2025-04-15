@@ -493,10 +493,11 @@ impl QueryPlanner {
             ),
             Some(PlanNode::Sequence(root_node)) if is_subscription => {
                 let Some((primary, rest)) = root_node.nodes.split_first() else {
-                    unreachable!("Sequence must have at least one node");
+                    // TODO(@goto-bus-stop): We could probably guarantee this in the type system
+                    bail!("Invalid query plan: Sequence must have at least one node");
                 };
                 let PlanNode::Fetch(primary) = primary.clone() else {
-                    unreachable!("Primary node of a subscription is not a Fetch");
+                    bail!("Invalid query plan: Primary node of a subscription is not a Fetch");
                 };
                 let rest = PlanNode::Sequence(SequenceNode {
                     nodes: rest.to_vec(),
@@ -509,9 +510,10 @@ impl QueryPlanner {
                 ))
             }
             Some(node) if is_subscription => {
-                unreachable!(
-                    "Unexpected top level PlanNode: '{node:?}' when processing subscription"
-                )
+                bail!(
+                    "Invalid query plan for subscription: unexpected {} at root",
+                    node.node_kind()
+                );
             }
             Some(PlanNode::Fetch(inner)) => Some(TopLevelPlanNode::Fetch(inner)),
             Some(PlanNode::Sequence(inner)) => Some(TopLevelPlanNode::Sequence(inner)),
