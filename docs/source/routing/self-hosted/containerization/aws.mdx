@@ -1,7 +1,7 @@
 ---
 title: Deploying GraphOS Router on Amazon Web Services
-subtitle: Deploy router with Elastic Container Service (ECS) 
-description: Build and deploy Apollo GraphOS Router on Amazon Web Services (AWS) with Elastic Container Service (ECS)
+subtitle: Deploy router with Amazon Elastic Container Service (ECS) 
+description: Build and deploy Apollo Router on Amazon Web Services (AWS) with Amazon Elastic Container Service (ECS)
 ---
 
 Learn how to deploy the router for development on AWS with Elastic Container Service (ECS).
@@ -13,7 +13,7 @@ You will:
 
 <Note>
 
-Not deploying to AWS? Try our deployment guides for [GCP](/graphos/routing/self-hosted/containerization/gcp) or [Azure](/graphos/routing/self-hosted/containerization/azure).
+Not deploying to AWS? Try our router deployment guides for [GCP](/graphos/routing/self-hosted/containerization/gcp) or [Azure](/graphos/routing/self-hosted/containerization/azure).
 
 </Note>
 
@@ -31,7 +31,7 @@ Before you start:
 
 ## Build router image
 
-After setting up the prerequisite tools, build a router image with custom configuration, then push it to AWS:
+To deploy your own router, start by customizing and building a router image, using a Dockerfile and a router configuration file:
 
 1. In a local directory, create a `router.yaml` file and copy-paste the following configuration into the file: 
     
@@ -42,9 +42,9 @@ After setting up the prerequisite tools, build a router image with custom config
         listen: 0.0.0.0:8088
     ```
 
-    Because the router's default HTTP and health check endpoint addresses are localhost and wouldn't be reachable when deployed, edit your `router.yaml` to configure these endpoints to listen to all addresses:  
+    The router's default HTTP and health check endpoint addresses are localhost, so they wouldn't be reachable when deployed. This configuration enables the router to listen to all addresses.
 
-1. Create a `Dockerfile` file and copy-paste the following into the file, where the container image of your chosen version of router is downloaded, and your customized `router.yaml` configuration file replaces the default router configuration file:
+1. Create a `Dockerfile` file and copy-paste the following into the file:
 
     ```text showLineNumbers=false
     # Use the official Apollo Router Core image as the base.
@@ -54,6 +54,8 @@ After setting up the prerequisite tools, build a router image with custom config
     # Replace the default router config with the local, customized router.yaml
     COPY router.yaml /dist/config/router.yaml
     ```
+
+    The Dockerfile sources the base router image from the GitHub container registry, using the version of router you specify. It then copies your customized `router.yaml` configuration file to overwrite the default router configuration file.
 
 1. From the same local directory, run the following `docker` CLI command to build a new router image. Choose a name and tag for the image, for example `router-aws:v1.61.0`.
     
@@ -108,7 +110,7 @@ Now that you have a built router image, create a repository in Elastic Cloud Reg
     aws ecr list-images --repository-name router-repo
     ```
 
-## Configure deployment
+## Create and deploy ECS task
 
 With your image pushed to your ECR repository, in ECS you can define a task for the router and deploy it as a service.
 
@@ -127,15 +129,17 @@ If you don't have a cluster, you can create one with default settings:
 Create an ECS task definition for your router:
 
 1. In the AWS ECS Console, go to **Task definitions** from the left navigation panel, then click **Create new task definition** and select **Create new task definition**.
-1. Configure the fields for **Container - 1**:
-    - Choose a **Name** for the container.
-    - Set **Image URI** to the URI of your router image.
-    - Under **Port mappings**, set **Container port** to `4000` and choose a **Port name**.
-    - Under **Environment variables**, set the environment variables `APOLLO_KEY` and `APOLLO_GRAPH_REF` to your graph API key and graph ref.
+1. Fill in the details for **Container - 1**:
+    - **Name**: Enter a container name
+    - **Image URI**: Select the URI of your router image
+    - **Port mappings**:  
+        - **Container port**: Enter `4000` (must match ) and 
+        - **Port name**: Enter a port name
+    - **Environment variables**: Enter the environment variables `APOLLO_KEY` and `APOLLO_GRAPH_REF` and set them to your graph API key and graph ref, respectively
 1. In `Docker configuration - optional`, enter the command options to configure the router and run it in development mode:
 
     ```text showLineNumbers=false
-    --dev,--config,/dist/config/router.yaml
+    --dev, --config, /dist/config/router.yaml
     ```
 1. Click **Create**. 
 
@@ -144,12 +148,15 @@ Create an ECS task definition for your router:
 Deploy the router in your ECS cluster:
 
 1. In AWS ECS Console under **Task definitions**, select your defined task, then click **Deploy** and select **Create service**.
-1. Configure the fields for the service:
-    - For `Existing cluster`, select your cluster from the dropdown.
-    - Enter a `Service name`.
+1. Fill in  the fields for the service:
+    - **Existing cluster**: Select your cluster
+    - **Service name**: Enter a name for your service
 1. Click **Create** to create the service. ECS will start deploying the service for the router.
 1. After AWS finishes deploying, click on the service to go to its page in Console. Check the service logs for messages from the running router. For example:
 
     ```text title="Example router log message"
     {"timestamp":"2025-04-04T17:32:14.928608731Z","level":"INFO","message":"Apollo Router v1.61.0 // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)","target":"apollo_router::executable","resource":{}}
     ```
+1. Go to the service URL and validate the the router's development Sandbox is running successfully.
+
+Congrats, you've successfully deployed the router!
