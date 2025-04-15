@@ -21,7 +21,6 @@ use http::Uri;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
-use super::string_template::StringTemplate;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
@@ -34,6 +33,7 @@ use super::spec::schema::SourceDirectiveArguments;
 use super::spec::versions::AllowedHeaders;
 use super::spec::versions::VersionInfo;
 use super::string_template;
+use super::string_template::StringTemplate;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
