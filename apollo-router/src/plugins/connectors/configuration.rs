@@ -87,10 +87,14 @@ pub(crate) struct SourceConfiguration {
 }
 
 fn uri_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-    // Copied from `url::Url::json_schema`
     SchemaObject {
-        instance_type: Some(vec![InstanceType::String, InstanceType::Null].into()),
+        instance_type: Some(InstanceType::String.into()),
         format: Some("uri".to_owned()),
+        extensions: {
+            let mut map = schemars::Map::new();
+            map.insert("nullable".to_owned(), serde_json::json!(true));
+            map
+        },
         ..Default::default()
     }
     .into()
