@@ -254,5 +254,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ne
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
 }

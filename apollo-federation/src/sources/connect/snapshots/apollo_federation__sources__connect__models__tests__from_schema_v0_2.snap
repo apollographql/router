@@ -118,6 +118,8 @@ expression: "&connectors"
         spec: V0_2,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     ConnectId {
         label: "connectors.json http: POST /posts",
@@ -302,5 +304,7 @@ expression: "&connectors"
             $batch,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
 }

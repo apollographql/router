@@ -64,6 +64,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         spec: V0_2,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     "one_User_0": Connector {
         id: ConnectId {
@@ -217,5 +219,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             $batch,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
 }

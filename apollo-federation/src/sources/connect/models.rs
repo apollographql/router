@@ -65,6 +65,11 @@ pub struct Connector {
 
     pub request_variables: HashSet<Namespace>,
     pub response_variables: HashSet<Namespace>,
+
+    /// The request headers referenced in the connectors request mapping
+    pub request_headers: HashSet<String>,
+    /// The request or response headers referenced in the connectors response mapping
+    pub response_headers: HashSet<String>,
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -141,8 +146,18 @@ impl Connector {
         let source_http = source.map(|s| &s.http);
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
-        let request_variables = transport.variables().collect();
-        let response_variables = connect.selection.external_variables().collect();
+        let request_variables: HashSet<Namespace> = transport
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+            .collect();
+        let request_headers = extract_header_references(transport.variable_references());
+
+        let response_variables: HashSet<Namespace> = connect
+            .selection
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+            .collect();
+        let response_headers = extract_header_references(connect.selection.variable_references());
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
 
         let id = ConnectId {
@@ -162,6 +177,8 @@ impl Connector {
             spec,
             request_variables,
             response_variables,
+            request_headers,
+            response_headers,
         };
 
         Ok((id, connector))
@@ -274,6 +291,34 @@ fn determine_entity_resolver(
     }
 }
 
+/// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
+fn extract_header_references<'a>(
+    variable_references: impl Iterator<Item = VariableReference<'a, Namespace>> + 'a,
+) -> HashSet<String> {
+    let headers: HashSet<String> = variable_references
+        .filter_map(|var_ref| {
+            if var_ref.namespace.namespace != Namespace::Request
+                && var_ref.namespace.namespace != Namespace::Response
+            {
+                return None;
+            }
+
+            // We only care if the path references starts with "headers"
+            if var_ref
+                .path
+                .first()
+                .is_none_or(|path| path.part != "headers")
+            {
+                return None;
+            }
+
+            // Grab the name of the header from the path
+            var_ref.path.get(1).map(|path| path.part.to_string())
+        })
+        .collect();
+    headers
+}
+
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
@@ -330,11 +375,6 @@ impl HttpJsonTransport {
 
     fn label(&self) -> String {
         format!("http: {} {}", self.method.as_str(), self.connect_template)
-    }
-
-    fn variables(&self) -> impl Iterator<Item = Namespace> {
-        self.variable_references()
-            .map(|var_ref| var_ref.namespace.namespace)
     }
 
     fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
@@ -703,6 +743,8 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                request_headers: {},
+                response_headers: {},
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -819,6 +861,8 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                request_headers: {},
+                response_headers: {},
             },
         }
         "###);
