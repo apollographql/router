@@ -617,6 +617,7 @@ mod tests {
                     },
                 ),
                 entity: false,
+                batch: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -688,6 +689,7 @@ mod tests {
                     },
                 ),
                 entity: false,
+                batch: None,
             },
         ]
         "#

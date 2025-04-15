@@ -782,6 +782,11 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
+                batch_settings: Some(
+                    ConnectorBatchSettings {
+                        max_size: None,
+                    },
+                ),
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -920,6 +925,11 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
+                batch_settings: Some(
+                    ConnectorBatchSettings {
+                        max_size: None,
+                    },
+                ),
             },
         }
         "#);

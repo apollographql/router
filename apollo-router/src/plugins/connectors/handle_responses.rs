@@ -1399,7 +1399,6 @@ mod tests {
             config: Default::default(),
             max_requests: None,
             request_variables: Default::default(),
-            response_variables: selection.external_variables().collect(),
             batch_settings: None,
             response_variables: selection
                 .variable_references()
