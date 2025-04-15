@@ -3,11 +3,11 @@ title: Query Planning Best Practices
 subtitle: What things should we keep in mind as we construct our supergraph and the operations that consume them?
 ---
 
-When working with Apollo Federation, changes in our schema can have unexpected impact on the complexity of our graph.
+When working with Apollo Federation, changes in your schema can have unexpected impact on the complexity of our graph.
 While many issues can be found at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), others changes may lead to issues that only arise at runtime while generating or executing query plans.
 
 Examples of changes that can impact query planning include:
-* Modifying `@key`, `@requires`, `@provides`, or `@shareable` directive usage
+* Adding or modifying `@key`, `@requires`, `@provides`, or `@shareable` directive usage
 * Adding or removing a type implementation from an interface
 * Using `interfaceObject` and adding new fields to an interface
 
@@ -16,7 +16,7 @@ To help alleviate these issues as much as possible, we recommend following some 
 ## Shared Types and Fields
 
 The [`@shareable` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/sharing-types) allows multiple subgraphs to resolve the same types or fields on entities, giving the query planner options for potentially shorter query paths. However, it's important to use it judiciously.
-- Extensive use can exponentially increase the number of possible query plans generated, potentially leading to performance degradation at runtime as we generate uncached plans.
+- Extensive `@shareable` use can exponentially increase the number of possible query plans generated as the query planner will find the shortest path to the desired result. This can then potentially lead to performance degradation at runtime as we generate plans.
 - Using `@shareable` at root fields on the `Query`, `Mutation`, and `Subscription` types indicates that any subgraph can resolve a given entry point. While query plans can be deterministic for a given version of Router + Federation, there are no guarantees across versions, meaning that your plans may change if new services get added or deleted. This could cause an unexpected change in traffic a service even there were no changes in the operations.
 
 ## Operations Spanning Multiple Subgraphs
@@ -29,7 +29,7 @@ Operations that need to query multiple subgraphs can impact performance because 
 ## `@requires` Directive
 
 The [`@requires` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#requires) allows a subgraph to fetch additional fields needed to resolve an entity. This can be powerful but must be handled with care.
-- Changes to fields utilized by `@requires` can impact the subgraph fetches that current operations depend on and may create larger and slower plans
+- Changes to fields utilized by `@requires` can impact the subgraph fetches that current operations depend on and may create larger and slower plans.
 - When performing schema migrations involving `@requires`, ensure compatibility by deploying changes in a manner that avoids disrupting ongoing queries. Plan deployments and schema changes in an atomic fashion.
 
 #### Example
