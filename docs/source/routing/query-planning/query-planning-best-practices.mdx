@@ -3,7 +3,7 @@ title: Query Planning Best Practices
 subtitle: What things should we keep in mind as we construct our supergraph and the operations that consume them?
 ---
 
-When working with Apollo Federation, changes in your schema can have unexpected impact on the complexity of our graph.
+When working with Apollo Federation, changes in your schema can have unexpected impact on the complexity of our graph. Adding one field or changing one directive may create a new supergraph that has hundreds or even thousands of new possible paths and edges to connect entities and resolve client operations.
 While many issues can be found at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), others changes may lead to issues that only arise at runtime while generating or executing query plans.
 
 Examples of changes that can impact query planning include:
