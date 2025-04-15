@@ -183,7 +183,7 @@ impl Part {
 }
 
 impl Part {
-    /// Evaluate the expression of the part (if any) and return the resulting String.
+    /// Evaluate the expression of the part (if any) and write the result to `output`.
     ///
     /// # Errors
     ///
