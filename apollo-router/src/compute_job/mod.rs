@@ -110,15 +110,17 @@ pub(crate) enum ComputeJobType {
     QueryPlanning,
     Introspection,
     QueryParsingWarmup,
+    QueryPlanningWarmup,
 }
 
 impl From<ComputeJobType> for Priority {
     fn from(job_type: ComputeJobType) -> Self {
         match job_type {
-            ComputeJobType::QueryPlanning => Self::P8,      // high
-            ComputeJobType::QueryParsing => Self::P4,       // medium
-            ComputeJobType::Introspection => Self::P1,      // low
-            ComputeJobType::QueryParsingWarmup => Self::P1, // low
+            ComputeJobType::QueryPlanning => Self::P8,       // high
+            ComputeJobType::QueryParsing => Self::P4,        // medium
+            ComputeJobType::Introspection => Self::P1,       // low
+            ComputeJobType::QueryParsingWarmup => Self::P1,  // low
+            ComputeJobType::QueryPlanningWarmup => Self::P2, // low
         }
     }
 }

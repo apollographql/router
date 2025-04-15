@@ -274,9 +274,7 @@ where
             config_mode_hash: _,
         } in all_cache_keys
         {
-            // NB: warmup query parsing has a very low priority so that real requests are
-            // prioritized. However, warmup query planning maintains its normal priority so
-            // that warmup doesn't take an excessively long time.
+            // NB: warmup tasks have a low priority so that real requests are prioritized
             let doc = loop {
                 match query_analysis
                     .parse_document(
@@ -339,6 +337,7 @@ where
                         document: doc.clone(),
                         metadata: caching_key.metadata.clone(),
                         plan_options: caching_key.plan_options.clone(),
+                        compute_job_type: ComputeJobType::QueryPlanningWarmup,
                     };
                     let res = match service.ready().await {
                         Ok(service) => service.call(request).await,
@@ -509,6 +508,7 @@ where
                 .document(doc)
                 .metadata(caching_key.metadata)
                 .plan_options(caching_key.plan_options)
+                .compute_job_type(ComputeJobType::QueryPlanning)
                 .build();
 
             // some clients might timeout and cancel the request before query planning is finished,

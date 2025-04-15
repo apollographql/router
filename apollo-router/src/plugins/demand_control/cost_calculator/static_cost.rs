@@ -644,6 +644,7 @@ mod tests {
     use crate::Configuration;
     use crate::Context;
     use crate::assert_snapshot_subscriber;
+    use crate::compute_job::ComputeJobType;
     use crate::plugins::authorization::CacheKeyMetadata;
     use crate::query_planner::QueryPlannerService;
     use crate::services::QueryPlannerContent;
@@ -745,6 +746,7 @@ mod tests {
                 query,
                 CacheKeyMetadata::default(),
                 PlanOptions::default(),
+                ComputeJobType::QueryPlanning,
             ))
             .await
             .unwrap();
