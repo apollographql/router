@@ -293,13 +293,15 @@ mod encoding {
     mod tests {
         use percent_encoding::utf8_percent_encode;
 
+        use super::*;
+
         /// This test is basically checking our understanding of how `AsciiSet` works.
         #[test]
-        fn unreserved_encodes_everything_but_unreserved() {
+        fn user_input_encodes_everything_but_unreserved() {
             for i in 0..=255u8 {
                 let character = i as char;
                 let string = character.to_string();
-                let encoded = utf8_percent_encode(&string, UNRESERVED);
+                let encoded = utf8_percent_encode(&string, USER_INPUT);
                 for encoded_char in encoded.into_iter().flat_map(|slice| slice.chars()) {
                     if character.is_ascii_alphanumeric()
                         || character == '-'
