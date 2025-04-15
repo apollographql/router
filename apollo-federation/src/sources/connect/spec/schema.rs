@@ -14,10 +14,12 @@ pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
+pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
