@@ -4,7 +4,7 @@ subtitle: What things should we keep in mind as we construct our supergraph and 
 ---
 
 When working with Apollo Federation, changes in your schema can have unexpected impact on the complexity of our graph. Adding one field or changing one directive may create a new supergraph that has hundreds or even thousands of new possible paths and edges to connect entities and resolve client operations.
-While many issues can be found at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), others changes may lead to issues that only arise at runtime while generating or executing query plans.
+While validation errors can be found at build time with [schema composition](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/composition), others changes may lead to issues that only arise at runtime while generating or executing query plans.
 
 Examples of changes that can impact query planning include:
 * Adding or modifying `@key`, `@requires`, `@provides`, or `@shareable` directive usage
@@ -17,7 +17,8 @@ To help alleviate these issues as much as possible, we recommend following some 
 
 The [`@shareable` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/sharing-types) allows multiple subgraphs to resolve the same types or fields on entities, giving the query planner options for potentially shorter query paths. However, it's important to use it judiciously.
 - Extensive `@shareable` use can exponentially increase the number of possible query plans generated as the query planner will find the shortest path to the desired result. This can then potentially lead to performance degradation at runtime as we generate plans.
-- Using `@shareable` at root fields on the `Query`, `Mutation`, and `Subscription` types indicates that any subgraph can resolve a given entry point. While query plans can be deterministic for a given version of Router + Federation, there are no guarantees across versions, meaning that your plans may change if new services get added or deleted. This could cause an unexpected change in traffic a service even there were no changes in the operations.
+- Using `@shareable` at root fields on the `Query`, `Mutation`, and `Subscription` types indicates that any subgraph can resolve a given entry point. While query plans can be deterministic for a given version of Router + Federation, there are no guarantees across versions, meaning that your plans may change if new services get added or deleted. This could cause an unexpected change in traffic for a given service, even there were no changes in the operations.
+  - Using shared root types also implies that the fields return the same data in the same order across all subgraphs, even if the data is a list, which is often not the case for dynamic applications.
 
 ## Operations Spanning Multiple Subgraphs
 
@@ -26,7 +27,7 @@ Operations that need to query multiple subgraphs can impact performance because 
 - Using directives like `@requires` or `@interfaceObject` carefully to control complexity.
 
 
-## `@requires` Directive
+### `@requires` Directive
 
 The [`@requires` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#requires) allows a subgraph to fetch additional fields needed to resolve an entity. This can be powerful but must be handled with care.
 - Changes to fields utilized by `@requires` can impact the subgraph fetches that current operations depend on and may create larger and slower plans.
@@ -85,7 +86,7 @@ Alternatively, you can perform this operation with an atomic migration at the su
 
 With this atomic strategy, the query planner resolves all outstanding requests to the old subgraph URL that relied on `nameLowercase` with the old query-planning configuration, which `@requires` the `nameLowercase` field. All new requests are made to the new subgraph URL using the new query-planning configuration, which `@requires` the `name` field.
 
-## Interface Implementations
+### Interface Implementations
 
 Interfaces are an essential part of GraphQL schema design, offering flexibility in defining polymorphic types. However, they can also be open for implementation across service boundaries, allowing subgraphs to contribute a new type that changes how existing operations execute.
 
