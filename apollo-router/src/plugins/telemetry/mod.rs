@@ -140,12 +140,10 @@ use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
+use crate::services::layers::persisted_queries::UsedQueryIdFromManifest;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
-use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
@@ -525,12 +523,7 @@ impl PluginPrivate for Telemetry {
 
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
-                                    .map(|u| {
-                                        u.stats_report_key == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
-                                            || u.stats_report_key == GRAPHQL_PARSE_FAILURE_ERROR_KEY
-                                            || u.stats_report_key
-                                                == GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
-                                    })
+                                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
                                     .unwrap_or(false)
                             }) {
                                 Self::update_apollo_metrics(
@@ -609,7 +602,7 @@ impl PluginPrivate for Telemetry {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.stats_report_key.as_str(),
+                        usage_reporting.get_stats_report_key().as_str(),
                     );
                 }
                 // To expose trace_id or not
@@ -1358,8 +1351,7 @@ impl Telemetry {
             .extensions()
             .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
         {
-            let licensed_operation_count =
-                licensed_operation_count(&usage_reporting.stats_report_key);
+            let licensed_operation_count = licensed_operation_count(&usage_reporting);
             let persisted_query_hit = context
                 .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
@@ -1411,6 +1403,16 @@ impl Telemetry {
                     .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
+                let maybe_pq_id = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
+                    .map(|u| u.pq_id);
+                let usage_reporting = if let Some(pq_id) = maybe_pq_id {
+                    Arc::new(usage_reporting.with_pq_id(pq_id))
+                } else {
+                    usage_reporting
+                };
+
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1428,7 +1430,7 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting.stats_report_key.to_string(),
+                        usage_reporting.get_stats_report_key(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
@@ -1464,11 +1466,11 @@ impl Telemetry {
                                 local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
-                                .referenced_fields_by_type
-                                .clone()
+                                .get_referenced_fields()
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
+                            query_metadata: usage_reporting.get_query_metadata(),
                         },
                     )]),
                 }
@@ -1756,13 +1758,10 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
     }
 }
 
-// Planner errors return stats report key that start with `## `
-// while successful planning stats report key start with `# `
-fn licensed_operation_count(stats_report_key: &str) -> u64 {
-    if stats_report_key.starts_with("## ") {
-        0
-    } else {
-        1
+fn licensed_operation_count(usage_reporting: &UsageReporting) -> u64 {
+    match usage_reporting {
+        UsageReporting::Error(_) => 0,
+        _ => 1,
     }
 }
 
