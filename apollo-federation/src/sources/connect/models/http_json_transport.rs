@@ -1105,7 +1105,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn test_origin_host_port_ipv6() {
         let mut transport = HttpJsonTransport::default();
