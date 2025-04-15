@@ -434,7 +434,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_1, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
           query: Query
         }
@@ -443,7 +443,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
 
         directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
 
@@ -478,11 +478,15 @@ mod tests {
           headers: [connect__HTTPHeaderMapping!]
         }
 
+        input connect__ConnectBatch {
+          maxSize: Int
+        }
+
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
         }
-        "###);
+        "#);
     }
 
     #[test]
@@ -515,7 +519,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
 
@@ -548,6 +552,10 @@ mod tests {
           DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
+        }
+
+        input connect__ConnectBatch {
+          maxSize: Int
         }
 
         input connect__SourceHTTP {
