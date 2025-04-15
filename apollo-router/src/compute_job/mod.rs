@@ -20,12 +20,24 @@ use crate::ageing_priority_queue::Priority;
 use crate::metrics::meter_provider;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
-/// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
+/// reaches `APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD * thread_pool_size()`
+///
+/// The default for APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD is 1000
 ///
 /// This number is somewhat arbitrary and subject to change. Most compute jobs
 /// don't take a long time, so by making the queue quite big, it's capable of eating
 /// a sizable backlog during spikes.
-const QUEUE_SOFT_CAPACITY_PER_THREAD: usize = 1_000;
+fn queue_capacity() -> usize {
+    // This environment variable is intentionally undocumented.
+    if let Some(threads) = std::env::var("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        threads
+    } else {
+        1000
+    }
+}
 
 /// By default, let this thread pool use all available resources if it can.
 /// In the worst case, we’ll have moderate context switching cost
@@ -98,7 +110,7 @@ fn queue() -> &'static AgeingPriorityQueue<Job> {
                 }
             });
         }
-        AgeingPriorityQueue::soft_bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
+        AgeingPriorityQueue::soft_bounded(queue_capacity() * pool_size)
     })
 }
 
