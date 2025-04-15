@@ -4,6 +4,8 @@
 //! Parsing (this module) is done by both the router at startup and composition. Validation
 //! (in [`crate::sources::connect::validation`]) is done only by composition.
 
+#![allow(rustdoc::private_intra_doc_links)]
+
 use std::fmt::Display;
 use std::fmt::Write;
 use std::ops::Range;
