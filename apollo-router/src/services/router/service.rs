@@ -227,7 +227,7 @@ impl Service<RouterRequest> for RouterService {
         if crate::compute_job::is_full() {
             let context = req.context.clone();
             return async {
-                Ok(router::Response::error_builder()
+                router::Response::error_builder()
                     .error(
                         graphql::Error::builder()
                             .message("Overloaded")
@@ -237,7 +237,7 @@ impl Service<RouterRequest> for RouterService {
                     .status_code(StatusCode::SERVICE_UNAVAILABLE)
                     .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                     .context(context)
-                    .build()?)
+                    .build()
             }
             .boxed();
         }

@@ -29,14 +29,10 @@ use crate::metrics::meter_provider;
 /// a sizable backlog during spikes.
 fn queue_capacity() -> usize {
     // This environment variable is intentionally undocumented.
-    if let Some(threads) = std::env::var("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD")
+    std::env::var("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD")
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
-    {
-        threads
-    } else {
-        1000
-    }
+        .unwrap_or(1000)
 }
 
 /// By default, let this thread pool use all available resources if it can.
