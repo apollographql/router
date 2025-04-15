@@ -371,7 +371,6 @@ impl<'schema> Transport<'schema> {
     ///
     /// TODO: Return input shapes for keys instead reparsing for `Connector::resolvable_key` later
     fn type_check(self, schema: &SchemaInfo) -> Vec<Message> {
-        // TODO: update context after each expression. Don't allow non `$config` options for base URLs
         let expression_context = Context::for_connect_request(
             schema,
             self.coordinate.connect,
