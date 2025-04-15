@@ -7,6 +7,13 @@ mod tests;
 // Use items from modules
 use std::sync::Arc;
 
+use config::Config;
+use config::ErrorMode;
+use config::SubgraphConfig;
+use effective_config::EffectiveConfig;
+use tower::BoxError;
+use tower::ServiceExt;
+
 use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -17,12 +24,6 @@ use crate::services::SupergraphResponse;
 use crate::services::fetch::AddSubgraphNameExt;
 use crate::services::fetch::SubgraphNameExt;
 use crate::services::supergraph::BoxService;
-use config::Config;
-use config::ErrorMode;
-use config::SubgraphConfig;
-use effective_config::EffectiveConfig;
-use tower::BoxError;
-use tower::ServiceExt;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 

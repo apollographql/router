@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
+use itertools::Itertools;
+
 use super::config::Config;
 use super::config::ErrorMode;
 use super::config::SubgraphConfig;
 use crate::error::ConfigurationError;
-use itertools::Itertools;
-use std::collections::HashMap;
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct EffectiveConfig {
