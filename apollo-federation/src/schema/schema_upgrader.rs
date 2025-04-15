@@ -80,14 +80,23 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
 
 // Extensions for FederationSchema to provide additional functionality
 trait FederationSchemaExt {
-    fn has_extension_elements(&self, type_pos: &TypeDefinitionPosition) -> bool;
-    fn has_non_extension_elements(&self, type_pos: &TypeDefinitionPosition) -> bool;
-    fn is_root_type(&self, type_pos: &TypeDefinitionPosition) -> bool;
+    fn has_extension_elements(
+        &self,
+        type_pos: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError>;
+    fn has_non_extension_elements(
+        &self,
+        type_pos: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError>;
+    fn is_root_type(&self, type_pos: &TypeDefinitionPosition) -> Result<bool, FederationError>;
 }
 
 // Implementation of the extension trait for FederationSchema
 impl FederationSchemaExt for FederationSchema {
-    fn has_extension_elements(&self, type_pos: &TypeDefinitionPosition) -> bool {
+    fn has_extension_elements(
+        &self,
+        type_pos: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
         // Check if a type has any extension elements
         // This would check if the type has any extensions defined in the schema
         match type_pos {
@@ -95,38 +104,84 @@ impl FederationSchemaExt for FederationSchema {
                 let schema = self.schema();
                 let type_name = &obj_pos.type_name;
                 if let Some(ExtendedType::Object(obj)) = schema.types.get(type_name) {
-                    return !obj.extensions().is_empty();
+                    return Ok(!obj.extensions().is_empty());
                 }
-                false
+                Ok(false)
             }
             TypeDefinitionPosition::Interface(itf_pos) => {
                 let schema = self.schema();
                 let type_name = &itf_pos.type_name; // Fixed: access field directly
                 if let Some(ExtendedType::Interface(itf)) = schema.types.get(type_name) {
                     // Fixed: call extensions() method, not access as field
-                    return !itf.extensions().is_empty();
+                    return Ok(!itf.extensions().is_empty());
                 }
-                false
+                Ok(false)
             }
-            _ => false,
+            _ => Ok(false),
         }
     }
 
-    fn has_non_extension_elements(&self, _type_pos: &TypeDefinitionPosition) -> bool {
-        // TODO: Not quite sure how to do this yet
-        todo!();
+    // a type has a non-extension element if the following cases
+    // 1. There is a directive on the non-extended type
+    // 2. There is a field on the non-extended type
+    // 3. There is an interface implementation on the non-extended type
+    fn has_non_extension_elements(
+        &self,
+        type_pos: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let schema = self.schema();
+        let result = match type_pos {
+            TypeDefinitionPosition::Object(obj_pos) => {
+                let node_obj = obj_pos.get(schema)?;
+                let directive_on_non_extended_type = node_obj
+                    .directives
+                    .iter()
+                    .any(|directive| directive.origin.extension_id().is_some());
+                let field_on_non_extended_type = obj_pos.fields(schema)?.fallible_any(
+                    |field| -> Result<bool, FederationError> {
+                        Ok(field.get(schema)?.origin.extension_id().is_some())
+                    },
+                )?;
+                let interface_implemented_on_non_extended_type = node_obj
+                    .implements_interfaces
+                    .iter()
+                    .any(|itf| itf.origin.extension_id().is_some());
+                directive_on_non_extended_type
+                    || field_on_non_extended_type
+                    || interface_implemented_on_non_extended_type
+            }
+            TypeDefinitionPosition::Interface(itf_pos) => {
+                let node_itf = itf_pos.get(schema)?;
+                let directive_on_non_extended_type = node_itf
+                    .directives
+                    .iter()
+                    .any(|directive| directive.origin.extension_id().is_some());
+                let field_on_non_extended_type = itf_pos.fields(schema)?.fallible_any(
+                    |field| -> Result<bool, FederationError> {
+                        Ok(field.get(schema)?.origin.extension_id().is_some())
+                    },
+                )?;
+                let interface_implemented_on_non_extended_type = node_itf
+                    .implements_interfaces
+                    .iter()
+                    .any(|itf| itf.origin.extension_id().is_some());
+                directive_on_non_extended_type
+                    || field_on_non_extended_type
+                    || interface_implemented_on_non_extended_type
+            }
+            _ => false,
+        };
+        Ok(result)
     }
 
-    fn is_root_type(&self, type_pos: &TypeDefinitionPosition) -> bool {
+    fn is_root_type(&self, type_pos: &TypeDefinitionPosition) -> Result<bool, FederationError> {
         // Check if a type is a root type (Query, Mutation, or Subscription)
         // Get the type name based on the type position
         let type_name = match type_pos {
             TypeDefinitionPosition::Object(pos) => &pos.type_name,
             TypeDefinitionPosition::Interface(pos) => &pos.type_name,
-            _ => return false, // Not a root type if not object or interface
+            _ => return Ok(false), // Not a root type if not object or interface
         };
-
-        let schema = self.schema();
 
         // Check for root types by querying the schema directly
         // This is a simplified implementation for compilation purposes
@@ -136,10 +191,10 @@ impl FederationSchemaExt for FederationSchema {
             || type_name.as_str() == "Mutation"
             || type_name.as_str() == "Subscription"
         {
-            return true;
+            return Ok(true);
         }
 
-        false
+        Ok(false)
     }
 }
 
@@ -208,8 +263,8 @@ impl<'a> SchemaUpgrader<'a> {
 
         // Iterate through all types and check if they're federation type extensions without a base
         for type_pos in schema.get_types() {
-            if self.is_root_type_extension(&type_pos)
-                || !self.is_federation_type_extension(&type_pos)
+            if self.is_root_type_extension(&type_pos)?
+                || !self.is_federation_type_extension(&type_pos)?
             {
                 continue;
             }
@@ -228,9 +283,11 @@ impl<'a> SchemaUpgrader<'a> {
                             // Fixed: dereference the string for comparison
                             subgraph_name.as_str() != self.original_subgraph.name.as_str()
                         })
-                        .any(|(_, type_info)| schema.has_non_extension_elements(&type_info.pos))
+                        .fallible_any(|(_, type_info)| {
+                            schema.has_non_extension_elements(&type_info.pos)
+                        })
                 })
-                .unwrap_or(false);
+                .unwrap_or(Ok(false))?;
 
             if !has_non_extension_definition {
                 return Err(FederationError::extension_with_no_base(&format!(
@@ -244,12 +301,15 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     // it certainly seems like this and is_root_type_extension could be combined, but I'm copying the functionality as-is for now
-    fn is_federation_type_extension(&self, type_pos: &TypeDefinitionPosition) -> bool {
+    fn is_federation_type_extension(
+        &self,
+        type_pos: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
         if !matches!(
             type_pos,
             TypeDefinitionPosition::Object(_) | TypeDefinitionPosition::Interface(_)
         ) {
-            return false;
+            return Ok(false);
         }
 
         let schema = &self.schema;
@@ -260,24 +320,26 @@ impl<'a> SchemaUpgrader<'a> {
             .has_applied_directive(schema, &Name::new_unchecked(fed1_extends_directive_name));
 
         // Use the FederationSchemaExt trait
-        let has_extension_elements = schema.has_extension_elements(type_pos);
-        let has_non_extension_elements = schema.has_non_extension_elements(type_pos);
+        let has_extension_elements = schema.has_extension_elements(type_pos)?;
+        let has_non_extension_elements = schema.has_non_extension_elements(type_pos)?;
 
-        (has_extends_directive || has_extension_elements)
-            && (has_extends_directive || !has_non_extension_elements)
+        Ok(has_extends_directive || has_extension_elements || !has_non_extension_elements)
     }
 
-    fn is_root_type_extension(&self, type_pos: &TypeDefinitionPosition) -> bool {
+    fn is_root_type_extension(
+        &self,
+        type_pos: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
         // Check if this is a root type (Query, Mutation, Subscription) that is declared as an extension
 
         let TypeDefinitionPosition::Object(_) = type_pos else {
-            return false;
+            return Ok(false);
         };
         let schema = &self.schema;
 
-        let is_root_type = schema.is_root_type(type_pos);
+        let is_root_type = schema.is_root_type(type_pos)?;
         if !is_root_type {
-            return false;
+            return Ok(false);
         }
 
         // because this is for Fed1, the directive may not be renamed
@@ -286,10 +348,10 @@ impl<'a> SchemaUpgrader<'a> {
             .has_applied_directive(schema, &Name::new_unchecked(fed1_extends_directive_name));
 
         // Use the FederationSchemaExt trait
-        let has_extension_elements = schema.has_extension_elements(type_pos);
-        let has_non_extension_elements = schema.has_non_extension_elements(type_pos);
+        let has_extension_elements = schema.has_extension_elements(type_pos)?;
+        let has_non_extension_elements = schema.has_non_extension_elements(type_pos)?;
 
-        has_extends_directive || (has_extension_elements && !has_non_extension_elements)
+        Ok(has_extends_directive || (has_extension_elements && !has_non_extension_elements))
     }
 
     // Either we have a string, or we have a list of strings that we need to combine

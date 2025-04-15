@@ -608,6 +608,7 @@ impl FieldDefinitionPosition {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn has_applied_directive(
         &self,
         schema: &FederationSchema,
@@ -619,7 +620,7 @@ impl FieldDefinitionPosition {
                 .is_empty(),
             FieldDefinitionPosition::Interface(field) => !field
                 .get_applied_directives(schema, directive_name)
-                .is_empty(), 
+                .is_empty(),
             FieldDefinitionPosition::Union(_) => false,
         }
     }
