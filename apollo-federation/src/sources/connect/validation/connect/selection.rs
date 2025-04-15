@@ -170,7 +170,9 @@ impl<'schema> Selection<'schema> {
     }
 
     pub(super) fn variables(&self) -> impl Iterator<Item = Namespace> + '_ {
-        self.parsed.external_variables()
+        self.parsed
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
     }
 }
 

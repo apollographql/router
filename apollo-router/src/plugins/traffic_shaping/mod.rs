@@ -789,6 +789,8 @@ mod test {
             request_variables: Default::default(),
             response_variables: Default::default(),
             batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
