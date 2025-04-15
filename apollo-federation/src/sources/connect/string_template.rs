@@ -223,7 +223,7 @@ impl Part {
 /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
 #[derive(Clone, Debug)]
 pub(crate) struct Constant {
-    pub(crate) value: String, // TODO: store string slices instead for improved performance?
+    pub(crate) value: String,
     pub(crate) location: Range<usize>,
 }
 
