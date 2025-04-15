@@ -9,7 +9,7 @@ subgraphs:
           @source(
             name: "json"
             http: {
-              origin: "$$config.host"
+              origin: "$$config.origin"
               path: "$(['api', 'v1'])"
               queryParams: "q: $(1)"
             }

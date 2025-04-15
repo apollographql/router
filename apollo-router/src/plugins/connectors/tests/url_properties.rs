@@ -26,8 +26,7 @@ async fn url_properties() {
                 "sources": {
                     "connectors.json": {
                         "$config": {
-                            "host": mock_server.address().ip(),
-                            "port": mock_server.address().port(),
+                            "origin": mock_server.address(),
                         }
                     }
                 }
