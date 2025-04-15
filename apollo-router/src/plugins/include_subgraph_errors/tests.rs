@@ -86,7 +86,7 @@ async fn run_test_case(
 async fn it_returns_valid_response() {
     run_test_case(
         &json!({ "all": false }),
-        &VALID_RESPONSE,  // Mock stream input
+        VALID_RESPONSE,   // Mock stream input
         "valid_response", // Snapshot suffix
     )
     .await;
@@ -96,8 +96,8 @@ async fn it_returns_valid_response() {
 async fn it_redacts_all_subgraphs_explicit_redact() {
     run_test_case(
         &json!({ "all": false }),
-        &PRODUCT_ERROR_RESPONSE, // Mock original error
-        "redact_all_explicit",   // Snapshot suffix
+        PRODUCT_ERROR_RESPONSE, // Mock original error
+        "redact_all_explicit",  // Snapshot suffix
     )
     .await;
 }
@@ -106,7 +106,7 @@ async fn it_redacts_all_subgraphs_explicit_redact() {
 async fn it_redacts_all_subgraphs_implicit_redact() {
     run_test_case(
         &json!({}), // Default is all: false
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "redact_all_implicit",
     )
     .await;
@@ -116,8 +116,8 @@ async fn it_redacts_all_subgraphs_implicit_redact() {
 async fn it_does_not_redact_all_subgraphs_explicit_allow() {
     run_test_case(
         &json!({ "all": true }),
-        &PRODUCT_ERROR_RESPONSE, // Mock original error
-        "allow_all_explicit",    // Snapshot suffix
+        PRODUCT_ERROR_RESPONSE, // Mock original error
+        "allow_all_explicit",   // Snapshot suffix
     )
     .await;
 }
@@ -126,7 +126,7 @@ async fn it_does_not_redact_all_subgraphs_explicit_allow() {
 async fn it_does_not_redact_all_implicit_redact_product_explicit_allow_for_product_query() {
     run_test_case(
         &json!({ "subgraphs": {"products": true }}), // Default all: false
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "allow_product_override_implicit_redact",
     )
     .await;
@@ -136,7 +136,7 @@ async fn it_does_not_redact_all_implicit_redact_product_explicit_allow_for_produ
 async fn it_does_redact_all_implicit_redact_product_explicit_allow_for_review_query() {
     run_test_case(
         &json!({ "subgraphs": {"reviews": true }}), // Allows reviews, defaults products to redact
-        &PRODUCT_ERROR_RESPONSE,                    // Mock original error for products
+        PRODUCT_ERROR_RESPONSE,                     // Mock original error for products
         "redact_product_when_review_allowed",
     )
     .await;
@@ -146,7 +146,7 @@ async fn it_does_redact_all_implicit_redact_product_explicit_allow_for_review_qu
 async fn it_does_not_redact_all_explicit_allow_review_explicit_redact_for_product_query() {
     run_test_case(
         &json!({ "all": true, "subgraphs": {"reviews": false }}), // Global allow, reviews redact
-        &PRODUCT_ERROR_RESPONSE,                                  // Mock original
+        PRODUCT_ERROR_RESPONSE,                                   // Mock original
         "allow_product_when_review_redacted",
     )
     .await;
@@ -156,7 +156,7 @@ async fn it_does_not_redact_all_explicit_allow_review_explicit_redact_for_produc
 async fn it_does_redact_all_explicit_allow_product_explicit_redact_for_product_query() {
     run_test_case(
         &json!({ "all": true, "subgraphs": {"products": false }}), // Global allow, products redact
-        &PRODUCT_ERROR_RESPONSE,                                   // Mock original
+        PRODUCT_ERROR_RESPONSE,                                    // Mock original
         "redact_product_override_explicit_allow",
     )
     .await;
@@ -166,7 +166,7 @@ async fn it_does_redact_all_explicit_allow_product_explicit_redact_for_product_q
 async fn it_does_not_redact_all_explicit_allow_account_explicit_redact_for_product_query() {
     run_test_case(
         &json!({ "all": true, "subgraphs": {"accounts": false }}), // Global allow, accounts redact
-        &PRODUCT_ERROR_RESPONSE,                                   // Mock original
+        PRODUCT_ERROR_RESPONSE,                                    // Mock original
         "allow_product_when_account_redacted",
     )
     .await;
@@ -176,7 +176,7 @@ async fn it_does_not_redact_all_explicit_allow_account_explicit_redact_for_produ
 async fn it_does_redact_all_explicit_allow_account_explicit_redact_for_account_query() {
     run_test_case(
         &json!({ "all": true, "subgraphs": {"accounts": false }}), // Global allow, accounts redact
-        &ACCOUNT_ERROR_RESPONSE,                                   // Mock original account error
+        ACCOUNT_ERROR_RESPONSE,                                    // Mock original account error
         "redact_account_override_explicit_allow",
     )
     .await;
@@ -285,7 +285,7 @@ async fn it_filters_extensions_based_on_global_allow_list_and_redacts_message() 
                 "allow_extensions_keys": ["code", "service"] // Allow 'code' and 'service'
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "filter_global_allow_redact_msg",
     )
     .await;
@@ -300,7 +300,7 @@ async fn it_filters_extensions_based_on_global_allow_list_keeps_message() {
                 "allow_extensions_keys": ["code", "service"] // Allow 'code' and 'service'
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "filter_global_allow_keep_msg",
     )
     .await;
@@ -316,7 +316,7 @@ async fn it_allows_subgraph_bool_override_global_deny_config() {
             },
             "subgraphs": { "products": true }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_bool_true_override_global_deny",
     )
     .await;
@@ -332,7 +332,7 @@ async fn it_allows_subgraph_bool_override_global_allow_config() {
             },
             "subgraphs": { "products": false }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_bool_false_override_global_allow",
     )
     .await;
@@ -350,7 +350,7 @@ async fn it_allows_subgraph_object_to_override_global_redaction() {
                 "products": { "redact_message": true } // Override redaction
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_obj_override_redaction",
     )
     .await;
@@ -368,7 +368,7 @@ async fn it_allows_subgraph_to_exclude_key_from_global_allow_list() {
                 "products": { "exclude_global_keys": ["test"] } // Exclude 'test'
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_exclude_global_allow",
     )
     .await;
@@ -386,7 +386,7 @@ async fn it_allows_subgraph_deny_list_to_override_global_allow_list() {
                 "products": { "deny_extensions_keys": ["test", "service"] } // Deny overrides global allow
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_deny_override_global_allow",
     )
     .await;
@@ -404,7 +404,7 @@ async fn it_allows_subgraph_allow_list_to_override_global_deny_list() {
                 "products": { "allow_extensions_keys": ["code", "test"] } // Allow overrides global deny for 'test'
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_allow_override_global_deny",
     )
     .await;
@@ -422,7 +422,7 @@ async fn it_allows_subgraph_deny_list_to_extend_global_deny_list() {
                 "products": { "deny_extensions_keys": ["code"] } // Extends global deny
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_deny_extend_global_deny",
     )
     .await;
@@ -440,7 +440,7 @@ async fn it_allows_subgraph_allow_list_to_extend_global_allow_list() {
                 "products": { "allow_extensions_keys": ["code"] } // Extends global allow
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_allow_extend_global_allow",
     )
     .await;
@@ -458,7 +458,7 @@ async fn it_redacts_service_extension_if_denied() {
                 "products": { "deny_extensions_keys": ["service"] } // Deny service specifically
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_deny_service",
     )
     .await;
@@ -476,7 +476,7 @@ async fn it_includes_service_extension_if_allowed() {
                 "products": { "allow_extensions_keys": ["service"] } // Allow service specifically
             }
         }),
-        &PRODUCT_ERROR_RESPONSE,
+        PRODUCT_ERROR_RESPONSE,
         "subgraph_allow_service",
     )
     .await;
@@ -488,7 +488,7 @@ async fn it_does_not_add_service_extension_for_non_subgraph_errors() {
         &json!({
             "all": true,
         }),
-        &NON_SUBGRAPH_ERROR,
+        NON_SUBGRAPH_ERROR,
         "non_subgraph_error",
     )
     .await;
@@ -500,7 +500,7 @@ async fn it_processes_incremental_responses() {
         &json!({
             "all": true,
         }),
-        &INCREMENTAL_RESPONSE,
+        INCREMENTAL_RESPONSE,
         "incremental_response",
     )
     .await;
