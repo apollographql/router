@@ -111,7 +111,7 @@ async fn overloaded_compute_job_pool() {
     let mut router = IntegrationTest::builder()
         .env_entry("APOLLO_ROUTER_COMPUTE_THREADS", "1")
         .env_entry("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD", "1")
-        .config(include_str!("fixtures/rust_query_planner.router.yaml"))
+        .config(include_str!("fixtures/happy.router.yaml"))
         .build()
         .await;
     router.start().await;
