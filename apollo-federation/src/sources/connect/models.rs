@@ -330,27 +330,23 @@ mod tests {
                             fragment: None,
                         },
                     ),
-                    connect_template: Some(
-                        URLTemplate {
-                            base: None,
-                            path: [
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "users",
-                                                location: 1..6,
-                                            },
-                                        ),
-                                    ],
-                                },
-                            ],
-                            query: [],
-                        },
-                    ),
-                    method: Some(
-                        Get,
-                    ),
+                    connect_template: URLTemplate {
+                        base: None,
+                        path: [
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "users",
+                                            location: 1..6,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ],
+                        query: [],
+                    },
+                    method: Get,
                     headers: {
                         "authtoken": From(
                             "x-auth-token",
@@ -371,16 +367,11 @@ mod tests {
                         ),
                     },
                     body: None,
-                    method_expression: None,
-                    scheme: None,
-                    host: None,
-                    port: None,
-                    user: None,
-                    password: None,
+                    origin: None,
                     source_path: None,
-                    source_query: None,
+                    source_query_params: None,
                     connect_path: None,
-                    connect_query: None,
+                    connect_query_params: None,
                 },
                 selection: Named(
                     SubSelection {
@@ -468,27 +459,23 @@ mod tests {
                             fragment: None,
                         },
                     ),
-                    connect_template: Some(
-                        URLTemplate {
-                            base: None,
-                            path: [
-                                StringTemplate {
-                                    parts: [
-                                        Constant(
-                                            Constant {
-                                                value: "posts",
-                                                location: 1..6,
-                                            },
-                                        ),
-                                    ],
-                                },
-                            ],
-                            query: [],
-                        },
-                    ),
-                    method: Some(
-                        Get,
-                    ),
+                    connect_template: URLTemplate {
+                        base: None,
+                        path: [
+                            StringTemplate {
+                                parts: [
+                                    Constant(
+                                        Constant {
+                                            value: "posts",
+                                            location: 1..6,
+                                        },
+                                    ),
+                                ],
+                            },
+                        ],
+                        query: [],
+                    },
+                    method: Get,
                     headers: {
                         "authtoken": From(
                             "x-auth-token",
@@ -509,16 +496,11 @@ mod tests {
                         ),
                     },
                     body: None,
-                    method_expression: None,
-                    scheme: None,
-                    host: None,
-                    port: None,
-                    user: None,
-                    password: None,
+                    origin: None,
                     source_path: None,
-                    source_query: None,
+                    source_query_params: None,
                     connect_path: None,
-                    connect_query: None,
+                    connect_query_params: None,
                 },
                 selection: Named(
                     SubSelection {

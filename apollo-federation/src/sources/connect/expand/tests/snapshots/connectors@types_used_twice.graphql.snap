@@ -37,28 +37,19 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ty
                     fragment: None,
                 },
             ),
-            connect_template: Some(
-                URLTemplate {
-                    base: None,
-                    path: [],
-                    query: [],
-                },
-            ),
-            method: Some(
-                Get,
-            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [],
+                query: [],
+            },
+            method: Get,
             headers: {},
             body: None,
-            method_expression: None,
-            scheme: None,
-            host: None,
-            port: None,
-            user: None,
-            password: None,
+            origin: None,
             source_path: None,
-            source_query: None,
+            source_query_params: None,
             connect_path: None,
-            connect_query: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {

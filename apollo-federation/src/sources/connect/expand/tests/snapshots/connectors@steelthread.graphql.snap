@@ -37,39 +37,30 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                     fragment: None,
                 },
             ),
-            connect_template: Some(
-                URLTemplate {
-                    base: None,
-                    path: [
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "users",
-                                        location: 1..6,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: [],
-                },
-            ),
-            method: Some(
-                Get,
-            ),
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "users",
+                                    location: 1..6,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: [],
+            },
+            method: Get,
             headers: {},
             body: None,
-            method_expression: None,
-            scheme: None,
-            host: None,
-            port: None,
-            user: None,
-            password: None,
+            origin: None,
             source_path: None,
-            source_query: None,
+            source_query_params: None,
             connect_path: None,
-            connect_query: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -144,86 +135,77 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                     fragment: None,
                 },
             ),
-            connect_template: Some(
-                URLTemplate {
-                    base: None,
-                    path: [
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "users",
-                                        location: 1..6,
-                                    },
-                                ),
-                            ],
-                        },
-                        StringTemplate {
-                            parts: [
-                                Expression(
-                                    Expression {
-                                        expression: Path(
-                                            PathSelection {
-                                                path: WithRange {
-                                                    node: Var(
-                                                        WithRange {
-                                                            node: $args,
-                                                            range: Some(
-                                                                0..5,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Key(
-                                                                WithRange {
-                                                                    node: Field(
-                                                                        "id",
-                                                                    ),
-                                                                    range: Some(
-                                                                        6..8,
-                                                                    ),
-                                                                },
-                                                                WithRange {
-                                                                    node: Empty,
-                                                                    range: Some(
-                                                                        8..8,
-                                                                    ),
-                                                                },
-                                                            ),
-                                                            range: Some(
-                                                                5..8,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        0..8,
-                                                    ),
-                                                },
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "users",
+                                    location: 1..6,
+                                },
+                            ),
+                        ],
+                    },
+                    StringTemplate {
+                        parts: [
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $args,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "id",
+                                                                ),
+                                                                range: Some(
+                                                                    6..8,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    8..8,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..8,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..8,
+                                                ),
                                             },
-                                        ),
-                                        location: 8..16,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: [],
-                },
-            ),
-            method: Some(
-                Get,
-            ),
+                                        },
+                                    ),
+                                    location: 8..16,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: [],
+            },
+            method: Get,
             headers: {},
             body: None,
-            method_expression: None,
-            scheme: None,
-            host: None,
-            port: None,
-            user: None,
-            password: None,
+            origin: None,
             source_path: None,
-            source_query: None,
+            source_query_params: None,
             connect_path: None,
-            connect_query: None,
+            connect_query_params: None,
         },
         selection: Named(
             SubSelection {
@@ -314,86 +296,77 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
                     fragment: None,
                 },
             ),
-            connect_template: Some(
-                URLTemplate {
-                    base: None,
-                    path: [
-                        StringTemplate {
-                            parts: [
-                                Constant(
-                                    Constant {
-                                        value: "users",
-                                        location: 1..6,
-                                    },
-                                ),
-                            ],
-                        },
-                        StringTemplate {
-                            parts: [
-                                Expression(
-                                    Expression {
-                                        expression: Path(
-                                            PathSelection {
-                                                path: WithRange {
-                                                    node: Var(
-                                                        WithRange {
-                                                            node: $this,
-                                                            range: Some(
-                                                                0..5,
-                                                            ),
-                                                        },
-                                                        WithRange {
-                                                            node: Key(
-                                                                WithRange {
-                                                                    node: Field(
-                                                                        "c",
-                                                                    ),
-                                                                    range: Some(
-                                                                        6..7,
-                                                                    ),
-                                                                },
-                                                                WithRange {
-                                                                    node: Empty,
-                                                                    range: Some(
-                                                                        7..7,
-                                                                    ),
-                                                                },
-                                                            ),
-                                                            range: Some(
-                                                                5..7,
-                                                            ),
-                                                        },
-                                                    ),
-                                                    range: Some(
-                                                        0..7,
-                                                    ),
-                                                },
+            connect_template: URLTemplate {
+                base: None,
+                path: [
+                    StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "users",
+                                    location: 1..6,
+                                },
+                            ),
+                        ],
+                    },
+                    StringTemplate {
+                        parts: [
+                            Expression(
+                                Expression {
+                                    expression: Path(
+                                        PathSelection {
+                                            path: WithRange {
+                                                node: Var(
+                                                    WithRange {
+                                                        node: $this,
+                                                        range: Some(
+                                                            0..5,
+                                                        ),
+                                                    },
+                                                    WithRange {
+                                                        node: Key(
+                                                            WithRange {
+                                                                node: Field(
+                                                                    "c",
+                                                                ),
+                                                                range: Some(
+                                                                    6..7,
+                                                                ),
+                                                            },
+                                                            WithRange {
+                                                                node: Empty,
+                                                                range: Some(
+                                                                    7..7,
+                                                                ),
+                                                            },
+                                                        ),
+                                                        range: Some(
+                                                            5..7,
+                                                        ),
+                                                    },
+                                                ),
+                                                range: Some(
+                                                    0..7,
+                                                ),
                                             },
-                                        ),
-                                        location: 8..15,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: [],
-                },
-            ),
-            method: Some(
-                Get,
-            ),
+                                        },
+                                    ),
+                                    location: 8..15,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: [],
+            },
+            method: Get,
             headers: {},
             body: None,
-            method_expression: None,
-            scheme: None,
-            host: None,
-            port: None,
-            user: None,
-            password: None,
+            origin: None,
             source_path: None,
-            source_query: None,
+            source_query_params: None,
             connect_path: None,
-            connect_query: None,
+            connect_query_params: None,
         },
         selection: Path(
             PathSelection {

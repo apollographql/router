@@ -146,7 +146,7 @@ impl HttpJsonTransport {
     fn resolved_origin(
         &self,
         inputs: &IndexMap<String, Value>,
-    ) -> (Option<String>, Vec<ApplyToError>) {
+    ) -> (Option<(String, Option<u16>)>, Vec<ApplyToError>) {
         let Some(origin) = self.origin.as_ref() else {
             return Default::default();
         };
@@ -155,7 +155,14 @@ impl HttpJsonTransport {
         let origin = origin
             .as_ref()
             .and_then(|s| s.as_str())
-            .map(|s| s.to_string());
+            // Use Url to parse the host and port to support IPv6 addresses
+            .and_then(|s| Url::parse(&format!("http://{s}")).ok())
+            .and_then(|url| {
+                let host = url.host_str()?.to_string();
+                let port = url.port();
+                Some((host, port))
+            });
+
         (origin, warnings)
     }
 
@@ -289,10 +296,16 @@ impl HttpJsonTransport {
 
         let (origin, ws) = self.resolved_origin(inputs);
         warnings.extend(ws);
-        if let Some(origin) = origin {
+        if let Some((host, port)) = origin {
             base_url
-                .set_host(Some(&origin))
-                .map_err(|_| FederationError::internal(format!("Invalid URL origin: {origin}")))?;
+                .set_host(Some(&host))
+                .map_err(|_| FederationError::internal(format!("Invalid URL host: {host}")))?;
+
+            if let Some(port) = port {
+                base_url
+                    .set_port(Some(port))
+                    .map_err(|_| FederationError::internal(format!("Invalid URL port: {port}")))?;
+            }
         }
 
         // PATH
@@ -1057,7 +1070,25 @@ mod tests {
     // -------------------------------------------------------------------------
 
     #[test]
-    fn test_host_port_user_password() {
+    fn test_origin_host() {
+        let mut transport = HttpJsonTransport::default();
+        let data = this! { "origin": "example.com" };
+
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap().0.as_str(),
+            "https://invalid/"
+        );
+
+        transport.origin = JSONSelection::parse("$this.origin").ok();
+
+        assert_eq!(
+            transport.make_uri(&data).unwrap().0.as_str(),
+            "https://example.com/"
+        );
+    }
+
+    #[test]
+    fn test_origin_host_port() {
         let mut transport = HttpJsonTransport::default();
         let data = this! { "origin": "example.com:8080" };
 
@@ -1066,11 +1097,30 @@ mod tests {
             "https://invalid/"
         );
 
-        transport.origin = JSONSelection::parse("$this.host").ok();
+        transport.origin = JSONSelection::parse("$this.origin").ok();
 
         assert_eq!(
             transport.make_uri(&data).unwrap().0.as_str(),
             "https://example.com:8080/"
+        );
+    }
+
+
+    #[test]
+    fn test_origin_host_port_ipv6() {
+        let mut transport = HttpJsonTransport::default();
+        let data = this! { "origin": "[::1]:8080" };
+
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap().0.as_str(),
+            "https://invalid/"
+        );
+
+        transport.origin = JSONSelection::parse("$this.origin").ok();
+
+        assert_eq!(
+            transport.make_uri(&data).unwrap().0.as_str(),
+            "https://[::1]:8080/"
         );
     }
 
