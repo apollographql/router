@@ -28,7 +28,7 @@ Operations that need to query multiple subgraphs can impact performance because 
 
 ## `@requires` Directive
 
-The `@requires` directive allows a subgraph to fetch additional fields needed to resolve an entity. This can be powerful but must be handled with care.
+The [`@requires` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#requires) allows a subgraph to fetch additional fields needed to resolve an entity. This can be powerful but must be handled with care.
 - Changes to fields utilized by `@requires` can impact the subgraph fetches that current operations depend on and may create larger and slower plans
 - When performing schema migrations involving `@requires`, ensure compatibility by deploying changes in a manner that avoids disrupting ongoing queries. Plan deployments and schema changes in an atomic fashion.
 
@@ -162,3 +162,20 @@ generates two queries, one to each subgraph, like so:
 </CodeColumns>
 
 Currently, the router expands all interfaces into implementing types.
+
+## Recommended Steps
+
+### Runtime
+In the [Router configuration](https://www.apollographql.com/docs/graphos/routing/configuration) there are many settings to help monitor and improve performance impacts. Here are some features all production graphs should consider:
+
+* Monitor your query planner performance with the [standard instruments](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#query-planning)
+* Enabling and configuring the [in-memory cache for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory)
+* Using the cache [warm up features](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) included out of the box and using the `dry-run` headers for operations
+* Enabling and configuring [distributed caches for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/distributed) to share across router instances
+* Limiting the size of operations (and therefore their query plans) with [request limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) and the cost with [demand control](https://www.apollographql.com/docs/graphos/routing/security/demand-control)
+
+### Build Time
+
+* Use [schema proposals](https://www.apollographql.com/docs/graphos/platform/schema-management/proposals) to review changes that have a large impact across entities and interfaces
+* Enable [common linter settings](https://www.apollographql.com/docs/graphos/platform/schema-management/linting)
+* Setup [custom checks](https://www.apollographql.com/docs/graphos/platform/schema-management/checks/custom) to do advanced and specific validations, like [limiting the size of query plans](https://github.com/apollosolutions/example-graphos-custom-check-query-planner)
