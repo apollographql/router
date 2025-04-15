@@ -26,7 +26,7 @@ use super::validation::SuspectedValidationBug;
 /// <https://spec.graphql.org/October2021/#sec-Normal-and-Serial-Execution>
 #[derive(Debug, Copy, Clone)]
 pub(crate) enum ExecutionMode {
-    /// Allowed to resolve fields in any order, including in parellel
+    /// Allowed to resolve fields in any order, including in parallel
     Normal,
     /// Top-level fields of a mutation operation must be executed in order
     #[allow(unused)]

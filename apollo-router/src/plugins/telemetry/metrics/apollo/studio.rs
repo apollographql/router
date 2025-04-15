@@ -15,6 +15,7 @@ use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::EnumStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::InputFieldStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::InputTypeStats;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
@@ -29,6 +30,7 @@ pub(crate) struct SingleStatsReport {
 pub(crate) struct SingleStats {
     pub(crate) stats_with_context: SingleContextualizedStats,
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
+    pub(crate) query_metadata: Option<QueryMetadata>,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -617,6 +619,7 @@ mod test {
                             is_interface: false,
                         },
                     )]),
+                    query_metadata: None,
                 },
             )]),
         }
