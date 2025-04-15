@@ -181,7 +181,7 @@ impl SubgraphMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut shareable_fields = IndexSet::default();
-        // @shareable is only avalaible on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
+        // @shareable is only available on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).
         let Some(shareable_directive_name) =

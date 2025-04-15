@@ -302,7 +302,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
                 // Note that currently `ConditionNode` only works for variables
                 // (`ConditionNode.condition` is expected to be a variable name and nothing else).
                 // We could change that, but really, why have a trivial `ConditionNode`
-                // when we can optimise things righ away.
+                // when we can optimise things right away.
                 condition.then_some(value)
             }
             Conditions::Variables(variables) => {
