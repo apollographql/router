@@ -705,29 +705,44 @@ fn batch_entities_from_request(
         Some(keys),
     ));
 
-    let inputs = RequestInputs {
-        batch: representations
-            .as_array()
-            .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
-            .iter()
-            .map(|rep| {
-                let obj = rep
-                    .as_object()
-                    .ok_or_else(|| {
-                        InvalidRepresentations("representation is not an object".into())
-                    })?
-                    .clone();
-                Ok::<_, MakeRequestError>(obj)
-            })
-            .collect::<Result<Vec<_>, _>>()?,
-        ..Default::default()
-    };
+    // First, let's grab all the representations into a single batch
+    let batch = representations
+        .as_array()
+        .ok_or_else(|| InvalidRepresentations("representations is not an array".into()))?
+        .iter()
+        .map(|rep| {
+            let obj = rep
+                .as_object()
+                .ok_or_else(|| InvalidRepresentations("representation is not an object".into()))?
+                .clone();
+            Ok::<_, MakeRequestError>(obj)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(vec![ResponseKey::BatchEntity {
-        selection: selection.clone(),
-        inputs,
-        keys: keys.clone(),
-    }])
+    // If we've got a max_size set, chunk the batch into smaller batches. Otherwise, we'll default to just a single batch.
+    let max_size = connector.batch_settings.as_ref().and_then(|bs| bs.max_size);
+    let batches = max_size.map_or(vec![batch.clone()], |size| {
+        batch.chunks(size).map(|chunk| chunk.to_vec()).collect()
+    });
+
+    // Finally, map the batches to BatchEntity. Each one of these final BatchEntity's ends up being a outgoing request
+    let batch_entities = batches
+        .iter()
+        .map(|batch| {
+            let inputs = RequestInputs {
+                batch: batch.to_vec(),
+                ..Default::default()
+            };
+
+            ResponseKey::BatchEntity {
+                selection: selection.clone(),
+                inputs,
+                keys: keys.clone(),
+            }
+        })
+        .collect();
+
+    Ok(batch_entities)
 }
 
 #[cfg(test)]
@@ -804,6 +819,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -887,6 +903,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -996,6 +1013,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -1117,6 +1135,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1237,6 +1256,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1338,6 +1358,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1461,6 +1482,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1619,6 +1641,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1774,6 +1797,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1900,6 +1924,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2013,6 +2038,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2089,6 +2115,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         };
 
         let requests: Vec<_> = super::make_requests(

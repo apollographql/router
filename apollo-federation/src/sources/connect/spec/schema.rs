@@ -55,6 +55,15 @@ pub(crate) struct SourceHTTPArguments {
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 }
 
+/// Settings for the connector when it is doing a $batch entity resolver
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct SourceBatchArguments {
+    /// Set a maximum number of requests to be batched together.
+    ///
+    /// Over this maximum, will be split into multiple batch requests of max_size.
+    pub(crate) max_size: Option<usize>,
+}
+
 /// Arguments to the `@connect` directive
 ///
 /// Refer to [ConnectSpecDefinition] for more info.
@@ -85,6 +94,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// identified domain model.) If true, the connector must be defined on a field
     /// of the Query type.
     pub(crate) entity: bool,
+
+    /// Settings for the connector when it is doing a $batch entity resolver
+    pub(crate) batch: Option<SourceBatchArguments>,
 }
 
 /// The HTTP arguments needed for a connect request

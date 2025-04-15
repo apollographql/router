@@ -642,6 +642,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -742,6 +743,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -847,6 +849,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         });
 
         let keys = connector
@@ -962,6 +965,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -1078,6 +1082,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -1332,6 +1337,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: selection.external_variables().collect(),
+            batch_settings: None,
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()

@@ -65,6 +65,21 @@ pub struct Connector {
 
     pub request_variables: HashSet<Namespace>,
     pub response_variables: HashSet<Namespace>,
+
+    pub batch_settings: Option<ConnectorBatchSettings>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectorBatchSettings {
+    pub max_size: Option<usize>,
+}
+
+impl ConnectorBatchSettings {
+    fn from_directive(connect: &ConnectDirectiveArguments) -> Option<Self> {
+        Some(Self {
+            max_size: connect.batch.as_ref().and_then(|b| b.max_size),
+        })
+    }
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -144,6 +159,7 @@ impl Connector {
         let request_variables = transport.variables().collect();
         let response_variables = connect.selection.external_variables().collect();
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
+        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
 
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
@@ -162,6 +178,7 @@ impl Connector {
             spec,
             request_variables,
             response_variables,
+            batch_settings,
         };
 
         Ok((id, connector))

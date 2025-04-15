@@ -3378,6 +3378,7 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        batch_settings: None,
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
@@ -3441,6 +3442,7 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        batch_settings: None,
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
