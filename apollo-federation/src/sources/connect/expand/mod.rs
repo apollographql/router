@@ -48,7 +48,7 @@ pub enum ExpansionResult {
 /// with standard query planning concepts while still enforcing connector-specific rules. To do so,
 /// each connector is separated into its own unique subgraph with relevant GraphQL directives to enforce
 /// field dependencies and response structures. This allows for satisfiability and validation to piggy-back
-/// off of existing functionality in a reproducable way.
+/// off of existing functionality in a reproducible way.
 pub fn expand_connectors(
     supergraph_str: &str,
     api_schema_options: &ApiSchemaOptions,

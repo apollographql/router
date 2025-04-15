@@ -630,7 +630,7 @@ fn compute_root_serial_dependency_graph(
             // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
             // the current ID that is inside the fetch dep graph's ID generator, or to use the
             // starting ID. Because this method ensure uniqueness between IDs, this approach was
-            // taken; however, it could be the case that this causes unforseen issues.
+            // taken; however, it could be the case that this causes unforeseen issues.
             digest.push(std::mem::replace(
                 &mut fetch_dependency_graph,
                 new_dep_graph,

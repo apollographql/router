@@ -299,7 +299,7 @@ impl From<FederationErrorBridge> for QueryPlannerError {
 }
 
 /// A temporary error type used to extract a few variants from `apollo-federation`'s
-/// `FederationError`. For backwards compatability, these other variant need to be extracted so
+/// `FederationError`. For backwards compatibility, these other variant need to be extracted so
 /// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
 /// router 2.0, apollo-federation should split its error type into internal and external types.
 /// When this happens, this temp type should be replaced with that type.

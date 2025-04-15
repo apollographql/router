@@ -219,7 +219,7 @@ async fn subgraph(
         .unwrap()
         .parse::<usize>()
         .unwrap();
-    // Read the request body and prompty ignore it
+    // Read the request body and promptly ignore it
     request
         .into_body()
         .collect()

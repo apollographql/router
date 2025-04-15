@@ -675,7 +675,7 @@ impl ValidFederationSchema {
     ) -> Result<Name, FederationError> {
         // Currently, the types used to define the federation operations, that is _Any, _Entity and _Service,
         // are not considered part of the federation spec, and are instead hardcoded to the names above.
-        // The reason being that there is no way to maintain backward compatbility with fed2 if we were to add
+        // The reason being that there is no way to maintain backward compatibility with fed2 if we were to add
         // those to the federation spec without requiring users to add those types to their @link `import`,
         // and that wouldn't be a good user experience (because most users don't really know what those types
         // are/do). And so we special case it.
