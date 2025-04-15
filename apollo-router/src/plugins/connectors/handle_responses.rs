@@ -326,11 +326,21 @@ impl MappedResponse {
                         .collect::<HashMap<_, _>>();
 
                     // Make a list of entities that matches the representations list
-                    let entities = key_values
+                    let new_entities = key_values
                         .map(|key| map.remove(&key).unwrap_or(Value::Null))
                         .collect_vec();
 
-                    data.insert(ENTITIES, Value::Array(entities));
+                    // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
+                    let entities = data
+                        .entry(ENTITIES)
+                        .or_insert(Value::Array(Vec::with_capacity(count)));
+
+                    entities
+                        .as_array_mut()
+                        .ok_or_else(|| {
+                            HandleResponseError::MergeError("_entities is not an array".into())
+                        })?
+                        .extend(new_entities);
                 }
             },
         }
