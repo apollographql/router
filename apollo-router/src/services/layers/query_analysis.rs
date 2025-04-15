@@ -20,6 +20,7 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use lru::LruCache;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 
 use crate::Configuration;
 use crate::Context;
@@ -27,6 +28,7 @@ use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::UsageReporting;
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::compute_job;
+use crate::compute_job::ComputeJobType;
 use crate::compute_job::MaybeBackPressureError;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -41,7 +43,6 @@ use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::Query;
 use crate::spec::QueryHash;
 use crate::spec::Schema;
@@ -123,10 +124,8 @@ impl QueryAnalysisLayer {
 
         // Must be created *outside* of the compute_job or the span is not connected to the parent
         let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
-
-        let priority = compute_job::Priority::P4; // Medium priority
-        compute_job::execute(priority, move |_| {
-            span.in_scope(|| {
+        let compute_job_future = span.in_scope(||{
+            compute_job::execute(ComputeJobType::QueryParsing, move |_| {
                 Query::parse_document(
                     &query,
                     operation_name.as_deref(),
@@ -162,10 +161,13 @@ impl QueryAnalysisLayer {
                     Ok(doc)
                 })
             })
-        })
-        .map_err(MaybeBackPressureError::TemporaryError)?
-        .await
-        .map_err(MaybeBackPressureError::PermanentError)
+        });
+
+        compute_job_future
+            .map_err(MaybeBackPressureError::TemporaryError)?
+            .instrument(span)
+            .await
+            .map_err(MaybeBackPressureError::PermanentError)
     }
 
     /// Measure the number of selections that would be encountered if we walked the given selection
@@ -360,10 +362,9 @@ impl QueryAnalysisLayer {
             }
             Err(MaybeBackPressureError::PermanentError(errors)) => {
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(Arc::new(UsageReporting {
-                        stats_report_key: errors.get_error_key().to_string(),
-                        referenced_fields_by_type: HashMap::new(),
-                    }))
+                    lock.insert(Arc::new(UsageReporting::Error(
+                        errors.get_error_key().to_string(),
+                    )))
                 });
                 let errors = match errors.into_graphql_errors() {
                     Ok(v) => v,
@@ -383,10 +384,9 @@ impl QueryAnalysisLayer {
             }
             Err(MaybeBackPressureError::TemporaryError(error)) => {
                 request.context.extensions().with_lock(|lock| {
-                    lock.insert(Arc::new(UsageReporting {
-                        stats_report_key: GRAPHQL_VALIDATION_FAILURE_ERROR_KEY.to_string(),
-                        referenced_fields_by_type: HashMap::new(),
-                    }))
+                    let error_key = SpecError::ValidationError(ValidationErrors { errors: vec![] })
+                        .get_error_key();
+                    lock.insert(Arc::new(UsageReporting::Error(error_key.to_string())))
                 });
                 Err(SupergraphResponse::builder()
                     .error(error.to_graphql_error())
