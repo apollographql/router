@@ -6,53 +6,53 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/url_prope
 [
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(http:)`, argument `query` is invalid: `*.bad` must start with one of $config, $context",
+        message: "In `@source(http:)`, argument `queryParams` is invalid: `*.bad` must start with one of $config, $context",
         locations: [
-            11:39..11:39,
+            11:45..11:45,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(http:)`, argument `query` is invalid: array values aren't valid here",
+        message: "In `@source(http:)`, argument `queryParams` is invalid: array values aren't valid here",
         locations: [
-            12:41..12:43,
+            12:47..12:49,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@source(http:)`, argument `query` is invalid: string values aren't valid here",
+        message: "In `@source(http:)`, argument `queryParams` is invalid: string values aren't valid here",
         locations: [
-            13:41..13:46,
+            13:47..13:52,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `query` is invalid: `*.bad` must start with one of $args, $config, $context",
+        message: "In `@connect(http:)` on `Query.resources`, argument `queryParams` is invalid: `*.bad` must start with one of $args, $config, $context",
         locations: [
-            23:44..23:44,
+            23:50..23:50,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `query` is invalid: string values aren't valid here",
+        message: "In `@connect(http:)` on `Query.resources`, argument `queryParams` is invalid: string values aren't valid here",
         locations: [
-            24:46..24:51,
+            24:52..24:57,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `query` is invalid: array values aren't valid here",
+        message: "In `@connect(http:)` on `Query.resources`, argument `queryParams` is invalid: array values aren't valid here",
         locations: [
-            25:46..25:53,
+            25:52..25:59,
         ],
     },
     Message {
         code: InvalidUrlProperty,
-        message: "In `@connect(http:)` on `Query.resources`, argument `query` is invalid: string values aren't valid here",
+        message: "In `@connect(http:)` on `Query.resources`, argument `queryParams` is invalid: string values aren't valid here",
         locations: [
             16:16..16:22,
             16:13..16:22,
-            27:50..27:51,
+            31:56..31:57,
         ],
     },
 ]

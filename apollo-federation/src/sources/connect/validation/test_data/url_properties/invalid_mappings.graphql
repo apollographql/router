@@ -6,14 +6,9 @@ extend schema
   @source(
     name: "v1"
     http: {
-      method: "."
-      scheme: "."
-      host: "."
-      port: "."
-      user: "."
-      password: "."
+      origin: "."
       path: "."
-      query: "."
+      queryParams: "."
     }
   )
 
@@ -22,14 +17,9 @@ type Query {
     @connect(
       source: "v1"
       http: {
-        method: "."
-        scheme: "."
-        host: "."
-        port: "."
-        user: "."
-        password: "."
+        origin: "."
         path: "."
-        query: "."
+        queryParams: "."
       }
       selection: "$"
     )

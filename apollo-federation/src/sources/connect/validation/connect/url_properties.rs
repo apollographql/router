@@ -29,14 +29,9 @@ enum PropertyLocation<'schema> {
 #[allow(unused)]
 pub(crate) struct UrlProperties<'schema> {
     location: PropertyLocation<'schema>,
-    method: Option<Property<'schema>>,
-    scheme: Option<Property<'schema>>,
-    host: Option<Property<'schema>>,
-    port: Option<Property<'schema>>,
-    user: Option<Property<'schema>>,
-    password: Option<Property<'schema>>,
+    origin: Option<Property<'schema>>,
     path: Option<Property<'schema>>,
-    query: Option<Property<'schema>>,
+    query_params: Option<Property<'schema>>,
 }
 
 impl<'schema> UrlProperties<'schema> {
@@ -65,14 +60,9 @@ impl<'schema> UrlProperties<'schema> {
         schema: &'schema SchemaInfo<'schema>,
         http_arg: &'schema [(Name, Node<Value>)],
     ) -> Result<Self, Message> {
-        let mut method = None;
-        let mut scheme = None;
-        let mut host = None;
-        let mut port = None;
-        let mut user = None;
-        let mut password = None;
+        let mut origin = None;
         let mut path = None;
-        let mut query = None;
+        let mut query_params = None;
 
         fn parse_http_arg<'schema>(
             node: &'schema Node<Value>,
@@ -115,16 +105,11 @@ impl<'schema> UrlProperties<'schema> {
 
         for (name, value) in http_arg {
             match name.as_str() {
-                "method" => method = parse_http_arg(value, name.as_str(), &mut errors, source_map),
-                "scheme" => scheme = parse_http_arg(value, name.as_str(), &mut errors, source_map),
-                "host" => host = parse_http_arg(value, name.as_str(), &mut errors, source_map),
-                "port" => port = parse_http_arg(value, name.as_str(), &mut errors, source_map),
-                "user" => user = parse_http_arg(value, name.as_str(), &mut errors, source_map),
-                "password" => {
-                    password = parse_http_arg(value, name.as_str(), &mut errors, source_map)
-                }
+                "origin" => origin = parse_http_arg(value, name.as_str(), &mut errors, source_map),
                 "path" => path = parse_http_arg(value, name.as_str(), &mut errors, source_map),
-                "query" => query = parse_http_arg(value, name.as_str(), &mut errors, source_map),
+                "queryParams" => {
+                    query_params = parse_http_arg(value, name.as_str(), &mut errors, source_map)
+                }
                 _ => {}
             }
         }
@@ -148,14 +133,9 @@ impl<'schema> UrlProperties<'schema> {
 
         Ok(Self {
             location,
-            method,
-            scheme,
-            host,
-            port,
-            user,
-            password,
+            origin,
             path,
-            query,
+            query_params,
         })
     }
 
@@ -218,56 +198,19 @@ impl<'a, 's> IntoIterator for &'a UrlProperties<'s> {
         Option<&'a Property<'s>>,
         &'static LazyLock<Shape>,
     );
-    type IntoIter = std::array::IntoIter<Self::Item, 8>;
+    type IntoIter = std::array::IntoIter<Self::Item, 3>;
 
     fn into_iter(self) -> Self::IntoIter {
         [
-            ("method", self.method.as_ref(), &METHOD_SHAPE),
-            ("scheme", self.scheme.as_ref(), &SCHEME_SHAPE),
-            ("host", self.host.as_ref(), &HOST_SHAPE),
-            ("port", self.port.as_ref(), &PORT_SHAPE),
-            ("user", self.user.as_ref(), &USER_SHAPE),
-            ("password", self.password.as_ref(), &PASSWORD_SHAPE),
+            ("origin", self.origin.as_ref(), &ORIGIN_SHAPE),
             ("path", self.path.as_ref(), &PATH_SHAPE),
-            ("query", self.query.as_ref(), &QUERY_SHAPE),
+            ("queryParams", self.query_params.as_ref(), &QUERY_SHAPE),
         ]
         .into_iter()
     }
 }
 
-static METHOD_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::one(
-        [
-            Shape::string_value("GET", None),
-            Shape::string_value("POST", None),
-            Shape::string_value("PUT", None),
-            Shape::string_value("PATCH", None),
-            Shape::string_value("DELETE", None),
-        ],
-        None,
-    )
-});
-
-static SCHEME_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
-    Shape::one(
-        [
-            Shape::string_value("http", None),
-            Shape::string_value("https", None),
-        ],
-        None,
-    )
-});
-
-static HOST_SHAPE: LazyLock<Shape> = LazyLock::new(|| Shape::string([]));
-
-static PORT_SHAPE: LazyLock<Shape> =
-    LazyLock::new(|| Shape::one([Shape::int([]), Shape::null([])], []));
-
-static USER_SHAPE: LazyLock<Shape> =
-    LazyLock::new(|| Shape::one([Shape::string([]), Shape::null([])], []));
-
-static PASSWORD_SHAPE: LazyLock<Shape> =
-    LazyLock::new(|| Shape::one([Shape::string([]), Shape::null([])], []));
+static ORIGIN_SHAPE: LazyLock<Shape> = LazyLock::new(|| Shape::string([]));
 
 static PATH_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     Shape::list(
