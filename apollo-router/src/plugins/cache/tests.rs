@@ -470,7 +470,7 @@ async fn insert_with_nested_field_set() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true.into(),
+                enabled: true,
                 ttl: None,
                 ..Default::default()
             },
@@ -480,7 +480,7 @@ async fn insert_with_nested_field_set() {
             Subgraph {
                 redis: None,
                 private_id: Some("sub".to_string()),
-                enabled: true.into(),
+                enabled: true,
                 ttl: None,
                 ..Default::default()
             },
