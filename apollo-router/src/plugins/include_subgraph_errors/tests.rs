@@ -10,10 +10,22 @@ use crate::graphql;
 use crate::plugins::test::PluginTestHarness;
 use crate::services::supergraph; // Required for collect
 
-const PRODUCT_ERROR_RESPONSE: &str = r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR", "apollo.subgraph.name": "products"}}]}"#;
-const ACCOUNT_ERROR_RESPONSE: &str = r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL", "apollo.subgraph.name": "accounts"}}]}"#;
-const VALID_RESPONSE: &str = r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#;
-const NON_SUBGRAPH_ERROR: &str = r#"{"data":{"topProducts":null},"errors":[{"message":"Authentication error","path":[],"extensions":{"test":"value","code":"AUTH_ERROR"}}]}"#;
+const PRODUCT_ERROR_RESPONSE: &[&str] = &[
+    r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR", "apollo.subgraph.name": "products"}}]}"#,
+];
+const ACCOUNT_ERROR_RESPONSE: &[&str] = &[
+    r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL", "apollo.subgraph.name": "accounts"}}]}"#,
+];
+const VALID_RESPONSE: &[&str] = &[
+    r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#,
+];
+const NON_SUBGRAPH_ERROR: &[&str] = &[
+    r#"{"data":{"topProducts":null},"errors":[{"message":"Authentication error","path":[],"extensions":{"test":"value","code":"AUTH_ERROR"}}]}"#,
+];
+const INCREMENTAL_RESPONSE: &[&str] = &[
+    r#"{"data":{"topProducts":null},"errors":[{"message":"Main errors error","path":[],"extensions":{"test":"value","code":"MAIN_ERROR", "apollo.subgraph.name": "products"}}]}"#,
+    r#"{"incremental":[{"data":{"topProducts":null},"errors":[{"message":"Incremental error","path":[],"extensions":{"test":"value","code":"INCREMENTAL_ERROR", "apollo.subgraph.name": "products"}}]}]}"#,
+];
 
 async fn build_harness(
     plugin_config: &Value,
@@ -26,16 +38,19 @@ async fn build_harness(
 
 async fn run_test_case(
     config: &Value,
-    mock_response: &str, // Raw bytes representing the *original* supergraph response
-    snapshot_suffix: &str, // Suffix for the snapshot file name
+    mock_responses: &[&str], // Raw bytes representing the *original* supergraph response
+    snapshot_suffix: &str,   // Suffix for the snapshot file name
 ) {
     let harness = build_harness(config).await.expect("plugin should load");
 
     // Parse the raw bytes into the mock response element(s)
     // Assuming a single response element for simplicity in these tests
-    let mock_response_element: graphql::Response =
-        serde_json::from_str(mock_response).expect("Failed to parse mock response bytes");
-    let mock_response_elements = vec![mock_response_element];
+    let mock_response_elements = mock_responses
+        .iter()
+        .map(|response| {
+            serde_json::from_str(response).expect("Failed to parse mock response bytes")
+        })
+        .collect::<Vec<_>>();
 
     let service = harness.supergraph_service(move |req| {
         let mock_response_elements = mock_response_elements.clone();
@@ -52,10 +67,11 @@ async fn run_test_case(
     let actual_responses: Vec<graphql::Response> = response.response.body_mut().collect().await;
 
     let config = serde_yaml::to_string(config).expect("config to yaml");
-    let request = serde_json::to_string_pretty(
-        &serde_json::from_str::<Value>(mock_response).expect("request"),
-    )
-    .expect("request");
+    let parsed_responses = mock_responses
+        .iter()
+        .map(|response| serde_json::from_str(response).expect("request"))
+        .collect::<Vec<Value>>();
+    let request = serde_json::to_string_pretty(&parsed_responses).expect("request to json");
 
     let description = format!("CONFIG:\n{}\n\nREQUEST:\n{}", config, request);
     with_settings!({
@@ -474,6 +490,18 @@ async fn it_does_not_add_service_extension_for_non_subgraph_errors() {
         }),
         &NON_SUBGRAPH_ERROR,
         "non_subgraph_error",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn it_processes_incremental_responses() {
+    run_test_case(
+        &json!({
+            "all": true,
+        }),
+        &INCREMENTAL_RESPONSE,
+        "incremental_response",
     )
     .await;
 }
