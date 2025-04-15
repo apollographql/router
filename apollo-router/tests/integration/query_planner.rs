@@ -110,7 +110,7 @@ async fn valid_schema_with_new_qp_change_to_broken_schema_keeps_old_config() {
 async fn overloaded_compute_job_pool() {
     let mut router = IntegrationTest::builder()
         .env_entry("APOLLO_ROUTER_COMPUTE_THREADS", "1")
-        .env_entry("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD", "2")
+        .env_entry("APOLLO_ROUTER_COMPUTE_QUEUE_CAPACITY_PER_THREAD", "1")
         .config(include_str!("fixtures/rust_query_planner.router.yaml"))
         .build()
         .await;
