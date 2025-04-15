@@ -540,42 +540,58 @@ impl ApplyToInternal for WithRange<PathList> {
                 }
             }
             PathList::Key(key, tail) => {
-                if let JSON::Array(array) = data {
-                    return self.apply_to_array(array, vars, input_path);
-                }
-
                 let input_path_with_key = input_path.append(key.to_json());
 
-                if !matches!(data, JSON::Object(_)) {
-                    return (
-                        None,
-                        vec![ApplyToError::new(
-                            format!(
-                                "Property {} not found in {}",
-                                key.dotted(),
-                                json_type_name(data),
-                            ),
-                            input_path_with_key.to_vec(),
-                            key.range(),
-                        )],
-                    );
-                }
+                if let JSON::Array(array) = data {
+                    // If we recursively call self.apply_to_array, it will end
+                    // up invoking the tail of the key recursively, whereas we
+                    // want to apply the tail once to the entire output array of
+                    // shallow key lookups. To keep the recursion shallow, we
+                    // need a version of self that has the same key but no tail.
+                    let empty_tail = WithRange::new(PathList::Empty, tail.range());
+                    let self_with_empty_tail =
+                        WithRange::new(PathList::Key(key.clone(), empty_tail), key.range());
 
-                if let Some(child) = data.get(key.as_str()) {
-                    tail.apply_to_path(child, vars, &input_path_with_key)
+                    self_with_empty_tail
+                        .apply_to_array(array, vars, input_path)
+                        .and_then_collecting_errors(|shallow_mapped_array| {
+                            // This tail.apply_to_path call happens only once,
+                            // passing to the original/top-level tail the entire
+                            // array produced by key-related recursion/mapping.
+                            tail.apply_to_path(shallow_mapped_array, vars, &input_path_with_key)
+                        })
                 } else {
-                    (
-                        None,
-                        vec![ApplyToError::new(
-                            format!(
-                                "Property {} not found in {}",
-                                key.dotted(),
-                                json_type_name(data),
-                            ),
-                            input_path_with_key.to_vec(),
-                            key.range(),
-                        )],
-                    )
+                    if !matches!(data, JSON::Object(_)) {
+                        return (
+                            None,
+                            vec![ApplyToError::new(
+                                format!(
+                                    "Property {} not found in {}",
+                                    key.dotted(),
+                                    json_type_name(data),
+                                ),
+                                input_path_with_key.to_vec(),
+                                key.range(),
+                            )],
+                        );
+                    }
+
+                    if let Some(child) = data.get(key.as_str()) {
+                        tail.apply_to_path(child, vars, &input_path_with_key)
+                    } else {
+                        (
+                            None,
+                            vec![ApplyToError::new(
+                                format!(
+                                    "Property {} not found in {}",
+                                    key.dotted(),
+                                    json_type_name(data),
+                                ),
+                                input_path_with_key.to_vec(),
+                                key.range(),
+                            )],
+                        )
+                    }
                 }
             }
             PathList::Expr(expr, tail) => expr
@@ -586,14 +602,20 @@ impl ApplyToInternal for WithRange<PathList> {
                     input_path.append(JSON::String(format!("->{}", method_name.as_ref()).into()));
 
                 if let Some(method) = ArrowMethod::lookup(method_name) {
-                    method.apply(
-                        method_name,
-                        method_args.as_ref(),
-                        data,
-                        vars,
-                        &method_path,
-                        tail,
-                    )
+                    let (result_opt, errors) =
+                        method.apply(method_name, method_args.as_ref(), data, vars, &method_path);
+
+                    if let Some(result) = result_opt {
+                        tail.apply_to_path(&result, vars, &method_path)
+                            .prepend_errors(errors)
+                    } else {
+                        // If the method produced no output, assume the errors
+                        // explain the None. Methods can legitimately produce
+                        // None without errors (like ->first or ->last on an
+                        // empty array), so we do not report any blanket error
+                        // here when errors.is_empty().
+                        (None, errors)
+                    }
                 } else {
                     (
                         None,
@@ -2533,6 +2555,218 @@ mod tests {
         assert_eq!(
             selection!("$.another.'pesky string literal!'.\"identifier\"").apply_to(&data),
             (Some(json!(123)), vec![],),
+        );
+    }
+
+    #[test]
+    fn test_left_associative_path_evaluation() {
+        assert_eq!(
+            selection!("batch.id->first").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(1)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->last").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(3)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->size").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(3)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->slice(1)->first").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(2)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map({ batchId: @ })").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (
+                Some(json!([
+                    { "batchId": 1 },
+                    { "batchId": 2 },
+                    { "batchId": 3 },
+                ])),
+                vec![],
+            ),
+        );
+
+        let mut vars = IndexMap::default();
+        vars.insert(
+            "$batch".to_string(),
+            json!([
+                { "id": 4 },
+                { "id": 5 },
+                { "id": 6 },
+            ]),
+        );
+        assert_eq!(
+            selection!("$batch.id->map({ batchId: @ })").apply_with_vars(
+                &json!({
+                    "batch": "ignored",
+                }),
+                &vars
+            ),
+            (
+                Some(json!([
+                    { "batchId": 4 },
+                    { "batchId": 5 },
+                    { "batchId": 6 },
+                ])),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map({ batchId: @ })->first").apply_to(&json!({
+                "batch": [
+                    { "id": 7 },
+                    { "id": 8 },
+                    { "id": 9 },
+                ],
+            })),
+            (Some(json!({ "batchId": 7 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map({ batchId: @ })->last").apply_to(&json!({
+                "batch": [
+                    { "id": 7 },
+                    { "id": 8 },
+                    { "id": 9 },
+                ],
+            })),
+            (Some(json!({ "batchId": 9 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map({ batchId: @ })->first").apply_with_vars(
+                &json!({
+                    "batch": "ignored",
+                }),
+                &vars
+            ),
+            (Some(json!({ "batchId": 4 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map({ batchId: @ })->last").apply_with_vars(
+                &json!({
+                    "batch": "ignored",
+                }),
+                &vars
+            ),
+            (Some(json!({ "batchId": 6 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+                "arrays": [
+                    { "as": { "bs": [10, 20, 30] } },
+                    { "as": { "bs": [40, 50, 60] } },
+                    { "as": { "bs": [70, 80, 90] } },
+                ],
+            })),
+            (
+                Some(json!({
+                    "echoed": [
+                        [10, 20, 30],
+                        [40, 50, 60],
+                        [70, 80, 90],
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+                "arrays": [
+                    { "as": { "bs": [10, 20, 30] } },
+                    { "as": [
+                        { "bs": [40, 50, 60] },
+                        { "bs": [70, 80, 90] },
+                    ] },
+                    { "as": { "bs": [100, 110, 120] } },
+                ],
+            })),
+            (
+                Some(json!({
+                    "echoed": [
+                        [10, 20, 30],
+                        [
+                            [40, 50, 60],
+                            [70, 80, 90],
+                        ],
+                        [100, 110, 120],
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("batch.id->jsonStringify").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!("[1,2,3]")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map([@])->echo([@])->jsonStringify").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!("[[[1],[2],[3]]]")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map([@])->echo([@])->jsonStringify->typeof").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!("string")), vec![]),
         );
     }
 

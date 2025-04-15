@@ -425,7 +425,7 @@ async fn license_handler(
     ) {
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
         // If not successful some other thread will have logged.
         let last_elapsed_seconds = delta.load(Ordering::SeqCst);
         let elapsed_seconds = start.elapsed().as_secs();

@@ -654,6 +654,110 @@ async fn test_headers() {
 }
 
 #[tokio::test]
+async fn test_override_headers_with_config() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  // This is additive to the existing forwarding rule
+                  {
+                    "propagate": {
+                      "named": "x-forward-2",
+                      "rename": "x-forward"
+                    }
+                  },
+                  // This is an override
+                  {
+                    "insert": {
+                      "name": "x-insert",
+                      "value": "inserted-by-config"
+                    }
+                  },
+                  // This is an override
+                  {
+                    "insert": {
+                      "name": "x-insert-multi-value",
+                      "value": "third,fourth"
+                    }
+                  }
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.insert("x-rename-source", "renamed-by-source".parse().unwrap());
+            headers.insert("x-rename-connect", "renamed-by-connect".parse().unwrap());
+            headers.insert("x-forward", "forwarded".parse().unwrap());
+            headers.insert("x-forward-2", "forwarded-by-config".parse().unwrap());
+            headers.append("x-forward", "forwarded-again".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded-again").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded-by-config").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted-by-config").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("third").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("fourth").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
 async fn test_args_and_this_in_header() {
     let mock_server = MockServer::start().await;
     mock_api::user_2().mount(&mock_server).await;
@@ -1534,7 +1638,11 @@ async fn test_variables() {
         .await;
     Mock::given(method("POST"))
         .and(path("/f"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({}))
+                .insert_header("value", "myothercoolheader"),
+        )
         .mount(&mock_server)
         .await;
     let uri = mock_server.uri();
@@ -1542,7 +1650,7 @@ async fn test_variables() {
     let response = execute(
         &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
         &uri,
-        "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
+        "{ f(arg: \"arg\") { arg context config sibling status extra request response f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
           "connectors": {
@@ -1563,7 +1671,10 @@ async fn test_variables() {
             }
           }
         })),
-        |_| {},
+        |request| {
+          let headers = request.router_request.headers_mut();
+          headers.insert("value", "coolheader".parse().unwrap());
+        },
     )
     .await;
 
@@ -1582,6 +1693,8 @@ async fn test_variables() {
             "config": "C",
             "status": 200
           },
+          "request": "coolheader",
+          "response": "myothercoolheader",
           "f": {
             "arg": "arg",
             "context": "B",
@@ -1601,13 +1714,13 @@ async fn test_variables() {
             Matcher::new()
                 .method("POST")
                 .path("/f")
-                .query("arg=rg&context=B&config=C")
+                .query("arg=rg&context=B&config=C&header=coolheader")
                 .header("x-source-context".into(), "B".try_into().unwrap())
                 .header("x-source-config".into(), "C".try_into().unwrap())
                 .header("x-connect-arg".into(), "g".try_into().unwrap())
                 .header("x-connect-context".into(), "B".try_into().unwrap())
                 .header("x-connect-config".into(), "C".try_into().unwrap())
-                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C" }))
+                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "request": "coolheader" }))
                 ,
             Matcher::new()
                 .method("POST")

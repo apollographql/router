@@ -414,6 +414,7 @@ pub struct LinksMetadata {
 }
 
 impl LinksMetadata {
+    // PORT_NOTE: Call this as a replacement for `CoreFeatures.coreItself` from JS.
     pub(crate) fn link_spec_definition(
         &self,
     ) -> Result<&'static LinkSpecDefinition, FederationError> {

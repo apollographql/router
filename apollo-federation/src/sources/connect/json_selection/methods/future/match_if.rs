@@ -7,7 +7,6 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::helpers::vec_push;
@@ -34,7 +33,6 @@ fn match_if_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     let mut errors = Vec::new();
 
@@ -49,9 +47,6 @@ fn match_if_method(
                     if let Some(JSON::Bool(true)) = condition_opt {
                         return pair[1]
                             .apply_to_path(data, vars, input_path)
-                            .and_then_collecting_errors(|value| {
-                                tail.apply_to_path(value, vars, input_path)
-                            })
                             .prepend_errors(errors);
                     };
                 }

@@ -95,7 +95,7 @@ pub(crate) const DEPRECATED_FIRST_EVENT_CONTEXT_KEY: &str =
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
-/// Containing [`Service`] in the request lifecyle.
+/// Containing [`Service`] in the request lifecycle.
 #[derive(Clone)]
 pub(crate) struct SupergraphService {
     query_planner_service: CachingQueryPlanner<QueryPlannerService>,
@@ -547,7 +547,7 @@ async fn subscription_task(
         .extensions()
         .with_lock(|lock| {
             lock.get::<Arc<UsageReporting>>()
-                .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+                .map(|usage_reporting| usage_reporting.get_stats_report_key().clone())
         })
         .unwrap_or_default();
 

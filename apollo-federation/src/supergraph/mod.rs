@@ -2455,7 +2455,7 @@ mod tests {
                             d: String
                         }
 
-         * This tests is similar to the other test with unions, but because its members are enties, the
+         * This tests is similar to the other test with unions, but because its members are entries, the
          * members themself with have a join__owner, and that means the removal will hit a different
          * code path (technically, the union A will be "removed" directly by `extractSubgraphsFromSupergraph`
          * instead of being removed indirectly through the removal of its members).

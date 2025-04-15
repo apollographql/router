@@ -788,6 +788,8 @@ mod test {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -816,6 +818,7 @@ mod test {
             transport_request: http_request.into(),
             key,
             mapping_problems,
+            supergraph_request: Default::default(),
         }
     }
 

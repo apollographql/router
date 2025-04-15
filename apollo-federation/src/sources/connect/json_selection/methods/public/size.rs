@@ -6,9 +6,7 @@ use shape::location::SourceId;
 
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
-use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::helpers::json_type_name;
 use crate::sources::connect::json_selection::immutable::InputPath;
@@ -26,9 +24,8 @@ fn size_method(
     method_name: &WithRange<String>,
     method_args: Option<&MethodArgs>,
     data: &JSON,
-    vars: &VarsWithPathsMap,
+    _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (
@@ -47,17 +44,17 @@ fn size_method(
     match data {
         JSON::Array(array) => {
             let size = array.len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
+            (Some(JSON::Number(size.into())), vec![])
         }
         JSON::String(s) => {
             let size = s.as_str().len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
+            (Some(JSON::Number(size.into())), vec![])
         }
         // Though we can't ask for ->first or ->last or ->at(n) on an object, we
         // can safely return how many properties the object has for ->size.
         JSON::Object(map) => {
             let size = map.len() as i64;
-            tail.apply_to_path(&JSON::Number(size.into()), vars, input_path)
+            (Some(JSON::Number(size.into())), vec![])
         }
         _ => (
             None,

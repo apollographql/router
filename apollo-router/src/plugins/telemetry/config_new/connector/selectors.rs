@@ -361,6 +361,8 @@ mod tests {
             spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         }
     }
 
@@ -403,6 +405,7 @@ mod tests {
             }),
             key: response_key(),
             mapping_problems,
+            supergraph_request: Default::default(),
         }
     }
 

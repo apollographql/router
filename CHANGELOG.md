@@ -2,6 +2,40 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.1.2] - 2025-04-14
+
+## 🐛 Fixes
+
+### Support `@context`/`@fromContext` when using Connectors ([PR #7132](https://github.com/apollographql/router/pull/7132))
+
+This fixes a bug that dropped the `@context` and `@fromContext` directives when introducing a connector.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/7132
+
+## 📃 Configuration
+
+### Add new configurable delivery pathway for high cardinality Apollo Studio metrics ([PR #7138](https://github.com/apollographql/router/pull/7138))
+
+This change provides a secondary pathway for new "realtime" Studio metrics whose delivery interval is configurable due to their higher cardinality. These metrics will respect `telemetry.apollo.batch_processor.scheduled_delay` as configured on the realtime path.
+
+All other Apollo metrics will maintain the previous hardcoded 60s send interval.
+
+By [@rregitsky](https://github.com/rregitsky) and [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7138
+
+
+
+# [2.1.1] - 2025-04-07
+
+## 🔒 Security
+
+### Certain query patterns may cause resource exhaustion
+
+Corrects a set of denial-of-service (DOS) vulnerabilities that made it possible for an attacker to render router inoperable with certain simple query patterns due to uncontrolled resource consumption. All prior-released versions and configurations are vulnerable except those where `persisted_queries.enabled`, `persisted_queries.safelist.enabled`, and `persisted_queries.safelist.require_id` are all `true`.
+
+See the associated GitHub Advisories [GHSA-3j43-9v8v-cp3f](https://github.com/apollographql/router/security/advisories/GHSA-3j43-9v8v-cp3f), [GHSA-84m6-5m72-45fp](https://github.com/apollographql/router/security/advisories/GHSA-84m6-5m72-45fp), [GHSA-75m2-jhh5-j5g2](https://github.com/apollographql/router/security/advisories/GHSA-75m2-jhh5-j5g2), and [GHSA-94hh-jmq8-2fgp](https://github.com/apollographql/router/security/advisories/GHSA-94hh-jmq8-2fgp), and the `apollo-compiler` GitHub Advisory [GHSA-7mpv-9xg6-5r79](https://github.com/apollographql/apollo-rs/security/advisories/GHSA-7mpv-9xg6-5r79) for more information.
+
+By [@sachindshinde](https://github.com/sachindshinde) and [@goto-bus-stop](https://github.com/goto-bus-stop).
+
 # [2.1.0] - 2025-03-25
 
 ## 🚀 Features
