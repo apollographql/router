@@ -117,10 +117,11 @@ async fn overloaded_compute_job_pool() {
     router.start().await;
     router.assert_started().await;
     // Fire off 100 concurrent requests
-    let requests = (0..100).map(|i| {
-        let mut body =
-            json!({"query":"query ExampleQuery {topProducts{nameAlias: name}}","variables":{}});
-        body["variables"]["nameAlias"] = format!("name-{}", i).into();
+    let requests = (0..1000).map(|i| {
+        let mut body = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+        // Replace the query nameAlias with a new query that has an alias based on i
+        body["query"] = format!(r#"query ExampleQuery{} {{topProducts{{name}}}}"#, i).into();
+
         router.execute_query(Query::builder().body(body).build())
     });
     let responses = futures::future::join_all(requests).await;
