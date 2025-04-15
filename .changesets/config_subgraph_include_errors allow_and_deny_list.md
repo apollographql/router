@@ -1,4 +1,4 @@
-### Brief but complete sentence that stands on its own ([Issue #6402](https://github.com/apollographql/router/pull/6402)
+### `include_subgraph_errors` fine grained control ([Issue #6402](https://github.com/apollographql/router/pull/6402)
 
 Update `include_subgraph_errors` with additional configuration options for both global and subgraph levels. This update provides finer control over error messages and extension keys for each subgraph. 
 For more details, please read the [subgraph-error-inclusion](https://www.apollographql.com/docs/apollo-server/observability/subgraph-error-inclusion/).
@@ -26,6 +26,4 @@ include_subgraph_errors:
 
 **Note:** Using a `deny_extensions_keys` approach carries security risks because any sensitive information not explicitly included in the deny list will be exposed to clients. For better security, subgraphs should prefer to redact everything or `allow_extensions_keys` when possible.
 
-In future releases, Router may add its own extensions to subgraph errors in minor releases.
-
-By [@AUTHOR](https://github.com/Samjin) in https://github.com/apollographql/router/pull/6862
+By [@Samjin](https://github.com/Samjin) and [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/7164
