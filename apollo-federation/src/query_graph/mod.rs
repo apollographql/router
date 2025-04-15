@@ -50,6 +50,7 @@ use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::query_planner::EnabledOverrideConditions;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
@@ -201,7 +202,7 @@ impl QueryGraphEdge {
         conditions_to_check: &EnabledOverrideConditions,
     ) -> bool {
         if let Some(override_condition) = &self.override_condition {
-            override_condition.condition == conditions_to_check.contains(&override_condition.label)
+            override_condition.check(conditions_to_check)
         } else {
             true
         }
@@ -236,6 +237,12 @@ impl Display for QueryGraphEdge {
 pub(crate) struct OverrideCondition {
     pub(crate) label: String,
     pub(crate) condition: bool,
+}
+
+impl OverrideCondition {
+    pub(crate) fn check(&self, enabled_conditions: &EnabledOverrideConditions) -> bool {
+        self.condition == enabled_conditions.contains(&self.label)
+    }
 }
 
 impl Display for OverrideCondition {
@@ -405,6 +412,9 @@ pub struct QueryGraph {
     /// argument coordinates). This identifier is called the "context ID".
     arguments_to_context_ids_by_source:
         IndexMap<Arc<str>, IndexMap<ObjectFieldArgumentDefinitionPosition, Name>>,
+    /// To speed up the estimation of counting non-local selections, we precompute specific metadata
+    /// about the query graph and store that here.
+    non_local_selection_metadata: non_local_selections_estimation::QueryGraphMetadata,
 }
 
 impl QueryGraph {
@@ -500,7 +510,7 @@ impl QueryGraph {
         self.types_to_nodes_by_source(&self.current_source)
     }
 
-    fn types_to_nodes_by_source(
+    pub(super) fn types_to_nodes_by_source(
         &self,
         source: &str,
     ) -> Result<&IndexMap<NamedType, IndexSet<NodeIndex>>, FederationError> {
@@ -580,6 +590,12 @@ impl QueryGraph {
 
     pub(crate) fn is_context_used(&self) -> bool {
         !self.arguments_to_context_ids_by_source.is_empty()
+    }
+
+    pub(crate) fn non_local_selection_metadata(
+        &self,
+    ) -> &non_local_selections_estimation::QueryGraphMetadata {
+        &self.non_local_selection_metadata
     }
 
     /// All outward edges from the given node (including self-key and self-root-type-resolution

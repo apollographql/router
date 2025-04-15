@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
 expression: report
+snapshot_kind: text
 ---
 header:
   graph_ref: test
@@ -20,6 +21,8 @@ traces_per_query:
           operation_type: query
           operation_subtype: ""
           result: ""
+          client_library_name: ""
+          client_library_version: ""
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1

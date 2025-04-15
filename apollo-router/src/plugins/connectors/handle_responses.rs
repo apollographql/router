@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
+use apollo_compiler::collections::HashMap;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::JSONSelection;
 use axum::body::HttpBody;
 use http::header::CONTENT_LENGTH;
+use itertools::Itertools;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use serde_json_bytes::ByteString;
@@ -78,6 +81,7 @@ impl RawResponse {
         connector: Arc<Connector>,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     ) -> connector::request_service::Response {
         let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
@@ -89,9 +93,12 @@ impl RawResponse {
             } => {
                 let inputs = key.inputs().merge(
                     &connector.response_variables,
+                    &connector.response_headers,
                     connector.config.as_ref(),
                     context,
                     Some(parts.status.as_u16()),
+                    supergraph_request,
+                    Some(&parts),
                 );
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -293,6 +300,38 @@ impl MappedResponse {
                         }
                     };
                 }
+                ResponseKey::BatchEntity { keys, inputs, .. } => {
+                    let Value::Array(values) = value else {
+                        return Err(HandleResponseError::MergeError(
+                            "Response for a batch request does not map to an array".into(),
+                        ));
+                    };
+
+                    let key_selection: Result<JSONSelection, _> = keys.try_into();
+                    let key_selection = key_selection
+                        .map_err(|e| HandleResponseError::MergeError(e.to_string()))?;
+
+                    // Convert representations into keys for use in the map
+                    let key_values = inputs.batch.iter().map(|v| {
+                        key_selection
+                            .apply_to(&Value::Object(v.clone()))
+                            .0
+                            .unwrap_or(Value::Null)
+                    });
+
+                    // Create a map of keys to entities
+                    let mut map = values
+                        .into_iter()
+                        .filter_map(|v| key_selection.apply_to(&v).0.map(|key| (key, v)))
+                        .collect::<HashMap<_, _>>();
+
+                    // Make a list of entities that matches the representations list
+                    let entities = key_values
+                        .map(|key| map.remove(&key).unwrap_or(Value::Null))
+                        .collect_vec();
+
+                    data.insert(ENTITIES, Value::Array(entities));
+                }
             },
         }
 
@@ -309,6 +348,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     context: &Context,
     debug_request: Option<ConnectorDebugHttpRequest>,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
     match result {
         // This occurs when we short-circuit the request when over the limit
@@ -358,7 +398,13 @@ pub(crate) async fn process_response<T: HttpBody>(
             };
             if is_success {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                raw.map_response(result, connector, context, debug_context)
+                raw.map_response(
+                    result,
+                    connector,
+                    context,
+                    debug_context,
+                    supergraph_request,
+                )
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                 raw.map_error(result, connector, context, debug_context)
@@ -562,6 +608,7 @@ async fn deserialize_response<T: HttpBody>(
 mod tests {
     use std::sync::Arc;
 
+    use apollo_compiler::Schema;
     use apollo_compiler::name;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
@@ -571,10 +618,13 @@ mod tests {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use insta::assert_debug_snapshot;
+    use itertools::Itertools;
     use url::Url;
 
     use crate::Context;
+    use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
+    use crate::plugins::connectors::make_requests::RequestInputs;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::services::router;
     use crate::services::router::body::RouterBody;
@@ -604,6 +654,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -624,6 +676,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -632,6 +690,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -642,6 +701,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -704,6 +764,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -724,6 +786,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -732,6 +800,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -742,6 +811,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -786,6 +856,129 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_handle_responses_batch() {
+        let connector = Arc::new(Connector {
+            spec: ConnectSpec::V0_2,
+            id: ConnectId::new_on_object(
+                "subgraph_name".into(),
+                None,
+                name!(User),
+                0,
+                "test label",
+            ),
+            transport: HttpJsonTransport {
+                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                connect_template: "/path".parse().unwrap(),
+                method: HTTPMethod::Post,
+                headers: Default::default(),
+                body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
+            },
+            selection: JSONSelection::parse("$.data { id name }").unwrap(),
+            entity_resolver: Some(EntityResolver::TypeBatch),
+            config: Default::default(),
+            max_requests: None,
+            request_variables: Default::default(),
+            response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
+        });
+
+        let keys = connector
+            .resolvable_key(
+                &Schema::parse_and_validate("type Query { _: ID } type User { id: ID! }", "")
+                    .unwrap(),
+            )
+            .unwrap()
+            .unwrap();
+
+        let response1: http::Response<RouterBody> = http::Response::builder()
+            // different order from the request inputs
+            .body(router::body::from_bytes(
+                r#"{"data":[{"id": "2","name":"B"},{"id": "1","name":"A"}]}"#,
+            ))
+            .unwrap();
+
+        let mut inputs: RequestInputs = RequestInputs::default();
+        let representations = serde_json_bytes::json!([{"__typename": "User", "id": "1"}, {"__typename": "User", "id": "2"}]);
+        inputs.batch = representations
+            .as_array()
+            .unwrap()
+            .iter()
+            .cloned()
+            .map(|v| v.as_object().unwrap().clone())
+            .collect_vec();
+
+        let response_key1 = ResponseKey::BatchEntity {
+            selection: Arc::new(JSONSelection::parse("$.data { id name }").unwrap()),
+            keys,
+            inputs,
+        };
+
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
+        let res = super::aggregate_responses(vec![
+            process_response(
+                Ok(response1),
+                response_key1,
+                connector.clone(),
+                &Context::default(),
+                None,
+                &None,
+                supergraph_request,
+            )
+            .await
+            .mapped_response,
+        ])
+        .unwrap();
+
+        assert_debug_snapshot!(res, @r#"
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "_entities": Array([
+                                Object({
+                                    "id": String(
+                                        "1",
+                                    ),
+                                    "name": String(
+                                        "A",
+                                    ),
+                                }),
+                                Object({
+                                    "id": String(
+                                        "2",
+                                    ),
+                                    "name": String(
+                                        "B",
+                                    ),
+                                }),
+                            ]),
+                        }),
+                    ),
+                    path: None,
+                    errors: [],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
+                },
+            },
+        }
+        "#);
+    }
+
+    #[tokio::test]
     async fn test_handle_responses_entity_field() {
         let connector = Arc::new(Connector {
             spec: ConnectSpec::V0_1,
@@ -810,6 +1003,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -834,6 +1029,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -842,6 +1043,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -852,6 +1054,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -926,6 +1129,8 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -966,6 +1171,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
@@ -974,6 +1185,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -984,6 +1196,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -994,6 +1207,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -1004,6 +1218,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -1179,7 +1394,12 @@ mod tests {
             config: Default::default(),
             max_requests: None,
             request_variables: Default::default(),
-            response_variables: selection.external_variables().collect(),
+            response_variables: selection
+                .variable_references()
+                .map(|var_ref| var_ref.namespace.namespace)
+                .collect(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -1192,6 +1412,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -1200,6 +1426,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,

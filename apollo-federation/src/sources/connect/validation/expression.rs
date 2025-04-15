@@ -3,6 +3,7 @@
 
 use std::ops::Range;
 use std::str::FromStr;
+use std::sync::LazyLock;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::parser::LineColumn;
@@ -15,12 +16,25 @@ use shape::location::Location;
 use shape::location::SourceId;
 
 use crate::sources::connect::Namespace;
+use crate::sources::connect::id::ConnectedElement;
+use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
+
+static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
+    Shape::record(
+        [(
+            "headers".to_string(),
+            Shape::dict(Shape::list(Shape::string([]), []), []),
+        )]
+        .into(),
+        [],
+    )
+});
 
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
@@ -41,36 +55,50 @@ impl<'schema> Context<'schema> {
         source: &'schema GraphQLString,
         code: Code,
     ) -> Self {
-        let object_type = coordinate.field_coordinate.object;
-        let is_root_type = schema
-            .schema_definition
-            .query
-            .as_ref()
-            .is_some_and(|query| query.name == object_type.name)
-            || schema
-                .schema_definition
-                .mutation
-                .as_ref()
-                .is_some_and(|mutation| mutation.name == object_type.name);
-        let mut var_lookup: IndexMap<Namespace, Shape> = [
-            (
-                Namespace::Args,
-                shape_for_arguments(coordinate.field_coordinate.field),
-            ),
-            (Namespace::Config, Shape::unknown([])),
-            (Namespace::Context, Shape::unknown([])),
-        ]
-        .into_iter()
-        .collect();
-        if !is_root_type {
-            var_lookup.insert(Namespace::This, Shape::from(object_type));
-        }
+        match coordinate.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+                parent_category,
+            } => {
+                let mut var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
 
-        Self {
-            schema,
-            var_lookup,
-            source,
-            code,
+                if matches!(parent_category, ObjectCategory::Other) {
+                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                }
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
         }
     }
 
@@ -83,6 +111,7 @@ impl<'schema> Context<'schema> {
         let var_lookup: IndexMap<Namespace, Shape> = [
             (Namespace::Config, Shape::unknown([])),
             (Namespace::Context, Shape::unknown([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
         ]
         .into_iter()
         .collect();
@@ -335,13 +364,12 @@ fn shape_name(shape: &Shape) -> &'static str {
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use apollo_compiler::name;
     use line_col::LineColLookup;
     use rstest::rstest;
 
     use super::*;
     use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::validation::coordinates::FieldCoordinate;
+    use crate::sources::connect::validation::link::ConnectLink;
 
     fn expression(selection: &str) -> Expression {
         Expression {
@@ -399,8 +427,8 @@ mod tests {
         let object = schema.get_object("Query").unwrap();
         let field = &object.fields["aField"];
         let directive = field.directives.get("connect").unwrap();
-        let source_directive = name!("source");
-        let schema_info = SchemaInfo::new(&schema, &schema_str, &directive.name, &source_directive);
+        let schema_info =
+            SchemaInfo::new(&schema, &schema_str, ConnectLink::new(&schema).unwrap()?);
         let expr_string = GraphQLString::new(
             &directive
                 .argument_by_name("http", &schema)
@@ -414,7 +442,11 @@ mod tests {
         )
         .unwrap();
         let coordinate = ConnectDirectiveCoordinate {
-            field_coordinate: FieldCoordinate { field, object },
+            element: ConnectedElement::Field {
+                parent_type: object,
+                field_def: field,
+                parent_category: ObjectCategory::Query,
+            },
             directive,
         };
         let context =

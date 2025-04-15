@@ -70,8 +70,8 @@ This project uses [Semantic Versioning 2.0.0](https://semver.org/).  When releas
 
 Creating a release PR is the first step of starting a release, whether there will be pre-releases or not.  About a release PR:
 
-* A release PR is based on a release branch and a release branch gathers all the commits for a release.
-* The release PR merges into `main` at the time that the release becomes official.
+* A release PR is based on a mainline release line (e.g., `dev`, or `1.x`) and a release branch gathers all the commits for a release.
+* The release PR merges into the mainline at the time that the release becomes official.
 * A release can be started from any branch or commit, but it is almost always started from `dev` as that is the main development trunk of the Router.
 * The release PR is in a draft mode until after the preparation PR has been merged into it.
 
@@ -111,24 +111,30 @@ Start following the steps below to start a release PR.  The process is **not ful
    git checkout -b "${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
 
-7. Push this new branch to the appropriate remote.  We will open a PR for it **later**, but this will be the **base** for the PR created in the next step).  (And `--set-upstream` will of course track this locally.  This is commonly abbreviated as `-u`.)
+7. Add an empty commit to the branch.  This isn't always necessary, but it allows the staging PR to be opened when there is no other difference to the base-branch (e.g., `dev`) which prevents the PR from getting opened, even in draft mode.
+
+   ```
+   git commit --allow-empty -m "Start v${APOLLO_ROUTER_RELEASE_VERSION} PR"
+   ```
+
+8. Push this new branch to the appropriate remote.  We will open a PR for it **later**, but this will be the **base** for the PR created in the next step).  (And `--set-upstream` will of course track this locally.  This is commonly abbreviated as `-u`.)
 
    ```
    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
 
-8. Now, open a draft PR with a small boilerplate header from the branch which was just pushed:
+9. Now, open a draft PR with a small boilerplate header from the branch which was just pushed:
 
    ```
-   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+   cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "dev" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
    > **Note**
-   > **This particular PR must be true-merged to \`main\`.**
+   > **This particular PR must be true-merged to \`dev\`.**
 
-   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
+   * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`dev\` branch of an upcoming release (version number in the title).
    * It will act as a staging branch until we are ready to finalize the release.
    * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
    * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
-       - Does this PR target the right branch? (usually, \`main\`)
+       - Does this PR target the right branch? (usually, \`dev\`)
        - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
        - If those things look good, this PR is good to merge!
    EOM
@@ -246,7 +252,7 @@ Start following the steps below to start a release PR.  The process is **not ful
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-7. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.  This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).
+7. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is supported by the Routter.
 
 11. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
@@ -277,7 +283,7 @@ Start following the steps below to start a release PR.  The process is **not ful
     git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-15. Programatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
+15. Programmatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
 
     > Note: This file could totally be created by the `xtask` if we merely decide convention for it and whether we want it checked in or not.  It will be used again later in process and, in theory, by CI.  Definitely not suggesting this should live on as regex.
 
@@ -438,15 +444,7 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-18. (Conditional) If this is meant to be marked as the latest version, edit the release and add the "Latest" label:
-
-    > Note: As of this writing, we will only mark 1.x versions as Latest.
-
-    ```
-    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" --latest
-    ```
-
-19. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+18. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window)
 
@@ -455,7 +453,7 @@ Start following the steps below to start a release PR.  The process is **not ful
       cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-20. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+19. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content

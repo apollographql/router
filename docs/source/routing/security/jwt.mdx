@@ -29,8 +29,9 @@ These are the high-level steps of JWT-based authentication with the GraphOS Rout
    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL provides its keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
    - **If validation fails, the router rejects the request.** This can occur if the JWT is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
 
-5. The router extracts all **claims** from the validated JWT and includes them in the request's context, making them available to your [router customizations](/router/customizations/overview/), such as Rhai scripts.
-6. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs to enable more granular access control.
+5. The router extracts all **claims** from the validated JWT and includes them in the request's context (`apollo::authentication::jwt_claims`), making them available to your [router customizations](/router/customizations/overview/), such as Rhai scripts.
+6. The router will insert the status of JWT processing into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes.
+7. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs to enable more granular access control.
    - For examples, [see below](#working-with-jwt-claims).
 
 ## Turning it on
@@ -55,6 +56,7 @@ Otherwise, if you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne
          # These keys are optional. Default values are shown.
          header_name: Authorization
          header_value_prefix: Bearer
+         on_error: Error
          # array of alternative token sources
          sources:
            - type: header
@@ -149,6 +151,45 @@ The default value is `Bearer`.
 <tr>
 <td style="min-width: 150px;">
 
+##### `on_error`
+
+</td>
+<td>
+
+This setting controls the behavior of the router when an error occurs during JWT validation. Possible values are `Error` (default) and `Continue`.
+
+- `Error`: The router responds with an error when an error occurs during JWT validation.
+- `Continue`: The router continues processing the request when an error occurs during JWT validation. Requests with invalid JWTs will be treated as unauthenticated.
+
+Regardless of whether JWT authentication succeeds, the status of JWT processing is inserted into the request context (`apollo::authentication::jwt_status`). This status is informational and may be used for logging or debugging purposes.
+
+```js
+// On failure
+{
+    // Whether the JWT came from a header or cookie source
+    type: string,
+    // The name of the source's field
+    name: string,
+    // Error details
+    error: {
+        // A user-friendly error message
+        message: string,
+        // A machine-readable error code
+        code: string,
+        // The underlying reason for the error, if any
+        reason: string?
+    }
+}
+
+// On success
+{
+    // Whether the JWT came from a header or cookie source
+    type: string,
+    // The name of the source's field
+    name: string
+}
+```
+
 ##### `sources`
 
 </td>
@@ -204,7 +245,9 @@ The default value is `false`.
 After the GraphOS Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo::authentication::jwt_claims`
 
 > - If no JWT is present for a client request, this context value is the empty tuple, `()`.
-> - If a JWT _is_ present but validation of the JWT fails, the router _rejects_ the request.
+> - If a JWT _is_ present but validation of the JWT fails,
+>     - When `on_error` is set to `Error`, the router _rejects_ the request.
+>     - When `on_error` is set to `Continue`, the router _continues_ processing the request, and the context value is the empty tuple, `()`.
 
 If unauthenticated requests should be rejected, the router can be configured like this:
 

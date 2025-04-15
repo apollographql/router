@@ -14,8 +14,10 @@ use tower::BoxError;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
+pub(crate) mod feature_gate_enforcement;
 pub(crate) mod license_enforcement;
 pub(crate) mod license_stream;
+mod parsed_link_spec;
 pub(crate) mod persisted_queries_manifest_stream;
 pub(crate) mod schema;
 pub(crate) mod schema_stream;

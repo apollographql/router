@@ -1,6 +1,8 @@
 //! Implements support for persisted queries and safelisting at the supergraph service stage.
 
+mod freeform_graphql_behavior;
 mod id_extractor;
+mod manifest;
 mod manifest_poller;
 
 #[cfg(test)]
@@ -10,8 +12,9 @@ use http::HeaderValue;
 use http::StatusCode;
 use http::header::CACHE_CONTROL;
 use id_extractor::PersistedQueryIdExtractor;
-pub use manifest_poller::FullPersistedQueryOperationId;
-pub use manifest_poller::PersistedQueryManifest;
+pub use manifest::FullPersistedQueryOperationId;
+pub use manifest::ManifestOperation;
+pub use manifest::PersistedQueryManifest;
 pub(crate) use manifest_poller::PersistedQueryManifestPoller;
 use tower::BoxError;
 
@@ -27,9 +30,11 @@ const PERSISTED_QUERIES_CLIENT_NAME_CONTEXT_KEY: &str = "apollo_persisted_querie
 const PERSISTED_QUERIES_SAFELIST_SKIP_ENFORCEMENT_CONTEXT_KEY: &str =
     "apollo_persisted_queries::safelist::skip_enforcement";
 
-/// Marker type for request context to identify requests that were expanded from a persisted query
-/// ID.
-struct UsedQueryIdFromManifest;
+/// Used to identify requests that were expanded from a persisted query ID
+#[derive(Clone)]
+pub(crate) struct UsedQueryIdFromManifest {
+    pub(crate) pq_id: String,
+}
 
 /// Implements persisted query support, namely expanding requests using persisted query IDs and
 /// filtering free-form GraphQL requests based on router configuration.
@@ -167,10 +172,12 @@ impl PersistedQueryLayer {
                 body.extensions.remove("persistedQuery");
                 // Record that we actually used our ID, so we can skip the
                 // safelist check later.
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(UsedQueryIdFromManifest));
+
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(UsedQueryIdFromManifest {
+                        pq_id: persisted_query_id.into(),
+                    })
+                });
                 u64_counter!(
                     "apollo.router.operations.persisted_queries",
                     "Total requests with persisted queries enabled",
@@ -439,13 +446,12 @@ fn supergraph_err(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::time::Duration;
 
-    use maplit::hashmap;
     use serde_json::json;
     use tracing::instrument::WithSubscriber;
 
+    use super::manifest::ManifestOperation;
     use super::*;
     use crate::Context;
     use crate::assert_snapshot_subscriber;
@@ -454,7 +460,7 @@ mod tests {
     use crate::configuration::PersistedQueriesSafelist;
     use crate::configuration::Supergraph;
     use crate::metrics::FutureMetricsExt;
-    use crate::services::layers::persisted_queries::manifest_poller::FreeformGraphQLBehavior;
+    use crate::services::layers::persisted_queries::freeform_graphql_behavior::FreeformGraphQLBehavior;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::spec::Schema;
     use crate::test_harness::mocks::persisted_queries::*;
@@ -540,21 +546,24 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn enabled_pq_layer_with_client_names() {
-        let (_mock_guard, uplink_config) = mock_pq_uplink(&hashmap! {
-            FullPersistedQueryOperationId {
-                operation_id: "both-plain-and-cliented".to_string(),
+        let manifest = PersistedQueryManifest::from(vec![
+            ManifestOperation {
+                id: "both-plain-and-cliented".to_string(),
+                body: "query { bpac_no_client: __typename }".to_string(),
                 client_name: None,
-            } => "query { bpac_no_client: __typename }".to_string(),
-            FullPersistedQueryOperationId {
-                operation_id: "both-plain-and-cliented".to_string(),
+            },
+            ManifestOperation {
+                id: "both-plain-and-cliented".to_string(),
+                body: "query { bpac_web_client: __typename }".to_string(),
                 client_name: Some("web".to_string()),
-            } => "query { bpac_web_client: __typename }".to_string(),
-            FullPersistedQueryOperationId {
-                operation_id: "only-cliented".to_string(),
+            },
+            ManifestOperation {
+                id: "only-cliented".to_string(),
+                body: "query { oc_web_client: __typename }".to_string(),
                 client_name: Some("web".to_string()),
-            } => "query { oc_web_client: __typename }".to_string(),
-        })
-        .await;
+            },
+        ]);
+        let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
         let pq_layer = PersistedQueryLayer::new(
             &Configuration::fake_builder()
@@ -876,22 +885,17 @@ mod tests {
 
     async fn pq_layer_freeform_graphql_with_safelist(log_unknown: bool) {
         async move {
-            let manifest = HashMap::from([
-                (
-                    FullPersistedQueryOperationId {
-                        operation_id: "valid-syntax".to_string(),
-                        client_name: None,
-                    },
-                    "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah"
-                        .to_string(),
-                ),
-                (
-                    FullPersistedQueryOperationId {
-                        operation_id: "invalid-syntax".to_string(),
-                        client_name: None,
-                    },
-                    "}}}".to_string(),
-                ),
+            let manifest = PersistedQueryManifest::from(vec![
+                ManifestOperation {
+                    id: "valid-syntax".to_string(),
+                    body: "fragment A on Query { me { id } }    query SomeOp { ...A ...B }    fragment,,, B on Query{me{name,username}  } # yeah".to_string(),
+                    client_name: None,
+                },
+                ManifestOperation {
+                    id: "invalid-syntax".to_string(),
+                    body: "}}}".to_string(),
+                    client_name: None,
+                },
             ]);
 
             let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;

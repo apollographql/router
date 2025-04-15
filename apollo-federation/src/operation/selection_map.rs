@@ -18,7 +18,6 @@ use crate::operation::SelectionId;
 use crate::operation::SelectionSet;
 use crate::operation::SiblingTypename;
 use crate::operation::field_selection::FieldSelection;
-use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
 use crate::operation::inline_fragment_selection::InlineFragmentSelection;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
@@ -415,16 +414,16 @@ impl SelectionMap {
     /// filtering has happened on all the selections of its sub-selection.
     pub(crate) fn filter_recursive_depth_first(
         &self,
-        predicate: &mut dyn FnMut(&Selection) -> Result<bool, FederationError>,
-    ) -> Result<Cow<'_, Self>, FederationError> {
+        predicate: &mut dyn FnMut(&Selection) -> bool,
+    ) -> Cow<'_, Self> {
         fn recur_sub_selections<'sel>(
             selection: &'sel Selection,
-            predicate: &mut dyn FnMut(&Selection) -> Result<bool, FederationError>,
-        ) -> Result<Cow<'sel, Selection>, FederationError> {
-            Ok(match selection {
+            predicate: &mut dyn FnMut(&Selection) -> bool,
+        ) -> Cow<'sel, Selection> {
+            match selection {
                 Selection::Field(field) => {
                     if let Some(sub_selections) = &field.selection_set {
-                        match sub_selections.filter_recursive_depth_first(predicate)? {
+                        match sub_selections.filter_recursive_depth_first(predicate) {
                             Cow::Borrowed(_) => Cow::Borrowed(selection),
                             Cow::Owned(new) => {
                                 Cow::Owned(Selection::from_field(field.field.clone(), Some(new)))
@@ -436,7 +435,7 @@ impl SelectionMap {
                 }
                 Selection::InlineFragment(fragment) => match fragment
                     .selection_set
-                    .filter_recursive_depth_first(predicate)?
+                    .filter_recursive_depth_first(predicate)
                 {
                     Cow::Borrowed(_) => Cow::Borrowed(selection),
                     Cow::Owned(selection_set) => Cow::Owned(Selection::InlineFragment(Arc::new(
@@ -446,20 +445,17 @@ impl SelectionMap {
                         ),
                     ))),
                 },
-                Selection::FragmentSpread(_) => {
-                    return Err(FederationError::internal("unexpected fragment spread"));
-                }
-            })
+            }
         }
         let mut iter = self.values();
         let mut enumerated = (&mut iter).enumerate();
         let mut new_map: Self;
         loop {
             let Some((index, selection)) = enumerated.next() else {
-                return Ok(Cow::Borrowed(self));
+                return Cow::Borrowed(self);
             };
-            let filtered = recur_sub_selections(selection, predicate)?;
-            let keep = predicate(&filtered)?;
+            let filtered = recur_sub_selections(selection, predicate);
+            let keep = predicate(&filtered);
             if keep && matches!(filtered, Cow::Borrowed(_)) {
                 // Nothing changed so far, continue without cloning
                 continue;
@@ -474,12 +470,12 @@ impl SelectionMap {
             break;
         }
         for selection in iter {
-            let filtered = recur_sub_selections(selection, predicate)?;
-            if predicate(&filtered)? {
+            let filtered = recur_sub_selections(selection, predicate);
+            if predicate(&filtered) {
                 new_map.insert(filtered.into_owned());
             }
         }
-        Ok(Cow::Owned(new_map))
+        Cow::Owned(new_map)
     }
 }
 
@@ -504,7 +500,6 @@ where
 #[derive(Debug)]
 pub(crate) enum SelectionValue<'a> {
     Field(FieldSelectionValue<'a>),
-    FragmentSpread(FragmentSpreadSelectionValue<'a>),
     InlineFragment(InlineFragmentSelectionValue<'a>),
 }
 
@@ -514,9 +509,6 @@ impl<'a> SelectionValue<'a> {
             Selection::Field(field_selection) => {
                 SelectionValue::Field(FieldSelectionValue::new(field_selection))
             }
-            Selection::FragmentSpread(fragment_spread_selection) => SelectionValue::FragmentSpread(
-                FragmentSpreadSelectionValue::new(fragment_spread_selection),
-            ),
             Selection::InlineFragment(inline_fragment_selection) => SelectionValue::InlineFragment(
                 InlineFragmentSelectionValue::new(inline_fragment_selection),
             ),
@@ -526,7 +518,6 @@ impl<'a> SelectionValue<'a> {
     pub(super) fn key(&self) -> SelectionKey<'_> {
         match self {
             Self::Field(field) => field.get().key(),
-            Self::FragmentSpread(frag) => frag.get().key(),
             Self::InlineFragment(frag) => frag.get().key(),
         }
     }
@@ -536,7 +527,6 @@ impl<'a> SelectionValue<'a> {
     pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         match self {
             SelectionValue::Field(field) => field.get_selection_set_mut(),
-            SelectionValue::FragmentSpread(frag) => Some(frag.get_selection_set_mut()),
             SelectionValue::InlineFragment(frag) => Some(frag.get_selection_set_mut()),
         }
     }
@@ -560,24 +550,6 @@ impl<'a> FieldSelectionValue<'a> {
 
     pub(crate) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
         Arc::make_mut(self.0).selection_set.as_mut()
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct FragmentSpreadSelectionValue<'a>(&'a mut Arc<FragmentSpreadSelection>);
-
-impl<'a> FragmentSpreadSelectionValue<'a> {
-    pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
-        Self(fragment_spread_selection)
-    }
-
-    pub(crate) fn get(&self) -> &Arc<FragmentSpreadSelection> {
-        self.0
-    }
-
-    #[cfg(test)]
-    pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
-        &mut Arc::make_mut(self.0).selection_set
     }
 }
 
