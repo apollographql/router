@@ -9,6 +9,18 @@ expression: yaml
     name: test_observability
   spans:
     - name: test_observability
+- fields:
+    queue_capacity: "[queue_capacity]"
+    threads: "[threads]"
+  level: INFO
+  message: compute job thread pool created
+  span:
+    job.type: QueryParsing
+    name: compute_job
+  spans:
+    - name: test_observability
+    - job.type: QueryParsing
+      name: compute_job
 - fields: {}
   level: INFO
   message: Inner

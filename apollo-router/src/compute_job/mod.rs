@@ -334,7 +334,10 @@ mod tests {
             let result = job.await;
             assert_eq!(result, 1);
         }
-        .with_subscriber(assert_snapshot_subscriber!())
+        .with_subscriber(assert_snapshot_subscriber!({
+            "[].fields.queue_capacity" => "[queue_capacity]",
+            "[].fields.threads" => "[threads]",
+        }))
         .await;
     }
 
