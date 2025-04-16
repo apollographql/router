@@ -14,7 +14,7 @@ const CLIENT_LIBRARY_KEY: &str = "clientLibrary";
 const CLIENT_LIBRARY_NAME_KEY: &str = "name";
 const CLIENT_LIBRARY_VERSION_KEY: &str = "version";
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, JsonSchema)]
 struct Config {
     #[serde(default = "default_enable_client_library_metrics")]
     enable_client_library_metrics: bool,
