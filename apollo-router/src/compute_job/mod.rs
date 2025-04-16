@@ -312,30 +312,28 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
-    use tracing_futures::WithSubscriber;
-
     use super::*;
-    use crate::assert_snapshot_subscriber;
 
     #[tokio::test]
+    #[tracing_test::traced_test]
     async fn test_observability() {
-        // In this test we expect the logged message to have
+        let job = execute(ComputeJobType::QueryParsing, |_| {
+            tracing::info!("Inner");
+            1
+        });
+        assert_eq!(job.unwrap().await, 1);
 
-        async {
-            let span = info_span!("test_observability");
-            let job = span.in_scope(|| {
-                tracing::info!("Outer");
-                execute(ComputeJobType::QueryParsing, |_| {
-                    tracing::info!("Inner");
-                    1
-                })
-                .unwrap()
-            });
-            let result = job.await;
-            assert_eq!(result, 1);
-        }
-        .with_subscriber(assert_snapshot_subscriber!())
-        .await;
+        assert!(logs_contain("Inner"));
+        logs_assert(|lines: &[&str]| {
+            let properly_annotated = lines
+                .iter()
+                .any(|line| line.contains("Inner") && line.contains("job.type=\"QueryParsing\""));
+            if properly_annotated {
+                Ok(())
+            } else {
+                Err("Expected inner log line to be annotated with compute job type".to_string())
+            }
+        });
     }
 
     #[tokio::test]
