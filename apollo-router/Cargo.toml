@@ -205,7 +205,7 @@ static_assertions = "1.1.0"
 strum_macros = "0.27.0"
 sys-info = "0.9.1"
 sysinfo = { version = "0.32.0", features = ["system", "windows"], default-features = false }
-thiserror = "1.0.61"
+thiserror = "2.0.0"
 tokio.workspace = true
 tokio-stream = { version = "0.1.15", features = ["sync", "net"] }
 tokio-util = { version = "0.7.11", features = ["net", "codec", "time"] }
