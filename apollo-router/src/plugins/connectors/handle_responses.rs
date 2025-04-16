@@ -520,7 +520,7 @@ async fn deserialize_response<T: HttpBody>(
                     problems: vec![],
                 },
             };
-            if event.condition.lock().evaluate_response(&response) {
+            if event.condition.evaluate_response(&response) {
                 Some(event.level)
             } else {
                 None

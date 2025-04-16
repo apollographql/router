@@ -358,7 +358,7 @@ impl
             request.context.extensions().with_lock(|lock| {
                 lock.insert(SupergraphEventResponse {
                     level: response_event.level,
-                    condition: Arc::new(Mutex::new(response_event.condition)),
+                    condition: Arc::new(response_event.condition),
                 })
             });
         }
@@ -417,7 +417,7 @@ impl CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes,
             request.context.extensions().with_lock(|lock| {
                 lock.insert(SubgraphEventResponse {
                     level: response_event.level,
-                    condition: Arc::new(Mutex::new(response_event.condition)),
+                    condition: Arc::new(response_event.condition),
                 })
             });
         }
@@ -467,14 +467,13 @@ struct RouterEventsConfig {
 #[derive(Clone)]
 pub(crate) struct SupergraphEventResponse {
     pub(crate) level: EventLevel,
-    pub(crate) condition: Arc<Mutex<Condition<SupergraphSelector>>>,
+    pub(crate) condition: Arc<Condition<SupergraphSelector>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SubgraphEventResponse {
     pub(crate) level: EventLevel,
-    // FIXME: never used
-    pub(crate) condition: Arc<Mutex<Condition<SubgraphSelector>>>,
+    pub(crate) condition: Arc<Condition<SubgraphSelector>>,
 }
 
 #[derive(Clone)]

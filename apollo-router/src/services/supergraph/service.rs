@@ -438,7 +438,6 @@ async fn service_call(
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
                             if !supergraph_response_event
                                 .condition
-                                .lock()
                                 .evaluate_event_response(resp, &ctx)
                             {
                                 return;

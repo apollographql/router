@@ -30,7 +30,7 @@ pub(crate) struct ConnectorEventRequest {
 #[derive(Clone)]
 pub(crate) struct ConnectorEventResponse {
     pub(crate) level: EventLevel,
-    pub(crate) condition: Arc<Mutex<Condition<ConnectorSelector>>>,
+    pub(crate) condition: Arc<Condition<ConnectorSelector>>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
@@ -83,7 +83,7 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
             request.context.extensions().with_lock(|lock| {
                 lock.insert(ConnectorEventResponse{
                     level: response_event.level,
-                    condition: Arc::new(Mutex::new(response_event.condition)),
+                    condition: Arc::new(response_event.condition),
                 })
             });
         }

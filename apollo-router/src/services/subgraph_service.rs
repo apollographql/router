@@ -1364,7 +1364,6 @@ pub(crate) async fn call_single_http(
 
         let should_log = subgraph_response_event
             .condition
-            .lock()
             .evaluate_response(&subgraph_response);
         if should_log {
             let mut attrs = Vec::with_capacity(5);
