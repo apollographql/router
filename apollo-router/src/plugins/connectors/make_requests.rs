@@ -867,7 +867,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -951,7 +951,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1061,7 +1061,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1183,7 +1183,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1304,7 +1304,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1406,7 +1406,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1530,7 +1530,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1689,7 +1689,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1845,7 +1845,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1972,7 +1972,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -2086,11 +2086,10 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
@@ -2207,11 +2206,10 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
@@ -2332,7 +2330,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             },
@@ -2409,7 +2407,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },

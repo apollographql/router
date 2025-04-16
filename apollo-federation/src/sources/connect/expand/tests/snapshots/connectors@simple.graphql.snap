@@ -20,7 +20,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 http://example/,
             ),
             connect_template: StringTemplate {
@@ -105,7 +105,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 http://example/,
             ),
             connect_template: StringTemplate {
@@ -249,7 +249,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 http://example/,
             ),
             connect_template: StringTemplate {

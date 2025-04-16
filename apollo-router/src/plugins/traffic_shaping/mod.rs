@@ -776,7 +776,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Uri::from_str("http://localhost/api").ok(),
+                source_url: Uri::from_str("http://localhost/api").ok(),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },

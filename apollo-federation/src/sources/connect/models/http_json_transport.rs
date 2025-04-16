@@ -42,7 +42,7 @@ use crate::sources::connect::string_template::write_value;
 
 #[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
-    pub source_uri: Option<Uri>,
+    pub source_url: Option<Uri>,
     pub connect_template: StringTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
@@ -85,7 +85,7 @@ impl HttpJsonTransport {
         }
 
         Ok(Self {
-            source_uri: source.map(|s| s.base_uri.clone()),
+            source_url: source.map(|s| s.base_url.clone()),
             connect_template: connect_url.parse().map_err(|e: string_template::Error| {
                 FederationError::internal(format!(
                     "could not parse URL template: {message}",
@@ -151,7 +151,7 @@ impl HttpJsonTransport {
 
         let mut parts = Parts::default();
         let (scheme, authority) = self
-            .source_uri
+            .source_url
             .as_ref()
             .and_then(|source_uri| Some((source_uri.scheme()?, source_uri.authority()?)))
             .or_else(|| Some((connect_uri.scheme()?, connect_uri.authority()?)))
@@ -162,7 +162,7 @@ impl HttpJsonTransport {
         parts.authority = Some(authority.clone());
 
         let mut path = UriString::new();
-        if let Some(source_uri_path) = self.source_uri.as_ref().map(|source_uri| source_uri.path())
+        if let Some(source_uri_path) = self.source_url.as_ref().map(|source_uri| source_uri.path())
         {
             path.write_trusted(source_uri_path)
         }
@@ -182,7 +182,7 @@ impl HttpJsonTransport {
 
         let mut query = UriString::new();
         if let Some(source_uri_query) = self
-            .source_uri
+            .source_url
             .as_ref()
             .and_then(|source_uri| source_uri.query())
         {
@@ -565,7 +565,7 @@ mod tests {
     #[test]
     fn combine_new_and_old_apis() {
         let transport = HttpJsonTransport {
-            source_uri: Uri::from_str("http://example.com/a?z=1").ok(),
+            source_url: Uri::from_str("http://example.com/a?z=1").ok(),
             connect_template: "/{$args.c}?x={$args.x}".parse().unwrap(),
             source_path: JSONSelection::parse("$(['b', $args.b2])").ok(),
             connect_path: JSONSelection::parse("$(['d', $args.d2])").ok(),
@@ -614,7 +614,7 @@ mod tests {
     fn append_path() {
         assert_eq!(
             HttpJsonTransport {
-                source_uri: Uri::from_str("https://localhost:8080/v1").ok(),
+                source_url: Uri::from_str("https://localhost:8080/v1").ok(),
                 connect_template: "/hello/42".parse().unwrap(),
                 ..Default::default()
             }
@@ -630,7 +630,7 @@ mod tests {
     fn append_path_with_trailing_slash() {
         assert_eq!(
             HttpJsonTransport {
-                source_uri: Uri::from_str("https://localhost:8080/").ok(),
+                source_url: Uri::from_str("https://localhost:8080/").ok(),
                 connect_template: "/hello/42".parse().unwrap(),
                 ..Default::default()
             }
@@ -646,7 +646,7 @@ mod tests {
     fn append_path_test_with_trailing_slash_and_base_path() {
         assert_eq!(
             HttpJsonTransport {
-                source_uri: Uri::from_str("https://localhost:8080/v1/").ok(),
+                source_url: Uri::from_str("https://localhost:8080/v1/").ok(),
                 connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             }
@@ -662,7 +662,7 @@ mod tests {
     fn append_path_test_with_and_base_path_and_params() {
         assert_eq!(
             HttpJsonTransport {
-                source_uri: Uri::from_str("https://localhost:8080/v1?foo=bar").ok(),
+                source_url: Uri::from_str("https://localhost:8080/v1?foo=bar").ok(),
                 connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             }
@@ -678,7 +678,7 @@ mod tests {
     fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
         assert_eq!(
             HttpJsonTransport {
-                source_uri: Uri::from_str("https://localhost:8080/v1/?foo=bar").ok(),
+                source_url: Uri::from_str("https://localhost:8080/v1/?foo=bar").ok(),
                 connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 ..Default::default()
             }

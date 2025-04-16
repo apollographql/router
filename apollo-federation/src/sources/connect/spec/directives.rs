@@ -230,7 +230,7 @@ impl SourceHTTPArguments {
         }
 
         Ok(Self {
-            base_uri: base_url.ok_or(internal!(
+            base_url: base_url.ok_or(internal!(
                 "missing `base_url` field in `@source` directive's `http` argument"
             ))?,
             headers: headers.unwrap_or_default(),
@@ -535,7 +535,7 @@ mod tests {
             SourceDirectiveArguments {
                 name: "json",
                 http: SourceHTTPArguments {
-                    base_uri: https://jsonplaceholder.typicode.com/,
+                    base_url: https://jsonplaceholder.typicode.com/,
                     headers: {
                         "authtoken": From(
                             "x-auth-token",

@@ -347,7 +347,7 @@ mod tests {
                 "label",
             ),
             transport: HttpJsonTransport {
-                source_uri: None,
+                source_url: None,
                 connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
                 ..Default::default()
             },

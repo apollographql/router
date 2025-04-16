@@ -1512,7 +1512,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },
@@ -1599,7 +1599,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 ..Default::default()
             },

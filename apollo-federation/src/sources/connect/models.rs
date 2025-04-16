@@ -375,7 +375,7 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_uri: Some(
+                    source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
                     connect_template: StringTemplate {
@@ -490,7 +490,7 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_uri: Some(
+                    source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
                     connect_template: StringTemplate {
