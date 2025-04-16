@@ -1,10 +1,10 @@
 use serde_json::json;
 use tower::BoxError;
 
-use crate::integration::common::graph_os_enabled;
 use crate::integration::common::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id_via_header() -> Result<(), BoxError> {
@@ -27,12 +27,12 @@ async fn test_trace_id_via_header() -> Result<(), BoxError> {
     router.assert_started().await;
     make_call(&mut router, trace_id).await;
     router
-        .assert_log_contains(&format!("trace_id: {}", trace_id))
+        .wait_for_log_message(&format!("trace_id: {}", trace_id))
         .await;
 
     make_call(&mut router, trace_id).await;
     router
-        .assert_log_contains(&format!("\"id_from_header\": \"{}\"", trace_id))
+        .wait_for_log_message(&format!("\"id_from_header\": \"{}\"", trace_id))
         .await;
 
     router.graceful_shutdown().await;

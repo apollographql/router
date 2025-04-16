@@ -16,15 +16,17 @@ use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::graphql;
-use crate::plugin::test::canned;
-use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugin::PluginPrivate;
 use crate::plugin::PluginUnstable;
+use crate::plugin::test::MockSubgraph;
+use crate::plugin::test::canned;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
+use crate::services::HasSchema;
+use crate::services::SupergraphCreator;
 use crate::services::execution;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
 use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -32,8 +34,6 @@ use crate::services::router;
 use crate::services::router::service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::HasSchema;
-use crate::services::SupergraphCreator;
 use crate::spec::Schema;
 use crate::uplink::license_enforcement::LicenseState;
 
@@ -42,6 +42,9 @@ pub mod mocks;
 
 #[cfg(test)]
 pub(crate) mod http_client;
+
+#[cfg(any(test, feature = "snapshot"))]
+pub(crate) mod http_snapshot;
 
 /// Builder for the part of an Apollo Router that handles GraphQL requests, as a [`tower::Service`].
 ///
@@ -275,22 +278,14 @@ impl<'a> TestHarness<'a> {
         } else {
             self
         };
-        let builder = if builder.subgraph_network_requests {
-            builder
-        } else {
-            builder.subgraph_hook(|_name, _default| {
-                tower::service_fn(|request: subgraph::Request| {
-                    let empty_response = subgraph::Response::builder()
-                        .extensions(crate::json_ext::Object::new())
-                        .context(request.context)
-                        .id(request.id)
-                        .build();
-                    std::future::ready(Ok(empty_response))
-                })
-                .boxed()
-            })
-        };
-        let config = builder.configuration.unwrap_or_default();
+        let mut config = builder.configuration.unwrap_or_default();
+        if !builder.subgraph_network_requests {
+            Arc::make_mut(&mut config)
+                .apollo_plugins
+                .plugins
+                .entry("experimental_mock_subgraphs")
+                .or_insert(serde_json::json!({}));
+        }
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
@@ -301,16 +296,11 @@ impl<'a> TestHarness<'a> {
                 None,
                 None,
                 Some(builder.extra_plugins),
+                Default::default(),
             )
             .await?;
 
         Ok((config, supergraph_creator))
-    }
-
-    /// Builds the supergraph service
-    #[deprecated = "use build_supergraph instead"]
-    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        self.build_supergraph().await
     }
 
     /// Builds the supergraph service
@@ -340,7 +330,7 @@ impl<'a> TestHarness<'a> {
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
             let span = PropagatingMakeSpan {
-                license: LicenseState::default(),
+                license: Default::default(),
                 span_mode: span_mode(&config),
             }
             .make_span(&request.router_request);
@@ -349,10 +339,10 @@ impl<'a> TestHarness<'a> {
         .boxed_clone())
     }
 
-    #[cfg(test)]
-    pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_factory::tests::make_axum_router;
+    /// Build the HTTP service
+    pub async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::ListenAddrAndRouter;
+        use crate::axum_factory::axum_http_server_factory::make_axum_router;
         use crate::router_factory::RouterFactory;
 
         let (config, supergraph_creator) = self.build_common().await?;
@@ -366,11 +356,7 @@ impl<'a> TestHarness<'a> {
 
         let web_endpoints = router_creator.web_endpoints();
 
-        let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let ready = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let routers = make_axum_router(
-            live,
-            ready,
             router_creator,
             &config,
             web_endpoints,
@@ -382,10 +368,9 @@ impl<'a> TestHarness<'a> {
 }
 
 /// An HTTP-level service, as would be given to Hyper’s server
-#[cfg(test)]
-pub(crate) type HttpService = tower::util::BoxService<
+pub type HttpService = tower::util::BoxService<
     http::Request<crate::services::router::Body>,
-    http::Response<axum::body::BoxBody>,
+    http::Response<axum::body::Body>,
     std::convert::Infallible,
 >;
 
@@ -548,6 +533,51 @@ pub fn make_fake_batch(
         result.push(b',');
         result.append(&mut json_bytes_new_req);
         result.push(b']');
-        crate::services::router::Body::from(result)
+        router::body::from_bytes(result)
     })
+}
+
+#[tokio::test]
+async fn test_intercept_subgraph_network_requests() {
+    use futures::StreamExt;
+    let request = crate::services::supergraph::Request::canned_builder()
+        .build()
+        .unwrap();
+    let response = TestHarness::builder()
+        .schema(include_str!("../testing_schema.graphql"))
+        .configuration_json(serde_json::json!({
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap()
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "topProducts": null
+      },
+      "errors": [
+        {
+          "message": "subgraph mock not configured",
+          "path": [],
+          "extensions": {
+            "code": "SUBGRAPH_MOCK_NOT_CONFIGURED",
+            "service": "products"
+          }
+        }
+      ]
+    }
+    "###);
 }

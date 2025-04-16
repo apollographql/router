@@ -3,8 +3,8 @@ import express from "express";
 import { listenForFlagUpdates } from "./launchDarkly.js";
 
 const LABEL_PREFIX = "launchDarkly:";
-const UNRESOLVED_LABELS_CONTEXT_KEY = "apollo_override::unresolved_labels";
-const LABELS_TO_OVERRIDE_CONTEXT_KEY = "apollo_override::labels_to_override";
+const UNRESOLVED_LABELS_CONTEXT_KEY = "apollo::progressive_override::unresolved_labels";
+const LABELS_TO_OVERRIDE_CONTEXT_KEY = "apollo::progressive_override::labels_to_override";
 
 const { PORT } = process.env;
 

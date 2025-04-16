@@ -1,16 +1,22 @@
 use std::collections::HashMap;
+use std::future;
 
+use futures::StreamExt;
+use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::subgraph;
 use crate::services::SubgraphResponse;
+use crate::services::execution;
+use crate::services::fetch::SubgraphNameExt;
+use crate::services::subgraph;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
@@ -84,6 +90,34 @@ impl Plugin for IncludeSubgraphErrors {
             })
             .boxed()
     }
+
+    // TODO: promote fetch_service to a plugin hook
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let all = self.config.all;
+        let subgraphs = self.config.subgraphs.clone();
+        ServiceBuilder::new()
+            .map_response(move |mut response: execution::Response| {
+                response.response = response.response.map(move |response| {
+                    response
+                        .flat_map(move |mut response| {
+                            response.errors.iter_mut().for_each(|error| {
+                                if let Some(subgraph_name) = error.subgraph_name() {
+                                    if !*subgraphs.get(&subgraph_name).unwrap_or(&all) {
+                                        tracing::info!("redacted subgraph({subgraph_name}) error");
+                                        error.message = REDACTED_ERROR_MESSAGE.to_string();
+                                        error.extensions = Object::default();
+                                    }
+                                }
+                            });
+                            stream::once(future::ready(response))
+                        })
+                        .boxed()
+                });
+                response
+            })
+            .service(service)
+            .boxed()
+    }
 }
 
 #[cfg(test)]
@@ -98,20 +132,20 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::Configuration;
     use crate::json_ext::Object;
-    use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::plugin::test::MockSubgraph;
     use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
+    use crate::services::HasSchema;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
-    use crate::services::HasSchema;
-    use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::services::SupergraphRequest;
     use crate::spec::Schema;
-    use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR","service":"products"}}]}"#.as_bytes())
@@ -214,13 +248,26 @@ mod test {
             .await
             .unwrap();
         let schema = planner.schema();
-        let subgraph_schemas = planner.subgraph_schemas();
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let mut plugins = create_plugins(&configuration, &schema, subgraph_schemas, None, None)
-            .await
-            .unwrap();
+        let mut plugins = create_plugins(
+            &Configuration::default(),
+            &schema,
+            subgraph_schemas,
+            None,
+            None,
+            Default::default(),
+        )
+        .await
+        .unwrap();
 
         plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 

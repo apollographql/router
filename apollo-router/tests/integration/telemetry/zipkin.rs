@@ -4,16 +4,16 @@ use std::collections::HashSet;
 use std::ops::Deref;
 
 use anyhow::anyhow;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::integration::common::Query;
-use crate::integration::common::Telemetry;
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
@@ -142,6 +142,10 @@ impl Verifier for ZipkinTraceSpec {
 
     fn spec(&self) -> &TraceSpec {
         &self.trace_spec
+    }
+
+    fn verify_resources(&self, _trace: &Value) -> Result<(), BoxError> {
+        Ok(())
     }
 }
 

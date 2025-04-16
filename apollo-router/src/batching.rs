@@ -4,34 +4,34 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
-use opentelemetry::trace::TraceContextExt;
 use opentelemetry::Context as otelContext;
+use opentelemetry::trace::TraceContextExt;
 use parking_lot::Mutex as PMutex;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tower::BoxError;
 use tracing::Instrument;
 use tracing::Span;
 
+use crate::Context;
 use crate::error::FetchError;
 use crate::error::SubgraphBatchingError;
 use crate::graphql;
 use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
-use crate::query_planner::fetch::QueryHash;
-use crate::services::http::HttpClientServiceFactory;
-use crate::services::process_batches;
-use crate::services::router::body::get_body_bytes;
-use crate::services::router::body::RouterBody;
-use crate::services::subgraph::SubgraphRequestId;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-use crate::Context;
+use crate::services::http::HttpClientServiceFactory;
+use crate::services::process_batches;
+use crate::services::router;
+use crate::services::router::body::RouterBody;
+use crate::services::subgraph::SubgraphRequestId;
+use crate::spec::QueryHash;
 
 /// A query that is part of a batch.
 /// Note: It's ok to make transient clones of this struct, but *do not* store clones anywhere apart
@@ -281,7 +281,7 @@ impl Batch {
                                 request, sender, ..
                             } in cancelled_requests
                             {
-                                let subgraph_name = request.subgraph_name.ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                                let subgraph_name = request.subgraph_name;
                                 if let Err(log_error) = sender.send(Err(Box::new(FetchError::SubrequestBatchingError {
                                         service: subgraph_name.clone(),
                                         reason: format!("request cancelled: {reason}"),
@@ -365,7 +365,7 @@ impl Batch {
                 sender: tx,
             } in all_in_one
             {
-                let subgraph_name = sg_request.subgraph_name.clone().ok_or(SubgraphBatchingError::MissingSubgraphName)?;
+                let subgraph_name = sg_request.subgraph_name.clone();
                 let value = svc_map
                     .entry(
                         subgraph_name,
@@ -449,7 +449,7 @@ pub(crate) async fn assemble_batch(
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
     // Construct the actual byte body of the batched request
-    let bytes = get_body_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = router::body::into_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Retain the various contexts for later use
     let contexts = requests
@@ -470,7 +470,7 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, RouterBody::from(bytes));
+    let request = http::Request::from_parts(parts, router::body::from_bytes(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 
@@ -483,26 +483,27 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use tokio::sync::oneshot;
     use tower::ServiceExt;
-    use wiremock::matchers;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
+    use wiremock::matchers;
 
-    use super::assemble_batch;
     use super::Batch;
     use super::BatchQueryInfo;
-    use crate::graphql;
-    use crate::graphql::Request;
-    use crate::layers::ServiceExt as LayerExt;
-    use crate::query_planner::fetch::QueryHash;
-    use crate::services::http::HttpClientServiceFactory;
-    use crate::services::router;
-    use crate::services::subgraph;
-    use crate::services::subgraph::SubgraphRequestId;
-    use crate::services::SubgraphRequest;
-    use crate::services::SubgraphResponse;
+    use super::assemble_batch;
     use crate::Configuration;
     use crate::Context;
     use crate::TestHarness;
+    use crate::graphql;
+    use crate::graphql::Request;
+    use crate::layers::ServiceExt as LayerExt;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
+    use crate::services::http::HttpClientServiceFactory;
+    use crate::services::router;
+    use crate::services::router::body;
+    use crate::services::subgraph;
+    use crate::services::subgraph::SubgraphRequestId;
+    use crate::spec::QueryHash;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_assembles_batch() {
@@ -553,7 +554,8 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            std::str::from_utf8(&request.into_body().to_bytes().await.unwrap()).unwrap(),
+            std::str::from_utf8(&router::body::into_bytes(request.into_body()).await.unwrap())
+                .unwrap(),
         )
         .unwrap();
 
@@ -581,7 +583,7 @@ mod tests {
                     .body(graphql::Response::builder().data(data.clone()).build())
                     .unwrap(),
                 context: Context::new(),
-                subgraph_name: None,
+                subgraph_name: String::default(),
                 id: SubgraphRequestId(String::new()),
             };
 
@@ -619,17 +621,19 @@ mod tests {
 
         let bq = Batch::query_for_index(batch.clone(), 0).expect("its a valid index");
 
-        assert!(bq
-            .set_query_hashes(vec![Arc::new(QueryHash::default())])
-            .await
-            .is_ok());
+        assert!(
+            bq.set_query_hashes(vec![Arc::new(QueryHash::default())])
+                .await
+                .is_ok()
+        );
         assert!(!bq.finished());
         assert!(bq.signal_cancelled("why not?".to_string()).await.is_ok());
         assert!(bq.finished());
-        assert!(bq
-            .signal_cancelled("only once though".to_string())
-            .await
-            .is_err());
+        assert!(
+            bq.signal_cancelled("only once though".to_string())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -651,24 +655,27 @@ mod tests {
             )
             .subgraph_name("whatever".to_string())
             .build();
-        assert!(bq
-            .set_query_hashes(vec![Arc::new(QueryHash::default())])
-            .await
-            .is_ok());
+        assert!(
+            bq.set_query_hashes(vec![Arc::new(QueryHash::default())])
+                .await
+                .is_ok()
+        );
         assert!(!bq.finished());
-        assert!(bq
-            .signal_progress(
+        assert!(
+            bq.signal_progress(
                 factory.clone(),
                 request.clone(),
                 graphql::Request::default()
             )
             .await
-            .is_ok());
+            .is_ok()
+        );
         assert!(bq.finished());
-        assert!(bq
-            .signal_progress(factory, request, graphql::Request::default())
-            .await
-            .is_err());
+        assert!(
+            bq.signal_progress(factory, request, graphql::Request::default())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -690,20 +697,23 @@ mod tests {
             )
             .subgraph_name("whatever".to_string())
             .build();
-        assert!(bq
-            .set_query_hashes(vec![Arc::new(QueryHash::default())])
-            .await
-            .is_ok());
+        assert!(
+            bq.set_query_hashes(vec![Arc::new(QueryHash::default())])
+                .await
+                .is_ok()
+        );
         assert!(!bq.finished());
-        assert!(bq
-            .signal_progress(factory, request, graphql::Request::default())
-            .await
-            .is_ok());
+        assert!(
+            bq.signal_progress(factory, request, graphql::Request::default())
+                .await
+                .is_ok()
+        );
         assert!(bq.finished());
-        assert!(bq
-            .signal_cancelled("only once though".to_string())
-            .await
-            .is_err());
+        assert!(
+            bq.signal_cancelled("only once though".to_string())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -728,20 +738,23 @@ mod tests {
         let qh = Arc::new(QueryHash::default());
         assert!(bq.set_query_hashes(vec![qh.clone(), qh]).await.is_ok());
         assert!(!bq.finished());
-        assert!(bq
-            .signal_progress(factory, request, graphql::Request::default())
-            .await
-            .is_ok());
+        assert!(
+            bq.signal_progress(factory, request, graphql::Request::default())
+                .await
+                .is_ok()
+        );
         assert!(!bq.finished());
-        assert!(bq
-            .signal_cancelled("only twice though".to_string())
-            .await
-            .is_ok());
+        assert!(
+            bq.signal_cancelled("only twice though".to_string())
+                .await
+                .is_ok()
+        );
         assert!(bq.finished());
-        assert!(bq
-            .signal_cancelled("only twice though".to_string())
-            .await
-            .is_err());
+        assert!(
+            bq.signal_cancelled("only twice though".to_string())
+                .await
+                .is_err()
+        );
     }
 
     fn expect_batch(request: &wiremock::Request) -> ResponseTemplate {
@@ -806,6 +819,9 @@ mod tests {
             "include_subgraph_errors": {
                 "all": true
             },
+            "include_subgraph_errors": {
+                "all": true
+            },
             "batching": {
                 "enabled": true,
                 "mode": "batch_http_link",
@@ -853,7 +869,7 @@ mod tests {
                 .method("POST")
                 .header(CONTENT_TYPE, "application/json")
                 .header(ACCEPT, "application/json")
-                .body(serde_json::to_vec(&request).unwrap().into())
+                .body(body::from_bytes(serde_json::to_vec(&request).unwrap()))
                 .unwrap(),
         };
 

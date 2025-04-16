@@ -3,18 +3,36 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
+use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
+use position::ObjectFieldDefinitionPosition;
+use position::ObjectOrInterfaceTypeDefinitionPosition;
+use position::TagDirectiveTargetPosition;
 use referencer::Referencers;
 
+use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::internal_error;
+use crate::link::Link;
 use crate::link::LinksMetadata;
+use crate::link::federation_spec_definition::ContextDirectiveArguments;
+use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::federation_spec_definition::FromContextDirectiveArguments;
+use crate::link::federation_spec_definition::KeyDirectiveArguments;
+use crate::link::federation_spec_definition::ProvidesDirectiveArguments;
+use crate::link::federation_spec_definition::RequiresDirectiveArguments;
+use crate::link::federation_spec_definition::TagDirectiveArguments;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
@@ -27,14 +45,16 @@ use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod argument_composition_strategies;
+pub(crate) mod blueprint;
 pub(crate) mod definitions;
 pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
+pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
 
-fn compute_subgraph_metadata(
-    schema: &Valid<FederationSchema>,
+pub(crate) fn compute_subgraph_metadata(
+    schema: &FederationSchema,
 ) -> Result<Option<SubgraphMetadata>, FederationError> {
     Ok(
         if let Ok(federation_spec_definition) = get_federation_spec_definition_from_subgraph(schema)
@@ -48,7 +68,7 @@ fn compute_subgraph_metadata(
 pub(crate) mod type_and_directive_specification;
 
 /// A GraphQL schema with federation data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FederationSchema {
     schema: Schema,
     referencers: Referencers,
@@ -76,8 +96,12 @@ impl FederationSchema {
         &self.referencers
     }
 
+    pub(crate) fn subgraph_metadata(&self) -> Option<&SubgraphMetadata> {
+        self.subgraph_metadata.as_deref()
+    }
+
     /// Returns all the types in the schema, minus builtins.
-    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> + '_ {
+    pub(crate) fn get_types(&self) -> impl Iterator<Item = TypeDefinitionPosition> {
         self.schema
             .types
             .iter()
@@ -101,7 +125,7 @@ impl FederationSchema {
 
     pub(crate) fn get_directive_definitions(
         &self,
-    ) -> impl Iterator<Item = DirectiveDefinitionPosition> + '_ {
+    ) -> impl Iterator<Item = DirectiveDefinitionPosition> {
         self.schema
             .directive_definitions
             .keys()
@@ -214,6 +238,388 @@ impl FederationSchema {
             None => Ok(None),
         }
     }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.isFed2Schema` in JS
+    // This works even if the schema bootstrapping was not completed.
+    pub(crate) fn is_fed_2(&self) -> bool {
+        self.federation_link()
+            .is_some_and(|link| link.url.version.satisfies(&Version { major: 2, minor: 0 }))
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.federationFeature` in JS
+    fn federation_link(&self) -> Option<&Arc<Link>> {
+        self.metadata().and_then(|metadata| {
+            metadata
+                .by_identity
+                .get(FederationSpecDefinition::latest().identity())
+        })
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.fieldSetType` in JS.
+    pub(crate) fn field_set_type(&self) -> Result<ScalarTypeDefinitionPosition, FederationError> {
+        let name_in_schema =
+            self.federation_type_name_in_schema(FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC)?;
+        match self.schema.types.get(&name_in_schema) {
+            Some(ExtendedType::Scalar(_)) => Ok(ScalarTypeDefinitionPosition {
+                type_name: name_in_schema,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{name_in_schema}` type definition"
+            ),
+            None => {
+                bail!("Unexpected: type not found for federation spec's `{name_in_schema}`")
+            }
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.federationTypeNameInSchema` in JS.
+    // Note: Unfortunately, this overlaps with `ValidFederationSchema`'s
+    //       `federation_type_name_in_schema` method. This method was added because it's used
+    //       during composition before `ValidFederationSchema` is created.
+    pub(crate) fn federation_type_name_in_schema(
+        &self,
+        name: Name,
+    ) -> Result<Name, FederationError> {
+        // Currently, the types used to define the federation operations, that is _Any, _Entity and
+        // _Service, are not considered part of the federation spec, and are instead hardcoded to
+        // the names above. The reason being that there is no way to maintain backward
+        // compatibility with fed2 if we were to add those to the federation spec without requiring
+        // users to add those types to their @link `import`, and that wouldn't be a good user
+        // experience (because most users don't really know what those types are/do). And so we
+        // special case it.
+        if name.starts_with('_') {
+            return Ok(name);
+        }
+
+        if self.is_fed_2() {
+            let Some(links) = self.metadata() else {
+                bail!("Schema should be a core schema")
+            };
+            let Some(federation_link) = links
+                .by_identity
+                .get(FederationSpecDefinition::latest().identity())
+            else {
+                bail!("Schema should have the latest federation link")
+            };
+            Ok(federation_link.type_name_in_schema(&name))
+        } else {
+            // The only type here so far is the the `FieldSet` one. And in fed1, it's called `_FieldSet`, so ...
+            Name::new(&format!("_{name}"))
+                .map_err(|e| internal_error!("Invalid name `_{name}`: {e}"))
+        }
+    }
+
+    pub(crate) fn context_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ContextDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let context_directive_definition = federation_spec.context_directive_definition(self)?;
+        let context_directive_referencers = self
+            .referencers()
+            .get_directive(&context_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for interface_type_position in &context_directive_referencers.interface_types {
+            match interface_type_position.get(self.schema()) {
+                Ok(interface_type) => {
+                    let directives = &interface_type.directives;
+                    for directive in directives.get_all(&context_directive_definition.name) {
+                        let arguments = federation_spec.context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| ContextDirective {
+                            arguments: args,
+                            target: interface_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for object_type_position in &context_directive_referencers.object_types {
+            match object_type_position.get(self.schema()) {
+                Ok(object_type) => {
+                    let directives = &object_type.directives;
+                    for directive in directives.get_all(&context_directive_definition.name) {
+                        let arguments = federation_spec.context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| ContextDirective {
+                            arguments: args,
+                            target: object_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for union_type_position in &context_directive_referencers.union_types {
+            match union_type_position.get(self.schema()) {
+                Ok(union_type) => {
+                    let directives = &union_type.directives;
+                    for directive in directives.get_all(&context_directive_definition.name) {
+                        let arguments = federation_spec.context_directive_arguments(directive);
+                        applications.push(arguments.map(|args| ContextDirective {
+                            arguments: args,
+                            target: union_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    pub(crate) fn from_context_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<FromContextDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let from_context_directive_definition =
+            federation_spec.from_context_directive_definition(self)?;
+        let from_context_directive_referencers = self
+            .referencers()
+            .get_directive(&from_context_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for interface_field_argument_position in
+            &from_context_directive_referencers.interface_field_arguments
+        {
+            match interface_field_argument_position.get(self.schema()) {
+                Ok(interface_field_argument) => {
+                    let directives = &interface_field_argument.directives;
+                    for directive in directives.get_all(&from_context_directive_definition.name) {
+                        let arguments = federation_spec.from_context_directive_arguments(directive);
+                        applications
+                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for object_field_argument_position in
+            &from_context_directive_referencers.object_field_arguments
+        {
+            match object_field_argument_position.get(self.schema()) {
+                Ok(object_field_argument) => {
+                    let directives = &object_field_argument.directives;
+                    for directive in directives.get_all(&from_context_directive_definition.name) {
+                        let arguments = federation_spec.from_context_directive_arguments(directive);
+                        applications
+                            .push(arguments.map(|args| FromContextDirective { arguments: args }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    pub(crate) fn key_directive_applications(&self) -> FallibleDirectiveIterator<KeyDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let key_directive_definition = federation_spec.key_directive_definition(self)?;
+        let key_directive_referencers = self
+            .referencers()
+            .get_directive(&key_directive_definition.name)?;
+
+        let mut applications: Vec<Result<KeyDirective, FederationError>> = Vec::new();
+        for object_type_position in &key_directive_referencers.object_types {
+            match object_type_position.get(self.schema()) {
+                Ok(object_type) => {
+                    let directives = &object_type.directives;
+                    for directive in directives.get_all(&key_directive_definition.name) {
+                        let arguments = federation_spec.key_directive_arguments(directive);
+                        applications.push(arguments.map(|args| KeyDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: object_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for interface_type_position in &key_directive_referencers.interface_types {
+            match interface_type_position.get(self.schema()) {
+                Ok(interface_type) => {
+                    let directives = &interface_type.directives;
+                    for directive in directives.get_all(&key_directive_definition.name) {
+                        let arguments = federation_spec.key_directive_arguments(directive);
+                        applications.push(arguments.map(|args| KeyDirective {
+                            arguments: args,
+                            schema_directive: directive,
+                            sibling_directives: directives,
+                            target: interface_type_position.clone().into(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    pub(crate) fn provides_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<ProvidesDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let provides_directive_definition = federation_spec.provides_directive_definition(self)?;
+        let provides_directive_referencers = self
+            .referencers()
+            .get_directive(&provides_directive_definition.name)?;
+
+        let mut applications: Vec<Result<ProvidesDirective, FederationError>> = Vec::new();
+        for field_definition_position in &provides_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for provides_directive_application in
+                        directives.get_all(&provides_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .provides_directive_arguments(provides_directive_application);
+                        applications.push(arguments.map(|args| ProvidesDirective {
+                            arguments: args,
+                            target_return_type: field_definition.ty.inner_named_type(),
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    pub(crate) fn requires_directive_applications(
+        &self,
+    ) -> FallibleDirectiveIterator<RequiresDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let requires_directive_definition = federation_spec.requires_directive_definition(self)?;
+        let requires_directive_referencers = self
+            .referencers()
+            .get_directive(&requires_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in &requires_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for provides_directive_application in
+                        directives.get_all(&requires_directive_definition.name)
+                    {
+                        let arguments = federation_spec
+                            .requires_directive_arguments(provides_directive_application);
+                        applications.push(arguments.map(|args| RequiresDirective {
+                            arguments: args,
+                            target: field_definition_position,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+
+    // TODO: This currently only returns targets for object_fields and interface_fields
+    pub(crate) fn tag_directive_applications(&self) -> FallibleDirectiveIterator<TagDirective> {
+        let federation_spec = get_federation_spec_definition_from_subgraph(self)?;
+        let tag_directive_definition = federation_spec.tag_directive_definition(self)?;
+        let tag_directive_referencers = self
+            .referencers()
+            .get_directive(&tag_directive_definition.name)?;
+
+        let mut applications = Vec::new();
+        for field_definition_position in &tag_directive_referencers.object_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::ObjectField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        for field_definition_position in &tag_directive_referencers.interface_fields {
+            match field_definition_position.get(self.schema()) {
+                Ok(field_definition) => {
+                    let directives = &field_definition.directives;
+                    for tag_directive_application in
+                        directives.get_all(&tag_directive_definition.name)
+                    {
+                        let arguments =
+                            federation_spec.tag_directive_arguments(tag_directive_application);
+                        applications.push(arguments.map(|args| TagDirective {
+                            arguments: args,
+                            target: TagDirectiveTargetPosition::InterfaceField(
+                                field_definition_position.clone(),
+                            ),
+                            directive: tag_directive_application,
+                        }));
+                    }
+                }
+                Err(error) => applications.push(Err(error.into())),
+            }
+        }
+        Ok(applications)
+    }
+}
+
+type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
+
+pub(crate) struct ContextDirective<'schema> {
+    /// The parsed arguments of this `@context` application
+    arguments: ContextDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: CompositeTypeDefinitionPosition,
+}
+
+pub(crate) struct FromContextDirective<'schema> {
+    /// The parsed arguments of this `@fromContext` application
+    arguments: FromContextDirectiveArguments<'schema>,
+}
+
+pub(crate) struct KeyDirective<'schema> {
+    /// The parsed arguments of this `@key` application
+    arguments: KeyDirectiveArguments<'schema>,
+    /// The original `Directive` instance from the AST with unparsed arguments
+    schema_directive: &'schema apollo_compiler::schema::Component<Directive>,
+    /// The `DirectiveList` containing all directives applied to the target position, including this one
+    sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
+    /// The schema position to which this directive is applied
+    target: ObjectOrInterfaceTypeDefinitionPosition,
+}
+
+pub(crate) struct ProvidesDirective<'schema> {
+    /// The parsed arguments of this `@provides` application
+    arguments: ProvidesDirectiveArguments<'schema>,
+    /// The return type of the target field
+    target_return_type: &'schema Name,
+}
+
+pub(crate) struct RequiresDirective<'schema> {
+    /// The parsed arguments of this `@requires` application
+    arguments: RequiresDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: &'schema ObjectFieldDefinitionPosition,
+}
+
+pub(crate) struct TagDirective<'schema> {
+    /// The parsed arguments of this `@tag` application
+    arguments: TagDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: TagDirectiveTargetPosition, // TODO: Make this a reference
+    /// Reference to the directive in the schema
+    directive: &'schema Node<Directive>,
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
@@ -269,7 +675,7 @@ impl ValidFederationSchema {
     ) -> Result<Name, FederationError> {
         // Currently, the types used to define the federation operations, that is _Any, _Entity and _Service,
         // are not considered part of the federation spec, and are instead hardcoded to the names above.
-        // The reason being that there is no way to maintain backward compatbility with fed2 if we were to add
+        // The reason being that there is no way to maintain backward compatibility with fed2 if we were to add
         // those to the federation spec without requiring users to add those types to their @link `import`,
         // and that wouldn't be a good user experience (because most users don't really know what those types
         // are/do). And so we special case it.

@@ -1,13 +1,13 @@
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::subgraph;
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use prost::Message;
 use prost_types::Timestamp;
+use proto::reports::Trace;
+use proto::reports::trace::Node;
 use proto::reports::trace::node::Id::Index;
 use proto::reports::trace::node::Id::ResponseName;
-use proto::reports::trace::Node;
-use proto::reports::Trace;
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -426,15 +426,7 @@ pub(crate) fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
       };
       builder.with_json(
           json!({
-              "query": "
-                query($representations: [_Any!]!) {
-                  _entities(representations: $representations) {
-                    ..._generated_onProduct1_0
-                  }
-                }
-                fragment _generated_onProduct1_0 on Product {
-                  reviews { author{ __typename id } }
-                }",
+              "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Product { reviews { author { __typename id } } } } }",
               "variables": {"representations": [
                   {"__typename": "Product", "upc": "1"},
                   {"__typename": "Product", "upc": "2"},

@@ -1,13 +1,13 @@
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use itertools::Itertools;
 
 use super::argument::directive_optional_list_argument;
@@ -25,6 +25,7 @@ use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::link::spec_definition::SpecDefinitions;
 use crate::schema::FederationSchema;
+use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 
 pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
 pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");
@@ -189,7 +190,7 @@ impl JoinSpecDefinition {
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find join spec in schema".to_owned(),
             })?;
-        if let ExtendedType::Enum(ref type_) = type_ {
+        if let ExtendedType::Enum(type_) = type_ {
             Ok(type_)
         } else {
             Err(SingleFederationError::Internal {
@@ -408,6 +409,14 @@ impl JoinSpecDefinition {
 impl SpecDefinition for JoinSpecDefinition {
     fn url(&self) -> &Url {
         &self.url
+    }
+
+    fn directive_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
+    }
+
+    fn type_specs(&self) -> Vec<Box<dyn TypeAndDirectiveSpecification>> {
+        todo!()
     }
 }
 

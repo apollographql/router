@@ -18,15 +18,11 @@ The **Apollo Router Core** is a configurable, high-performance **graph router** 
 
 ## Development
 
-You will need a recent version of rust (`1.83.0` works well as of writing).
-Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
-the recommended way to do it as it will automatically install the toolchain version
-specified in `rust-toolchain.toml`, including rustfmt and clippy
-that are not always included by default in other rust distribution channels:
-
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
+You will need a recent version of rust, as specified in `rust-toolchain.toml`.
+We recommend [using rustup](https://www.rust-lang.org/tools/install)
+as it will automatically install the requiried toolchain version,
+including rustfmt and clippy
+that are not always included by default in other rust distribution channels.
 
 In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
 
@@ -110,7 +106,7 @@ cargo build --profile release-dhat --features dhat-heap
 
 This will create a router in `./target/release-dhat`, which can be run with:
 ```shell
-cargo run --profile release-dhat --feautures dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
+cargo run --profile release-dhat --features dhat-heap -- -s ./apollo-router/testing_schema.graphql -c router.yaml
 ```
 
 When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can

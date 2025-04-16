@@ -5,6 +5,7 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Result;
 
+use brotli::enc::StandardAlloc;
 use brotli::enc::backward_references::BrotliEncoderParams;
 use brotli::enc::encode::BrotliEncoderCompressStream;
 use brotli::enc::encode::BrotliEncoderCreateInstance;
@@ -12,7 +13,6 @@ use brotli::enc::encode::BrotliEncoderHasMoreOutput;
 use brotli::enc::encode::BrotliEncoderIsFinished;
 use brotli::enc::encode::BrotliEncoderOperation;
 use brotli::enc::encode::BrotliEncoderStateStruct;
-use brotli::enc::StandardAlloc;
 
 use crate::axum_factory::compression::codec::Encode;
 use crate::axum_factory::compression::util::PartialBuffer;

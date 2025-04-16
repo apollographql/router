@@ -1,12 +1,10 @@
-#[cfg(test)]
-use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::fmt;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry::sdk::Resource;
-use opentelemetry::OrderMap;
+use opentelemetry::KeyValue;
+use opentelemetry_sdk::Resource;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Field;
@@ -23,10 +21,10 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
 
-use super::get_trace_and_span_id;
-use super::EventFormatter;
 use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
+use super::EventFormatter;
+use super::get_trace_and_span_id;
 use crate::plugins::telemetry::config::TraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::DisplayTraceIdFormat;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
@@ -234,8 +232,8 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|(key, _value)| {
-                    let key_name = key.as_str();
+                .filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -245,9 +243,11 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
-            for (key, value) in attrs {
-                write!(writer, "{key}={value},")?;
+            let mut attrs: Vec<_> = attrs.collect();
+            #[cfg(test)]
+            attrs.sort_by_key(|kv| kv.key.clone());
+            for kv in attrs {
+                write!(writer, "{}={},", kv.key, kv.value)?;
             }
         }
 
@@ -391,12 +391,11 @@ where
                 None => {
                     let event_attributes = extensions.get_mut::<EventAttributes>();
                     event_attributes.map(|event_attributes| {
-                        OrderMap::from_iter(
-                            event_attributes
-                                .take()
-                                .into_iter()
-                                .map(|kv| (kv.key, kv.value)),
-                        )
+                        event_attributes
+                            .take()
+                            .into_iter()
+                            .map(|KeyValue { key, value }| (key, value))
+                            .collect()
                     })
                 }
             };

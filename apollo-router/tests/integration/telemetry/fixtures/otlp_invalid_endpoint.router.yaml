@@ -1,0 +1,16 @@
+telemetry:
+  exporters:
+    tracing:
+      common:
+        service_name: router
+      otlp:
+        enabled: true
+        endpoint: <otel-collector-endpoint>
+        batch_processor:
+          scheduled_delay: 1s
+          max_queue_size: 1
+          max_concurrent_exports: 1
+          max_export_batch_size: 1
+    metrics:
+      prometheus:
+        enabled: true

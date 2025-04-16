@@ -1,30 +1,30 @@
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+use apollo_compiler::Name;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_compiler::Schema;
 use itertools::Itertools;
+use petgraph::Direction;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use regex::Regex;
 use strum::IntoEnumIterator;
 
 use crate::bail;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
-use crate::operation::merge_selection_sets;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::operation::Selection;
 use crate::operation::SelectionSet;
+use crate::operation::merge_selection_sets;
 use crate::query_graph::ContextCondition;
 use crate::query_graph::OverrideCondition;
 use crate::query_graph::QueryGraph;
@@ -32,6 +32,8 @@ use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::query_planning_traversal::non_local_selections_estimation::precompute_non_local_selection_metadata;
+use crate::schema::ValidFederationSchema;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -46,10 +48,9 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
 use crate::supergraph::extract_subgraphs_from_supergraph;
-use crate::utils::iter_into_single_item;
 use crate::utils::FallibleIterator;
+use crate::utils::iter_into_single_item;
 
 /// Builds a "federated" query graph based on the provided supergraph and API schema.
 ///
@@ -77,6 +78,7 @@ pub fn build_federated_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let query_graph =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?
@@ -112,6 +114,7 @@ pub fn build_query_graph(
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
         arguments_to_context_ids_by_source: Default::default(),
+        non_local_selection_metadata: Default::default(),
     };
     let builder = SchemaQueryGraphBuilder::new(query_graph, name, schema, None, false)?;
     query_graph = builder.build()?;
@@ -1002,6 +1005,10 @@ impl FederatedQueryGraphBuilder {
         self.handle_interface_object()?;
         // This method adds no nodes/edges, but just precomputes followup edge information.
         self.precompute_non_trivial_followup_edges()?;
+        // This method adds no nodes/edges, but just precomputes metadata for estimating the count
+        // of non_local_selections.
+        self.base.query_graph.non_local_selection_metadata =
+            precompute_non_local_selection_metadata(&self.base.query_graph)?;
         Ok(self.base.build())
     }
 
@@ -1923,13 +1930,6 @@ impl FederatedQueryGraphBuilder {
                             stack.push((node, &inline_fragment_selection.selection_set));
                         }
                     }
-                    Selection::FragmentSpread(_) => {
-                        return Err(SingleFederationError::Internal {
-                            message: "Unexpectedly found named fragment in FieldSet scalar"
-                                .to_owned(),
-                        }
-                        .into());
-                    }
                 }
             }
         }
@@ -2370,7 +2370,7 @@ fn context_parse_error(context: &str, message: &str) -> FederationError {
     .into()
 }
 
-fn parse_context(field: &str) -> Result<(String, String), FederationError> {
+pub(crate) fn parse_context(field: &str) -> Result<(String, String), FederationError> {
     // PORT_NOTE: The original JS regex, as shown below
     //   /^(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*\$(?:[\n\r\t ,]|#[^\n\r]*(?![^\n\r]))*([A-Za-z_]\w*(?!\w))([\s\S]*)$/
     // makes use of negative lookaheads, which aren't supported natively by Rust's regex crate.
@@ -2437,27 +2437,27 @@ fn parse_context(field: &str) -> Result<(String, String), FederationError> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::Name;
+    use apollo_compiler::Schema;
     use apollo_compiler::collections::IndexMap;
     use apollo_compiler::collections::IndexSet;
     use apollo_compiler::name;
-    use apollo_compiler::Name;
-    use apollo_compiler::Schema;
+    use petgraph::Direction;
     use petgraph::graph::NodeIndex;
     use petgraph::visit::EdgeRef;
-    use petgraph::Direction;
 
     use crate::error::FederationError;
-    use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_graph::QueryGraphNode;
     use crate::query_graph::QueryGraphNodeType;
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::schema::ValidFederationSchema;
     use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::OutputTypeDefinitionPosition;
     use crate::schema::position::ScalarTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
-    use crate::schema::ValidFederationSchema;
 
     const SCHEMA_NAME: &str = "test";
 

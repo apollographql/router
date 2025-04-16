@@ -20,12 +20,12 @@ use multer::Multipart;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
-use wiremock::matchers::body_partial_json;
-use wiremock::matchers::header;
-use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::body_partial_json;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
 
 #[path = "./common.rs"]
 pub(crate) mod common;
@@ -125,6 +125,11 @@ fn lookup_dir(
                     continue;
                 }
 
+                #[cfg(not(feature = "snapshot"))]
+                if plan.snapshot {
+                    continue;
+                }
+
                 tests.push(Trial::test(name, move || test(&path, plan)));
             } else {
                 lookup_dir(&path, &name, tests)?;
@@ -199,7 +204,7 @@ impl TestExecution {
                 subgraphs,
                 update_url_overrides,
             } => {
-                self.reload_subgraphs(subgraphs, *update_url_overrides, out)
+                self.reload_subgraphs(subgraphs, *update_url_overrides, path, out)
                     .await
             }
             Action::Request {
@@ -240,8 +245,10 @@ impl TestExecution {
         self.subgraphs = subgraphs.clone();
         let (mut subgraphs_server, url) = self.start_subgraphs(out).await;
 
-        let subgraph_overrides = self.load_subgraph_mocks(&mut subgraphs_server, &url).await;
-        writeln!(out, "got subgraph mocks: {subgraph_overrides:?}").unwrap();
+        let subgraph_overrides = self
+            .load_subgraph_mocks(&mut subgraphs_server, &url, path, out)
+            .await;
+        writeln!(out, "got subgraph mocks: {subgraph_overrides:?}")?;
 
         let config = open_file(&path.join(configuration_path), out)?;
         let schema_path = path.join(schema_path);
@@ -293,7 +300,7 @@ impl TestExecution {
 
         let subgraph_url = Self::subgraph_url(&subgraphs_server);
         let subgraph_overrides = self
-            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url, path, out)
             .await;
 
         let config = open_file(&path.join(configuration_path), out)?;
@@ -342,33 +349,74 @@ impl TestExecution {
         &mut self,
         subgraphs_server: &mut MockServer,
         url: &str,
+        #[cfg_attr(not(feature = "snapshot"), allow(unused_variables))] path: &Path,
+        #[cfg_attr(not(feature = "snapshot"), allow(unused_variables, clippy::ptr_arg))]
+        out: &mut String,
     ) -> HashMap<String, String> {
         let mut subgraph_overrides = HashMap::new();
 
+        #[cfg_attr(not(feature = "snapshot"), allow(unused_variables))]
         for (name, subgraph) in &self.subgraphs {
-            for SubgraphRequestMock { request, response } in &subgraph.requests {
-                let mut builder = Mock::given(body_partial_json(&request.body));
+            if let Some(snapshot) = subgraph.snapshot.as_ref() {
+                #[cfg(feature = "snapshot")]
+                {
+                    use std::str::FromStr;
 
-                if let Some(s) = request.method.as_deref() {
-                    builder = builder.and(method(s));
-                }
+                    use http::Uri;
+                    use http::header::CONTENT_LENGTH;
+                    use http::header::CONTENT_TYPE;
 
-                if let Some(s) = request.path.as_deref() {
-                    builder = builder.and(wiremock::matchers::path(s));
-                }
-
-                for (header_name, header_value) in &request.headers {
-                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
-                }
-
-                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
-                for (header_name, header_value) in &response.headers {
-                    res = res.append_header(header_name.as_str(), header_value.as_str());
-                }
-                builder
-                    .respond_with(res.set_body_json(&response.body))
-                    .mount(subgraphs_server)
+                    let snapshot_server = apollo_router::SnapshotServer::spawn(
+                        &path.join(&snapshot.path),
+                        Uri::from_str(&snapshot.base_url).unwrap(),
+                        true,
+                        snapshot.update.unwrap_or(false),
+                        Some(vec![CONTENT_TYPE.to_string(), CONTENT_LENGTH.to_string()]),
+                        snapshot.port,
+                    )
                     .await;
+                    let snapshot_url = snapshot_server.uri();
+                    writeln!(
+                        out,
+                        "snapshot server for {name} listening on {snapshot_url}"
+                    )
+                    .unwrap();
+                    subgraph_overrides
+                        .entry(name.to_string())
+                        .or_insert(snapshot_url.clone());
+                }
+                #[cfg(not(feature = "snapshot"))]
+                panic!("Tests using the snapshot feature must have `snapshot` set to `true`")
+            } else {
+                for SubgraphRequestMock { request, response } in
+                    subgraph.requests.as_ref().unwrap_or(&vec![])
+                {
+                    let mut builder = match &request.body {
+                        Some(body) => Mock::given(body_partial_json(body)),
+                        None => Mock::given(wiremock::matchers::AnyMatcher),
+                    };
+
+                    if let Some(s) = request.method.as_deref() {
+                        builder = builder.and(method(s));
+                    }
+
+                    if let Some(s) = request.path.as_deref() {
+                        builder = builder.and(wiremock::matchers::path(s));
+                    }
+
+                    for (header_name, header_value) in &request.headers {
+                        builder = builder.and(header(header_name.as_str(), header_value.as_str()));
+                    }
+
+                    let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
+                    for (header_name, header_value) in &response.headers {
+                        res = res.append_header(header_name.as_str(), header_value.as_str());
+                    }
+                    builder
+                        .respond_with(res.set_body_json(&response.body))
+                        .mount(subgraphs_server)
+                        .await;
+                }
             }
 
             // Add a default override for products, if not specified
@@ -384,6 +432,7 @@ impl TestExecution {
         &mut self,
         subgraphs: &HashMap<String, Subgraph>,
         update_url_overrides: bool,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         writeln!(out, "reloading subgraphs with: {subgraphs:?}").unwrap();
@@ -398,7 +447,7 @@ impl TestExecution {
 
         let subgraph_url = Self::subgraph_url(&subgraphs_server);
         let subgraph_overrides = self
-            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url)
+            .load_subgraph_mocks(&mut subgraphs_server, &subgraph_url, path, out)
             .await;
         self.subgraphs_server = Some(subgraphs_server);
 
@@ -715,6 +764,8 @@ struct Plan {
     enterprise: bool,
     #[serde(default)]
     redis: bool,
+    #[serde(default)]
+    snapshot: bool,
     actions: Vec<Action>,
 }
 
@@ -756,9 +807,19 @@ enum Action {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[cfg_attr(not(feature = "snapshot"), allow(dead_code))]
+struct Snapshot {
+    path: String,
+    base_url: String,
+    update: Option<bool>,
+    port: Option<u16>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Subgraph {
-    requests: Vec<SubgraphRequestMock>,
+    snapshot: Option<Snapshot>,
+    requests: Option<Vec<SubgraphRequestMock>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -775,7 +836,7 @@ struct HttpRequest {
     path: Option<String>,
     #[serde(default)]
     headers: HashMap<String, String>,
-    body: Value,
+    body: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

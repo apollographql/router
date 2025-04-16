@@ -6,11 +6,11 @@ use serde_json_bytes::ByteString;
 use super::Fragments;
 use crate::json_ext::Object;
 use crate::json_ext::PathElement;
-use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
-use crate::spec::query::DeferStats;
 use crate::spec::FieldType;
 use crate::spec::Schema;
 use crate::spec::SpecError;
+use crate::spec::query::DeferStats;
+use crate::spec::query::subselections::DEFER_DIRECTIVE_NAME;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {

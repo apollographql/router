@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod datadog;
-#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
-mod jaeger;
 mod logging;
 mod metrics;
 mod otlp;
@@ -25,12 +23,11 @@ struct TraceSpec {
     priority_sampled: Option<&'static str>,
     subgraph_sampled: Option<bool>,
     trace_id: Option<String>,
-    span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
+    resources: HashMap<&'static str, &'static str>,
 }
 
 #[buildstructor::buildstructor]
 impl TraceSpec {
-    #[allow(clippy::too_many_arguments)]
     #[builder]
     pub fn new(
         operation_name: Option<String>,
@@ -42,7 +39,7 @@ impl TraceSpec {
         priority_sampled: Option<&'static str>,
         subgraph_sampled: Option<bool>,
         trace_id: Option<String>,
-        span_attributes: HashMap<&'static str, Vec<(&'static str, &'static str)>>,
+        resources: HashMap<&'static str, &'static str>,
     ) -> Self {
         Self {
             operation_name,
@@ -53,8 +50,8 @@ impl TraceSpec {
             unmeasured_spans,
             priority_sampled,
             subgraph_sampled,
-            span_attributes,
             trace_id,
+            resources,
         }
     }
 }

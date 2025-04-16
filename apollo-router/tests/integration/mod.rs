@@ -3,8 +3,11 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
+mod connectors;
 mod coprocessor;
 mod docs;
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
+mod entity_cache;
 mod file_upload;
 mod introspection;
 mod lifecycle;

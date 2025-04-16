@@ -218,7 +218,7 @@ pub(crate) trait Visitor: Sized {
         def: &ast::FragmentSpread,
     ) -> Result<Option<ast::FragmentSpread>, BoxError> {
         let res = fragment_spread(self, def);
-        if let Ok(Some(ref fragment)) = res.as_ref() {
+        if let Ok(Some(fragment)) = res.as_ref() {
             self.state()
                 .used_fragments
                 .insert(fragment.fragment_name.as_str().to_string());
@@ -569,13 +569,10 @@ mod tests {
                 def: &ast::Field,
             ) -> Result<Option<ast::Field>, BoxError> {
                 Ok(field(self, field_def, def)?.map(|mut new| {
-                    new.directives.push(
-                        ast::Directive {
-                            name: apollo_compiler::name!("added"),
-                            arguments: Vec::new(),
-                        }
-                        .into(),
-                    );
+                    new.directives.push(ast::Directive {
+                        name: apollo_compiler::name!("added"),
+                        arguments: Vec::new(),
+                    });
                     new
                 }))
             }

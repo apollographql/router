@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
@@ -9,30 +12,29 @@ use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
 use indexmap::map::Entry;
 
+use crate::ValidFederationSubgraph;
 use crate::error::FederationError;
-use crate::link::spec::Identity;
+use crate::link::DEFAULT_LINK_NAME;
 use crate::link::Link;
 use crate::link::LinkError;
-use crate::link::DEFAULT_LINK_NAME;
-use crate::subgraph::spec::AppliedFederationLink;
-use crate::subgraph::spec::FederationSpecDefinitions;
-use crate::subgraph::spec::LinkSpecDefinitions;
+use crate::link::spec::Identity;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
+use crate::subgraph::spec::AppliedFederationLink;
 use crate::subgraph::spec::CONTEXTFIELDVALUE_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 use crate::subgraph::spec::ENTITY_UNION_NAME;
 use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
+use crate::subgraph::spec::FederationSpecDefinitions;
 use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
+use crate::subgraph::spec::LinkSpecDefinitions;
 use crate::subgraph::spec::SERVICE_SDL_QUERY;
 use crate::subgraph::spec::SERVICE_TYPE;
-use crate::ValidFederationSubgraph;
 
 mod database;
 pub mod spec;
+pub mod typestate; // TODO: Move here to overwrite Subgraph after API is reasonable
 
 pub struct Subgraph {
     pub name: String,
@@ -119,7 +121,7 @@ impl Subgraph {
                     .schema_definition
                     .make_mut()
                     .directives
-                    .push(defaults.applied_link_directive().into());
+                    .push(defaults.applied_link_directive());
                 defaults
             }
         };
@@ -136,7 +138,7 @@ impl Subgraph {
                     .schema_definition
                     .make_mut()
                     .directives
-                    .push(defaults.applied_link_directive().into());
+                    .push(defaults.applied_link_directive());
                 defaults
             }
         };
@@ -350,6 +352,33 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
             url: value.url,
             schema: value.schema.schema().clone(),
         }
+    }
+}
+
+/// Currently, this is making up for the fact that we don't have an equivalent of `addSubgraphToErrors`.
+/// In JS, that manipulates the underlying `GraphQLError` message to prepend the subgraph name. In Rust,
+/// it's idiomatic to have strongly typed errors which defer conversion to strings via `thiserror`, so
+/// for now we wrap the underlying error until we figure out a longer-term replacement that accounts
+/// for missing error codes and the like.
+#[allow(dead_code)]
+#[derive(Clone, Debug)]
+pub struct SubgraphError {
+    pub(crate) subgraph: String,
+    pub(crate) error: FederationError,
+}
+
+impl SubgraphError {
+    pub(crate) fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+        SubgraphError {
+            subgraph: subgraph.into(),
+            error: error.into(),
+        }
+    }
+}
+
+impl Display for SubgraphError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}] {}", self.subgraph, self.error)
     }
 }
 

@@ -6,6 +6,10 @@ use http::HeaderValue;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use crate::Configuration;
+use crate::Context;
+use crate::Notify;
+use crate::TestHarness;
 use crate::graphql;
 use crate::plugin::test::MockSubgraph;
 use crate::services::router::ClientRequestAccepts;
@@ -13,10 +17,6 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::Schema;
 use crate::test_harness::MockedSubgraphs;
-use crate::Configuration;
-use crate::Context;
-use crate::Notify;
-use crate::TestHarness;
 
 const SCHEMA: &str = include_str!("../../testdata/orga_supergraph.graphql");
 
@@ -1132,13 +1132,12 @@ async fn subscription_callback_schema_reload() {
     // reload schema
     let schema = Schema::parse(&new_schema, &configuration).unwrap();
     notify.broadcast_schema(Arc::new(schema));
-    insta::assert_json_snapshot!(tokio::time::timeout(
-        Duration::from_secs(1),
-        stream.next_response()
-    )
-    .await
-    .unwrap()
-    .unwrap());
+    insta::assert_json_snapshot!(
+        tokio::time::timeout(Duration::from_secs(1), stream.next_response())
+            .await
+            .unwrap()
+            .unwrap()
+    );
 }
 
 #[tokio::test]
@@ -1277,28 +1276,13 @@ async fn root_typename_with_defer_and_empty_first_response() {
     let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "
-                    { ..._generated_onQuery1_0 }
-
-                    fragment _generated_onQuery1_0 on Query {
-                      currentUser { activeOrganization { __typename id} }
-                    }
-                ",
+                "query": "{ ... on Query { currentUser { activeOrganization { __typename id } } } }",
             }},
             serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
         ).build()),
         ("orga", MockSubgraph::builder().with_json(
             serde_json::json!{{
-                "query": "
-                    query($representations: [_Any!]!) {
-                      _entities(representations: $representations) {
-                        ..._generated_onOrganization1_0
-                      }
-                    }
-                    fragment _generated_onOrganization1_0 on Organization {
-                      suborga { id name }
-                    }
-                ",
+                "query": "query($representations: [_Any!]!) { _entities(representations: $representations) { ... on Organization { suborga { id name } } } }",
                 "variables": {
                     "representations":[{"__typename": "Organization", "id":"0"}]
                 }
@@ -1854,7 +1838,7 @@ async fn reconstruct_deferred_query_under_interface() {
 
 fn subscription_context() -> Context {
     let context = Context::new();
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         lock.insert(ClientRequestAccepts {
             multipart_subscription: true,
             ..Default::default()
@@ -1866,7 +1850,7 @@ fn subscription_context() -> Context {
 
 fn defer_context() -> Context {
     let context = Context::new();
-    context.extensions().with_lock(|mut lock| {
+    context.extensions().with_lock(|lock| {
         lock.insert(ClientRequestAccepts {
             multipart_defer: true,
             ..Default::default()
@@ -3262,7 +3246,7 @@ async fn id_scalar_can_overflow_i32() {
         .await
         .unwrap();
     // The router did not panic or respond with an early validation error.
-    // Instead it did a subgraph fetch, which recieved the correct ID variable without rounding:
+    // Instead it did a subgraph fetch, which received the correct ID variable without rounding:
     assert_eq!(
         response.errors[0].extensions["reason"].as_str().unwrap(),
         "$id = 9007199254740993"
@@ -3424,9 +3408,9 @@ async fn interface_object_typename() {
                         }
                     }
                   }"#,*/
-                  // this works too
-                  /*
-                  r#"{
+            // this works too
+            /*
+            r#"{
               searchContacts(name: "max") {
                   inner {
                     ...F
@@ -3436,7 +3420,7 @@ async fn interface_object_typename() {
             fragment F on Contact {
               country
             }"#,
-                   */
+             */
             // this does not
             r#"{
         searchContacts(name: "max") {

@@ -1,9 +1,9 @@
 use bytes::Bytes;
 use derivative::Derivative;
-use serde::de::DeserializeSeed;
-use serde::de::Error;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::DeserializeSeed;
+use serde::de::Error;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -137,7 +137,7 @@ impl Request {
     /// of some parameters to be specified that would be otherwise required
     /// for a real request.  It's usually enough for most testing purposes,
     /// especially when a fully constructed `Request` is difficult to construct.
-    /// While today, its paramters have the same optionality as its `new`
+    /// While today, its parameters have the same optionality as its `new`
     /// counterpart, that may change in future versions.
     fn fake_new(
         query: Option<String>,
@@ -196,7 +196,7 @@ impl Request {
     fn process_batch_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(value);
 
-        if value.is_array() {
+        if let serde_json::Value::Array(entries) = value {
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
@@ -210,10 +210,7 @@ impl Request {
                 1,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
+            for entry in entries {
                 let bytes = serde_json::to_vec(entry)?;
                 result.push(Request::deserialize_from_bytes(&bytes.into())?);
             }
@@ -227,7 +224,7 @@ impl Request {
     fn process_query_values(value: &serde_json::Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(value);
 
-        if value.is_array() {
+        if let serde_json::Value::Array(entries) = value {
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
@@ -241,10 +238,7 @@ impl Request {
                 1,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
+            for entry in entries {
                 result.push(Request::process_value(entry)?);
             }
         } else {

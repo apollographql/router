@@ -7,8 +7,8 @@ mod visitor;
 use std::fmt;
 use std::pin::Pin;
 
-use apollo_compiler::execution::GraphQLError as CompilerExecutionError;
-use apollo_compiler::execution::ResponseDataPathElement;
+use apollo_compiler::response::GraphQLError as CompilerExecutionError;
+use apollo_compiler::response::ResponseDataPathSegment;
 use futures::Stream;
 use heck::ToShoutySnakeCase;
 pub use request::Request;
@@ -26,6 +26,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
+use crate::spec::query::ERROR_CODE_RESPONSE_VALIDATION;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
 ///
@@ -169,12 +170,47 @@ impl Error {
             extensions,
         })
     }
+
+    pub(crate) fn from_value_completion_value(value: &Value) -> Option<Error> {
+        let value_completion = ensure_object!(value).ok()?;
+        let mut extensions = value_completion
+            .get("extensions")
+            .and_then(|e: &Value| -> Option<Object> {
+                serde_json_bytes::from_value(e.clone()).ok()
+            })
+            .unwrap_or_default();
+        extensions.insert("code", ERROR_CODE_RESPONSE_VALIDATION.into());
+        extensions.insert("severity", tracing::Level::WARN.as_str().into());
+
+        let message = value_completion
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(|m| m.to_string())
+            .unwrap_or_default();
+        let locations = value_completion
+            .get("locations")
+            .map(|l: &Value| skip_invalid_locations(l.clone()))
+            .map(|l: Value| serde_json_bytes::from_value(l).unwrap_or_default())
+            .unwrap_or_default();
+        let path =
+            value_completion
+                .get("path")
+                .and_then(|p: &serde_json_bytes::Value| -> Option<Path> {
+                    serde_json_bytes::from_value(p.clone()).ok()
+                });
+        Some(Error {
+            message,
+            locations,
+            path,
+            extensions,
+        })
+    }
 }
 
 /// GraphQL spec require that both "line" and "column" are positive numbers.
 /// However GraphQL Java and GraphQL Kotlin return `{ "line": -1, "column": -1 }`
 /// if they can't determine error location inside query.
-/// This function removes such locations from suplied value.
+/// This function removes such locations from supplied value.
 fn skip_invalid_locations(mut value: Value) -> Value {
     if let Some(array) = value.as_array_mut() {
         array.retain(|location| {
@@ -233,10 +269,10 @@ impl From<CompilerExecutionError> for Error {
             let elements = path
                 .into_iter()
                 .map(|element| match element {
-                    ResponseDataPathElement::Field(name) => {
+                    ResponseDataPathSegment::Field(name) => {
                         JsonPathElement::Key(name.as_str().to_owned(), None)
                     }
-                    ResponseDataPathElement::ListIndex(i) => JsonPathElement::Index(i),
+                    ResponseDataPathSegment::ListIndex(i) => JsonPathElement::Index(i),
                 })
                 .collect();
             Some(Path(elements))

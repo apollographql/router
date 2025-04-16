@@ -4,10 +4,11 @@ use std::fmt::Formatter;
 use std::fmt::Write;
 use std::sync::LazyLock;
 
-use apollo_compiler::validation::DiagnosticList;
-use apollo_compiler::validation::WithErrors;
 use apollo_compiler::InvalidNameError;
 use apollo_compiler::Name;
+use apollo_compiler::ast::OperationType;
+use apollo_compiler::validation::DiagnosticList;
+use apollo_compiler::validation::WithErrors;
 
 use crate::subgraph::spec::FederationSpecError;
 
@@ -135,7 +136,9 @@ pub enum SingleFederationError {
     OperationNameNotProvided,
     #[error(r#"{message} in @fromContext substring "{context}""#)]
     FromContextParseError { context: String, message: String },
-    #[error("Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations.")]
+    #[error(
+        "Unsupported custom directive @{name} on fragment spread. Due to query transformations during planning, the router requires directives on fragment spreads to support both the FRAGMENT_SPREAD and INLINE_FRAGMENT locations."
+    )]
     UnsupportedSpreadDirective { name: Name },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
@@ -191,12 +194,27 @@ pub enum SingleFederationError {
     RequiresInvalidFields { message: String },
     #[error("{message}")]
     KeyFieldsSelectInvalidType { message: String },
-    #[error("{message}")]
-    RootQueryUsed { message: String },
-    #[error("{message}")]
-    RootMutationUsed { message: String },
-    #[error("{message}")]
-    RootSubscriptionUsed { message: String },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the query root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootQueryUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the mutation root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootMutationUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
+    #[error(
+        "The schema has a type named \"{expected_name}\" but it is not set as the subscription root type (\"{found_name}\" is instead): this is not supported by federation. If a root type does not use its default name, there should be no other type with that default name."
+    )]
+    RootSubscriptionUsed {
+        expected_name: Name,
+        found_name: Name,
+    },
     #[error("{message}")]
     InvalidSubgraphName { message: String },
     #[error("{message}")]
@@ -296,6 +314,12 @@ pub enum SingleFederationError {
     InterfaceKeyMissingImplementationType { message: String },
     #[error("@defer is not supported on subscriptions")]
     DeferredSubscriptionUnsupported,
+    #[error("{message}")]
+    QueryPlanComplexityExceeded { message: String },
+    #[error("the caller requested cancellation")]
+    PlanningCancelled,
+    #[error("No plan was found when subgraphs were disabled")]
+    NoPlanFoundWithDisabledSubgraphs,
 }
 
 impl SingleFederationError {
@@ -487,6 +511,34 @@ impl SingleFederationError {
                 ErrorCode::InterfaceKeyMissingImplementationType
             }
             SingleFederationError::DeferredSubscriptionUnsupported => ErrorCode::Internal,
+            SingleFederationError::QueryPlanComplexityExceeded { .. } => {
+                ErrorCode::QueryPlanComplexityExceededError
+            }
+            SingleFederationError::PlanningCancelled => ErrorCode::Internal,
+            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
+                ErrorCode::NoPlanFoundWithDisabledSubgraphs
+            }
+        }
+    }
+
+    pub(crate) fn root_already_used(
+        operation_type: OperationType,
+        expected_name: Name,
+        found_name: Name,
+    ) -> Self {
+        match operation_type {
+            OperationType::Query => Self::RootQueryUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Mutation => Self::RootMutationUsed {
+                expected_name,
+                found_name,
+            },
+            OperationType::Subscription => Self::RootSubscriptionUsed {
+                expected_name,
+                found_name,
+            },
         }
     }
 }
@@ -514,12 +566,16 @@ impl From<FederationSpecError> for FederationError {
     }
 }
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error, Default)]
 pub struct MultipleFederationErrors {
     pub errors: Vec<SingleFederationError>,
 }
 
 impl MultipleFederationErrors {
+    pub fn new() -> Self {
+        Self { errors: vec![] }
+    }
+
     pub fn push(&mut self, error: FederationError) {
         match error {
             FederationError::SingleFederationError(error) => {
@@ -633,7 +689,56 @@ impl FederationError {
         }
         .into()
     }
+
+    pub fn merge(self, other: Self) -> Self {
+        let mut result = MultipleFederationErrors::new();
+        result.push(self);
+        result.push(other);
+        result.into()
+    }
 }
+
+// Similar to `multi_try` crate, but with `FederationError` instead of `Vec<E>`.
+pub trait MultiTry<U> {
+    type Output;
+
+    fn and_try(self, other: Result<U, FederationError>) -> Self::Output;
+}
+
+impl<U> MultiTry<U> for Result<(), FederationError> {
+    type Output = Result<U, FederationError>;
+
+    fn and_try(self, other: Result<U, FederationError>) -> Result<U, FederationError> {
+        match (self, other) {
+            (Ok(_a), Ok(b)) => Ok(b),
+            (Ok(_a), Err(b)) => Err(b),
+            (Err(a), Ok(_b)) => Err(a),
+            (Err(a), Err(b)) => Err(a.merge(b)),
+        }
+    }
+}
+
+pub trait MultiTryAll: Sized + Iterator {
+    /// Apply `predicate` on all elements of the iterator, collecting all errors (if any).
+    /// - Returns Ok(()), if all elements are Ok.
+    /// - Otherwise, returns a FederationError with all errors.
+    /// - Note: Not to be confused with `try_for_each`, which stops on the first error.
+    fn try_for_all<F>(self, mut predicate: F) -> Result<(), FederationError>
+    where
+        F: FnMut(Self::Item) -> Result<(), FederationError>,
+    {
+        let mut errors = MultipleFederationErrors::new();
+        for item in self {
+            match predicate(item) {
+                Ok(()) => {}
+                Err(e) => errors.push(e),
+            }
+        }
+        errors.into_result()
+    }
+}
+
+impl<I: Iterator> MultiTryAll for I {}
 
 impl MultipleFederationErrors {
     /// Converts into `Result<(), FederationError>`.
@@ -801,7 +906,10 @@ static FIELDS_HAS_ARGS: LazyLock<ErrorCodeCategory<String>> = LazyLock::new(|| {
     ErrorCodeCategory::new_federation_directive(
         "FIELDS_HAS_ARGS".to_owned(),
         Box::new(|directive| {
-            format!("The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).", directive)
+            format!(
+                "The `fields` argument of a `@{}` directive includes a field defined with arguments (which is not currently supported).",
+                directive
+            )
         }),
         None,
     )
@@ -818,7 +926,10 @@ static DIRECTIVE_FIELDS_MISSING_EXTERNAL: LazyLock<ErrorCodeCategory<String>> = 
         ErrorCodeCategory::new_federation_directive(
             "FIELDS_MISSING_EXTERNAL".to_owned(),
             Box::new(|directive| {
-                format!("The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.", directive)
+                format!(
+                    "The `fields` argument of a `@{}` directive includes a field that is not marked as `@external`.",
+                    directive
+                )
             }),
             Some(ErrorCodeMetadata {
                 added_in: FED1_CODE,
@@ -863,7 +974,10 @@ static DIRECTIVE_IN_FIELDS_ARG: LazyLock<ErrorCodeCategory<String>> = LazyLock::
     ErrorCodeCategory::new_federation_directive(
         "DIRECTIVE_IN_FIELDS_ARG".to_owned(),
         Box::new(|directive| {
-            format!("The `fields` argument of a `@{}` directive includes some directive applications. This is not supported", directive)
+            format!(
+                "The `fields` argument of a `@{}` directive includes some directive applications. This is not supported",
+                directive
+            )
         }),
         Some(ErrorCodeMetadata {
             added_in: "2.1.0",
@@ -935,7 +1049,10 @@ static DIRECTIVE_INVALID_FIELDS: LazyLock<ErrorCodeCategory<String>> = LazyLock:
     ErrorCodeCategory::new_federation_directive(
         "INVALID_FIELDS".to_owned(),
         Box::new(|directive| {
-            format!("The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).", directive)
+            format!(
+                "The `fields` argument of a `@{}` directive is invalid (it has invalid syntax, includes unknown fields, ...).",
+                directive
+            )
         }),
         None,
     )
@@ -967,7 +1084,10 @@ static ROOT_TYPE_USED: LazyLock<ErrorCodeCategory<SchemaRootKind>> = LazyLock::n
         }),
         Box::new(|element| {
             let kind: String = element.into();
-            format!("A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.", kind)
+            format!(
+                "A subgraph's schema defines a type with the name `{}`, while also specifying a _different_ type name as the root query object. This is not allowed.",
+                kind
+            )
         }),
         Some(ErrorCodeMetadata {
             added_in: FED1_CODE,
@@ -1453,6 +1573,24 @@ static UNSUPPORTED_FEDERATION_DIRECTIVE: LazyLock<ErrorCodeDefinition> = LazyLoc
     )
 });
 
+static QUERY_PLAN_COMPLEXITY_EXCEEDED: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "QUERY_PLAN_COMPLEXITY_EXCEEDED".to_owned(),
+        "Indicates that provided query has too many possible ways to generate a plan and cannot be planned in a reasonable amount of time"
+            .to_owned(),
+        None,
+    )
+});
+
+static NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_owned(),
+        "Indicates that the provided query could not be query planned due to subgraphs being disabled"
+            .to_owned(),
+        None,
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1534,6 +1672,8 @@ pub enum ErrorCode {
     InterfaceKeyMissingImplementationType,
     UnsupportedFederationVersion,
     UnsupportedFederationDirective,
+    QueryPlanComplexityExceededError,
+    NoPlanFoundWithDisabledSubgraphs,
 }
 
 impl ErrorCode {
@@ -1633,6 +1773,8 @@ impl ErrorCode {
             }
             ErrorCode::UnsupportedFederationVersion => &UNSUPPORTED_FEDERATION_VERSION,
             ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
+            ErrorCode::QueryPlanComplexityExceededError => &QUERY_PLAN_COMPLEXITY_EXCEEDED,
+            ErrorCode::NoPlanFoundWithDisabledSubgraphs => &NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS,
         }
     }
 }

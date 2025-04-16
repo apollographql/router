@@ -29,117 +29,8 @@ const SUBGRAPH: &str = r#"
       }
 "#;
 
-#[test]
-fn it_respects_generate_query_fragments_option() {
-    let planner = planner!(
-        config = generate_fragments_config(),
-        Subgraph1: SUBGRAPH,
-    );
-    assert_plan!(
-          &planner,
-          r#"
-        query {
-          t {
-            ... on A {
-              x
-              y
-            }
-            ... on B {
-              z
-            }
-          }
-        }
-        "#,
-
-
-
-      // Note: `... on B {}` won't be replaced, since it has only one field.
-        @r###"
-    QueryPlan {
-      Fetch(service: "Subgraph1") {
-        {
-          t {
-            __typename
-            ..._generated_onA2_0
-            ... on B {
-              z
-            }
-          }
-        }
-
-        fragment _generated_onA2_0 on A {
-          x
-          y
-        }
-      },
-    }
-    "###
-    );
-}
-
-#[test]
-fn it_handles_nested_fragment_generation() {
-    let planner = planner!(
-        config = generate_fragments_config(),
-        Subgraph1: SUBGRAPH,
-    );
-    assert_plan!(
-        &planner,
-        r#"
-        query {
-          t {
-            ... on A {
-              x
-              y
-              t {
-                ... on A {
-                  x
-                  y
-                }
-                ... on B {
-                  z
-                }
-              }
-            }
-          }
-        }
-        "#,
-
-        // Note: `... on B {}` won't be replaced, since it has only one field.
-        @r###"
-    QueryPlan {
-      Fetch(service: "Subgraph1") {
-        {
-          t {
-            __typename
-            ..._generated_onA3_0
-          }
-        }
-
-        fragment _generated_onA2_0 on A {
-          x
-          y
-        }
-
-        fragment _generated_onA3_0 on A {
-          x
-          y
-          t {
-            __typename
-            ..._generated_onA2_0
-            ... on B {
-              z
-            }
-          }
-        }
-      },
-    }
-    "###
-    );
-}
-
-// TODO this test shows a clearly worse plan than reused fragments when fragments
-// target concrete types
+// TODO this test shows a worse plan than reused fragments when generated fragments
+// target concrete types whereas hand-crafted ones reference abstract types
 #[test]
 fn it_handles_nested_fragment_generation_from_operation_with_fragments() {
     let planner = planner!(
@@ -176,46 +67,47 @@ fn it_handles_nested_fragment_generation_from_operation_with_fragments() {
           }
         "#,
     );
+    let operation = r#"
+      query {
+        a {
+          ... on A1 {
+            ...FooSelect
+          }
+          ... on A2 {
+            ...FooSelect
+          }
+          ... on A3 {
+            ...FooSelect
+          }
+        }
+      }
+
+      fragment FooSelect on Foo {
+        __typename
+        foo
+        child {
+          ...FooChildSelect
+        }
+        child2 {
+          ...FooChildSelect
+        }
+      }
+
+      fragment FooChildSelect on Foo {
+        __typename
+        foo
+        child {
+          child {
+            child {
+              foo
+            }
+          }
+        }
+      }
+    "#;
     assert_plan!(
         &planner,
-        r#"
-          query {
-            a {
-              ... on A1 {
-                ...FooSelect
-              }
-              ... on A2 {
-                ...FooSelect
-              }
-              ... on A3 {
-                ...FooSelect
-              }
-            }
-          }
-
-          fragment FooSelect on Foo {
-            __typename
-            foo
-            child {
-              ...FooChildSelect
-            }
-            child2 {
-              ...FooChildSelect
-            }
-          }
-
-          fragment FooChildSelect on Foo {
-            __typename
-            foo
-            child {
-              child {
-                child {
-                  foo
-                }
-              }
-            }
-          }
-        "#,
+        operation,
 
         // This is a test case that shows worse result
         // QueryPlan {
@@ -268,108 +160,63 @@ fn it_handles_nested_fragment_generation_from_operation_with_fragments() {
         {
           a {
             __typename
-            ..._generated_onA14_0
-            ..._generated_onA24_0
-            ..._generated_onA34_0
-          }
-        }
-
-        fragment _generated_onA14_0 on A1 {
-          __typename
-          foo
-          child {
-            __typename
-            foo
-            child {
+            ... on A1 {
               __typename
+              foo
               child {
-                __typename
-                child {
-                  __typename
-                  foo
-                }
+                ...d
+              }
+              child2 {
+                ...d
               }
             }
-          }
-          child2 {
-            __typename
-            foo
-            child {
+            ... on A2 {
               __typename
+              foo
               child {
-                __typename
-                child {
-                  __typename
-                  foo
-                }
+                ...d
+              }
+              child2 {
+                ...d
+              }
+            }
+            ... on A3 {
+              __typename
+              foo
+              child {
+                ...d
+              }
+              child2 {
+                ...d
               }
             }
           }
         }
 
-        fragment _generated_onA24_0 on A2 {
+        fragment a on Foo {
           __typename
           foo
+        }
+
+        fragment b on Foo {
+          __typename
           child {
-            __typename
-            foo
-            child {
-              __typename
-              child {
-                __typename
-                child {
-                  __typename
-                  foo
-                }
-              }
-            }
-          }
-          child2 {
-            __typename
-            foo
-            child {
-              __typename
-              child {
-                __typename
-                child {
-                  __typename
-                  foo
-                }
-              }
-            }
+            ...a
           }
         }
 
-        fragment _generated_onA34_0 on A3 {
+        fragment c on Foo {
+          __typename
+          child {
+            ...b
+          }
+        }
+
+        fragment d on Foo {
           __typename
           foo
           child {
-            __typename
-            foo
-            child {
-              __typename
-              child {
-                __typename
-                child {
-                  __typename
-                  foo
-                }
-              }
-            }
-          }
-          child2 {
-            __typename
-            foo
-            child {
-              __typename
-              child {
-                __typename
-                child {
-                  __typename
-                  foo
-                }
-              }
-            }
+            ...c
           }
         }
       },
@@ -378,55 +225,6 @@ fn it_handles_nested_fragment_generation_from_operation_with_fragments() {
     );
 }
 
-#[test]
-fn it_handles_fragments_with_one_non_leaf_field() {
-    let planner = planner!(
-        config = generate_fragments_config(),
-        Subgraph1: SUBGRAPH,
-    );
-
-    assert_plan!(
-        &planner,
-        r#"
-        query {
-          t {
-            ... on A {
-              t {
-                ... on B {
-                  z
-                }
-              }
-            }
-          }
-        }
-        "#,
-        @r###"
-    QueryPlan {
-      Fetch(service: "Subgraph1") {
-        {
-          t {
-            __typename
-            ..._generated_onA1_0
-          }
-        }
-
-        fragment _generated_onA1_0 on A {
-          t {
-            __typename
-            ... on B {
-              z
-            }
-          }
-        }
-      },
-    }
-    "###
-    );
-}
-
-/// XXX(@goto-bus-stop): this test is meant to check that fragments with @skip and @include *are*
-/// migrated. But we are currently matching JS behavior, where they are not. This test should be
-/// updated when we remove JS compatibility.
 #[test]
 fn it_migrates_skip_include() {
     let planner = planner!(
@@ -462,35 +260,31 @@ fn it_migrates_skip_include() {
 
         // Note: `... on A @custom {}` won't be replaced, since it has a custom directive. Even
         // though it also supports being used on a named fragment spread, we cannot assume that
-        // the behaviour is exactly the same.
+        // the behaviour is exactly the same. We will replace its subselection though.
         @r###"
     QueryPlan {
       Fetch(service: "Subgraph1") {
         {
           t {
             __typename
-            ..._generated_onA3_0
+            ... on A {
+              x
+              y
+              t {
+                __typename
+                ...a @include(if: $var)
+                ...a @skip(if: $var)
+                ... on A @custom {
+                  ...a
+                }
+              }
+            }
           }
         }
 
-        fragment _generated_onA3_0 on A {
+        fragment a on A {
           x
           y
-          t {
-            __typename
-            ... on A @include(if: $var) {
-              x
-              y
-            }
-            ... on A @skip(if: $var) {
-              x
-              y
-            }
-            ... on A @custom {
-              x
-              y
-            }
-          }
         }
       },
     }
@@ -527,71 +321,21 @@ fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
       Fetch(service: "Subgraph1") {
         {
           t {
-            __typename
-            ..._generated_onA2_0
+            ...b
           }
           t2 {
-            __typename
-            ..._generated_onA2_0
+            ...b
           }
         }
 
-        fragment _generated_onA2_0 on A {
-          x
-          y
-        }
-      },
-    }
-    "###
-    );
-}
-
-#[test]
-fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment_definitions() {
-    let planner = planner!(
-        config = generate_fragments_config(),
-        Subgraph1: SUBGRAPH,
-    );
-    assert_plan!(
-        &planner,
-        r#"
-        query {
-          t {
-            ... on A {
-              x
-              y
-            }
-          }
-          t2 {
-            ... on A {
-              y
-              z
-            }
-          }
-        }
-      "#,
-        @r###"
-    QueryPlan {
-      Fetch(service: "Subgraph1") {
-        {
-          t {
-            __typename
-            ..._generated_onA2_0
-          }
-          t2 {
-            __typename
-            ..._generated_onA2_1
-          }
-        }
-
-        fragment _generated_onA2_0 on A {
+        fragment a on A {
           x
           y
         }
 
-        fragment _generated_onA2_1 on A {
-          y
-          z
+        fragment b on T {
+          __typename
+          ...a
         }
       },
     }
@@ -660,6 +404,13 @@ fn works_with_key_chains() {
       type T @key(fields: "id1") @key(fields: "id2") {
         id1: ID!
         id2: ID!
+        u1: U
+        u2: U
+      }
+
+      type U {
+        a: String
+        b: Int
       }
       "#,
         Subgraph3: r#"
@@ -682,6 +433,14 @@ fn works_with_key_chains() {
           id2
           x
           y
+          u1 {
+            a
+            b
+          }
+          u2 {
+            a
+            b
+          }
         }
       }
     "#,
@@ -707,7 +466,18 @@ fn works_with_key_chains() {
             {
               ... on T {
                 id2
+                u1 {
+                  ...a
+                }
+                u2 {
+                  ...a
+                }
               }
+            }
+
+            fragment a on U {
+              a
+              b
             }
           },
         },
@@ -720,12 +490,10 @@ fn works_with_key_chains() {
               }
             } =>
             {
-              ..._generated_onT2_0
-            }
-
-            fragment _generated_onT2_0 on T {
-              x
-              y
+              ... on T {
+                x
+                y
+              }
             }
           },
         },
@@ -735,6 +503,8 @@ fn works_with_key_chains() {
     );
 }
 
+// TODO this test shows redundant inline fragment in the "normalized" query
+// - ... on T2 inline fragment should be dropped during normalization
 #[test]
 fn another_mix_of_fragments_indirection_and_unions() {
     // This tests that the issue reported on https://github.com/apollographql/router/issues/3172 is resolved.
@@ -821,29 +591,23 @@ fn another_mix_of_fragments_indirection_and_unions() {
               owner {
                 u {
                   __typename
-                  ..._generated_onI3_0
-                  ..._generated_onT11_0
-                  ..._generated_onT23_0
+                  ... on I {
+                    __typename
+                    id1
+                    id2
+                  }
+                  ... on T1 {
+                    owner {
+                      v0
+                    }
+                  }
+                  ... on T2 {
+                    __typename
+                    id1
+                    id2
+                  }
                 }
               }
-            }
-
-            fragment _generated_onI3_0 on I {
-              __typename
-              id1
-              id2
-            }
-
-            fragment _generated_onT11_0 on T1 {
-              owner {
-                v0
-              }
-            }
-
-            fragment _generated_onT23_0 on T2 {
-              __typename
-              id1
-              id2
             }
           },
         }
@@ -895,28 +659,22 @@ fn another_mix_of_fragments_indirection_and_unions() {
               owner {
                 u {
                   __typename
-                  ..._generated_onI3_0
-                  ..._generated_onT11_0
-                  ..._generated_onT22_0
+                  ... on I {
+                    __typename
+                    id1
+                    id2
+                  }
+                  ... on T1 {
+                    owner {
+                      v0
+                    }
+                  }
+                  ... on T2 {
+                    id1
+                    id2
+                  }
                 }
               }
-            }
-
-            fragment _generated_onI3_0 on I {
-              __typename
-              id1
-              id2
-            }
-
-            fragment _generated_onT11_0 on T1 {
-              owner {
-                v0
-              }
-            }
-
-            fragment _generated_onT22_0 on T2 {
-              id1
-              id2
             }
           },
         }

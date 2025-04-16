@@ -3,15 +3,14 @@
 use std::fmt::Formatter;
 use std::str::FromStr;
 
-use access_json::JSONQuery;
-use http::header::HeaderName;
 use http::HeaderValue;
+use http::header::HeaderName;
 use regex::Regex;
+use serde::Deserializer;
 use serde::de;
 use serde::de::Error;
 use serde::de::SeqAccess;
 use serde::de::Visitor;
-use serde::Deserializer;
 
 /// De-serialize an optional [`HeaderName`].
 pub fn deserialize_option_header_name<'de, D>(
@@ -133,32 +132,6 @@ where
     D: Deserializer<'de>,
 {
     deserializer.deserialize_str(HeaderNameVisitor)
-}
-
-struct JSONQueryVisitor;
-
-impl Visitor<'_> for JSONQueryVisitor {
-    type Value = JSONQuery;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        formatter.write_str("struct JSONQuery")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: Error,
-    {
-        JSONQuery::parse(v)
-            .map_err(|e| de::Error::custom(format!("Invalid JSON query path for '{v}' {e}")))
-    }
-}
-
-/// De-serialize a [`JSONQuery`].
-pub fn deserialize_json_query<'de, D>(deserializer: D) -> Result<JSONQuery, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserializer.deserialize_str(JSONQueryVisitor)
 }
 
 struct HeaderValueVisitor;

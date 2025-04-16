@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 
+use serde::Serialize;
 use serde::ser;
 use serde::ser::SerializeMap;
 use serde::ser::SerializeSeq;
@@ -10,7 +11,6 @@ use serde::ser::SerializeStructVariant;
 use serde::ser::SerializeTuple;
 use serde::ser::SerializeTupleStruct;
 use serde::ser::SerializeTupleVariant;
-use serde::Serialize;
 
 pub(crate) fn estimate_size<T: Serialize>(s: &T) -> usize {
     let ser = s

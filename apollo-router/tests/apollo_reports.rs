@@ -23,17 +23,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use apollo_router::TestHarness;
 use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
-use axum::body::Bytes;
-use axum::routing::post;
 use axum::Extension;
 use axum::Json;
+use axum::body::Bytes;
+use axum::routing::post;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
+use http_body_util::BodyExt as _;
 use once_cell::sync::Lazy;
 use prost::Message;
 use proto::reports::Report;
@@ -58,10 +59,10 @@ async fn config(
     demand_control: bool,
     experimental_field_stats: bool,
 ) -> (JoinHandle<()>, serde_json::Value) {
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    *apollo_router::_private::APOLLO_KEY.lock() = Some("test".to_string());
+    *apollo_router::_private::APOLLO_GRAPH_REF.lock() = Some("test".to_string());
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
         .route("/", post(report))
@@ -69,9 +70,7 @@ async fn config(
         .layer(tower_http::add_extension::AddExtensionLayer::new(reports));
 
     let task = ROUTER_SERVICE_RUNTIME.spawn(async move {
-        axum::Server::from_tcp(listener)
-            .expect("mut be able to create report receiver")
-            .serve(app.into_make_service())
+        axum::serve(listener, app.into_make_service())
             .await
             .expect("could not start axum server")
     });
@@ -359,6 +358,7 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(
@@ -378,9 +378,12 @@ where
         .expect("router service call failed");
 
     // Drain the response
-    let mut found_report = match hyper::body::to_bytes(response.response.into_body())
+    let mut found_report = match response
+        .response
+        .into_body()
+        .collect()
         .await
-        .map(|b| String::from_utf8(b.to_vec()))
+        .map(|b| String::from_utf8(b.to_bytes().to_vec()))
     {
         Ok(Ok(response)) => {
             if response.contains("errors") {
@@ -415,6 +418,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     request: router::Request,
     filter: T,
 ) -> u64 {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) =
@@ -428,7 +432,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
         .expect("router service call failed");
 
     // Drain the response (and throw it away)
-    let _found_report = hyper::body::to_bytes(response.response.into_body()).await;
+    let _found_report = response.response.into_body().collect().await;
 
     // Give the server a little time to export something
     // If this test fails, consider increasing this time.

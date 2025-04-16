@@ -3,12 +3,12 @@ use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use opentelemetry::metrics::Unit;
-use opentelemetry_api::metrics::Counter;
-use opentelemetry_api::metrics::Histogram;
-use opentelemetry_api::metrics::MeterProvider;
-use opentelemetry_api::metrics::UpDownCounter;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
+use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::Histogram;
+use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
+use opentelemetry::metrics::UpDownCounter;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::SERVER_ADDRESS;
 use opentelemetry_semantic_conventions::trace::SERVER_PORT;
@@ -20,43 +20,53 @@ use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
-use super::attributes::HttpServerAttributes;
-use super::cache::attributes::CacheAttributes;
-use super::cache::CacheInstruments;
-use super::cache::CacheInstrumentsConfig;
-use super::cache::CACHE_METRIC;
-use super::graphql::selectors::ListLength;
-use super::graphql::GraphQLInstruments;
-use super::graphql::FIELD_EXECUTION;
-use super::graphql::FIELD_LENGTH;
-use super::selectors::CacheKind;
 use super::DefaultForLevel;
 use super::Selector;
+use super::attributes::HttpServerAttributes;
+use super::cache::CACHE_METRIC;
+use super::cache::CacheInstruments;
+use super::cache::CacheInstrumentsConfig;
+use super::cache::attributes::CacheAttributes;
+use super::graphql::FIELD_EXECUTION;
+use super::graphql::FIELD_LENGTH;
+use super::graphql::GraphQLInstruments;
+use super::graphql::selectors::ListLength;
+use super::selectors::CacheKind;
+use crate::Context;
+use crate::axum_factory::connection_handle::ConnectionState;
+use crate::axum_factory::connection_handle::OPEN_CONNECTIONS_METRIC;
 use crate::metrics;
+use crate::metrics::meter_provider;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
+use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
+use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
+use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
-use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::RouterValue;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphValue;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
-use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
+use crate::services::router::pipeline_handle::PIPELINE_METRIC;
+use crate::services::router::pipeline_handle::pipeline_counts;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 
@@ -81,6 +91,11 @@ pub(crate) struct InstrumentsConfig {
         SubgraphInstrumentsConfig,
         Instrument<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
     >,
+    /// Connector service instruments.
+    pub(crate) connector: Extendable<
+        ConnectorInstrumentsConfig,
+        Instrument<ConnectorAttributes, ConnectorSelector, ConnectorValue>,
+    >,
     /// GraphQL response field instruments.
     pub(crate) graphql: Extendable<
         GraphQLInstrumentsConfig,
@@ -98,9 +113,9 @@ const HTTP_SERVER_REQUEST_BODY_SIZE_METRIC: &str = "http.server.request.body.siz
 const HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC: &str = "http.server.response.body.size";
 const HTTP_SERVER_ACTIVE_REQUESTS: &str = "http.server.active_requests";
 
-const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.request.duration";
-const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
-const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
+pub(super) const HTTP_CLIENT_REQUEST_DURATION_METRIC: &str = "http.client.request.duration";
+pub(super) const HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC: &str = "http.client.request.body.size";
+pub(super) const HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC: &str = "http.client.response.body.size";
 
 impl InstrumentsConfig {
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -129,6 +144,11 @@ impl InstrumentsConfig {
                 format!("error for custom cache instrument {name:?} in condition: {err}")
             })?;
         }
+        for (name, custom) in &self.connector.custom {
+            custom.condition.validate(None).map_err(|err| {
+                format!("error for custom connector instrument {name:?} in condition: {err}")
+            })?;
+        }
 
         Ok(())
     }
@@ -143,6 +163,8 @@ impl InstrumentsConfig {
         self.subgraph
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.graphql
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
+        self.connector
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
@@ -161,7 +183,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_SERVER_REQUEST_DURATION_METRIC)
-                        .with_unit(Unit::new("s"))
+                        .with_unit("s")
                         .with_description("Duration of HTTP server requests.")
                         .init(),
                 ),
@@ -179,7 +201,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_SERVER_REQUEST_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP server request bodies.")
                         .init(),
                 ),
@@ -197,7 +219,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_SERVER_RESPONSE_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP server response bodies.")
                         .init(),
                 ),
@@ -215,7 +237,7 @@ impl InstrumentsConfig {
                 StaticInstrument::UpDownCounterI64(
                     meter
                         .i64_up_down_counter(HTTP_SERVER_ACTIVE_REQUESTS)
-                        .with_unit(Unit::new("request"))
+                        .with_unit("request")
                         .with_description("Number of active HTTP server requests.")
                         .init(),
                 ),
@@ -231,7 +253,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -243,7 +265,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -319,8 +341,8 @@ impl InstrumentsConfig {
                                     )
                                     .as_histogram()
                                     .cloned().expect(
-                                "cannot convert instrument to histogram for router; this should not happen",
-                            )
+                                    "cannot convert instrument to histogram for router; this should not happen",
+                                )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::RequestHeader {
@@ -363,7 +385,7 @@ impl InstrumentsConfig {
                                     .as_histogram()
                                     .cloned()
                                     .expect(
-                                    "cannot convert instrument to histogram for router; this should not happen",
+                                        "cannot convert instrument to histogram for router; this should not happen",
                                     )
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
@@ -429,7 +451,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -441,7 +463,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -482,7 +504,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_DURATION_METRIC)
-                        .with_unit(Unit::new("s"))
+                        .with_unit("s")
                         .with_description("Duration of HTTP client requests.")
                         .init(),
                 ),
@@ -500,7 +522,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_REQUEST_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client request bodies.")
                         .init(),
                 ),
@@ -518,7 +540,7 @@ impl InstrumentsConfig {
                 StaticInstrument::Histogram(
                     meter
                         .f64_histogram(HTTP_CLIENT_RESPONSE_BODY_SIZE_METRIC)
-                        .with_unit(Unit::new("By"))
+                        .with_unit("By")
                         .with_description("Size of HTTP client response bodies.")
                         .init(),
                 ),
@@ -534,7 +556,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -546,7 +568,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -691,6 +713,49 @@ impl InstrumentsConfig {
         }
     }
 
+    pub(crate) fn new_connector_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> ConnectorInstruments {
+        ConnectorInstruments::new(&self.connector, static_instruments)
+    }
+
+    pub(crate) fn new_builtin_connector_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = metrics::meter_provider().meter(METER_NAME);
+        let mut static_instruments = ConnectorInstruments::new_builtin(&self.connector);
+
+        for (instrument_name, instrument) in &self.connector.custom {
+            match instrument.ty {
+                InstrumentType::Counter => {
+                    static_instruments.insert(
+                        instrument_name.clone(),
+                        StaticInstrument::CounterF64(
+                            meter
+                                .f64_counter(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(instrument.unit.clone())
+                                .init(),
+                        ),
+                    );
+                }
+                InstrumentType::Histogram => {
+                    static_instruments.insert(
+                        instrument_name.clone(),
+                        StaticInstrument::Histogram(
+                            meter
+                                .f64_histogram(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(instrument.unit.clone())
+                                .init(),
+                        ),
+                    );
+                }
+            }
+        }
+
+        static_instruments
+    }
+
     pub(crate) fn new_builtin_graphql_instruments(&self) -> HashMap<String, StaticInstrument> {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let mut static_instruments = HashMap::with_capacity(self.graphql.custom.len());
@@ -727,7 +792,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_counter(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -739,7 +804,7 @@ impl InstrumentsConfig {
                             meter
                                 .f64_histogram(instrument_name.clone())
                                 .with_description(instrument.description.clone())
-                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .with_unit(instrument.unit.clone())
                                 .init(),
                         ),
                     );
@@ -771,16 +836,16 @@ impl InstrumentsConfig {
                         increment: Increment::FieldCustom(None),
                         condition: Condition::True,
                         histogram: Some(static_instruments
-                                .get(FIELD_LENGTH)
-                                .expect(
-                                    "cannot get static instrument for graphql; this should not happen",
-                                )
-                                .as_histogram()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to counter for graphql; this should not happen",
-                                )
-                            ),
+                            .get(FIELD_LENGTH)
+                            .expect(
+                                "cannot get static instrument for graphql; this should not happen",
+                            )
+                            .as_histogram()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to counter for graphql; this should not happen",
+                            )
+                        ),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: Some(Arc::new(GraphQLSelector::ListLength {
                             list_length: ListLength::Value,
@@ -842,7 +907,7 @@ impl InstrumentsConfig {
                 StaticInstrument::CounterF64(
                     meter
                         .f64_counter(CACHE_METRIC)
-                        .with_unit(Unit::new("ops"))
+                        .with_unit("ops")
                         .with_description("Entity cache hit/miss operations at the subgraph level")
                         .init(),
                 ),
@@ -873,16 +938,16 @@ impl InstrumentsConfig {
                         increment: Increment::Custom(None),
                         condition: Condition::True,
                         counter: Some(static_instruments
-                                .get(CACHE_METRIC)
-                                .expect(
-                                    "cannot get static instrument for cache; this should not happen",
-                                )
-                                .as_counter_f64()
-                                .cloned()
-                                .expect(
-                                    "cannot convert instrument to counter for cache; this should not happen",
-                                )
-                            ),
+                            .get(CACHE_METRIC)
+                            .expect(
+                                "cannot get static instrument for cache; this should not happen",
+                            )
+                            .as_counter_f64()
+                            .cloned()
+                            .expect(
+                                "cannot convert instrument to counter for cache; this should not happen",
+                            )
+                        ),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: Some(Arc::new(SubgraphSelector::Cache {
                             cache: CacheKind::Hit,
@@ -896,6 +961,80 @@ impl InstrumentsConfig {
             }),
         }
     }
+
+    pub(crate) fn new_pipeline_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = meter_provider().meter("apollo/router");
+        let mut instruments = HashMap::new();
+        instruments.insert(
+            PIPELINE_METRIC.to_string(),
+            StaticInstrument::GaugeU64(
+                meter
+                    .u64_observable_gauge(PIPELINE_METRIC)
+                    .with_description("The number of request pipelines active in the router")
+                    .with_callback(|i| {
+                        for (pipeline, count) in &*pipeline_counts() {
+                            let mut attributes = Vec::with_capacity(3);
+                            attributes.push(KeyValue::new("schema.id", pipeline.schema_id.clone()));
+                            if let Some(launch_id) = &pipeline.launch_id {
+                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
+                            }
+                            attributes
+                                .push(KeyValue::new("config.hash", pipeline.config_hash.clone()));
+
+                            i.observe(*count, &attributes);
+                        }
+                    })
+                    .init(),
+            ),
+        );
+        instruments.insert(
+            OPEN_CONNECTIONS_METRIC.to_string(),
+            StaticInstrument::GaugeU64(
+                meter
+                    .u64_observable_gauge(OPEN_CONNECTIONS_METRIC)
+                    .with_description("Number of currently connected clients")
+                    .with_callback(move |gauge| {
+                        let connections =
+                            crate::axum_factory::connection_handle::connection_counts();
+                        for (connection, count) in connections.iter() {
+                            let mut attributes = Vec::with_capacity(6);
+                            if let Some((ip, port)) = connection.address.ip_and_port() {
+                                attributes.push(KeyValue::new("server.address", ip.to_string()));
+                                attributes.push(KeyValue::new("server.port", port.to_string()));
+                            } else {
+                                // Unix socket
+                                attributes.push(KeyValue::new(
+                                    "server.address",
+                                    connection.address.to_string(),
+                                ));
+                            }
+                            attributes.push(KeyValue::new(
+                                "schema.id",
+                                connection.pipeline_ref.schema_id.clone(),
+                            ));
+                            if let Some(launch_id) = &connection.pipeline_ref.launch_id {
+                                attributes.push(KeyValue::new("launch.id", launch_id.clone()));
+                            }
+                            attributes.push(KeyValue::new(
+                                "config.hash",
+                                connection.pipeline_ref.config_hash.clone(),
+                            ));
+                            // Technically we need to support `idle` state, but that will have to be a follow-up,
+                            attributes.push(KeyValue::new(
+                                "http.connection.state",
+                                match connection.state {
+                                    ConnectionState::Active => "active",
+                                    ConnectionState::Terminating => "terminating",
+                                },
+                            ));
+                            gauge.observe(*count, &attributes);
+                        }
+                    })
+                    .init(),
+            ),
+        );
+        instruments
+    }
 }
 
 #[derive(Debug)]
@@ -903,6 +1042,9 @@ pub(crate) enum StaticInstrument {
     CounterF64(Counter<f64>),
     UpDownCounterI64(UpDownCounter<i64>),
     Histogram(Histogram<f64>),
+    // Gauges are never read
+    #[allow(dead_code)]
+    GaugeU64(ObservableGauge<u64>),
 }
 
 impl StaticInstrument {
@@ -1071,21 +1213,21 @@ impl<T, Request, Response, EventResponse> Selectors<Request, Response, EventResp
 where
     T: Selectors<Request, Response, EventResponse>,
 {
-    fn on_request(&self, request: &Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
-    fn on_response(&self, response: &Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_error(error, ctx),
@@ -1187,11 +1329,11 @@ where
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
     for<'a> &'a SelectorValue: Into<InstrumentValue<E>>,
 {
-    fn on_request(&self, request: &Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_request(request)
     }
 
-    fn on_response(&self, response: &Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_response(response)
     }
 
@@ -1199,11 +1341,11 @@ where
         &self,
         response: &EventResponse,
         ctx: &Context,
-    ) -> Vec<opentelemetry_api::KeyValue> {
+    ) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_response_event(response, ctx)
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
         self.attributes.on_error(error, ctx)
     }
 }
@@ -1329,7 +1471,7 @@ where
 }
 
 impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrumentsConfig {
-    fn on_request(&self, request: &subgraph::Request) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_request(&self, request: &subgraph::Request) -> Vec<opentelemetry::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
         attrs.extend(self.http_client_request_duration.on_request(request));
         attrs.extend(self.http_client_response_body_size.on_request(request));
@@ -1337,7 +1479,7 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrument
         attrs
     }
 
-    fn on_response(&self, response: &subgraph::Response) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_response(&self, response: &subgraph::Response) -> Vec<opentelemetry::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_response(response);
         attrs.extend(self.http_client_request_duration.on_response(response));
         attrs.extend(self.http_client_response_body_size.on_response(response));
@@ -1345,7 +1487,7 @@ impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrument
         attrs
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
         attrs.extend(self.http_client_request_duration.on_error(error, ctx));
         attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
@@ -1447,7 +1589,9 @@ where
                             })
                         }
                         None => {
-                            failfast_debug!("cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub");
+                            failfast_debug!(
+                                "cannot convert static instrument into a counter, this is an error; please fill an issue on GitHub"
+                            );
                         }
                     }
                 }
@@ -1503,7 +1647,9 @@ where
                             });
                         }
                         None => {
-                            failfast_debug!("cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub");
+                            failfast_debug!(
+                                "cannot convert static instrument into a histogram, this is an error; please fill an issue on GitHub"
+                            );
                         }
                     }
                 }
@@ -1836,7 +1982,7 @@ where
     pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
     pub(crate) counter: Option<Counter<f64>>,
     pub(crate) condition: Condition<T>,
-    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
     pub(crate) incremented: bool,
     pub(crate) _phantom: PhantomData<EventResponse>,
@@ -1889,7 +2035,9 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -1929,7 +2077,9 @@ where
                 Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -1986,7 +2136,9 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2074,7 +2226,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2166,7 +2320,7 @@ struct ActiveRequestsCounter {
 struct ActiveRequestsCounterInner {
     counter: Option<UpDownCounter<i64>>,
     attrs_config: Arc<ActiveRequestsAttributes>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    attributes: Vec<opentelemetry::KeyValue>,
 }
 
 impl Instrumented for ActiveRequestsCounter {
@@ -2261,7 +2415,7 @@ where
     pub(crate) selector: Option<Arc<T>>,
     pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
     pub(crate) histogram: Option<Histogram<f64>>,
-    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) attributes: Vec<opentelemetry::KeyValue>,
     // Useful when it's an histogram on events to know if we have to count for an event or not
     pub(crate) updated: bool,
     pub(crate) _phantom: PhantomData<EventResponse>,
@@ -2292,7 +2446,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2331,7 +2487,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2384,7 +2542,9 @@ where
                 Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2468,7 +2628,9 @@ where
                 Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
-                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    failfast_error!(
+                        "this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}"
+                    );
                     return;
                 }
             };
@@ -2561,9 +2723,17 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
+    use apollo_compiler::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::Name;
+    use apollo_compiler::name;
+    use apollo_federation::sources::connect::ConnectId;
+    use apollo_federation::sources::connect::ConnectSpec;
+    use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::sources::connect::URLTemplate;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -2571,13 +2741,14 @@ mod tests {
     use http::Uri;
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
-    use schemars::gen::SchemaGenerator;
+    use schemars::r#gen::SchemaGenerator;
     use serde::Deserialize;
     use serde_json::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
 
     use super::*;
+    use crate::Context;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
     use crate::error::Error;
@@ -2586,19 +2757,26 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
-    use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-    use crate::plugins::telemetry::config_new::instruments::Instrumented;
-    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::plugins::connectors::handle_responses::MappedResponse;
+    use crate::plugins::connectors::make_requests::ResponseKey;
+    use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
     use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
+    use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+    use crate::plugins::telemetry::config_new::instruments::Instrumented;
+    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::services::connector::request_service::Request;
+    use crate::services::connector::request_service::Response;
+    use crate::services::connector::request_service::TransportRequest;
+    use crate::services::connector::request_service::TransportResponse;
+    use crate::services::connector::request_service::transport;
     use crate::spec::operation_limits::OperationLimits;
-    use crate::Context;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
@@ -2702,6 +2880,30 @@ mod tests {
         /// Note that this MUST not be used without first using supergraph request event
         ResponseField {
             typed_value: TypedValueMirror,
+        },
+        ConnectorRequest {
+            subgraph_name: String,
+            source_name: String,
+            http_method: String,
+            url_template: String,
+            uri: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: Option<String>,
+            #[serde(default)]
+            mapping_problems: Vec<Problem>,
+        },
+        ConnectorResponse {
+            subgraph_name: String,
+            source_name: String,
+            http_method: String,
+            url_template: String,
+            status: u16,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: String,
+            #[serde(default)]
+            mapping_problems: Vec<Problem>,
         },
     }
 
@@ -2887,6 +3089,7 @@ mod tests {
                         let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
+                        let mut connector_instruments = None;
                         let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
@@ -2906,7 +3109,7 @@ mod tests {
                                         .method(Method::from_str(&method).expect("method"))
                                         .uri(Uri::from_str(&uri).expect("uri"))
                                         .headers(convert_headers(headers))
-                                        .body(body)
+                                        .body(router::body::from_bytes(body))
                                         .build()
                                         .unwrap();
                                     router_instruments = Some(config.new_router_instruments(
@@ -3094,7 +3297,7 @@ mod tests {
                                 Event::Extension { map } => {
                                     for (key, value) in map {
                                         if key == APOLLO_PRIVATE_QUERY_ALIASES.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3102,7 +3305,7 @@ mod tests {
                                             });
                                         }
                                         if key == APOLLO_PRIVATE_QUERY_DEPTH.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3110,7 +3313,7 @@ mod tests {
                                             });
                                         }
                                         if key == APOLLO_PRIVATE_QUERY_HEIGHT.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3118,7 +3321,7 @@ mod tests {
                                             });
                                         }
                                         if key == APOLLO_PRIVATE_QUERY_ROOT_FIELDS.to_string() {
-                                            context.extensions().with_lock(|mut lock| {
+                                            context.extensions().with_lock(|lock| {
                                                 let limits = lock
                                                     .get_or_default_mut::<OperationLimits<u32>>();
                                                 let value_as_u32 = value.as_u64().unwrap() as u32;
@@ -3126,6 +3329,157 @@ mod tests {
                                             });
                                         }
                                     }
+                                }
+                                Event::ConnectorRequest {
+                                    subgraph_name,
+                                    source_name,
+                                    http_method,
+                                    url_template,
+                                    uri,
+                                    headers,
+                                    body,
+                                    mapping_problems,
+                                } => {
+                                    let mut http_request = http::Request::builder()
+                                        .method(Method::from_str(&http_method).expect("method"))
+                                        .uri(Uri::from_str(&uri).expect("uri"))
+                                        .body(body.unwrap_or("".into()))
+                                        .unwrap();
+                                    *http_request.headers_mut() = convert_http_headers(headers);
+                                    let transport_request =
+                                        TransportRequest::Http(transport::http::HttpRequest {
+                                            inner: http_request,
+                                            debug: None,
+                                        });
+                                    let connector = Connector {
+                                        id: ConnectId::new(
+                                            subgraph_name,
+                                            Some(source_name),
+                                            name!(Query),
+                                            name!(field),
+                                            0,
+                                            "label",
+                                        ),
+                                        transport: HttpJsonTransport {
+                                            source_url: None,
+                                            connect_template: URLTemplate::from_str(
+                                                url_template.as_str(),
+                                            )
+                                            .unwrap(),
+                                            method: HTTPMethod::from_str(http_method.as_str())
+                                                .unwrap(),
+                                            headers: Default::default(),
+                                            body: None,
+                                        },
+                                        selection: JSONSelection::empty(),
+                                        config: None,
+                                        max_requests: None,
+                                        entity_resolver: None,
+                                        spec: ConnectSpec::V0_1,
+                                        request_variables: Default::default(),
+                                        response_variables: Default::default(),
+                                        batch_settings: None,
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
+                                    };
+                                    let response_key = ResponseKey::RootField {
+                                        name: "hello".to_string(),
+                                        inputs: Default::default(),
+                                        selection: Arc::new(
+                                            JSONSelection::parse("$.data").unwrap(),
+                                        ),
+                                    };
+                                    let request = Request {
+                                        context: Context::default(),
+                                        connector: Arc::new(connector),
+                                        service_name: Default::default(),
+                                        transport_request,
+                                        key: response_key.clone(),
+                                        mapping_problems,
+                                        supergraph_request: Default::default(),
+                                    };
+                                    connector_instruments = Some({
+                                        let connector_instruments = config
+                                            .new_connector_instruments(Arc::new(
+                                                config.new_builtin_connector_instruments(),
+                                            ));
+                                        connector_instruments.on_request(&request);
+                                        connector_instruments
+                                    });
+                                }
+                                Event::ConnectorResponse {
+                                    subgraph_name,
+                                    source_name,
+                                    http_method,
+                                    url_template,
+                                    status,
+                                    headers,
+                                    body,
+                                    mapping_problems,
+                                } => {
+                                    let connector = Connector {
+                                        id: ConnectId::new(
+                                            subgraph_name,
+                                            Some(source_name),
+                                            name!(Query),
+                                            name!(field),
+                                            0,
+                                            "label",
+                                        ),
+                                        transport: HttpJsonTransport {
+                                            source_url: None,
+                                            connect_template: URLTemplate::from_str(
+                                                url_template.as_str(),
+                                            )
+                                            .unwrap(),
+                                            method: HTTPMethod::from_str(http_method.as_str())
+                                                .unwrap(),
+                                            headers: Default::default(),
+                                            body: None,
+                                        },
+                                        selection: JSONSelection::empty(),
+                                        config: None,
+                                        max_requests: None,
+                                        entity_resolver: None,
+                                        spec: ConnectSpec::V0_1,
+                                        request_variables: Default::default(),
+                                        response_variables: Default::default(),
+                                        batch_settings: None,
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
+                                    };
+                                    let response_key = ResponseKey::RootField {
+                                        name: "hello".to_string(),
+                                        inputs: Default::default(),
+                                        selection: Arc::new(
+                                            JSONSelection::parse("$.data").unwrap(),
+                                        ),
+                                    };
+                                    let mut http_response = http::Response::builder()
+                                        .status(StatusCode::from_u16(status).expect("status"))
+                                        .body(router::body::from_bytes(body))
+                                        .unwrap();
+                                    *http_response.headers_mut() = convert_http_headers(headers);
+                                    let response = Response {
+                                        context: Context::default(),
+                                        connector: connector.into(),
+                                        transport_result: Ok(TransportResponse::Http(
+                                            transport::http::HttpResponse {
+                                                inner: http_response.into_parts().0,
+                                            },
+                                        )),
+                                        mapped_response: MappedResponse::Data {
+                                            data: json!({})
+                                                .try_into()
+                                                .expect("expecting valid JSON"),
+                                            key: response_key,
+                                            problems: mapping_problems,
+                                        },
+                                    };
+                                    connector_instruments
+                                        .take()
+                                        .expect("connector request must have been made first")
+                                        .on_response(&response);
                                 }
                             }
                         }
@@ -3581,10 +3935,12 @@ mod tests {
                 .header("content-type", "application/json")
                 .header("x-my-header", "TEST")
                 .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build(),
+                ])
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
@@ -3593,10 +3949,12 @@ mod tests {
                     .data(json!({
                         "price": 500
                     }))
-                    .errors(vec![graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build()])
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("nope")
+                            .extension_code("NOPE")
+                            .build(),
+                    ])
                     .build(),
                 &context_with_error,
             );
@@ -3638,10 +3996,12 @@ mod tests {
                 .status_code(StatusCode::BAD_REQUEST)
                 .header("content-type", "application/json")
                 .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
+                .errors(vec![
+                    graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build(),
+                ])
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
@@ -3650,10 +4010,12 @@ mod tests {
                     .data(json!({
                         "price": 500
                     }))
-                    .errors(vec![graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build()])
+                    .errors(vec![
+                        graphql::Error::builder()
+                            .message("nope")
+                            .extension_code("NOPE")
+                            .build(),
+                    ])
                     .build(),
                 &context_with_error,
             );

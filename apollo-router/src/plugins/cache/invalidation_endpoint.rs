@@ -3,9 +3,9 @@ use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
-use http::header::AUTHORIZATION;
 use http::Method;
 use http::StatusCode;
+use http::header::AUTHORIZATION;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,14 +18,13 @@ use tracing_futures::Instrument;
 use super::entity::Subgraph;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
+use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::router;
-use crate::services::router::body::RouterBody;
-use crate::ListenAddr;
 
 pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
@@ -112,16 +111,15 @@ impl Service<router::Request> for InvalidationService {
                     return Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::UNAUTHORIZED)
-                            .body("Missing authorization header".into())
+                            .body(router::body::from_bytes("Missing authorization header"))
                             .map_err(BoxError::from)?,
                         context: req.context,
                     });
                 }
                 match parts.method {
                     Method::POST => {
-                        let body = Into::<RouterBody>::into(body)
-                            .to_bytes()
-                            .instrument(tracing::info_span!("to_bytes"))
+                        let body = router::body::into_bytes(body)
+                            .instrument(tracing::info_span!("into_bytes"))
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
@@ -161,7 +159,9 @@ impl Service<router::Request> for InvalidationService {
                                     return Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::UNAUTHORIZED)
-                                            .body("Invalid authorization header".into())
+                                            .body(router::body::from_bytes(
+                                                "Invalid authorization header",
+                                            ))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     });
@@ -174,12 +174,11 @@ impl Service<router::Request> for InvalidationService {
                                     Ok(count) => Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::ACCEPTED)
-                                            .body(
-                                                serde_json::to_string(&json!({
+                                            .body(router::body::from_bytes(serde_json::to_string(
+                                                &json!({
                                                     "count": count
-                                                }))?
-                                                .into(),
-                                            )
+                                                }),
+                                            )?))
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     }),
@@ -189,7 +188,7 @@ impl Service<router::Request> for InvalidationService {
                                         Ok(router::Response {
                                             response: http::Response::builder()
                                                 .status(StatusCode::BAD_REQUEST)
-                                                .body(err.to_string().into())
+                                                .body(router::body::from_bytes(err.to_string()))
                                                 .map_err(BoxError::from)?,
                                             context: req.context,
                                         })
@@ -201,7 +200,7 @@ impl Service<router::Request> for InvalidationService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::BAD_REQUEST)
-                                        .body(err.into())
+                                        .body(router::body::from_bytes(err))
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -213,7 +212,7 @@ impl Service<router::Request> for InvalidationService {
                         Ok(router::Response {
                             response: http::Response::builder()
                                 .status(StatusCode::METHOD_NOT_ALLOWED)
-                                .body("".into())
+                                .body(router::body::from_bytes("".to_string()))
                                 .map_err(BoxError::from)?,
                             context: req.context,
                         })
@@ -273,7 +272,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -319,7 +318,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -331,7 +330,7 @@ mod tests {
                 String::from("test"),
                 Subgraph {
                     ttl: None,
-                    enabled: true,
+                    enabled: Some(true),
                     redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {

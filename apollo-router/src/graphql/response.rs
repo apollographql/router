@@ -1,6 +1,7 @@
 #![allow(missing_docs)] // FIXME
 use std::time::Instant;
 
+use apollo_compiler::response::ExecutionResponse;
 use bytes::Bytes;
 use serde::Deserialize;
 use serde::Serialize;
@@ -58,7 +59,6 @@ pub struct Response {
 impl Response {
     /// Constructor
     #[builder(visibility = "pub")]
-    #[allow(clippy::too_many_arguments)]
     fn new(
         label: Option<String>,
         data: Option<Value>,
@@ -245,25 +245,13 @@ impl IncrementalResponse {
     }
 }
 
-impl From<apollo_compiler::execution::Response> for Response {
-    fn from(response: apollo_compiler::execution::Response) -> Response {
-        let apollo_compiler::execution::Response {
-            errors,
-            data,
-            extensions,
-        } = response;
+impl From<ExecutionResponse> for Response {
+    fn from(response: ExecutionResponse) -> Response {
+        let ExecutionResponse { errors, data } = response;
         Self {
             errors: errors.into_graphql_errors().unwrap(),
-            data: match data {
-                apollo_compiler::execution::ResponseData::Object(map) => {
-                    Some(serde_json_bytes::Value::Object(map))
-                }
-                apollo_compiler::execution::ResponseData::Null => {
-                    Some(serde_json_bytes::Value::Null)
-                }
-                apollo_compiler::execution::ResponseData::Absent => None,
-            },
-            extensions,
+            data: data.map(serde_json_bytes::Value::Object),
+            extensions: Default::default(),
             label: None,
             path: None,
             has_next: None,
