@@ -430,16 +430,16 @@ mod tests {
         let low_priority_handles: Vec<_> = (0..pool_size * 3 - 1)
             .map(|_| {
                 execute(ComputeJobType::QueryPlanningWarmup, move |_| {
-                    let inner_start = start.clone();
-                    std::thread::sleep(sleep_duration.clone());
+                    let inner_start = start;
+                    std::thread::sleep(sleep_duration);
                     inner_start.elapsed()
                 })
                 .unwrap()
             })
             .collect();
         let high_priority_handle = execute(ComputeJobType::QueryPlanning, move |_| {
-            let inner_start = start.clone();
-            std::thread::sleep(sleep_duration.clone());
+            let inner_start = start;
+            std::thread::sleep(sleep_duration);
             inner_start.elapsed()
         })
         .unwrap();

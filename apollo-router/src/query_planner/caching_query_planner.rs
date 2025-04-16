@@ -722,6 +722,7 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 mod tests {
     use mockall::mock;
     use serde_json_bytes::json;
+    use std::time::Duration;
     use test_log::test;
     use tower::Service;
 
@@ -1172,5 +1173,86 @@ mod tests {
         } else {
             panic!("Expected both calls to return same error");
         }
+    }
+
+    #[tokio::test]
+    async fn test_cache_warmup() {
+        let create_delegate = |call_count| {
+            let mut delegate = MockMyQueryPlanner::new();
+            delegate.expect_clone().times(1).returning(move || {
+                let mut planner = MockMyQueryPlanner::new();
+                planner.expect_sync_call().times(call_count).returning(|_| {
+                    let plan = Arc::new(QueryPlan::fake_new(None, None));
+                    Ok(QueryPlannerResponse::builder()
+                        .content(QueryPlannerContent::Plan { plan })
+                        .build())
+                });
+                planner
+            });
+            delegate
+        };
+
+        let configuration: Configuration = Default::default();
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("../testdata/starstuff@current.graphql"),
+                &configuration,
+            )
+            .unwrap(),
+        );
+
+        let create_planner = async |delegate| {
+            CachingQueryPlanner::new(
+                delegate,
+                schema.clone(),
+                Default::default(),
+                &configuration,
+                IndexMap::default(),
+            )
+            .await
+            .unwrap()
+        };
+
+        let create_request = || {
+            let query_str = "query ExampleQuery { me { name } }".to_string();
+            let doc = Query::parse_document(&query_str, None, &schema, &configuration).unwrap();
+            let context = Context::new();
+            context
+                .extensions()
+                .with_lock(|lock| lock.insert::<ParsedDocument>(doc));
+            query_planner::CachingRequest::new(query_str, None, context)
+        };
+
+        // send query to caching planner. it should save this query plan in its cache
+        let mut planner = create_planner(create_delegate(1)).await;
+        let response = planner.call(create_request()).await.unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(planner.cache.len().await, 1);
+
+        // create and warm up a new planner. new planner's delegate should be called once during
+        // the warm-up phase to populate the cache
+        let query_analysis_layer =
+            QueryAnalysisLayer::new(schema.clone(), Arc::new(configuration.clone())).await;
+        let mut new_planner = create_planner(create_delegate(1)).await;
+        new_planner
+            .warm_up(
+                &query_analysis_layer,
+                &Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
+                Some(planner.previous_cache()),
+                Some(1),
+                Default::default(),
+                &Default::default(),
+            )
+            .await;
+        // wait a beat - items are added to cache asynchronously, so this helps avoid flakiness
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(new_planner.cache.len().await, 1);
+
+        // create a new delegate that _shouldn't_ be called since the new planner already has the
+        // result in its cache
+        new_planner.delegate = create_delegate(0);
+        let response = new_planner.call(create_request()).await.unwrap();
+        assert!(response.content.is_some());
+        assert_eq!(new_planner.cache.len().await, 1);
     }
 }
