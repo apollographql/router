@@ -497,37 +497,34 @@ async fn deserialize_response<T: HttpBody>(
     let log_response_level = context
         .extensions()
         .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
-        .and_then(|event| match event.0.condition() {
-            Some(condition) => {
-                // Create a temporary response here so we can evaluate the condition. This response
-                // is missing any information about the mapped response, because we don't have that
-                // yet. This means that we cannot correctly evaluate any condition that relies on
-                // the mapped response data or mapping problems. But we can't wait until we do have
-                // that information, because this is the only place we have the body bytes (without
-                // making an expensive clone of the body). So we either need to not expose any
-                // selector which can be used as a condition that requires mapping information, or
-                // we must document that such selectors cannot be used as conditions on standard
-                // connectors events.
+        .and_then(|event| {
+            // Create a temporary response here so we can evaluate the condition. This response
+            // is missing any information about the mapped response, because we don't have that
+            // yet. This means that we cannot correctly evaluate any condition that relies on
+            // the mapped response data or mapping problems. But we can't wait until we do have
+            // that information, because this is the only place we have the body bytes (without
+            // making an expensive clone of the body). So we either need to not expose any
+            // selector which can be used as a condition that requires mapping information, or
+            // we must document that such selectors cannot be used as conditions on standard
+            // connectors events.
 
-                let response = connector::request_service::Response {
-                    context: context.clone(),
-                    connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
-                        inner: parts.clone(),
-                    })),
-                    mapped_response: MappedResponse::Data {
-                        data: Value::Null,
-                        key: response_key.clone(),
-                        problems: vec![],
-                    },
-                };
-                if condition.lock().evaluate_response(&response) {
-                    Some(event.0.level())
-                } else {
-                    None
-                }
+            let response = connector::request_service::Response {
+                context: context.clone(),
+                connector: connector.clone(),
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: parts.clone(),
+                })),
+                mapped_response: MappedResponse::Data {
+                    data: Value::Null,
+                    key: response_key.clone(),
+                    problems: vec![],
+                },
+            };
+            if event.condition.lock().evaluate_response(&response) {
+                Some(event.level)
+            } else {
+                None
             }
-            None => Some(event.0.level()),
         });
 
     if let Some(level) = log_response_level {

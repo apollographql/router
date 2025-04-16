@@ -453,7 +453,7 @@ impl PluginPrivate for Telemetry {
                         .new_router_instruments(static_router_instruments.clone());
                     custom_instruments.on_request(request);
 
-                    let custom_events: RouterEvents =
+                    let mut custom_events: RouterEvents =
                         config_request.instrumentation.events.new_router_events();
                     custom_events.on_request(request);
 
@@ -464,7 +464,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -660,7 +660,7 @@ impl PluginPrivate for Telemetry {
                         .new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
-                    let supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    let mut supergraph_events = config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
                     (
@@ -675,7 +675,7 @@ impl PluginPrivate for Telemetry {
                     ctx,
                     custom_instruments,
                     mut custom_attributes,
-                    supergraph_events,
+                    mut supergraph_events,
                     custom_graphql_instruments,
                 ): (
                     Context,
@@ -804,7 +804,7 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_subgraph_instruments(static_subgraph_instruments.clone());
                     custom_instruments.on_request(sub_request);
-                    let custom_events = config.instrumentation.events.new_subgraph_events();
+                    let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
                     let custom_cache_instruments: CacheInstruments = config
@@ -825,7 +825,7 @@ impl PluginPrivate for Telemetry {
                     context,
                     custom_instruments,
                     custom_attributes,
-                    custom_events,
+                    mut custom_events,
                     custom_cache_instruments,
                 ): (
                     Context,
@@ -907,7 +907,7 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_connector_instruments(static_connector_instruments.clone());
                     custom_instruments.on_request(request);
-                    let custom_events = req_fn_config.instrumentation.events.new_connector_events();
+                    let mut custom_events = req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
 
                     let custom_span_attributes = req_fn_config
@@ -933,7 +933,7 @@ impl PluginPrivate for Telemetry {
                     let conf = res_fn_config.clone();
                     async move {
                         match custom_telemetry {
-                            Some((custom_instruments, custom_events, custom_span_attributes)) => {
+                            Some((custom_instruments, mut custom_events, custom_span_attributes)) => {
                                 let span = Span::current();
                                 span.set_span_dyn_attributes(custom_span_attributes);
 
@@ -1134,7 +1134,7 @@ impl Telemetry {
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
         custom_instruments: SupergraphInstruments,
-        custom_events: SupergraphEvents,
+        mut custom_events: SupergraphEvents,
         custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
         let res = match result {

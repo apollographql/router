@@ -3,28 +3,35 @@ use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::sync::Arc;
 use tower::BoxError;
 
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::Context;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
 use crate::plugins::telemetry::config_new::events::CustomEvent;
-use crate::plugins::telemetry::config_new::events::CustomEventInner;
 use crate::plugins::telemetry::config_new::events::CustomEvents;
 use crate::plugins::telemetry::config_new::events::Event;
-use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEvent;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::instruments::Instrumented;
 
 #[derive(Clone)]
-pub(crate) struct ConnectorEventRequest(pub(crate) StandardEvent<ConnectorSelector>);
+pub(crate) struct ConnectorEventRequest {
+    pub(crate) level: EventLevel,
+    pub(crate) condition: Arc<Mutex<Condition<ConnectorSelector>>>,
+}
+
 #[derive(Clone)]
-pub(crate) struct ConnectorEventResponse(pub(crate) StandardEvent<ConnectorSelector>);
+pub(crate) struct ConnectorEventResponse {
+    pub(crate) level: EventLevel,
+    pub(crate) condition: Arc<Mutex<Condition<ConnectorSelector>>>,
+}
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
@@ -46,92 +53,67 @@ pub(crate) fn new_connector_events(
     let custom_events = config
         .custom
         .iter()
-        .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
-            EventLevel::Off => None,
-            _ => Some(CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
-                    _phantom: Default::default(),
-                }),
-            }),
-        })
+        .filter_map(|(name, config)| CustomEvent::from_config(name, config))
         .collect();
 
     ConnectorEvents {
-        request: config.attributes.request.clone().into(),
-        response: config.attributes.response.clone().into(),
-        error: config.attributes.error.clone().into(),
+        request: StandardEvent::from_config(&config.attributes.request),
+        response: StandardEvent::from_config(&config.attributes.response),
+        error: StandardEvent::from_config(&config.attributes.error),
         custom: custom_events,
     }
 }
 
-impl Instrumented
-    for CustomEvents<
-        ConnectorRequest,
-        ConnectorResponse,
-        (),
-        ConnectorAttributes,
-        ConnectorSelector,
-    >
-{
-    type Request = ConnectorRequest;
-    type Response = ConnectorResponse;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) {
+impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, ConnectorSelector> {
+    pub(crate) fn on_request(&mut self, request: &ConnectorRequest) {
         // Any condition on the request is NOT evaluated here. It must be evaluated later when
         // getting the ConnectorEventRequest from the context. The request context is shared
         // between all connector requests, so any request could find this ConnectorEventRequest in
         // the context. Its presence on the context cannot be conditional on an individual request.
-        if self.request.level() != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .with_lock(|lock| lock.insert(ConnectorEventRequest(self.request.clone())));
+        if let Some(request_event) = self.request.take() {
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(ConnectorEventRequest {
+                    level: request_event.level,
+                    condition: Arc::new(Mutex::new(request_event.condition)),
+                })
+            });
         }
 
-        if self.response.level() != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .with_lock(|lock| lock.insert(ConnectorEventResponse(self.response.clone())));
+        if let Some(response_event) = self.response.take() {
+            request.context.extensions().with_lock(|lock| {
+                lock.insert(ConnectorEventResponse{
+                    level: response_event.level,
+                    condition: Arc::new(Mutex::new(response_event.condition)),
+                })
+            });
         }
 
-        for custom_event in &self.custom {
+        for custom_event in &mut self.custom {
             custom_event.on_request(request);
         }
     }
 
-    fn on_response(&self, response: &Self::Response) {
-        for custom_event in &self.custom {
+    pub(crate) fn on_response(&mut self, response: &ConnectorResponse) {
+        for custom_event in &mut self.custom {
             custom_event.on_response(response);
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error.level() != EventLevel::Off {
-            if let Some(condition) = self.error.condition() {
-                if !condition.lock().evaluate_error(error, ctx) {
-                    return;
-                }
+    pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
+        if let Some(error_event) = &mut self.error {
+            if error_event.condition.evaluate_error(error, ctx) {
+                log_event(
+                    error_event.level,
+                    "connector.http.error",
+                    vec![KeyValue::new(
+                        Key::from_static_str("error"),
+                        opentelemetry::Value::String(error.to_string().into()),
+                    )],
+                    "",
+                );
             }
-            log_event(
-                self.error.level(),
-                "connector.http.error",
-                vec![KeyValue::new(
-                    Key::from_static_str("error"),
-                    opentelemetry::Value::String(error.to_string().into()),
-                )],
-                "",
-            );
         }
-        for custom_event in &self.custom {
+        for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
         }
     }
