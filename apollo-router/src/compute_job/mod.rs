@@ -421,7 +421,8 @@ mod tests {
         let sleep_duration = Duration::from_millis(100);
         let buffered_sleep_duration = Duration::from_millis(120);
 
-        // Send in `pool_size * 3 - 1` low priority requests and 1 high priority request
+        // Send in `pool_size * 3 - 1` low priority requests and 1 high priority request after the
+        // low priority requests.
         // We expect the workers to begin right away, so they'll pull `pool_size` low priority
         // elements from the queue and work on them.
         // However, once the next worker gets free, it should pull the high priority request rather
