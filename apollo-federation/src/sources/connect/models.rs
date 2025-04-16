@@ -1,10 +1,10 @@
+mod http_json_transport;
 mod keys;
 
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_compiler::Node;
@@ -15,25 +15,23 @@ use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
-use either::Either;
 use http::HeaderName;
-use http::Uri;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
+pub use self::http_json_transport::HTTPMethod;
+pub use self::http_json_transport::HeaderSource;
+pub use self::http_json_transport::HttpJsonTransport;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
-use super::spec::ConnectHTTPArguments;
-use super::spec::SourceHTTPArguments;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
 use super::spec::versions::AllowedHeaders;
 use super::spec::versions::VersionInfo;
 use super::string_template;
-use super::string_template::StringTemplate;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
@@ -334,140 +332,6 @@ fn extract_header_references<'a>(
         })
         .collect();
     headers
-}
-
-// --- HTTP JSON ---------------------------------------------------------------
-#[derive(Clone, Debug)]
-pub struct HttpJsonTransport {
-    pub source_url: Option<Uri>,
-    pub connect_template: StringTemplate,
-    pub method: HTTPMethod,
-    pub headers: IndexMap<HeaderName, HeaderSource>,
-    pub body: Option<JSONSelection>,
-}
-
-impl HttpJsonTransport {
-    fn from_directive(
-        http: &ConnectHTTPArguments,
-        source: Option<&SourceHTTPArguments>,
-    ) -> Result<Self, FederationError> {
-        let (method, connect_url) = if let Some(url) = &http.get {
-            (HTTPMethod::Get, url)
-        } else if let Some(url) = &http.post {
-            (HTTPMethod::Post, url)
-        } else if let Some(url) = &http.patch {
-            (HTTPMethod::Patch, url)
-        } else if let Some(url) = &http.put {
-            (HTTPMethod::Put, url)
-        } else if let Some(url) = &http.delete {
-            (HTTPMethod::Delete, url)
-        } else {
-            return Err(FederationError::internal("missing http method"));
-        };
-
-        #[allow(clippy::mutable_key_type)]
-        // HeaderName is internally mutable, but we don't mutate it
-        let mut headers = http.headers.clone();
-        for (header_name, header_source) in
-            source.map(|source| &source.headers).into_iter().flatten()
-        {
-            if !headers.contains_key(header_name) {
-                headers.insert(header_name.clone(), header_source.clone());
-            }
-        }
-
-        Ok(Self {
-            source_url: source.map(|s| s.base_url.clone()),
-            connect_template: connect_url.parse().map_err(|e: string_template::Error| {
-                FederationError::internal(format!(
-                    "could not parse URL template: {message}",
-                    message = e.message
-                ))
-            })?,
-            method,
-            headers,
-            body: http.body.clone(),
-        })
-    }
-
-    fn label(&self) -> String {
-        format!("http: {} {}", self.method.as_str(), self.connect_template)
-    }
-
-    fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
-        let url_selections = self.connect_template.expressions().map(|e| &e.expression);
-        let header_selections = self
-            .headers
-            .iter()
-            .flat_map(|(_, source)| source.expressions());
-        url_selections
-            .chain(header_selections)
-            .chain(self.body.iter())
-            .flat_map(|b| {
-                b.external_var_paths()
-                    .into_iter()
-                    .flat_map(PathSelection::variable_reference)
-            })
-    }
-}
-
-/// The HTTP arguments needed for a connect request
-#[derive(Debug, Clone, Copy)]
-pub enum HTTPMethod {
-    Get,
-    Post,
-    Patch,
-    Put,
-    Delete,
-}
-
-impl HTTPMethod {
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        match self {
-            HTTPMethod::Get => "GET",
-            HTTPMethod::Post => "POST",
-            HTTPMethod::Patch => "PATCH",
-            HTTPMethod::Put => "PUT",
-            HTTPMethod::Delete => "DELETE",
-        }
-    }
-}
-
-impl FromStr for HTTPMethod {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_uppercase().as_str() {
-            "GET" => Ok(HTTPMethod::Get),
-            "POST" => Ok(HTTPMethod::Post),
-            "PATCH" => Ok(HTTPMethod::Patch),
-            "PUT" => Ok(HTTPMethod::Put),
-            "DELETE" => Ok(HTTPMethod::Delete),
-            _ => Err(format!("Invalid HTTP method: {s}")),
-        }
-    }
-}
-
-impl Display for HTTPMethod {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum HeaderSource {
-    From(HeaderName),
-    Value(HeaderValue),
-}
-
-impl HeaderSource {
-    pub(crate) fn expressions(&self) -> impl Iterator<Item = &JSONSelection> {
-        match self {
-            HeaderSource::From(_) => Either::Left(std::iter::empty()),
-            HeaderSource::Value(value) => Either::Right(value.expressions().map(|e| &e.expression)),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
