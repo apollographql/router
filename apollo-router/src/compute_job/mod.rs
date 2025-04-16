@@ -321,14 +321,23 @@ mod tests {
     use super::*;
     use crate::assert_snapshot_subscriber;
 
-    #[tokio::test]
-    async fn test_observability() {
-        // make sure that the queue has been initialized by calling `execute`. if this
-        // step is skipped, the queue will _sometimes_ be initialized in the step below,
-        // which causes an additional log line and a snapshot mismatch.
+    /// Send a request to the compute queue to make sure it is initialized.
+    ///
+    /// The queue is (a) wrapped in a `OnceLock`, so it is shared between tests, and (b) only
+    /// initialized after receiving and processing a request.
+    /// These two properties can lead to inconsistent behavior.
+    async fn ensure_queue_is_initialized() {
         execute(ComputeJobType::Introspection, |_| {})
             .unwrap()
             .await;
+    }
+
+    #[tokio::test]
+    async fn test_observability() {
+        // make sure that the queue has been initialized - if this step is skipped, the
+        // queue will _sometimes_ be initialized in the step below, which causes an
+        // additional log line and a snapshot mismatch.
+        ensure_queue_is_initialized().await;
 
         async {
             let span = info_span!("test_observability");
@@ -401,5 +410,65 @@ mod tests {
             Ok(Ok(())) => {}
             e => panic!("job did not cancel as expected: {e:?}"),
         };
+    }
+
+    #[tokio::test]
+    async fn test_relative_priorities() {
+        let pool_size = thread_pool_size();
+        ensure_queue_is_initialized().await;
+
+        let start = Instant::now();
+        let sleep_duration = Duration::from_millis(100);
+        let buffered_sleep_duration = Duration::from_millis(120);
+
+        // Send in `pool_size * 3 - 1` low priority requests and 1 high priority request
+        // We expect the workers to begin right away, so they'll pull `pool_size` low priority
+        // elements from the queue and work on them.
+        // However, once the next worker gets free, it should pull the high priority request rather
+        // than the remaining low priority requests
+        let low_priority_handles: Vec<_> = (0..pool_size * 3 - 1)
+            .map(|_| {
+                execute(ComputeJobType::QueryPlanningWarmup, move |_| {
+                    let inner_start = start.clone();
+                    std::thread::sleep(sleep_duration.clone());
+                    inner_start.elapsed()
+                })
+                .unwrap()
+            })
+            .collect();
+        let high_priority_handle = execute(ComputeJobType::QueryPlanning, move |_| {
+            let inner_start = start.clone();
+            std::thread::sleep(sleep_duration.clone());
+            inner_start.elapsed()
+        })
+        .unwrap();
+
+        let mut low_priority_durations =
+            futures::future::join_all(low_priority_handles.into_iter()).await;
+        let high_priority_duration = high_priority_handle.await;
+
+        // We expect:
+        // * `pool_size` low priority durations of `sleep_duration`
+        // * 1 high priority duration of `2 * sleep_duration`
+        // * `pool_size - 1` low priority durations of `2 * sleep_duration`
+        // * `pool_size` low priority durations of `3 * sleep_duration`
+        for _ in 0..pool_size {
+            let d = low_priority_durations.remove(0);
+            assert!(d < buffered_sleep_duration);
+        }
+
+        assert!(high_priority_duration < 2 * buffered_sleep_duration);
+        for _ in 0..pool_size - 1 {
+            let d = low_priority_durations.remove(0);
+            assert!(d < 2 * buffered_sleep_duration);
+        }
+
+        for _ in 0..pool_size {
+            let d = low_priority_durations.remove(0);
+            assert!(d < 3 * buffered_sleep_duration);
+        }
+
+        assert!(low_priority_durations.is_empty());
+        assert!(start.elapsed() < 3 * buffered_sleep_duration);
     }
 }
