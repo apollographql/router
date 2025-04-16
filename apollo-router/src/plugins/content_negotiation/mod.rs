@@ -113,7 +113,10 @@ impl ContentNegotiation {
         http::Response::builder()
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
             .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-            .body(Self::error_response_body("INVALID_CONTENT_TYPE_HEADER", message))
+            .body(Self::error_response_body(
+                "INVALID_CONTENT_TYPE_HEADER",
+                message,
+            ))
             .expect("cannot fail")
     }
 
@@ -186,9 +189,7 @@ impl Plugin for ContentNegotiation {
             .service(service)
             .map_response(|mut response: router::Response| {
                 let protocol_mode = response.context.extensions().with_lock(|lock| {
-                    lock.get::<Option<ProtocolMode>>()
-                        .cloned()
-                        .unwrap_or_default()
+                    lock.get::<ProtocolMode>().cloned()
                 });
                 let ClientRequestAccepts {
                     wildcard: accepts_wildcard,
@@ -215,22 +216,32 @@ impl Plugin for ContentNegotiation {
                         );
                     }
                     None if accepts_json || accepts_wildcard => {
-                        // TODO: accepts_json and accepts_wildcard should probably be separate cases to
-                        //  return separate content types, but for now I'm just replicating the existing
-                        //  behavior
                         headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
                     }
-                    None if accepts_multipart_defer => {
-                        headers.insert(CONTENT_TYPE, MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE);
-                    }
-                    None if accepts_multipart_subscription => {
-                        headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE,
-                        );
-                    }
+                    // None if accepts_multipart_defer => {
+                    //     // TODO: return an error?
+                    //     headers.insert(CONTENT_TYPE, MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE);
+                    // }
+                    // None if accepts_multipart_subscription => {
+                    //     // TODO: return an error?
+                    //     headers.insert(
+                    //         CONTENT_TYPE,
+                    //         MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE,
+                    //     );
+                    // }
                     _ => {
                         // TODO: return an error?
+                        // return router::Response::error_builder()
+                        //     .error(
+                        //         graphql::Error::builder()
+                        //             .message(format!("unexpected response value for header provided"))
+                        //             .extension_code("INVALID_ACCEPT_HEADER")
+                        //             .build(),
+                        //     )
+                        //     .status_code(StatusCode::NOT_ACCEPTABLE)
+                        //     .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+                        //     .context(response.context)
+                        //     .build().unwrap();
                         headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
                     }
                 }

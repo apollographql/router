@@ -1337,24 +1337,6 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
-pub(crate) fn count_operation_error_codes(
-    codes: &[&str],
-    context: &Context,
-    errors_config: &ErrorsConfiguration,
-) {
-    let errors: Vec<graphql::Error> = codes
-        .iter()
-        .map(|c| {
-            graphql::Error::builder()
-                .message("")
-                .extension_code(*c)
-                .build()
-        })
-        .collect();
-
-    count_operation_errors(&errors, context, errors_config);
-}
-
 pub(crate) fn count_operation_errors(
     errors: &[graphql::Error],
     context: &Context,
@@ -1559,7 +1541,6 @@ mod test {
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::aggregation::MeterProviderType;
-    use crate::metrics::count_operation_error_codes;
     use crate::metrics::count_operation_errors;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;
@@ -1888,118 +1869,6 @@ mod test {
             f64_counter_with_unit!("test", "test description", "s", 1.5, "attr" = "val");
             assert_counter!("test", 1.5, "attr" = "val");
             assert_unit("test", "s");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_count_operation_error_codes_with_extended_config_enabled() {
-        async {
-            let config = ErrorsConfiguration {
-                preview_extended_error_metrics: ExtendedErrorMetricsMode::Enabled,
-                ..Default::default()
-            };
-
-            let context = Context::default();
-            let _ = context.insert(APOLLO_OPERATION_ID, "some-id".to_string());
-            let _ = context.insert(OPERATION_NAME, "SomeOperation".to_string());
-            let _ = context.insert(OPERATION_KIND, "query".to_string());
-            let _ = context.insert(CLIENT_NAME, "client-1".to_string());
-            let _ = context.insert(CLIENT_VERSION, "version-1".to_string());
-
-            count_operation_error_codes(
-                &["GRAPHQL_VALIDATION_FAILED", "MY_CUSTOM_ERROR"],
-                &context,
-                &config,
-            );
-
-            assert_counter!(
-                "apollo.router.operations.error",
-                1,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-            assert_counter!(
-                "apollo.router.operations.error",
-                1,
-                "apollo.operation.id" = "some-id",
-                "graphql.operation.name" = "SomeOperation",
-                "graphql.operation.type" = "query",
-                "apollo.client.name" = "client-1",
-                "apollo.client.version" = "version-1",
-                "graphql.error.extensions.code" = "MY_CUSTOM_ERROR",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-
-            assert_counter!(
-                "apollo.router.graphql_error",
-                1,
-                code = "GRAPHQL_VALIDATION_FAILED"
-            );
-            assert_counter!("apollo.router.graphql_error", 1, code = "MY_CUSTOM_ERROR");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_count_operation_error_codes_with_extended_config_disabled() {
-        async {
-            let config = ErrorsConfiguration {
-                preview_extended_error_metrics: ExtendedErrorMetricsMode::Disabled,
-                ..Default::default()
-            };
-
-            let context = Context::default();
-            count_operation_error_codes(
-                &["GRAPHQL_VALIDATION_FAILED", "MY_CUSTOM_ERROR"],
-                &context,
-                &config,
-            );
-
-            assert_counter_not_exists!(
-                "apollo.router.operations.error",
-                u64,
-                "apollo.operation.id" = "",
-                "graphql.operation.name" = "",
-                "graphql.operation.type" = "",
-                "apollo.client.name" = "",
-                "apollo.client.version" = "",
-                "graphql.error.extensions.code" = "GRAPHQL_VALIDATION_FAILED",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-            assert_counter_not_exists!(
-                "apollo.router.operations.error",
-                u64,
-                "apollo.operation.id" = "",
-                "graphql.operation.name" = "",
-                "graphql.operation.type" = "",
-                "apollo.client.name" = "",
-                "apollo.client.version" = "",
-                "graphql.error.extensions.code" = "MY_CUSTOM_ERROR",
-                "graphql.error.extensions.severity" = "ERROR",
-                "graphql.error.path" = "",
-                "apollo.router.error.service" = ""
-            );
-
-            assert_counter!(
-                "apollo.router.graphql_error",
-                1,
-                code = "GRAPHQL_VALIDATION_FAILED"
-            );
-            assert_counter!("apollo.router.graphql_error", 1, code = "MY_CUSTOM_ERROR");
         }
         .with_metrics()
         .await;

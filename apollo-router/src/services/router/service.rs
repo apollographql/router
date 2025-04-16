@@ -45,7 +45,6 @@ use crate::http_ext;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
-use crate::metrics::count_operation_error_codes;
 use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;

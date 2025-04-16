@@ -285,9 +285,12 @@ async fn service_call(
             } else {
                 None
             };
-            context
-                .extensions()
-                .with_lock(|lock| lock.insert(protocol_mode));
+
+            if let Some(protocol_mode) = protocol_mode {
+                context
+                    .extensions()
+                    .with_lock(|lock| lock.insert(protocol_mode));
+            }
 
             if let Some(batching) = context
                 .extensions()

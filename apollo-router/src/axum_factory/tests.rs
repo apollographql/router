@@ -73,6 +73,7 @@ use crate::metrics::FutureMetricsExt;
 use crate::plugins::content_negotiation::MULTIPART_DEFER_ACCEPT_HEADER_VALUE;
 use crate::plugins::content_negotiation::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use crate::plugins::healthcheck::Config as HealthCheck;
+use crate::protocols::multipart::ProtocolMode;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::RouterRequest;
@@ -1708,6 +1709,11 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
             graphql::Response::builder().has_next(false).build(),
         ])
         .boxed();
+
+        // added by supergraph stage
+        req.context.extensions()
+            .with_lock(|lock| lock.insert(ProtocolMode::Defer));
+
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
             req.context,
@@ -1767,6 +1773,10 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
                 .build(),
         ])
         .boxed();
+
+        // added by supergraph stage
+        req.context.extensions()
+            .with_lock(|lock| lock.insert(ProtocolMode::Defer));
 
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
