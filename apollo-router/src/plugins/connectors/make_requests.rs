@@ -777,9 +777,11 @@ fn batch_entities_from_request(
 
     // If we've got a max_size set, chunk the batch into smaller batches. Otherwise, we'll default to just a single batch.
     let max_size = connector.batch_settings.as_ref().and_then(|bs| bs.max_size);
-    let batches = max_size.map_or(vec![batch.clone()], |size| {
+    let batches = if let Some(size) = max_size {
         batch.chunks(size).map(|chunk| chunk.to_vec()).collect()
-    });
+    } else {
+        vec![batch]
+    };
 
     // Finally, map the batches to BatchEntity. Each one of these final BatchEntity's ends up being a outgoing request
     let batch_entities = batches
