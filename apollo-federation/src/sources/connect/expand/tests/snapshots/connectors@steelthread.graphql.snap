@@ -21,21 +21,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -121,21 +107,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -284,21 +256,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,

@@ -21,21 +21,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "example",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://example/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -110,21 +96,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "example",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://example/,
             ),
             connect_template: URLTemplate {
                 base: None,
