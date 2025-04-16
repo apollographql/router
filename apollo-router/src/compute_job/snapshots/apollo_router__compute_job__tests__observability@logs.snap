@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/compute_job/mod.rs
 expression: yaml
+snapshot_kind: text
 ---
 - fields: {}
   level: INFO
@@ -9,6 +10,18 @@ expression: yaml
     name: test_observability
   spans:
     - name: test_observability
+- fields:
+    queue_capacity: 14000
+    threads: 14
+  level: INFO
+  message: compute job thread pool created
+  span:
+    job.type: QueryParsing
+    name: compute_job
+  spans:
+    - name: test_observability
+    - job.type: QueryParsing
+      name: compute_job
 - fields: {}
   level: INFO
   message: Inner
