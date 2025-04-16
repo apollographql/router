@@ -133,6 +133,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_Query_t2_0": Connector {
         id: ConnectId {
@@ -312,6 +317,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_Query_unselected_0": Connector {
         id: ConnectId {
@@ -442,6 +452,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_T_r1_0": Connector {
         id: ConnectId {
@@ -560,6 +575,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_T_r2_0": Connector {
         id: ConnectId {
@@ -727,6 +747,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_T_r3_0": Connector {
         id: ConnectId {
@@ -889,6 +914,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         },
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_T_r4_0": Connector {
         id: ConnectId {
@@ -1028,6 +1058,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_T_r5_0": Connector {
         id: ConnectId {
@@ -1211,5 +1246,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
         },
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }

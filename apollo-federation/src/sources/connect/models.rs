@@ -70,6 +70,21 @@ pub struct Connector {
     pub request_headers: HashSet<String>,
     /// The request or response headers referenced in the connectors response mapping
     pub response_headers: HashSet<String>,
+
+    pub batch_settings: Option<ConnectorBatchSettings>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectorBatchSettings {
+    pub max_size: Option<usize>,
+}
+
+impl ConnectorBatchSettings {
+    fn from_directive(connect: &ConnectDirectiveArguments) -> Option<Self> {
+        Some(Self {
+            max_size: connect.batch.as_ref().and_then(|b| b.max_size),
+        })
+    }
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -159,6 +174,7 @@ impl Connector {
             .collect();
         let response_headers = extract_header_references(connect.selection.variable_references());
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
+        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
 
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
@@ -179,6 +195,7 @@ impl Connector {
             response_variables,
             request_headers,
             response_headers,
+            batch_settings,
         };
 
         Ok((id, connector))
@@ -745,6 +762,11 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
+                batch_settings: Some(
+                    ConnectorBatchSettings {
+                        max_size: None,
+                    },
+                ),
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -863,6 +885,11 @@ mod tests {
                 response_variables: {},
                 request_headers: {},
                 response_headers: {},
+                batch_settings: Some(
+                    ConnectorBatchSettings {
+                        max_size: None,
+                    },
+                ),
             },
         }
         "###);
