@@ -1,0 +1,15 @@
+include_subgraph_errors:
+  all: true
+
+telemetry:
+  exporters:
+    logging:
+      stdout:
+        format: text
+
+rhai:
+  scripts: "tests/samples/enterprise/progressive-override/basic/rhai"
+  main: "main.rhai"
+
+plugins:
+  experimental.expose_query_plan: true

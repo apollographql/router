@@ -1,13 +1,17 @@
 //! Generation of usage reporting fields
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map::Entry;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::AddAssign;
 use std::sync::Arc;
 
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
+use apollo_compiler::Schema;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::OperationType;
@@ -22,16 +26,13 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
-use apollo_compiler::Schema;
-use router_bridge::planner::ReferencedFieldsForType;
-use router_bridge::planner::UsageReporting;
+use serde::Deserialize;
 use serde::Serialize;
+use sha2::Digest;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::QueryMetadata;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::spec::Fragments;
 use crate::spec::Query;
@@ -162,23 +163,183 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
     }
 }
 
-/// The result of the generate_usage_reporting function which contains a UsageReporting struct and
-/// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
-pub(crate) struct ComparableUsageReporting {
-    /// The UsageReporting fields
-    pub(crate) result: UsageReporting,
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct UsageReportingOperationDetails {
+    /// The operation name, or None if there is no operation name
+    operation_name: Option<String>,
+    /// The normalized operation signature, or None if there is no valid signature
+    operation_signature: Option<String>,
+    /// a list of all types and fields referenced in the query
+    #[serde(default)]
+    referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-/// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
-/// and referenced fields of an operation. The document used to generate the signature and for the references can be
-/// different to handle cases where the operation has been filtered, but we want to keep the same signature.
+impl UsageReportingOperationDetails {
+    fn operation_name_or_default(&self) -> String {
+        self.operation_name.as_deref().unwrap_or("").to_string()
+    }
+
+    fn operation_sig_or_default(&self) -> String {
+        self.operation_signature
+            .as_deref()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn get_signature_and_operation(&self) -> String {
+        let op_name = self.operation_name.as_deref().unwrap_or("-").to_string();
+        let op_sig = self
+            .operation_signature
+            .as_deref()
+            .unwrap_or("")
+            .to_string();
+        format!("# {}\n{}", op_name, op_sig)
+    }
+}
+
+/// UsageReporting fields, that will be used to send stats to uplink/studio
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum UsageReporting {
+    Operation(UsageReportingOperationDetails),
+    PersistedQuery {
+        operation_details: UsageReportingOperationDetails,
+        persisted_query_id: String,
+    },
+    Error(String),
+}
+
+impl UsageReporting {
+    pub(crate) fn with_pq_id(&self, persisted_query_id: String) -> UsageReporting {
+        match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => UsageReporting::PersistedQuery {
+                operation_details: operation_details.clone(),
+                persisted_query_id,
+            },
+            // PQ ID has no effect on errors
+            UsageReporting::Error { .. } => self.clone(),
+        }
+    }
+
+    /// The `stats_report_key` is a unique identifier derived from schema and query.
+    /// Metric data sent to Studio must be aggregated via grouped key of
+    /// (`client_name`, `client_version`, `stats_report_key`).
+    /// For errors, the report key is of the form "## <error name>\n".
+    /// For operations not requested by PQ, the report key is of the form "# <op name>\n<op sig>".
+    /// For operations requested by PQ, the report key is of the form "pq# <unique hash>", where the
+    /// unique hash is a string that is consistent for the same PQ and operation, but unique if either
+    /// is different. The actual PQ ID, operation name, and operation signature is passed as metadata.
+    /// We need to do this so that we can group stats for each combination of PQ and operation.
+    /// Note that the combination of signature and operation name is sometimes referred to in code as
+    /// the "operation signature".
+    pub(crate) fn get_stats_report_key(&self) -> String {
+        match self {
+            UsageReporting::Operation(operation_details) => {
+                operation_details.get_signature_and_operation()
+            }
+            UsageReporting::Error(error_key) => {
+                format!("## {}\n", error_key)
+            }
+            UsageReporting::PersistedQuery {
+                operation_details,
+                persisted_query_id,
+                ..
+            } => {
+                let string_to_hash = format!(
+                    "{}\n{}\n{}",
+                    persisted_query_id,
+                    operation_details.operation_name_or_default(),
+                    operation_details.operation_sig_or_default()
+                );
+                format!("pq# {}", Self::hash_string(&string_to_hash))
+            }
+        }
+    }
+
+    pub(crate) fn get_operation_id(&self) -> String {
+        let string_to_hash = match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => operation_details.get_signature_and_operation(),
+            UsageReporting::Error(error_key) => {
+                format!("# # {}\n", error_key)
+            }
+        };
+        Self::hash_string(&string_to_hash)
+    }
+
+    pub(crate) fn get_operation_name(&self) -> String {
+        match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => operation_details.operation_name_or_default(),
+            UsageReporting::Error(error_key) => format!("# {}", error_key),
+        }
+    }
+
+    pub(crate) fn get_referenced_fields(&self) -> HashMap<String, ReferencedFieldsForType> {
+        match self {
+            UsageReporting::Operation(operation_details)
+            | UsageReporting::PersistedQuery {
+                operation_details, ..
+            } => operation_details.referenced_fields_by_type.clone(),
+            UsageReporting::Error { .. } => HashMap::default(),
+        }
+    }
+
+    pub(crate) fn get_query_metadata(&self) -> Option<QueryMetadata> {
+        match self {
+            UsageReporting::PersistedQuery {
+                operation_details,
+                persisted_query_id,
+                ..
+            } => Some(QueryMetadata {
+                name: operation_details.operation_name_or_default(),
+                signature: operation_details.operation_sig_or_default(),
+                pq_id: persisted_query_id.clone(),
+            }),
+            // For now we only want to populate query metadata for PQ operations
+            UsageReporting::Operation { .. } | UsageReporting::Error { .. } => None,
+        }
+    }
+
+    fn hash_string(string_to_hash: &String) -> String {
+        let mut hasher = sha1::Sha1::new();
+        hasher.update(string_to_hash.as_bytes());
+        let result = hasher.finalize();
+        hex::encode(result)
+    }
+}
+
+/// A list of fields that will be resolved for a given type
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ReferencedFieldsForType {
+    /// names of the fields queried
+    #[serde(default)]
+    pub(crate) field_names: Vec<String>,
+    /// whether the field is an interface
+    #[serde(default)]
+    pub(crate) is_interface: bool,
+}
+
+/// Generate a UsageReporting containing the data required to generate a stats_report_key (either a normalized version of
+/// the operation signature or an error key or a PQ ID) and referenced fields of an operation. The document used to
+/// generate the signature and for the references can be different to handle cases where the operation has been filtered,
+/// but we want to keep the same signature.
 pub(crate) fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
-) -> ComparableUsageReporting {
+) -> UsageReporting {
     let mut generator = UsageGenerator {
         signature_doc,
         references_doc,
@@ -223,20 +384,17 @@ pub(crate) fn generate_extended_references(
 
 pub(crate) fn extract_enums_from_response(
     query: Arc<Query>,
-    operation_name: Option<&str>,
     schema: &Valid<Schema>,
     response_body: &Object,
     existing_refs: &mut ReferencedEnums,
 ) {
-    if let Some(operation) = query.operation(operation_name) {
-        extract_enums_from_selection_set(
-            &operation.selection_set,
-            &query.fragments,
-            schema,
-            response_body,
-            existing_refs,
-        );
-    }
+    extract_enums_from_selection_set(
+        &query.operation.selection_set,
+        &query.fragments,
+        schema,
+        response_body,
+        existing_refs,
+    );
 }
 
 fn add_enum_value_to_map(
@@ -346,16 +504,23 @@ struct UsageGenerator<'a> {
 }
 
 impl UsageGenerator<'_> {
-    fn generate_usage_reporting(&mut self) -> ComparableUsageReporting {
-        ComparableUsageReporting {
-            result: UsageReporting {
-                stats_report_key: self.generate_stats_report_key(),
-                referenced_fields_by_type: self.generate_apollo_reporting_refs(),
-            },
-        }
+    fn generate_usage_reporting(&mut self) -> UsageReporting {
+        UsageReporting::Operation(UsageReportingOperationDetails {
+            operation_name: self.get_operation_name(),
+            operation_signature: self.generate_normalized_signature(),
+            referenced_fields_by_type: self.generate_apollo_reporting_refs(),
+        })
     }
 
-    fn generate_stats_report_key(&mut self) -> String {
+    fn get_operation_name(&self) -> Option<String> {
+        self.signature_doc
+            .operations
+            .get(self.operation_name.as_deref())
+            .ok()
+            .and_then(|operation| operation.name.as_ref().map(|node| node.to_string()))
+    }
+
+    fn generate_normalized_signature(&mut self) -> Option<String> {
         self.fragments_map.clear();
 
         match self
@@ -364,10 +529,10 @@ impl UsageGenerator<'_> {
             .get(self.operation_name.as_deref())
             .ok()
         {
-            None => "".to_string(),
+            None => None,
             Some(operation) => {
                 self.extract_signature_fragments(&operation.selection_set);
-                self.format_operation_for_report(operation)
+                Some(self.format_operation_signature_for_report(operation))
             }
         }
     }
@@ -398,15 +563,10 @@ impl UsageGenerator<'_> {
         }
     }
 
-    fn format_operation_for_report(&self, operation: &Node<Operation>) -> String {
-        // The result in the name of the operation
-        let op_name = match &operation.name {
-            None => "-".into(),
-            Some(node) => node.to_string(),
-        };
-        let mut result = format!("# {}\n", op_name);
+    fn format_operation_signature_for_report(&self, operation: &Node<Operation>) -> String {
+        let mut result = String::new();
 
-        // Followed by a sorted list of fragments
+        // The signature starts with a sorted list of fragments
         let mut sorted_fragments: Vec<_> = self.fragments_map.iter().collect();
         sorted_fragments.sort_by_key(|&(k, _)| k);
 
@@ -751,7 +911,7 @@ struct SignatureFormatterWithAlgorithm<'a> {
     normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
 }
 
-impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
+impl fmt::Display for SignatureFormatterWithAlgorithm<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self.formatter {
             ApolloReportingSignatureFormatter::Operation(operation) => {
@@ -880,7 +1040,7 @@ fn format_selection_set(
             let use_separator = field_str
                 .chars()
                 .last()
-                .map_or(false, |c| c.is_alphanumeric() || c == '_');
+                .is_some_and(|c| c.is_alphanumeric() || c == '_');
             if i < fields.len() - 1 && use_separator {
                 f.write_str(" ")?;
             }
@@ -966,7 +1126,7 @@ fn format_field(
                     || arg_string
                         .chars()
                         .last()
-                        .map_or(true, |c| c.is_alphanumeric() || c == '_'))
+                        .is_none_or(|c| c.is_alphanumeric() || c == '_'))
             {
                 write!(f, "{}", separator)?;
             }
@@ -1110,11 +1270,7 @@ fn get_arg_separator(
         + arg_strings.iter().map(|s| s.len()).sum::<usize>()
         + arg_strings.len()
         + ((arg_strings.len() - 1) * 2);
-    if original_line_length > 80 {
-        ' '
-    } else {
-        ','
-    }
+    if original_line_length > 80 { ' ' } else { ',' }
 }
 
 fn format_fragment_spread(

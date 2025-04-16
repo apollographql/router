@@ -1,17 +1,21 @@
+//! Layers that do HTTP content negotiation using the Accept and Content-Type headers.
+//!
+//! Content negotiation uses a pair of layers that work together at the router and supergraph stages.
+
 use std::ops::ControlFlow;
 
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::Method;
 use http::StatusCode;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
+use mediatype::MediaTypeList;
+use mediatype::ReadParams;
+use mediatype::names::_STAR;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
-use mediatype::names::_STAR;
-use mediatype::MediaTypeList;
-use mediatype::ReadParams;
 use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
@@ -19,13 +23,8 @@ use tower::Service;
 use tower::ServiceExt;
 
 use crate::graphql;
-use crate::layers::sync_checkpoint::CheckpointService;
 use crate::layers::ServiceExt as _;
-use crate::services::router;
-use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
-use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
-use crate::services::router::ClientRequestAccepts;
-use crate::services::supergraph;
+use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::MULTIPART_DEFER_ACCEPT;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
@@ -33,9 +32,22 @@ use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 use crate::services::MULTIPART_SUBSCRIPTION_ACCEPT;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_PARAMETER;
 use crate::services::MULTIPART_SUBSCRIPTION_SPEC_VALUE;
+use crate::services::router;
+use crate::services::router::ClientRequestAccepts;
+use crate::services::router::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
+use crate::services::router::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
+use crate::services::supergraph;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
-/// [`Layer`] for Content-Type checks implementation.
+
+/// A layer for the router service that rejects requests that do not have an expected Content-Type,
+/// or that have an Accept header that is not supported by the router.
+///
+/// In particular, the Content-Type must be JSON, and the Accept header must include */*, or one of
+/// the JSON/GraphQL MIME types.
+///
+/// # Context
+/// If the request is valid, this layer adds a [`ClientRequestAccepts`] value to the context.
 #[derive(Clone, Default)]
 pub(crate) struct RouterLayer {}
 
@@ -52,10 +64,10 @@ where
                 if req.router_request.method() != Method::GET
                     && !content_type_is_json(req.router_request.headers())
                 {
-                    let response: http::Response<crate::services::router::Body> = http::Response::builder()
+                    let response = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(crate::services::router::Body::from(
+                        .body(router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()
@@ -71,17 +83,6 @@ where
                             .to_string(),
                         ))
                         .expect("cannot fail");
-                    u64_counter!(
-                        "apollo_router_http_requests_total",
-                        "Total number of HTTP requests made.",
-                        1,
-                        status = StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16() as i64,
-                        error = format!(
-                            r#"'content-type' header must be one of: {:?} or {:?}"#,
-                            APPLICATION_JSON.essence_str(),
-                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                        )
-                    );
 
                     return Ok(ControlFlow::Break(response.into()));
                 }
@@ -95,12 +96,14 @@ where
                 {
                     req.context
                         .extensions()
-                        .with_lock(|mut lock| lock.insert(accepts));
+                        .with_lock(|lock| lock.insert(accepts));
 
                     Ok(ControlFlow::Continue(req))
                 } else {
-                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).header(CONTENT_TYPE, APPLICATION_JSON.essence_str()).body(
-                        hyper::Body::from(
+                    let response = http::Response::builder()
+                        .status(StatusCode::NOT_ACCEPTABLE)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(router::body::from_bytes(
                             serde_json::json!({
                                 "errors": [
                                     graphql::Error::builder()
@@ -114,7 +117,9 @@ where
                                         .extension_code("INVALID_ACCEPT_HEADER")
                                         .build()
                                 ]
-                            }).to_string())).expect("cannot fail");
+                            })
+                            .to_string()
+                        )).expect("cannot fail");
 
                     Ok(ControlFlow::Break(response.into()))
                 }
@@ -124,7 +129,12 @@ where
     }
 }
 
-/// [`Layer`] for Content-Type checks implementation.
+/// A layer for the supergraph service that populates the Content-Type response header.
+///
+/// The content type is decided based on the [`ClientRequestAccepts`] context value, which is
+/// populated by the content negotiation [`RouterLayer`].
+// XXX(@goto-bus-stop): this feels a bit odd. It probably works fine because we can only ever respond
+// with JSON, but maybe this should be done as close as possible to where we populate the response body..?
 #[derive(Clone, Default)]
 pub(crate) struct SupergraphLayer {}
 
@@ -293,5 +303,14 @@ mod tests {
         default_headers.append(ACCEPT, HeaderValue::from_static(MULTIPART_DEFER_ACCEPT));
         let accepts = parse_accept(&default_headers);
         assert!(accepts.multipart_defer);
+
+        // Multiple accepted types, including one with a parameter we are interested in
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("multipart/mixed;subscriptionSpec=1.0, application/json"),
+        );
+        let accepts = parse_accept(&default_headers);
+        assert!(accepts.multipart_subscription);
     }
 }

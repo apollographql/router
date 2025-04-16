@@ -801,7 +801,10 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
         }
         "#,
     );
+    // Note: This plan is ambiguous without type-conditioned fetching (FED-515).
+    //       So, correctness check is disabled.
     assert_plan!(
+        validate_correctness = false,
         &planner,
         r#"
         {

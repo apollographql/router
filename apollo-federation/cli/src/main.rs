@@ -6,16 +6,23 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::ApiSchemaOptions;
+use apollo_federation::Supergraph;
+use apollo_federation::correctness::CorrectnessError;
 use apollo_federation::error::FederationError;
 use apollo_federation::error::SingleFederationError;
+use apollo_federation::internal_error;
 use apollo_federation::query_graph;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::sources::connect::expand::ExpansionResult;
+use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::subgraph;
-use bench::BenchOutput;
 use clap::Parser;
+use tracing_subscriber::prelude::*;
 
 mod bench;
+use bench::BenchOutput;
 use bench::run_bench;
 
 #[derive(Parser)]
@@ -23,12 +30,12 @@ struct QueryPlannerArgs {
     /// Enable @defer support.
     #[arg(long, default_value_t = false)]
     enable_defer: bool,
-    /// Reuse fragments to compress subgraph queries.
-    #[arg(long, default_value_t = false)]
-    reuse_fragments: bool,
     /// Generate fragments to compress subgraph queries.
     #[arg(long, default_value_t = false)]
     generate_fragments: bool,
+    /// Enable type conditioned fetching.
+    #[arg(long, default_value_t = false)]
+    type_conditioned_fetching: bool,
     /// Run GraphQL validation check on generated subgraph queries. (default: true)
     #[arg(long, default_missing_value = "true", require_equals = true, num_args = 0..=1)]
     subgraph_validation: Option<bool>,
@@ -38,10 +45,6 @@ struct QueryPlannerArgs {
     /// Set the `debug.paths_limit` option.
     #[arg(long)]
     paths_limit: Option<u32>,
-    /// If the supergraph only represents a single subgraph, pass through queries directly without
-    /// planning.
-    #[arg(long, default_value_t = false)]
-    single_subgraph_passthrough: bool,
 }
 
 /// CLI arguments. See <https://docs.rs/clap/latest/clap/_derive/index.html>
@@ -104,20 +107,31 @@ enum Command {
         #[command(flatten)]
         planner: QueryPlannerArgs,
     },
+
+    /// Expand connector-enabled supergraphs
+    Expand {
+        /// The path to the supergraph schema file, or `-` for stdin
+        supergraph_schema: PathBuf,
+
+        /// The output directory for the extracted subgraph schemas
+        destination_dir: Option<PathBuf>,
+
+        /// An optional prefix to match against expanded subgraph names
+        #[arg(long)]
+        filter_prefix: Option<String>,
+    },
 }
 
 impl QueryPlannerArgs {
     fn apply(&self, config: &mut QueryPlannerConfig) {
         config.incremental_delivery.enable_defer = self.enable_defer;
-        // --generate-fragments trumps --reuse-fragments
-        config.reuse_query_fragments = self.reuse_fragments && !self.generate_fragments;
         config.generate_query_fragments = self.generate_fragments;
+        config.type_conditioned_fetching = self.type_conditioned_fetching;
         config.subgraph_graphql_validation = self.subgraph_validation.unwrap_or(true);
         if let Some(max_evaluated_plans) = self.max_evaluated_plans {
             config.debug.max_evaluated_plans = max_evaluated_plans;
         }
         config.debug.paths_limit = self.paths_limit;
-        config.debug.bypass_planner_for_single_subgraph = self.single_subgraph_passthrough;
     }
 }
 
@@ -129,7 +143,20 @@ impl From<QueryPlannerArgs> for QueryPlannerConfig {
     }
 }
 
+/// Set up the tracing subscriber
+fn init_tracing() {
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .without_time()
+        .with_target(false);
+    let filter_layer = tracing_subscriber::EnvFilter::from_default_env();
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(filter_layer)
+        .init();
+}
+
 fn main() -> ExitCode {
+    init_tracing();
     let args = Args::parse();
     let result = match args.command {
         Command::Api {
@@ -154,6 +181,15 @@ fn main() -> ExitCode {
             operations_dir,
             planner,
         } => cmd_bench(&supergraph_schema, &operations_dir, planner),
+        Command::Expand {
+            supergraph_schema,
+            destination_dir,
+            filter_prefix,
+        } => cmd_expand(
+            &supergraph_schema,
+            destination_dir.as_ref(),
+            filter_prefix.as_deref(),
+        ),
     };
     match result {
         Err(error) => {
@@ -254,11 +290,28 @@ fn cmd_plan(
 
     let query_doc =
         ExecutableDocument::parse_and_validate(planner.api_schema().schema(), query, query_path)?;
-    print!(
-        "{}",
-        planner.build_query_plan(&query_doc, None, Default::default())?
+    let query_plan = planner.build_query_plan(&query_doc, None, Default::default())?;
+    println!("{query_plan}");
+
+    // Check the query plan
+    let subgraphs_by_name = supergraph
+        .extract_subgraphs()
+        .unwrap()
+        .into_iter()
+        .map(|(name, subgraph)| (name, subgraph.schema))
+        .collect();
+    let result = apollo_federation::correctness::check_plan(
+        planner.api_schema(),
+        &supergraph.schema,
+        &subgraphs_by_name,
+        &query_doc,
+        &query_plan,
     );
-    Ok(())
+    match result {
+        Ok(_) => Ok(()),
+        Err(CorrectnessError::FederationError(e)) => Err(e),
+        Err(CorrectnessError::ComparisonError(e)) => Err(internal_error!("{}", e.description())),
+    }
 }
 
 fn cmd_validate(file_paths: &[PathBuf]) -> Result<(), FederationError> {
@@ -295,6 +348,75 @@ fn cmd_extract(file_path: &Path, dest: Option<&PathBuf>) -> Result<(), Federatio
             println!(); // newline
         }
     }
+    Ok(())
+}
+
+fn cmd_expand(
+    file_path: &Path,
+    dest: Option<&PathBuf>,
+    filter_prefix: Option<&str>,
+) -> Result<(), FederationError> {
+    let original_supergraph = load_supergraph_file(file_path)?;
+    let ExpansionResult::Expanded { raw_sdl, .. } = expand_connectors(
+        &original_supergraph.schema.schema().serialize().to_string(),
+        &ApiSchemaOptions::default(),
+    )?
+    else {
+        return Err(FederationError::internal(
+            "supplied supergraph has no connectors to expand",
+        ));
+    };
+
+    // Validate the schema
+    // TODO: If expansion errors here due to bugs, it can be very hard to trace
+    // what specific portion of the expansion process failed. Work will need to be
+    // done to expansion to allow for returning an error type that carries the error
+    // and the expanded subgraph as seen until the error.
+    let expanded = Supergraph::new(&raw_sdl)?;
+
+    let subgraphs = expanded.extract_subgraphs()?;
+    if let Some(dest) = dest {
+        fs::create_dir_all(dest).map_err(|_| SingleFederationError::Internal {
+            message: "Error: directory creation failed".into(),
+        })?;
+        for (name, subgraph) in subgraphs {
+            // Skip any files not matching the prefix, if specified
+            if let Some(prefix) = filter_prefix {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
+            }
+
+            let subgraph_path = dest.join(format!("{}.graphql", name));
+            fs::write(subgraph_path, subgraph.schema.schema().to_string()).map_err(|_| {
+                SingleFederationError::Internal {
+                    message: "Error: file output failed".into(),
+                }
+            })?;
+        }
+    } else {
+        // Print out the schemas as YAML so that it can be piped into rover
+        // TODO: It would be nice to use rover's supergraph type here instead of manually printing
+        println!("federation_version: 2");
+        println!("subgraphs:");
+        for (name, subgraph) in subgraphs {
+            // Skip any files not matching the prefix, if specified
+            if let Some(prefix) = filter_prefix {
+                if !name.starts_with(prefix) {
+                    continue;
+                }
+            }
+
+            let schema_str = subgraph.schema.schema().serialize().initial_indent_level(4);
+            println!("  {name}:");
+            println!("    routing_url: none");
+            println!("    schema:");
+            println!("      sdl: |");
+            println!("{schema_str}");
+            println!(); // newline
+        }
+    }
+
     Ok(())
 }
 

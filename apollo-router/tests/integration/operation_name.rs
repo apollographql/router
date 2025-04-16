@@ -14,9 +14,15 @@ async fn empty_document() {
     {
       "errors": [
         {
-          "message": "Syntax Error: Unexpected <EOF>.",
+          "message": "parsing error: syntax error: Unexpected <EOF>.",
+          "locations": [
+            {
+              "line": 1,
+              "column": 27
+            }
+          ],
           "extensions": {
-            "code": "GRAPHQL_PARSE_FAILED"
+            "code": "PARSING_ERROR"
           }
         }
       ]
@@ -157,7 +163,7 @@ async fn incorrect_operation_name() {
         {
           "message": "Unknown operation named \"SecretThirdOp\"",
           "extensions": {
-            "code": "GRAPHQL_VALIDATION_FAILED"
+            "code": "GRAPHQL_UNKNOWN_OPERATION_NAME"
           }
         }
       ]

@@ -7,18 +7,6 @@ expression: first_response
     "__schema": {
       "types": [
         {
-          "name": "Query"
-        },
-        {
-          "name": "T"
-        },
-        {
-          "name": "String"
-        },
-        {
-          "name": "Boolean"
-        },
-        {
           "name": "__Schema"
         },
         {
@@ -41,6 +29,18 @@ expression: first_response
         },
         {
           "name": "__DirectiveLocation"
+        },
+        {
+          "name": "String"
+        },
+        {
+          "name": "Boolean"
+        },
+        {
+          "name": "Query"
+        },
+        {
+          "name": "T"
         }
       ]
     }

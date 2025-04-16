@@ -13,7 +13,6 @@ use tokio::sync::broadcast::{self};
 use tokio::sync::oneshot;
 use tower::BoxError;
 use tower::Layer;
-use tower::ServiceExt;
 
 use crate::batching::BatchQuery;
 use crate::graphql::Request;
@@ -49,6 +48,7 @@ impl Clone for CloneSubgraphResponse {
             response: http_ext::Response::from(&self.0.response).inner,
             context: self.0.context.clone(),
             subgraph_name: self.0.subgraph_name.clone(),
+            id: self.0.id.clone(),
         })
     }
 }
@@ -71,7 +71,7 @@ where
     }
 
     async fn dedup(
-        service: S,
+        mut service: S,
         wait_map: WaitMap,
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
@@ -84,7 +84,7 @@ where
             .extensions()
             .with_lock(|lock| lock.contains_key::<BatchQuery>())
         {
-            return service.ready_oneshot().await?.call(request).await;
+            return service.call(request).await;
         }
         loop {
             let mut locked_wait_map = wait_map.lock().await;
@@ -104,10 +104,11 @@ where
                                     SubgraphResponse::new_from_response(
                                         response.0.response,
                                         request.context,
-                                        request.subgraph_name.unwrap_or_default(),
+                                        request.subgraph_name,
+                                        request.id,
                                     )
                                 })
-                                .map_err(|e| e.into())
+                                .map_err(|e| e.into());
                         }
                         // there was an issue with the broadcast channel, retry fetching
                         Err(_) => continue,
@@ -121,6 +122,7 @@ where
 
                     let context = request.context.clone();
                     let authorization_cache_key = request.authorization.clone();
+                    let id = request.id.clone();
                     let cache_key = ((&request.subgraph_request).into(), authorization_cache_key);
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
@@ -133,12 +135,7 @@ where
                             locked_wait_map.remove(&cache_key);
                         });
 
-                        service
-                            .ready_oneshot()
-                            .await?
-                            .call(request)
-                            .await
-                            .map(CloneSubgraphResponse)
+                        service.call(request).await.map(CloneSubgraphResponse)
                     };
 
                     // Let our waiters know
@@ -161,7 +158,8 @@ where
                         SubgraphResponse::new_from_response(
                             response.0.response,
                             context,
-                            response.0.subgraph_name.unwrap_or_default(),
+                            response.0.subgraph_name,
+                            id,
                         )
                     });
                 }
@@ -182,19 +180,20 @@ where
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
     }
 
     fn call(&mut self, request: SubgraphRequest) -> Self::Future {
         let service = self.service.clone();
+        let mut inner = std::mem::replace(&mut self.service, service);
 
         if request.operation_kind == OperationKind::Query {
             let wait_map = self.wait_map.clone();
 
-            Box::pin(async move { Self::dedup(service, wait_map, request).await })
+            Box::pin(async move { Self::dedup(inner, wait_map, request).await })
         } else {
-            Box::pin(async move { service.oneshot(request).await })
+            Box::pin(async move { inner.call(request).await })
         }
     }
 }

@@ -5,11 +5,10 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::router::body::RouterBody;
 use super::Plugins;
+use super::router::body::RouterBody;
 use crate::Context;
 
-pub(crate) mod body_stream;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
@@ -47,15 +46,15 @@ impl HttpClientServiceFactory {
     pub(crate) fn from_config(
         service: impl Into<String>,
         configuration: &crate::Configuration,
-        http2: crate::plugins::traffic_shaping::Http2Config,
+        client_config: crate::configuration::shared::Client,
     ) -> Self {
         use indexmap::IndexMap;
 
-        let service = HttpClientService::from_config(
+        let service = HttpClientService::from_config_for_subgraph(
             service,
             configuration,
             &rustls::RootCertStore::empty(),
-            http2,
+            client_config,
         )
         .unwrap();
 

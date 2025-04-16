@@ -6,9 +6,8 @@ info:
   telemetry:
     instrumentation:
       instruments:
-        router:
-          http.server.active_requests: false
-          http.server.request.duration: false
+        default_requirement_level: none
+        subgraph:
           custom.histogram.duration:
             description: histogram of requests
             type: histogram
@@ -21,4 +20,5 @@ info:
   data:
     datapoints:
       - sum: 0.1
+        count: 1
         attributes: {}

@@ -1,16 +1,22 @@
 use std::collections::HashMap;
+use std::future;
 
+use futures::StreamExt;
+use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::subgraph;
 use crate::services::SubgraphResponse;
+use crate::services::execution;
+use crate::services::fetch::SubgraphNameExt;
+use crate::services::subgraph;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
@@ -42,42 +48,80 @@ impl Plugin for IncludeSubgraphErrors {
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        // Search for subgraph in our configured subgraph map.
-        // If we can't find it, use the "all" value
-        if !*self.config.subgraphs.get(name).unwrap_or(&self.config.all) {
-            let sub_name_response = name.to_string();
-            let sub_name_error = name.to_string();
-            return service
-                .map_response(move |mut response: SubgraphResponse| {
-                    if !response.response.body().errors.is_empty() {
+        // Search for subgraph in our configured subgraph map. If we can't find it, use the "all" value
+        let include_subgraph_errors = *self.config.subgraphs.get(name).unwrap_or(&self.config.all);
+
+        let sub_name_response = name.to_string();
+        let sub_name_error = name.to_string();
+        service
+            .map_response(move |mut response: SubgraphResponse| {
+                let errors = &mut response.response.body_mut().errors;
+                if !errors.is_empty() {
+                    if include_subgraph_errors {
+                        for error in errors.iter_mut() {
+                            error
+                                .extensions
+                                .entry("service")
+                                .or_insert(sub_name_response.clone().into());
+                        }
+                    } else {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        for error in response.response.body_mut().errors.iter_mut() {
+                        for error in errors.iter_mut() {
                             error.message = REDACTED_ERROR_MESSAGE.to_string();
                             error.extensions = Object::default();
                         }
                     }
-                    response
-                })
-                // _error to stop clippy complaining about unused assignments...
-                .map_err(move |mut _error: BoxError| {
+                }
+
+                response
+            })
+            .map_err(move |error: BoxError| {
+                if include_subgraph_errors {
+                    error
+                } else {
                     // Create a redacted error to replace whatever error we have
                     tracing::info!("redacted subgraph({sub_name_error}) error");
-                    _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                    Box::new(crate::error::FetchError::SubrequestHttpError {
                         status_code: None,
                         service: "redacted".to_string(),
                         reason: "redacted".to_string(),
-                    });
-                    _error
-                })
-                .boxed();
-        }
-        service
+                    })
+                }
+            })
+            .boxed()
+    }
+
+    // TODO: promote fetch_service to a plugin hook
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        let all = self.config.all;
+        let subgraphs = self.config.subgraphs.clone();
+        ServiceBuilder::new()
+            .map_response(move |mut response: execution::Response| {
+                response.response = response.response.map(move |response| {
+                    response
+                        .flat_map(move |mut response| {
+                            response.errors.iter_mut().for_each(|error| {
+                                if let Some(subgraph_name) = error.subgraph_name() {
+                                    if !*subgraphs.get(&subgraph_name).unwrap_or(&all) {
+                                        tracing::info!("redacted subgraph({subgraph_name}) error");
+                                        error.message = REDACTED_ERROR_MESSAGE.to_string();
+                                        error.extensions = Object::default();
+                                    }
+                                }
+                            });
+                            stream::once(future::ready(response))
+                        })
+                        .boxed()
+                });
+                response
+            })
+            .service(service)
+            .boxed()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -88,23 +132,23 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::Configuration;
     use crate::json_ext::Object;
-    use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlannerPool;
+    use crate::plugin::test::MockSubgraph;
+    use crate::query_planner::QueryPlannerService;
     use crate::router_factory::create_plugins;
+    use crate::services::HasSchema;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
     use crate::services::router;
     use crate::services::router::service::RouterCreator;
-    use crate::services::HasSchema;
-    use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::services::SupergraphRequest;
     use crate::spec::Schema;
-    use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
-        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query($first: Int) { topProducts(first: $first) { __typename upc } }\",\"variables\":{\"first\":2}}","path":[],"extensions":{"test":"value","code":"FETCH_ERROR","service":"products"}}]}"#.as_bytes())
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -191,19 +235,26 @@ mod test {
 
         let product_service = MockSubgraph::new(product_mocks).with_extensions(extensions);
 
+        let mut configuration = Configuration::default();
+        // TODO(@goto-bus-stop): need to update the mocks and remove this, #6013
+        configuration.supergraph.generate_query_fragments = false;
+        let configuration = Arc::new(configuration);
+
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Schema::parse(schema, &Default::default()).unwrap();
-        let planner = BridgeQueryPlannerPool::new(
-            Vec::new(),
-            schema.into(),
-            Default::default(),
-            NonZeroUsize::new(1).unwrap(),
-        )
-        .await
-        .unwrap();
+        let schema = Schema::parse(schema, &configuration).unwrap();
+
+        let planner = QueryPlannerService::new(schema.into(), Arc::clone(&configuration))
+            .await
+            .unwrap();
         let schema = planner.schema();
-        let subgraph_schemas = planner.subgraph_schemas();
+        let subgraph_schemas = Arc::new(
+            planner
+                .subgraph_schemas()
+                .iter()
+                .map(|(k, v)| (k.clone(), v.schema.clone()))
+                .collect(),
+        );
 
         let builder = PluggableSupergraphServiceBuilder::new(planner);
 
@@ -213,6 +264,7 @@ mod test {
             subgraph_schemas,
             None,
             None,
+            Default::default(),
         )
         .await
         .unwrap();
@@ -228,10 +280,10 @@ mod test {
         let supergraph_creator = builder.build().await.expect("should build");
 
         RouterCreator::new(
-            QueryAnalysisLayer::new(supergraph_creator.schema(), Default::default()).await,
-            Arc::new(PersistedQueryLayer::new(&Default::default()).await.unwrap()),
+            QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await,
+            Arc::new(PersistedQueryLayer::new(&configuration).await.unwrap()),
             Arc::new(supergraph_creator),
-            Arc::new(Configuration::default()),
+            configuration,
         )
         .await
         .unwrap()

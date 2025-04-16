@@ -1,16 +1,17 @@
+use std::sync::Arc;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
+use apollo_router::TestHarness;
 use apollo_router::graphql;
 use apollo_router::services::execution;
 use apollo_router::services::supergraph;
-use apollo_router::TestHarness;
 use serde_json::json;
 use tower::BoxError;
 use tower::ServiceExt;
 
 use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_response_errors() {
@@ -310,7 +311,9 @@ async fn test_request_bytes_limit_with_coprocessor() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    let (_, resp) = router.execute_huge_query().await;
+    let (_, resp) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(resp.status(), 413);
     router.graceful_shutdown().await;
     Ok(())
@@ -324,7 +327,9 @@ async fn test_request_bytes_limit() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    let (_, resp) = router.execute_huge_query().await;
+    let (_, resp) = router
+        .execute_query(Query::default().with_huge_query())
+        .await;
     assert_eq!(resp.status(), 413);
     router.graceful_shutdown().await;
     Ok(())

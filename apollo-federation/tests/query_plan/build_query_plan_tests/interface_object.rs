@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 use crate::query_plan::build_query_plan_support::find_fetch_nodes_for_subgraph;
 
@@ -368,8 +369,8 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
 }
 
 #[test]
-fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_starts_with_interface_object(
-) {
+fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_starts_with_interface_object()
+ {
     let planner = planner!(
         S1: SUBGRAPH1,
         S2: SUBGRAPH2,
@@ -819,6 +820,236 @@ fn it_handles_interface_object_input_rewrites_when_cloning_dependency_graph() {
                     }
                   }
                 },
+              },
+            },
+          },
+        }
+      "###
+    );
+}
+
+#[test]
+fn test_interface_object_advance_with_non_collecting_and_type_preserving_transitions_ordering() {
+    let planner = planner!(
+        S1: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+
+            type Query {
+                test: A
+            }
+        "#,
+        S2: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S3: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        S4: r#"
+            type A @key(fields: "id") {
+                id: ID!
+            }
+        "#,
+        Y1: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Y2: r#"
+            interface I {
+                id: ID!
+            }
+
+            type A implements I @key(fields: "id") @key(fields: "alt_id { id }") {
+                id: ID!
+                alt_id: AltID!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+        Z: r#"
+            type I @interfaceObject @key(fields: "alt_id { id }") {
+                alt_id: AltID!
+                data: String!
+            }
+
+            type AltID {
+                id: ID!
+            }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            {
+                test {
+                    data
+                }
+            }
+        "#,
+
+        // Make sure we fetch S1 -> Y1 -> Z, not S1 -> Y2 -> Z.
+        // That's following JS QP's behavior.
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "S1") {
+          {
+            test {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Y1") {
+            {
+              ... on A {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            }
+          },
+        },
+        Flatten(path: "test") {
+          Fetch(service: "Z") {
+            {
+              ... on A {
+                __typename
+                alt_id {
+                  id
+                }
+              }
+            } =>
+            {
+              ... on I {
+                data
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
+}
+
+#[test]
+fn test_type_conditioned_fetching_with_interface_object_does_not_crash() {
+    let planner = planner!(
+        config = QueryPlannerConfig {
+          type_conditioned_fetching: true,
+          ..Default::default()
+        },
+        S1: r#"
+          type I @interfaceObject @key(fields: "id") {
+            id: ID!
+            t: T
+          }
+
+          type T {
+            relatedIs: [I]
+          }
+        "#,
+        S2: r#"
+          type Query {
+            i: I
+          }
+
+          interface I @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+
+          type A implements I @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            i {
+              t {
+                relatedIs {
+                  a
+                }
+              }
+            }
+          }
+        "#,
+
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "S2") {
+              {
+                i {
+                  __typename
+                  id
+                }
+              }
+            },
+            Flatten(path: "i") {
+              Fetch(service: "S1") {
+                {
+                  ... on I {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on I {
+                    t {
+                      relatedIs {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "i.t.relatedIs.@") {
+              Fetch(service: "S2") {
+                {
+                  ... on I {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on I {
+                    __typename
+                    a
+                  }
+                }
               },
             },
           },

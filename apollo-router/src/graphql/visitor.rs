@@ -92,18 +92,11 @@ pub(crate) trait ResponseVisitor {
                             inner_field.as_ref(),
                             value,
                         );
-                    } else {
-                        tracing::warn!("The response did not include a field corresponding to query field {:?}", inner_field);
                     }
                 }
                 apollo_compiler::executable::Selection::FragmentSpread(fragment_spread) => {
                     if let Some(fragment) = fragment_spread.fragment_def(request) {
                         self.visit_selections(request, variables, &fragment.selection_set, fields);
-                    } else {
-                        tracing::warn!(
-                            "The fragment {} was not found in the query document.",
-                            fragment_spread.fragment_name
-                        );
                     }
                 }
                 apollo_compiler::executable::Selection::InlineFragment(inline_fragment) => {
@@ -127,9 +120,9 @@ mod tests {
     use apollo_compiler::Schema;
     use bytes::Bytes;
     use insta::assert_yaml_snapshot;
-    use serde::ser::SerializeMap;
     use serde::Serialize;
     use serde::Serializer;
+    use serde::ser::SerializeMap;
 
     use super::*;
     use crate::graphql::Response;

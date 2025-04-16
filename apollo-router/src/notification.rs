@@ -21,14 +21,14 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::RecvError;
-use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
+use crate::Configuration;
 use crate::graphql;
 use crate::spec::Schema;
-use crate::Configuration;
 
 static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
@@ -179,7 +179,9 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.configuration.0.send(configuration).expect("cannot send the configuration update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new configuration everytime we have a new router configuration
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<K, V> {
         self.router_broadcasts.subscribe_configuration()
     }
     /// Receive the new schema everytime we have a new schema
@@ -187,7 +189,7 @@ impl<K, V> Notify<K, V> {
         self.router_broadcasts.schema.0.send(schema).expect("cannot send the schema update to the static channel. Should not happen because the receiver will always live in this struct; qed");
     }
     /// Receive the new schema everytime we have a new schema
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<K, V> {
         self.router_broadcasts.subscribe_schema()
     }
 }
@@ -510,7 +512,11 @@ where
 
         match Pin::new(&mut this.msg_receiver).poll_next(cx) {
             Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(_)))) => {
-                tracing::info!(monotonic_counter.apollo_router_skipped_event_count = 1u64,);
+                u64_counter!(
+                    "apollo.router.skipped.event.count",
+                    "Amount of events dropped from the internal message queue",
+                    1u64
+                );
                 self.poll_next(cx)
             }
             Poll::Ready(None) => Poll::Ready(None),
@@ -751,9 +757,8 @@ where
             .insert(topic, Subscription::new(sender, heartbeat_enabled))
             .is_some();
         if !existed {
-            // TODO: deprecated name, should use our new convention apollo.router. for router next
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
                 1
             );
@@ -810,7 +815,7 @@ where
             tracing::trace!("deleting subscription from unsubscribe");
             if self.subscriptions.remove(&topic).is_some() {
                 i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
+                    "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
                     -1
                 );
@@ -883,7 +888,7 @@ where
             for (_subscriber_id, subscription) in closed_subs {
                 tracing::trace!("deleting subscription from kill_dead_topics");
                 i64_up_down_counter!(
-                    "apollo_router_opened_subscriptions",
+                    "apollo.router.opened.subscriptions",
                     "Number of opened subscriptions",
                     -1
                 );
@@ -913,7 +918,7 @@ where
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
             i64_up_down_counter!(
-                "apollo_router_opened_subscriptions",
+                "apollo.router.opened.subscriptions",
                 "Number of opened subscriptions",
                 -1
             );
@@ -965,12 +970,14 @@ impl RouterBroadcasts {
         }
     }
 
-    pub(crate) fn subscribe_configuration(&self) -> impl Stream<Item = Weak<Configuration>> {
+    pub(crate) fn subscribe_configuration(
+        &self,
+    ) -> impl Stream<Item = Weak<Configuration>> + use<> {
         BroadcastStream::new(self.configuration.0.subscribe())
             .filter_map(|cfg| futures::future::ready(cfg.ok()))
     }
 
-    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> {
+    pub(crate) fn subscribe_schema(&self) -> impl Stream<Item = Arc<Schema>> + use<> {
         BroadcastStream::new(self.schema.0.subscribe())
             .filter_map(|schema| futures::future::ready(schema.ok()))
     }

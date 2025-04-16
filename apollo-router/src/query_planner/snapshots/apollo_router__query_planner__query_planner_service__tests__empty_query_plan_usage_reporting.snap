@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/query_planner/query_planner_service.rs
+expression: stats_report_key
+---
+"# -\n{__schema{queryType{name}}}"

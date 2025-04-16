@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 
-use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
+use serde::de::Visitor;
 use serde_json_bytes::ByteString;
 
 use super::DeferStats;
 use super::Operation;
-use crate::spec::selection::Selection;
+use crate::Configuration;
 use crate::spec::Condition;
 use crate::spec::FieldType;
 use crate::spec::Fragment;
 use crate::spec::IncludeSkip;
 use crate::spec::SpecError;
-use crate::Configuration;
+use crate::spec::selection::Selection;
 
 #[derive(Debug, PartialEq, Hash, Eq)]
 pub(crate) struct SubSelectionKey {
@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for SubSelectionKey {
 }
 
 struct SubSelectionKeyVisitor;
-impl<'de> Visitor<'de> for SubSelectionKeyVisitor {
+impl Visitor<'_> for SubSelectionKeyVisitor {
     type Value = SubSelectionKey;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -100,7 +100,7 @@ const MAX_DEFER_VARIABLES: usize = 4;
 
 pub(crate) fn collect_subselections(
     configuration: &Configuration,
-    operations: &[Operation],
+    operation: &Operation,
     fragments: &HashMap<String, Fragment>,
     defer_stats: &DeferStats,
 ) -> Result<HashMap<SubSelectionKey, SubSelectionValue>, SpecError> {
@@ -122,29 +122,27 @@ pub(crate) fn collect_subselections(
     };
     for defer_conditions in variable_combinations(defer_stats) {
         shared.defer_conditions = defer_conditions;
-        for operation in operations {
-            let type_name = operation.type_name.clone();
-            let primary = collect_from_selection_set(
-                &mut shared,
-                // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
-                #[allow(clippy::unwrap_used)]
-                &FieldType::new_named((&type_name).try_into().unwrap()),
-                &operation.selection_set,
-            )
-            .map_err(|err| SpecError::TransformError(err.to_owned()))?;
-            debug_assert!(shared.path.is_empty());
-            if !primary.is_empty() {
-                shared.subselections.insert(
-                    SubSelectionKey {
-                        defer_label: None,
-                        defer_conditions,
-                    },
-                    SubSelectionValue {
-                        selection_set: primary,
-                        type_name,
-                    },
-                );
-            }
+        let type_name = operation.type_name.clone();
+        let primary = collect_from_selection_set(
+            &mut shared,
+            // FIXME: use `ast::Name` everywhere so fallible conversion isn’t needed
+            #[allow(clippy::unwrap_used)]
+            &FieldType::new_named((&type_name).try_into().unwrap()),
+            &operation.selection_set,
+        )
+        .map_err(|err| SpecError::TransformError(err.to_owned()))?;
+        debug_assert!(shared.path.is_empty());
+        if !primary.is_empty() {
+            shared.subselections.insert(
+                SubSelectionKey {
+                    defer_label: None,
+                    defer_conditions,
+                },
+                SubSelectionValue {
+                    selection_set: primary,
+                    type_name,
+                },
+            );
         }
     }
     Ok(shared.subselections)
@@ -152,7 +150,7 @@ pub(crate) fn collect_subselections(
 
 /// Returns an iterator of functions, one per combination of boolean values of the given variables.
 /// The function return whether a given variable (by its name) is true in that combination.
-fn variable_combinations(defer_stats: &DeferStats) -> impl Iterator<Item = BooleanValues> {
+fn variable_combinations(defer_stats: &DeferStats) -> impl Iterator<Item = BooleanValues> + use<> {
     // `N = variables.len()` boolean values have a total of 2^N combinations.
     // If we enumerate them by counting from 0 to 2^N - 1,
     // interpreting the N bits of the binary representation of the counter

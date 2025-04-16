@@ -2,6 +2,8 @@
 source: apollo-router/src/configuration/expansion.rs
 expression: value
 ---
+connectors:
+  debug_extensions: true
 homepage:
   enabled: false
   some_other_config: should remain
@@ -18,4 +20,3 @@ telemetry:
     tracing:
       experimental_response_trace_id:
         enabled: true
-

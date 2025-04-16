@@ -4,25 +4,26 @@ use tracing::error_span;
 use tracing::info_span;
 
 use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::Telemetry;
+use crate::plugins::telemetry::consts::CONNECT_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::Telemetry;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::tracer::TraceId;
-use crate::uplink::license_enforcement::LicenseState;
 use crate::uplink::license_enforcement::LICENSE_EXPIRED_SHORT_MESSAGE;
+use crate::uplink::license_enforcement::LicenseState;
 
 #[derive(Debug, Copy, Clone, Deserialize, JsonSchema, Default, Eq, PartialEq)]
 /// Span mode to create new or deprecated spans
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SpanMode {
     /// Keep the request span as root span and deprecated attributes. This option will eventually removed.
-    #[default]
     Deprecated,
     /// Use new OpenTelemetry spec compliant span attributes or preserve existing. This will be the default in future.
+    #[default]
     SpecCompliant,
 }
 
@@ -36,7 +37,8 @@ impl SpanMode {
             SpanMode::Deprecated => {
                 if matches!(
                     license_state,
-                    LicenseState::LicensedWarn | LicenseState::LicensedHalt
+                    LicenseState::LicensedWarn { limits: _ }
+                        | LicenseState::LicensedHalt { limits: _ }
                 ) {
                     error_span!(
                         REQUEST_SPAN_NAME,
@@ -202,6 +204,26 @@ impl SpanMode {
                     SUBGRAPH_SPAN_NAME,
                     "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = ::tracing::field::Empty,
+                    "otel.status_code" = ::tracing::field::Empty,
+                )
+            }
+        }
+    }
+
+    pub(crate) fn create_connector(&self, source_name: &str) -> ::tracing::span::Span {
+        match self {
+            SpanMode::Deprecated => {
+                info_span!(
+                    CONNECT_REQUEST_SPAN_NAME,
+                    "apollo.source.name" = source_name,
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                )
+            }
+            SpanMode::SpecCompliant => {
+                info_span!(
+                    CONNECT_REQUEST_SPAN_NAME,
+                    "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                 )
             }

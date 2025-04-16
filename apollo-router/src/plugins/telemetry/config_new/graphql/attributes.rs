@@ -1,12 +1,17 @@
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::NamedType;
 use opentelemetry::Key;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
+use crate::Context;
+use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
+use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
 use crate::plugins::telemetry::config_new::graphql::selectors::FieldName;
 use crate::plugins::telemetry::config_new::graphql::selectors::FieldType;
@@ -14,13 +19,8 @@ use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
 use crate::plugins::telemetry::config_new::graphql::selectors::TypeName;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
-use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
-use crate::plugins::telemetry::config_new::Selector;
-use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -58,16 +58,14 @@ impl DefaultForLevel for GraphQLAttributes {
     }
 }
 
-impl Selectors for GraphQLAttributes {
-    type Request = supergraph::Request;
-    type Response = supergraph::Response;
-    type EventResponse = crate::graphql::Response;
-
-    fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
+impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Response>
+    for GraphQLAttributes
+{
+    fn on_request(&self, _request: &supergraph::Request) -> Vec<KeyValue> {
         Vec::default()
     }
 
-    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
         Vec::default()
     }
 
@@ -156,13 +154,13 @@ impl Selectors for GraphQLAttributes {
 mod test {
     use serde_json_bytes::json;
 
+    use crate::Context;
     use crate::context::OPERATION_NAME;
+    use crate::plugins::telemetry::config_new::DefaultForLevel;
+    use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::test::field;
     use crate::plugins::telemetry::config_new::test::ty;
-    use crate::plugins::telemetry::config_new::DefaultForLevel;
-    use crate::plugins::telemetry::config_new::Selectors;
-    use crate::Context;
 
     #[test]
     fn test_default_for_level() {

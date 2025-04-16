@@ -4,11 +4,6 @@
 
 ---
 
-**Announcement:**   
-Join 1000+ engineers at GraphQL Summit for talks, workshops, and office hours, Oct 8-10 in NYC. [Get your pass here ->](https://summit.graphql.com/?utm_campaign=github_federation_readme)
-
----
-
 # Apollo Router Core
 
 The **Apollo Router Core** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
@@ -52,8 +47,6 @@ Options:
           Schema location relative to the project directory [env: APOLLO_ROUTER_SUPERGRAPH_PATH=]
       --apollo-uplink-endpoints <APOLLO_UPLINK_ENDPOINTS>
           The endpoints (comma separated) polled to fetch the latest supergraph schema [env: APOLLO_UPLINK_ENDPOINTS=]
-      --apollo-uplink-poll-interval <APOLLO_UPLINK_POLL_INTERVAL>
-          The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_UPLINK_POLL_INTERVAL=] [default: 10s]
       --anonymous-telemetry-disabled
           Disable sending anonymous usage information to Apollo [env: APOLLO_TELEMETRY_DISABLED=]
       --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>

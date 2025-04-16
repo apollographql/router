@@ -9,21 +9,21 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::spec::Schema;
+use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
-use crate::spec::Schema;
-use crate::spec::TYPENAME;
 
 pub(crate) struct ScopeExtractionVisitor<'a> {
     schema: &'a schema::Schema,
@@ -122,7 +122,7 @@ fn scopes_argument(
         .filter_map(|value| value.as_str().map(str::to_owned))
 }
 
-impl<'a> traverse::Visitor for ScopeExtractionVisitor<'a> {
+impl traverse::Visitor for ScopeExtractionVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_scopes.extend(scopes_argument(
@@ -288,7 +288,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
         }
     }
 
-    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())
@@ -418,7 +418,7 @@ impl<'a> ScopeFilteringVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for ScopeFilteringVisitor<'a> {
+impl transform::Visitor for ScopeFilteringVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -644,8 +644,8 @@ mod tests {
     use std::collections::BTreeSet;
     use std::collections::HashSet;
 
-    use apollo_compiler::ast::Document;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast::Document;
 
     use crate::json_ext::Path;
     use crate::plugins::authorization::scopes::ScopeExtractionVisitor;
@@ -767,7 +767,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,

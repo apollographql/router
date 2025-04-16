@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use std::fmt::Display;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -7,6 +8,8 @@ use apollo_compiler::validation::Valid;
 use http::StatusCode;
 use http::Version;
 use multimap::MultiMap;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
@@ -18,23 +21,32 @@ use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tower::BoxError;
 
+use crate::Context;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
-use crate::query_planner::fetch::QueryHash;
-use crate::Context;
+use crate::spec::QueryHash;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;
+/// unique id for a subgraph request and the related response
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SubgraphRequestId(pub String);
+
+impl Display for SubgraphRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
@@ -48,9 +60,8 @@ pub struct Request {
 
     pub context: Context,
 
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
-    pub(crate) subgraph_name: Option<String>,
+    /// Name of the subgraph
+    pub(crate) subgraph_name: String,
     /// Channel to send the subscription stream to listen on events coming from subgraph in a task
     pub(crate) subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
     /// Channel triggered when the client connection has been dropped
@@ -62,6 +73,9 @@ pub struct Request {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 
     pub(crate) executable_document: Option<Arc<Valid<apollo_compiler::ExecutableDocument>>>,
+
+    /// unique id for this request
+    pub(crate) id: SubgraphRequestId,
 }
 
 #[buildstructor::buildstructor]
@@ -76,7 +90,7 @@ impl Request {
         operation_kind: OperationKind,
         context: Context,
         subscription_stream: Option<mpsc::Sender<BoxGqlStream>>,
-        subgraph_name: Option<String>,
+        subgraph_name: String,
         connection_closed_signal: Option<broadcast::Receiver<()>>,
     ) -> Request {
         Self {
@@ -87,9 +101,13 @@ impl Request {
             subgraph_name,
             subscription_stream,
             connection_closed_signal,
-            query_hash: Default::default(),
+            // It's NOT GREAT! to have an empty hash value here.
+            // This value is populated based on the subgraph query hash in the query planner code.
+            // At the time of writing it's in `crate::query_planner::fetch::FetchNode::fetch_node`.
+            query_hash: QueryHash::default().into(),
             authorization: Default::default(),
             executable_document: None,
+            id: SubgraphRequestId::new(),
         }
     }
 
@@ -114,7 +132,7 @@ impl Request {
             operation_kind.unwrap_or(OperationKind::Query),
             context.unwrap_or_default(),
             subscription_stream,
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
             connection_closed_signal,
         )
     }
@@ -154,7 +172,33 @@ impl Clone for Request {
             query_hash: self.query_hash.clone(),
             authorization: self.authorization.clone(),
             executable_document: self.executable_document.clone(),
+            id: self.id.clone(),
         }
+    }
+}
+
+impl SubgraphRequestId {
+    pub fn new() -> Self {
+        SubgraphRequestId(
+            uuid::Uuid::new_v4()
+                .as_hyphenated()
+                .encode_lower(&mut uuid::Uuid::encode_buffer())
+                .to_string(),
+        )
+    }
+}
+
+impl std::ops::Deref for SubgraphRequestId {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for SubgraphRequestId {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -163,10 +207,11 @@ assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
     pub response: http::Response<graphql::Response>,
-    // FIXME for router 2.x
-    /// Name of the subgraph, it's an Option to not introduce breaking change
-    pub(crate) subgraph_name: Option<String>,
+    /// Name of the subgraph
+    pub(crate) subgraph_name: String,
     pub context: Context,
+    /// unique id matching the corresponding field in the request
+    pub(crate) id: SubgraphRequestId,
 }
 
 #[buildstructor::buildstructor]
@@ -179,11 +224,13 @@ impl Response {
         response: http::Response<graphql::Response>,
         context: Context,
         subgraph_name: String,
-    ) -> Response {
+        id: SubgraphRequestId,
+    ) -> Self {
         Self {
             response,
             context,
-            subgraph_name: Some(subgraph_name),
+            subgraph_name,
+            id,
         }
     }
 
@@ -201,8 +248,9 @@ impl Response {
         status_code: Option<StatusCode>,
         context: Context,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
-        subgraph_name: Option<String>,
-    ) -> Response {
+        subgraph_name: String,
+        id: Option<SubgraphRequestId>,
+    ) -> Self {
         // Build a response
         let res = graphql::Response::builder()
             .and_label(label)
@@ -220,10 +268,16 @@ impl Response {
 
         *response.headers_mut() = headers.unwrap_or_default();
 
+        // Warning: the id argument for this builder is an Option to make that a non breaking change
+        // but this means that if a subgraph response is created explicitly without an id, it will
+        // be generated here and not match the id from the subgraph request
+        let id = id.unwrap_or_default();
+
         Self {
             response,
             context,
             subgraph_name,
+            id,
         }
     }
 
@@ -244,8 +298,9 @@ impl Response {
         context: Option<Context>,
         headers: Option<http::HeaderMap<http::HeaderValue>>,
         subgraph_name: Option<String>,
-    ) -> Response {
-        Response::new(
+        id: Option<SubgraphRequestId>,
+    ) -> Self {
+        Self::new(
             label,
             data,
             path,
@@ -254,7 +309,8 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             headers,
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
+            id,
         )
     }
 
@@ -276,8 +332,9 @@ impl Response {
         context: Option<Context>,
         headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
         subgraph_name: Option<String>,
+        id: Option<SubgraphRequestId>,
     ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+        Ok(Self::new(
             label,
             data,
             path,
@@ -286,7 +343,8 @@ impl Response {
             status_code,
             context.unwrap_or_default(),
             Some(header_map(headers)?),
-            subgraph_name,
+            subgraph_name.unwrap_or_default(),
+            id,
         ))
     }
 
@@ -298,9 +356,10 @@ impl Response {
         errors: Vec<Error>,
         status_code: Option<StatusCode>,
         context: Context,
-        subgraph_name: Option<String>,
-    ) -> Result<Response, BoxError> {
-        Ok(Response::new(
+        subgraph_name: String,
+        id: Option<SubgraphRequestId>,
+    ) -> Self {
+        Self::new(
             Default::default(),
             Default::default(),
             Default::default(),
@@ -310,7 +369,8 @@ impl Response {
             context,
             Default::default(),
             subgraph_name,
-        ))
+            id,
+        )
     }
 }
 

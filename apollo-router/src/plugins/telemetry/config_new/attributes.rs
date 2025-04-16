@@ -1,22 +1,22 @@
 use std::fmt::Debug;
 use std::net::SocketAddr;
 
+use http::StatusCode;
+use http::Uri;
 use http::header::CONTENT_LENGTH;
 use http::header::FORWARDED;
 use http::header::USER_AGENT;
-use http::StatusCode;
-use http::Uri;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::baggage::BaggageExt;
+use opentelemetry::baggage::BaggageExt;
+use opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE;
+use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE;
 use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
 use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
-use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE;
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
 use opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
 use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_NAME;
@@ -34,23 +34,25 @@ use serde::Deserialize;
 use tower::BoxError;
 use tracing::Span;
 
+use crate::Context;
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
-use crate::plugins::telemetry::config_new::cost::SupergraphCostAttributes;
-use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
+use crate::plugins::telemetry::config_new::cost::SupergraphCostAttributes;
+use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
+use crate::services::subgraph::SubgraphRequestId;
 use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
+pub(crate) const HTTP_REQUEST_RESEND_COUNT: Key = Key::from_static_str("http.request.resend_count");
 pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
 pub(crate) const SUBGRAPH_GRAPHQL_OPERATION_NAME: Key =
     Key::from_static_str("subgraph.graphql.operation.name");
@@ -64,6 +66,16 @@ const NETWORK_LOCAL_PORT: Key = Key::from_static_str("network.local.port");
 
 const NETWORK_PEER_ADDRESS: Key = Key::from_static_str("network.peer.address");
 const NETWORK_PEER_PORT: Key = Key::from_static_str("network.peer.port");
+
+pub(crate) const HTTP_REQUEST_HEADERS: Key = Key::from_static_str("http.request.headers");
+pub(crate) const HTTP_REQUEST_URI: Key = Key::from_static_str("http.request.uri");
+pub(crate) const HTTP_REQUEST_VERSION: Key = Key::from_static_str("http.request.version");
+pub(crate) const HTTP_REQUEST_BODY: Key = Key::from_static_str("http.request.body");
+
+pub(crate) const HTTP_RESPONSE_HEADERS: Key = Key::from_static_str("http.response.headers");
+pub(crate) const HTTP_RESPONSE_STATUS: Key = Key::from_static_str("http.response.status");
+pub(crate) const HTTP_RESPONSE_VERSION: Key = Key::from_static_str("http.response.version");
+pub(crate) const HTTP_RESPONSE_BODY: Key = Key::from_static_str("http.response.body");
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -231,6 +243,10 @@ pub(crate) struct SubgraphAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "subgraph.graphql.operation.type")]
     graphql_operation_type: Option<StandardAttribute>,
+
+    /// The number of times the request has been resent
+    #[serde(rename = "http.request.resend_count")]
+    http_request_resend_count: Option<StandardAttribute>,
 }
 
 impl DefaultForLevel for SubgraphAttributes {
@@ -257,6 +273,9 @@ impl DefaultForLevel for SubgraphAttributes {
                 }
                 if self.graphql_operation_type.is_none() {
                     self.graphql_operation_type = Some(StandardAttribute::Bool(true));
+                }
+                if self.http_request_resend_count.is_none() {
+                    self.http_request_resend_count = Some(StandardAttribute::Bool(true));
                 }
             }
             DefaultAttributeRequirementLevel::None => {}
@@ -596,11 +615,7 @@ impl DefaultForLevel for HttpServerAttributes {
     }
 }
 
-impl Selectors for RouterAttributes {
-    type Request = router::Request;
-    type Response = router::Response;
-    type EventResponse = ();
-
+impl Selectors<router::Request, router::Response, ()> for RouterAttributes {
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = self.common.on_request(request);
         attrs.extend(self.server.on_request(request));
@@ -647,17 +662,13 @@ impl Selectors for RouterAttributes {
     }
 }
 
-impl Selectors for HttpCommonAttributes {
-    type Request = router::Request;
-    type Response = router::Response;
-    type EventResponse = ();
-
+impl Selectors<router::Request, router::Response, ()> for HttpCommonAttributes {
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         if let Some(key) = self
             .http_request_method
             .as_ref()
-            .and_then(|a| a.key(HTTP_REQUEST_METHOD))
+            .and_then(|a| a.key(HTTP_REQUEST_METHOD.into()))
         {
             attrs.push(KeyValue::new(
                 key,
@@ -668,7 +679,7 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .http_request_body_size
             .as_ref()
-            .and_then(|a| a.key(HTTP_REQUEST_BODY_SIZE))
+            .and_then(|a| a.key(HTTP_REQUEST_BODY_SIZE.into()))
         {
             if let Some(content_length) = request
                 .router_request
@@ -687,7 +698,7 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .network_protocol_name
             .as_ref()
-            .and_then(|a| a.key(NETWORK_PROTOCOL_NAME))
+            .and_then(|a| a.key(NETWORK_PROTOCOL_NAME.into()))
         {
             if let Some(scheme) = request.router_request.uri().scheme() {
                 attrs.push(KeyValue::new(key, scheme.to_string()));
@@ -696,7 +707,7 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .network_protocol_version
             .as_ref()
-            .and_then(|a| a.key(NETWORK_PROTOCOL_VERSION))
+            .and_then(|a| a.key(NETWORK_PROTOCOL_VERSION.into()))
         {
             attrs.push(KeyValue::new(
                 key,
@@ -706,11 +717,15 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .network_transport
             .as_ref()
-            .and_then(|a| a.key(NETWORK_TRANSPORT))
+            .and_then(|a| a.key(NETWORK_TRANSPORT.into()))
         {
             attrs.push(KeyValue::new(key, "tcp".to_string()));
         }
-        if let Some(key) = self.network_type.as_ref().and_then(|a| a.key(NETWORK_TYPE)) {
+        if let Some(key) = self
+            .network_type
+            .as_ref()
+            .and_then(|a| a.key(NETWORK_TYPE.into()))
+        {
             if let Some(connection_info) =
                 request.router_request.extensions().get::<ConnectionInfo>()
             {
@@ -732,7 +747,7 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .http_response_body_size
             .as_ref()
-            .and_then(|a| a.key(HTTP_RESPONSE_BODY_SIZE))
+            .and_then(|a| a.key(HTTP_RESPONSE_BODY_SIZE.into()))
         {
             if let Some(content_length) = response
                 .response
@@ -752,7 +767,7 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .http_response_status_code
             .as_ref()
-            .and_then(|a| a.key(HTTP_RESPONSE_STATUS_CODE))
+            .and_then(|a| a.key(HTTP_RESPONSE_STATUS_CODE.into()))
         {
             attrs.push(KeyValue::new(
                 key,
@@ -789,7 +804,7 @@ impl Selectors for HttpCommonAttributes {
         if let Some(key) = self
             .http_response_status_code
             .as_ref()
-            .and_then(|a| a.key(HTTP_RESPONSE_STATUS_CODE))
+            .and_then(|a| a.key(HTTP_RESPONSE_STATUS_CODE.into()))
         {
             attrs.push(KeyValue::new(
                 key,
@@ -801,14 +816,14 @@ impl Selectors for HttpCommonAttributes {
     }
 }
 
-impl Selectors for HttpServerAttributes {
-    type Request = router::Request;
-    type Response = router::Response;
-    type EventResponse = ();
-
+impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
-        if let Some(key) = self.http_route.as_ref().and_then(|a| a.key(HTTP_ROUTE)) {
+        if let Some(key) = self
+            .http_route
+            .as_ref()
+            .and_then(|a| a.key(HTTP_ROUTE.into()))
+        {
             attrs.push(KeyValue::new(
                 key,
                 request.router_request.uri().path().to_string(),
@@ -817,7 +832,7 @@ impl Selectors for HttpServerAttributes {
         if let Some(key) = self
             .client_address
             .as_ref()
-            .and_then(|a| a.key(CLIENT_ADDRESS))
+            .and_then(|a| a.key(CLIENT_ADDRESS.into()))
         {
             if let Some(forwarded) = Self::forwarded_for(request) {
                 attrs.push(KeyValue::new(key, forwarded.ip().to_string()));
@@ -829,7 +844,11 @@ impl Selectors for HttpServerAttributes {
                 }
             }
         }
-        if let Some(key) = self.client_port.as_ref().and_then(|a| a.key(CLIENT_PORT)) {
+        if let Some(key) = self
+            .client_port
+            .as_ref()
+            .and_then(|a| a.key(CLIENT_PORT.into()))
+        {
             if let Some(forwarded) = Self::forwarded_for(request) {
                 attrs.push(KeyValue::new(key, forwarded.port() as i64));
             } else if let Some(connection_info) =
@@ -844,7 +863,7 @@ impl Selectors for HttpServerAttributes {
         if let Some(key) = self
             .server_address
             .as_ref()
-            .and_then(|a| a.key(SERVER_ADDRESS))
+            .and_then(|a| a.key(SERVER_ADDRESS.into()))
         {
             if let Some(forwarded) =
                 Self::forwarded_host(request).and_then(|h| h.host().map(|h| h.to_string()))
@@ -858,7 +877,11 @@ impl Selectors for HttpServerAttributes {
                 }
             }
         }
-        if let Some(key) = self.server_port.as_ref().and_then(|a| a.key(SERVER_PORT)) {
+        if let Some(key) = self
+            .server_port
+            .as_ref()
+            .and_then(|a| a.key(SERVER_PORT.into()))
+        {
             if let Some(forwarded) = Self::forwarded_host(request).and_then(|h| h.port_u16()) {
                 attrs.push(KeyValue::new(key, forwarded as i64));
             } else if let Some(connection_info) =
@@ -925,15 +948,23 @@ impl Selectors for HttpServerAttributes {
         }
 
         let router_uri = request.router_request.uri();
-        if let Some(key) = self.url_path.as_ref().and_then(|a| a.key(URL_PATH)) {
+        if let Some(key) = self.url_path.as_ref().and_then(|a| a.key(URL_PATH.into())) {
             attrs.push(KeyValue::new(key, router_uri.path().to_string()));
         }
-        if let Some(key) = self.url_query.as_ref().and_then(|a| a.key(URL_QUERY)) {
+        if let Some(key) = self
+            .url_query
+            .as_ref()
+            .and_then(|a| a.key(URL_QUERY.into()))
+        {
             if let Some(query) = router_uri.query() {
                 attrs.push(KeyValue::new(key, query.to_string()));
             }
         }
-        if let Some(key) = self.url_scheme.as_ref().and_then(|a| a.key(URL_SCHEME)) {
+        if let Some(key) = self
+            .url_scheme
+            .as_ref()
+            .and_then(|a| a.key(URL_SCHEME.into()))
+        {
             if let Some(scheme) = router_uri.scheme_str() {
                 attrs.push(KeyValue::new(key, scheme.to_string()));
             }
@@ -941,7 +972,7 @@ impl Selectors for HttpServerAttributes {
         if let Some(key) = self
             .user_agent_original
             .as_ref()
-            .and_then(|a| a.key(USER_AGENT_ORIGINAL))
+            .and_then(|a| a.key(USER_AGENT_ORIGINAL.into()))
         {
             if let Some(user_agent) = request
                 .router_request
@@ -1003,17 +1034,15 @@ impl HttpServerAttributes {
     }
 }
 
-impl Selectors for SupergraphAttributes {
-    type Request = supergraph::Request;
-    type Response = supergraph::Response;
-    type EventResponse = crate::graphql::Response;
-
+impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Response>
+    for SupergraphAttributes
+{
     fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         if let Some(key) = self
             .graphql_document
             .as_ref()
-            .and_then(|a| a.key(GRAPHQL_DOCUMENT))
+            .and_then(|a| a.key(GRAPHQL_DOCUMENT.into()))
         {
             if let Some(query) = &request.supergraph_request.body().query {
                 attrs.push(KeyValue::new(key, query.clone()));
@@ -1022,7 +1051,7 @@ impl Selectors for SupergraphAttributes {
         if let Some(key) = self
             .graphql_operation_name
             .as_ref()
-            .and_then(|a| a.key(GRAPHQL_OPERATION_NAME))
+            .and_then(|a| a.key(GRAPHQL_OPERATION_NAME.into()))
         {
             if let Some(operation_name) = &request
                 .context
@@ -1035,7 +1064,7 @@ impl Selectors for SupergraphAttributes {
         if let Some(key) = self
             .graphql_operation_type
             .as_ref()
-            .and_then(|a| a.key(GRAPHQL_OPERATION_TYPE))
+            .and_then(|a| a.key(GRAPHQL_OPERATION_TYPE.into()))
         {
             if let Some(operation_type) = &request
                 .context
@@ -1057,7 +1086,7 @@ impl Selectors for SupergraphAttributes {
 
     fn on_response_event(
         &self,
-        response: &Self::EventResponse,
+        response: &crate::graphql::Response,
         context: &Context,
     ) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -1070,11 +1099,7 @@ impl Selectors for SupergraphAttributes {
     }
 }
 
-impl Selectors for SubgraphAttributes {
-    type Request = subgraph::Request;
-    type Response = subgraph::Response;
-    type EventResponse = ();
-
+impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes {
     fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         if let Some(key) = self
@@ -1114,20 +1139,54 @@ impl Selectors for SubgraphAttributes {
             .as_ref()
             .and_then(|a| a.key(SUBGRAPH_NAME))
         {
-            if let Some(subgraph_name) = &request.subgraph_name {
-                attrs.push(KeyValue::new(key, subgraph_name.clone()));
+            attrs.push(KeyValue::new(key, request.subgraph_name.clone()));
+        }
+
+        attrs
+    }
+
+    fn on_response(&self, response: &subgraph::Response) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        if let Some(key) = self
+            .http_request_resend_count
+            .as_ref()
+            .and_then(|a| a.key(HTTP_REQUEST_RESEND_COUNT))
+        {
+            if let Some(resend_count) = response
+                .context
+                .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
+                .ok()
+                .flatten()
+            {
+                attrs.push(KeyValue::new(key, resend_count as i64));
             }
         }
 
         attrs
     }
 
-    fn on_response(&self, _response: &subgraph::Response) -> Vec<KeyValue> {
-        Vec::default()
-    }
-
     fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
+    }
+}
+
+/// Key used in context to save number of retries for a subgraph http request
+pub(crate) struct SubgraphRequestResendCountKey<'a> {
+    subgraph_req_id: &'a SubgraphRequestId,
+}
+
+impl<'a> SubgraphRequestResendCountKey<'a> {
+    pub(crate) fn new(subgraph_req_id: &'a SubgraphRequestId) -> Self {
+        Self { subgraph_req_id }
+    }
+}
+
+impl From<SubgraphRequestResendCountKey<'_>> for String {
+    fn from(value: SubgraphRequestResendCountKey) -> Self {
+        format!(
+            "apollo::telemetry::http_request_resend_count_{}",
+            value.subgraph_req_id
+        )
     }
 }
 
@@ -1137,28 +1196,28 @@ mod test {
     use std::str::FromStr;
 
     use anyhow::anyhow;
-    use http::header::FORWARDED;
-    use http::header::USER_AGENT;
     use http::HeaderValue;
     use http::StatusCode;
     use http::Uri;
+    use http::header::FORWARDED;
+    use http::header::USER_AGENT;
+    use opentelemetry::Context;
+    use opentelemetry::KeyValue;
+    use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
-    use opentelemetry::Context;
-    use opentelemetry_api::baggage::BaggageExt;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE;
+    use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE;
     use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
     use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
-    use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE;
     use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
-    use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE;
     use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
     use opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
     use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_NAME;
@@ -1179,22 +1238,22 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
+    use crate::plugins::telemetry::config_new::Selectors;
+    use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
     use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
     use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
-    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-    use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-    use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
     use crate::plugins::telemetry::config_new::attributes::NETWORK_LOCAL_ADDRESS;
     use crate::plugins::telemetry::config_new::attributes::NETWORK_LOCAL_PORT;
     use crate::plugins::telemetry::config_new::attributes::NETWORK_PEER_ADDRESS;
     use crate::plugins::telemetry::config_new::attributes::NETWORK_PEER_PORT;
+    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_NAME;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_TYPE;
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
-    use crate::plugins::telemetry::config_new::Selectors;
+    use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
+    use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
+    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::otel;
     use crate::services::router;
     use crate::services::subgraph;
@@ -1314,7 +1373,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == GRAPHQL_DOCUMENT)
+                .find(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT)
                 .map(|key_val| &key_val.value),
             Some(&"query { __typename }".into())
         );
@@ -1337,7 +1396,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == GRAPHQL_OPERATION_NAME)
+                .find(|key_val| key_val.key.as_str() == GRAPHQL_OPERATION_NAME)
                 .map(|key_val| &key_val.value),
             Some(&"topProducts".into())
         );
@@ -1381,7 +1440,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == GRAPHQL_OPERATION_TYPE)
+                .find(|key_val| key_val.key.as_str() == GRAPHQL_OPERATION_TYPE)
                 .map(|key_val| &key_val.value),
             Some(&"query".into())
         );
@@ -1562,7 +1621,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == HTTP_REQUEST_BODY_SIZE)
+                .find(|key_val| key_val.key.as_str() == HTTP_REQUEST_BODY_SIZE)
                 .map(|key_val| &key_val.value),
             Some(&256.into())
         );
@@ -1587,7 +1646,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == HTTP_RESPONSE_BODY_SIZE)
+                .find(|key_val| key_val.key.as_str() == HTTP_RESPONSE_BODY_SIZE)
                 .map(|key_val| &key_val.value),
             Some(&256.into())
         );
@@ -1609,7 +1668,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == HTTP_REQUEST_METHOD)
+                .find(|key_val| key_val.key.as_str() == HTTP_REQUEST_METHOD)
                 .map(|key_val| &key_val.value),
             Some(&"POST".into())
         );
@@ -1631,7 +1690,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == HTTP_RESPONSE_STATUS_CODE)
+                .find(|key_val| key_val.key.as_str() == HTTP_RESPONSE_STATUS_CODE)
                 .map(|key_val| &key_val.value),
             Some(&(StatusCode::BAD_REQUEST.as_u16() as i64).into())
         );
@@ -1640,7 +1699,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == HTTP_RESPONSE_STATUS_CODE)
+                .find(|key_val| key_val.key.as_str() == HTTP_RESPONSE_STATUS_CODE)
                 .map(|key_val| &key_val.value),
             Some(&(StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64).into())
         );
@@ -1662,7 +1721,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == NETWORK_PROTOCOL_NAME)
+                .find(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_NAME)
                 .map(|key_val| &key_val.value),
             Some(&"https".into())
         );
@@ -1684,7 +1743,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION)
+                .find(|key_val| key_val.key.as_str() == NETWORK_PROTOCOL_VERSION)
                 .map(|key_val| &key_val.value),
             Some(&"HTTP/1.1".into())
         );
@@ -1701,7 +1760,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == NETWORK_TRANSPORT)
+                .find(|key_val| key_val.key.as_str() == NETWORK_TRANSPORT)
                 .map(|key_val| &key_val.value),
             Some(&"tcp".into())
         );
@@ -1723,7 +1782,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == NETWORK_TYPE)
+                .find(|key_val| key_val.key.as_str() == NETWORK_TYPE)
                 .map(|key_val| &key_val.value),
             Some(&"ipv4".into())
         );
@@ -1745,7 +1804,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == CLIENT_ADDRESS)
+                .find(|key_val| key_val.key.as_str() == CLIENT_ADDRESS)
                 .map(|key_val| &key_val.value),
             Some(&"192.168.0.8".into())
         );
@@ -1762,7 +1821,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == CLIENT_ADDRESS)
+                .find(|key_val| key_val.key.as_str() == CLIENT_ADDRESS)
                 .map(|key_val| &key_val.value),
             Some(&"2.4.6.8".into())
         );
@@ -1784,7 +1843,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == CLIENT_PORT)
+                .find(|key_val| key_val.key.as_str() == CLIENT_PORT)
                 .map(|key_val| &key_val.value),
             Some(&6060.into())
         );
@@ -1801,7 +1860,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == CLIENT_PORT)
+                .find(|key_val| key_val.key.as_str() == CLIENT_PORT)
                 .map(|key_val| &key_val.value),
             Some(&8000.into())
         );
@@ -1826,7 +1885,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == HTTP_ROUTE)
+                .find(|key_val| key_val.key.as_str() == HTTP_ROUTE)
                 .map(|key_val| &key_val.value),
             Some(&"/graphql".into())
         );
@@ -1948,7 +2007,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == SERVER_ADDRESS)
+                .find(|key_val| key_val.key.as_str() == SERVER_ADDRESS)
                 .map(|key_val| &key_val.value),
             Some(&"192.168.0.1".into())
         );
@@ -1965,7 +2024,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == SERVER_ADDRESS)
+                .find(|key_val| key_val.key.as_str() == SERVER_ADDRESS)
                 .map(|key_val| &key_val.value),
             Some(&"2.4.6.8".into())
         );
@@ -1987,7 +2046,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == SERVER_PORT)
+                .find(|key_val| key_val.key.as_str() == SERVER_PORT)
                 .map(|key_val| &key_val.value),
             Some(&8080.into())
         );
@@ -2004,7 +2063,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == SERVER_PORT)
+                .find(|key_val| key_val.key.as_str() == SERVER_PORT)
                 .map(|key_val| &key_val.value),
             Some(&8000.into())
         );
@@ -2025,7 +2084,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == URL_PATH)
+                .find(|key_val| key_val.key.as_str() == URL_PATH)
                 .map(|key_val| &key_val.value),
             Some(&"/graphql".into())
         );
@@ -2046,7 +2105,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == URL_QUERY)
+                .find(|key_val| key_val.key.as_str() == URL_QUERY)
                 .map(|key_val| &key_val.value),
             Some(&"hi=5".into())
         );
@@ -2067,7 +2126,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == URL_SCHEME)
+                .find(|key_val| key_val.key.as_str() == URL_SCHEME)
                 .map(|key_val| &key_val.value),
             Some(&"https".into())
         );
@@ -2089,7 +2148,7 @@ mod test {
         assert_eq!(
             attributes
                 .iter()
-                .find(|key_val| key_val.key == USER_AGENT_ORIGINAL)
+                .find(|key_val| key_val.key.as_str() == USER_AGENT_ORIGINAL)
                 .map(|key_val| &key_val.value),
             Some(&"my-agent".into())
         );

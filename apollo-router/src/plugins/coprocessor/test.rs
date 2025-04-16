@@ -4,17 +4,18 @@ mod tests {
     use std::sync::Arc;
 
     use futures::future::BoxFuture;
-    use http::header::ACCEPT;
-    use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::Method;
     use http::StatusCode;
+    use http::header::ACCEPT;
+    use http::header::CONTENT_TYPE;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
     use router::body::RouterBody;
     use serde_json::json;
     use serde_json_bytes::Value;
+    use services::subgraph::SubgraphRequestId;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -26,10 +27,10 @@ mod tests {
     use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
     use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
+    use crate::services::external::EXTERNALIZABLE_VERSION;
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
-    use crate::services::external::EXTERNALIZABLE_VERSION;
-    use crate::services::router::body::get_body_bytes;
+    use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
 
@@ -62,12 +63,14 @@ mod tests {
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
-        assert!(crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .is_err());
+        assert!(
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -87,12 +90,14 @@ mod tests {
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
-        assert!(crate::TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .is_err());
+        assert!(
+            crate::TestHarness::builder()
+                .configuration_json(config)
+                .unwrap()
+                .build_router()
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -101,7 +106,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: false,
@@ -131,7 +136,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -161,7 +168,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: false,
@@ -191,7 +198,9 @@ mod tests {
                     "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -221,7 +230,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: false,
@@ -250,7 +259,9 @@ mod tests {
                     "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -279,12 +290,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -295,7 +302,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -342,12 +349,9 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                subgraph_request_id: true,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -384,18 +388,32 @@ mod tests {
                     req.subgraph_request.into_body().query.unwrap()
                 );
 
+                // this should be the same as the initial request id
+                assert_eq!(&*req.id, "5678");
+
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -438,7 +456,8 @@ mod tests {
                                     }
                                   },
                                   "serviceName": "service name shouldn't change",
-                                  "uri": "http://thisurihaschanged"
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
                             }"#,
                     ))
                     .unwrap())
@@ -452,18 +471,343 @@ mod tests {
             "my_subgraph_service_name".to_string(),
         );
 
-        let request = subgraph::Request::fake_builder().build();
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
 
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!("5678", &*response.id);
         assert_eq!(
             serde_json_bytes::json!({ "test": 1234_u32 }),
-            service
-                .oneshot(request)
-                .await
-                .unwrap()
-                .response
-                .into_body()
-                .data
-                .unwrap()
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_with_selective_context() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                    ["this-is-a-test-context".to_string()].into(),
+                ))),
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Let's assert that the subgraph request has been transformed as it should have.
+                assert_eq!(
+                    req.subgraph_request.headers().get("cookie").unwrap(),
+                    "tasty_cookie=strawberry"
+                );
+                assert_eq!(
+                    req.context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .unwrap()
+                        .unwrap(),
+                    42
+                );
+
+                // The subgraph uri should have changed
+                assert_eq!(
+                    "http://thisurihaschanged/",
+                    req.subgraph_request.uri().to_string()
+                );
+
+                // The query should have changed
+                assert_eq!(
+                    "query Long {\n  me {\n  name\n}\n}",
+                    req.subgraph_request.into_body().query.unwrap()
+                );
+
+                // this should be the same as the initial request id
+                assert_eq!(&*req.id, "5678");
+
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
+                let context = deserialized_request.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    42
+                );
+                assert!(
+                    context
+                        .get::<&str, String>("not_passed")
+                        .ok()
+                        .flatten()
+                        .is_none()
+                );
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "query": "query Long {\n  me {\n  name\n}\n}"
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "this-is-a-test-context": 42
+                                    }
+                                  },
+                                  "serviceName": "service name shouldn't change",
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+        request
+            .context
+            .insert("not_passed", "OK".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 42)
+            .unwrap();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!("5678", &*response.id);
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request_with_deprecated_context() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphRequestConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
+                ..Default::default()
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Let's assert that the subgraph request has been transformed as it should have.
+                assert_eq!(
+                    req.subgraph_request.headers().get("cookie").unwrap(),
+                    "tasty_cookie=strawberry"
+                );
+                assert_eq!(
+                    req.context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .unwrap()
+                        .unwrap(),
+                    42
+                );
+                assert_eq!(
+                    req.context
+                        .get::<&str, String>("apollo::supergraph::operation_name")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    "New".to_string()
+                );
+
+                // The subgraph uri should have changed
+                assert_eq!(
+                    "http://thisurihaschanged/",
+                    req.subgraph_request.uri().to_string()
+                );
+
+                // The query should have changed
+                assert_eq!(
+                    "query Long {\n  me {\n  name\n}\n}",
+                    req.subgraph_request.into_body().query.unwrap()
+                );
+
+                // this should be the same as the initial request id
+                assert_eq!(&*req.id, "5678");
+
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    deserialized_request.subgraph_request_id.as_deref(),
+                    Some("5678")
+                );
+                let context = deserialized_request.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    42
+                );
+                assert_eq!(
+                    context
+                        .get::<&str, String>("operation_name")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    "Test".to_string()
+                );
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "continue",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "query": "query Long {\n  me {\n  name\n}\n}"
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "this-is-a-test-context": 42,
+                                      "operation_name": "New"
+                                    }
+                                  },
+                                  "serviceName": "service name shouldn't change",
+                                  "uri": "http://thisurihaschanged",
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+        request
+            .context
+            .insert("apollo::supergraph::operation_name", "Test".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 42)
+            .unwrap();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        assert_eq!("5678", &*response.id);
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            response.response.into_body().data.unwrap()
         );
     }
 
@@ -480,12 +824,8 @@ mod tests {
                     SelectorOrValue::Value("value".to_string().into()),
                 ])
                 .into(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -503,13 +843,14 @@ mod tests {
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .subgraph_name(String::default())
                     .build())
             });
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -554,12 +895,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -570,7 +907,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -624,12 +961,8 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                uri: false,
-                method: false,
-                service_name: false,
+                ..Default::default()
             },
             response: Default::default(),
         };
@@ -640,7 +973,7 @@ mod tests {
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
@@ -689,11 +1022,9 @@ mod tests {
             request: Default::default(),
             response: SubgraphResponseConf {
                 condition: Default::default(),
-                headers: false,
-                context: false,
                 body: true,
-                service_name: false,
-                status_code: false,
+                subgraph_request_id: true,
+                ..Default::default()
             },
         };
 
@@ -703,18 +1034,27 @@ mod tests {
         mock_subgraph_service
             .expect_call()
             .returning(|req: subgraph::Request| {
+                assert_eq!(&*req.id, "5678");
                 Ok(subgraph::Response::builder()
                     .data(json!({ "test": 1234_u32 }))
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
-            Box::pin(async {
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let body: Value =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+                let subgraph_id = body.get("subgraphRequestId").unwrap();
+                assert_eq!(subgraph_id.as_str(), Some("5678"));
+
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -756,7 +1096,8 @@ mod tests {
                                       "accepts-multipart": false,
                                       "this-is-a-test-context": 42
                                     }
-                                  }
+                                  },
+                                  "subgraphRequestId": "9abc"
                             }"#,
                     ))
                     .unwrap())
@@ -770,7 +1111,8 @@ mod tests {
             "my_subgraph_service_name".to_string(),
         );
 
-        let request = subgraph::Request::fake_builder().build();
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
 
         let response = service.oneshot(request).await.unwrap();
 
@@ -779,6 +1121,7 @@ mod tests {
             response.response.headers().get("cookie").unwrap(),
             "tasty_cookie=strawberry"
         );
+        assert_eq!(&*response.id, "5678");
 
         assert_eq!(
             response
@@ -787,6 +1130,311 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             42
+        );
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 5678_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_with_selective_context() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                    ["this-is-a-test-context".to_string()].into(),
+                ))),
+                ..Default::default()
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                assert_eq!(&*req.id, "5678");
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let deserialized_response: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                assert_eq!(
+                    deserialized_response.subgraph_request_id,
+                    Some(SubgraphRequestId("5678".to_string()))
+                );
+
+                let context = deserialized_response.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    55
+                );
+                assert!(
+                    context
+                        .get::<&str, String>("not_passed")
+                        .ok()
+                        .flatten()
+                        .is_none()
+                );
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphResponse",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "data": {
+                                        "test": 5678
+                                    }
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "this-is-a-test-context": 42
+                                    }
+                                  },
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+        request
+            .context
+            .insert("not_passed", "OK".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 55)
+            .unwrap();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        // Let's assert that the subgraph response has been transformed as it should have.
+        assert_eq!(
+            response.response.headers().get("cookie").unwrap(),
+            "tasty_cookie=strawberry"
+        );
+        assert_eq!(&*response.id, "5678");
+
+        assert_eq!(
+            response
+                .context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            42
+        );
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 5678_u32 }),
+            response.response.into_body().data.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response_with_deprecated_context() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphResponseConf {
+                condition: Default::default(),
+                body: true,
+                subgraph_request_id: true,
+                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
+                ..Default::default()
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                assert_eq!(&*req.id, "5678");
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .id(req.id)
+                    .subgraph_name(String::default())
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |r: http::Request<RouterBody>| {
+            Box::pin(async move {
+                let (_, body) = r.into_parts();
+                let deserialized_response: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&router::body::into_bytes(body).await.unwrap()).unwrap();
+
+                assert_eq!(
+                    deserialized_response.subgraph_request_id,
+                    Some(SubgraphRequestId("5678".to_string()))
+                );
+
+                let context = deserialized_response.context.unwrap_or_default();
+                assert_eq!(
+                    context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    55
+                );
+                assert_eq!(
+                    context
+                        .get::<&str, String>("operation_name")
+                        .expect("context key should be there")
+                        .expect("context key should have the right format"),
+                    "Test".to_string()
+                );
+
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        r#"{
+                                "version": 1,
+                                "stage": "SubgraphResponse",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "data": {
+                                        "test": 5678
+                                    }
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "this-is-a-test-context": 42,
+                                      "operation_name": "New"
+                                    }
+                                  },
+                                  "subgraphRequestId": "9abc"
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let mut request = subgraph::Request::fake_builder().build();
+        request.id = SubgraphRequestId("5678".to_string());
+        request
+            .context
+            .insert("apollo::supergraph::operation_name", "Test".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 55)
+            .unwrap();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        // Let's assert that the subgraph response has been transformed as it should have.
+        assert_eq!(
+            response.response.headers().get("cookie").unwrap(),
+            "tasty_cookie=strawberry"
+        );
+        assert_eq!(&*response.id, "5678");
+
+        assert_eq!(
+            response
+                .context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            42
+        );
+        assert_eq!(
+            response
+                .context
+                .get::<&str, String>("apollo::supergraph::operation_name")
+                .unwrap()
+                .unwrap(),
+            "New".to_string()
         );
 
         assert_eq!(
@@ -807,11 +1455,8 @@ mod tests {
                     default: None,
                 })
                 .into(),
-                headers: false,
-                context: false,
                 body: true,
-                service_name: false,
-                status_code: false,
+                ..Default::default()
             },
         };
 
@@ -829,13 +1474,14 @@ mod tests {
                     .errors(Vec::new())
                     .extensions(crate::json_ext::Object::new())
                     .context(req.context)
+                    .subgraph_name(String::default())
                     .build())
             });
 
         let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SubgraphResponse",
@@ -923,7 +1569,7 @@ mod tests {
             response: SupergraphResponseConf {
                 condition: Default::default(),
                 headers: false,
-                context: false,
+                context: ContextConf::Deprecated(false),
                 body: true,
                 status_code: false,
                 sdl: false,
@@ -948,7 +1594,7 @@ mod tests {
         let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(
+                    .body(router::body::from_bytes(
                         r#"{
                                 "version": 1,
                                 "stage": "SupergraphResponse",
@@ -979,12 +1625,219 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_supergraph_response_with_selective_context() {
+        let supergraph_stage = SupergraphStage {
+            request: Default::default(),
+            response: SupergraphResponseConf {
+                condition: Default::default(),
+                headers: false,
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                    ["this-is-a-test-context".to_string()].into(),
+                ))),
+                body: true,
+                status_code: false,
+                sdl: false,
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(Value::Null)
+                        .subscribed(true)
+                        .build(),
+                    req.context,
+                ))
+            });
+
+        let mock_http_client =
+            mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let (_, body) = req.into_parts();
+                    let deserialized_response: Externalizable<serde_json::Value> =
+                        serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
+                            .unwrap();
+                    let context = deserialized_response.context.unwrap_or_default();
+                    assert_eq!(
+                        context
+                            .get::<&str, u8>("this-is-a-test-context")
+                            .expect("context key should be there")
+                            .expect("context key should have the right format"),
+                        42
+                    );
+                    assert!(
+                        context
+                            .get::<&str, String>("not_passed")
+                            .ok()
+                            .flatten()
+                            .is_none()
+                    );
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                                "version": 1,
+                                "stage": "SupergraphResponse",
+                                "context": {
+                                    "entries": {
+                                        "this-is-a-test-context": 25
+                                    }
+                                },
+                                "body": {
+                                    "data": null
+                                }
+                            }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        request
+            .context
+            .insert("not_passed", "OK".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 42)
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            response
+                .context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            25
+        );
+
+        let gql_response = response.response.body_mut().next().await.unwrap();
+        // Let's assert that the supergraph response has been transformed as it should have.
+        assert_eq!(gql_response.subscribed, Some(true));
+        assert_eq!(gql_response.data, Some(Value::Null));
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response_with_deprecated_context() {
+        let supergraph_stage = SupergraphStage {
+            request: Default::default(),
+            response: SupergraphResponseConf {
+                condition: Default::default(),
+                headers: false,
+                context: ContextConf::NewContextConf(NewContextConf::Deprecated),
+                body: true,
+                status_code: false,
+                sdl: false,
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(Value::Null)
+                        .subscribed(true)
+                        .build(),
+                    req.context,
+                ))
+            });
+
+        let mock_http_client =
+            mock_with_deferred_callback(move |req: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let (_, body) = req.into_parts();
+                    let deserialized_response: Externalizable<serde_json::Value> =
+                        serde_json::from_slice(&router::body::into_bytes(body).await.unwrap())
+                            .unwrap();
+                    let context = deserialized_response.context.unwrap_or_default();
+                    assert_eq!(
+                        context
+                            .get::<&str, String>("operation_name")
+                            .expect("context key should be there")
+                            .expect("context key should have the right format"),
+                        "Test".to_string()
+                    );
+                    Ok(http::Response::builder()
+                        .body(router::body::from_bytes(
+                            r#"{
+                                "version": 1,
+                                "stage": "SupergraphResponse",
+                                "context": {
+                                    "entries": {
+                                        "operation_name": "New"
+                                    }
+                                },
+                                "body": {
+                                    "data": null
+                                }
+                            }"#,
+                        ))
+                        .unwrap())
+                })
+            });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+        request
+            .context
+            .insert("apollo::supergraph::operation_name", "Test".to_string())
+            .unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        assert_eq!(
+            response
+                .context
+                .get::<&str, String>("apollo::supergraph::operation_name")
+                .unwrap()
+                .unwrap(),
+            "New".to_string()
+        );
+        assert!(
+            response
+                .context
+                .get::<&str, String>("operation_name")
+                .ok()
+                .flatten()
+                .is_none()
+        );
+
+        let gql_response = response.response.body_mut().next().await.unwrap();
+        // Let's assert that the supergraph response has been transformed as it should have.
+        assert_eq!(gql_response.subscribed, Some(true));
+        assert_eq!(gql_response.data, Some(Value::Null));
+    }
+
+    #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -1025,8 +1878,10 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1080,7 +1935,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1098,19 +1955,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_plugin_router_request_with_condition() {
+    async fn external_plugin_router_request_with_selective_context() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
-                // Won't be satisfied
-                condition: Condition::Eq([
-                    SelectorOrValue::Selector(RouterSelector::RequestMethod {
-                        request_method: true,
-                    }),
-                    SelectorOrValue::Value("GET".to_string().into()),
-                ])
-                .into(),
+                condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::Selective(Arc::new(
+                    ["this-is-a-test-context".to_string()].into(),
+                ))),
                 body: true,
                 sdl: true,
                 path: true,
@@ -1120,12 +1972,26 @@ mod tests {
         };
 
         let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
-            assert!(req
-                .context
-                .get::<&str, u8>("this-is-a-test-context")
-                .ok()
-                .flatten()
-                .is_none());
+            // Let's assert that the router request has been transformed as it should have.
+            assert_eq!(
+                req.supergraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.supergraph_request.into_body().query.unwrap()
+            );
+
             Ok(supergraph::Response::builder()
                 .data(json!({ "test": 1234_u32 }))
                 .context(req.context)
@@ -1137,8 +2003,32 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+
+                assert_eq!(
+                    deserialized_request
+                        .context
+                        .as_ref()
+                        .unwrap()
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .unwrap()
+                        .unwrap(),
+                    42
+                );
+
+                assert!(
+                    deserialized_request
+                        .context
+                        .as_ref()
+                        .unwrap()
+                        .get::<&str, String>("not_passed")
+                        .ok()
+                        .flatten()
+                        .is_none()
+                );
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1192,7 +2082,142 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+        request
+            .context
+            .insert("not_passed", "OK".to_string())
+            .unwrap();
+        request
+            .context
+            .insert("this-is-a-test-context", 42)
+            .unwrap();
+
+        let res = service.oneshot(request.try_into().unwrap()).await.unwrap();
+
+        assert!(
+            res.context
+                .get::<&str, String>("not_passed")
+                .ok()
+                .flatten()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request_with_condition() {
+        let router_stage = RouterStage {
+            request: RouterRequestConf {
+                // Won't be satisfied
+                condition: Condition::Eq([
+                    SelectorOrValue::Selector(RouterSelector::RequestMethod {
+                        request_method: true,
+                    }),
+                    SelectorOrValue::Value("GET".to_string().into()),
+                ])
+                .into(),
+                headers: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
+                body: true,
+                sdl: true,
+                path: true,
+                method: true,
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = router::service::from_supergraph_mock_callback(move |req| {
+            assert!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .ok()
+                    .flatten()
+                    .is_none()
+            );
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+                assert_eq!(
+                    PipelineStep::RouterRequest.to_string(),
+                    deserialized_request.stage
+                );
+
+                let input = json!(
+                      {
+                  "version": 1,
+                  "stage": "RouterRequest",
+                  "control": "continue",
+                  "id": "1b19c05fdafc521016df33148ad63c1b",
+                  "headers": {
+                    "cookie": [
+                      "tasty_cookie=strawberry"
+                    ],
+                    "content-type": [
+                      "application/json"
+                    ],
+                    "host": [
+                      "127.0.0.1:4000"
+                    ],
+                    "apollo-federation-include-trace": [
+                      "ftv1"
+                    ],
+                    "apollographql-client-name": [
+                      "manual"
+                    ],
+                    "accept": [
+                      "*/*"
+                    ],
+                    "user-agent": [
+                      "curl/7.79.1"
+                    ],
+                    "content-length": [
+                      "46"
+                    ]
+                  },
+                  "body": "{
+                      \"query\": \"query Long {\n  me {\n  name\n}\n}\"
+                    }",
+                  "context": {
+                    "entries": {
+                      "accepts-json": false,
+                      "accepts-wildcard": true,
+                      "accepts-multipart": false,
+                      "this-is-a-test-context": 42
+                    }
+                  },
+                  "sdl": "the sdl shouldnt change"
+                });
+                Ok(http::Response::builder()
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1215,7 +2240,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -1261,8 +2286,10 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1318,7 +2345,9 @@ mod tests {
                   "sdl": "the sdl shouldnt change"
                 });
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1344,7 +2373,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -1358,8 +2387,10 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1389,7 +2420,9 @@ mod tests {
                 }
                 );
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1413,7 +2446,9 @@ mod tests {
         assert_eq!("a value", value);
 
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
+            &router::body::into_bytes(response.into_body())
+                .await
+                .unwrap(),
         )
         .unwrap();
 
@@ -1433,7 +2468,7 @@ mod tests {
             request: RouterRequestConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 path: true,
@@ -1447,8 +2482,10 @@ mod tests {
         let mock_http_client = mock_with_callback(move |req: http::Request<RouterBody>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(
+                        &router::body::into_bytes(req.into_body()).await.unwrap(),
+                    )
+                    .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
                 assert_eq!(
@@ -1468,7 +2505,9 @@ mod tests {
                 }
                 );
                 Ok(http::Response::builder()
-                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                    .body(router::body::from_bytes(
+                        serde_json::to_string(&input).unwrap(),
+                    ))
                     .unwrap())
             })
         });
@@ -1490,7 +2529,9 @@ mod tests {
 
         assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
+            &router::body::into_bytes(response.into_body())
+                .await
+                .unwrap(),
         )
         .unwrap();
 
@@ -1513,7 +2554,7 @@ mod tests {
             response: RouterResponseConf {
                 condition: Default::default(),
                 headers: true,
-                context: true,
+                context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
                 sdl: true,
                 status_code: false,
@@ -1535,7 +2576,7 @@ mod tests {
                 Box::pin(async {
                     let deserialized_response: Externalizable<serde_json::Value> =
                         serde_json::from_slice(
-                            &hyper::body::to_bytes(res.into_body()).await.unwrap(),
+                            &router::body::into_bytes(res.into_body()).await.unwrap(),
                         )
                         .unwrap();
 
@@ -1598,7 +2639,9 @@ mod tests {
                       "sdl": "the sdl shouldnt change"
                     });
                     Ok(http::Response::builder()
-                        .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
+                        .body(router::body::from_bytes(
+                            serde_json::to_string(&input).unwrap(),
+                        ))
                         .unwrap())
                 })
             });
@@ -1633,7 +2676,9 @@ mod tests {
         assert_eq!(
             json!({ "data": { "test": 42_u32 } }),
             serde_json::from_slice::<serde_json::Value>(
-                &get_body_bytes(res.response.into_body()).await.unwrap()
+                &router::body::into_bytes(res.response.into_body())
+                    .await
+                    .unwrap()
             )
             .unwrap()
         );

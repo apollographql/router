@@ -8,10 +8,20 @@ use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
 
+use super::layers::query_analysis::ParsedDocument;
+use crate::Context;
+use crate::compute_job::MaybeBackPressureError;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
-use crate::Context;
+
+/// Options for planning a query
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlanOptions {
+    /// Which labels to override during query planning
+    pub(crate) override_conditions: Vec<String>,
+}
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
@@ -20,7 +30,9 @@ assert_impl_all!(Request: Send);
 pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
-    pub(crate) context: Context,
+    pub(crate) document: ParsedDocument,
+    pub(crate) metadata: crate::plugins::authorization::CacheKeyMetadata,
+    pub(crate) plan_options: PlanOptions,
 }
 
 #[buildstructor::buildstructor]
@@ -29,11 +41,19 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
-    pub(crate) fn new(query: String, operation_name: Option<String>, context: Context) -> Request {
+    pub(crate) fn new(
+        query: String,
+        operation_name: Option<String>,
+        document: ParsedDocument,
+        metadata: crate::plugins::authorization::CacheKeyMetadata,
+        plan_options: PlanOptions,
+    ) -> Request {
         Self {
             query,
             operation_name,
-            context,
+            document,
+            metadata,
+            plan_options,
         }
     }
 }
@@ -72,7 +92,6 @@ pub(crate) struct Response {
     /// Optional in case of error
     pub(crate) content: Option<QueryPlannerContent>,
     pub(crate) errors: Vec<graphql::Error>,
-    pub(crate) context: Context,
 }
 
 /// Query, QueryPlan and Introspection data.
@@ -80,6 +99,7 @@ pub(crate) struct Response {
 pub(crate) enum QueryPlannerContent {
     Plan { plan: Arc<QueryPlan> },
     Response { response: Box<graphql::Response> },
+    CachedIntrospectionResponse { response: Box<graphql::Response> },
     IntrospectionDisabled,
 }
 
@@ -91,27 +111,18 @@ impl Response {
     #[builder]
     pub(crate) fn new(
         content: Option<QueryPlannerContent>,
-        context: Context,
         errors: Vec<graphql::Error>,
     ) -> Response {
-        Self {
-            content,
-            context,
-            errors,
-        }
+        Self { content, errors }
     }
 }
 
-pub(crate) type BoxService = tower::util::BoxService<Request, Response, QueryPlannerError>;
+pub(crate) type ServiceError = MaybeBackPressureError<QueryPlannerError>;
+pub(crate) type BoxService = tower::util::BoxService<Request, Response, ServiceError>;
 #[allow(dead_code)]
-pub(crate) type BoxCloneService =
-    tower::util::BoxCloneService<Request, Response, QueryPlannerError>;
+pub(crate) type BoxCloneService = tower::util::BoxCloneService<Request, Response, ServiceError>;
 #[allow(dead_code)]
-pub(crate) type ServiceResult = Result<Response, QueryPlannerError>;
-#[allow(dead_code)]
-pub(crate) type Body = hyper::Body;
-#[allow(dead_code)]
-pub(crate) type Error = hyper::Error;
+pub(crate) type ServiceResult = Result<Response, ServiceError>;
 
 #[async_trait]
 pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {

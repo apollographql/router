@@ -3,21 +3,22 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use opentelemetry::runtime;
-use opentelemetry::sdk::metrics::PeriodicReader;
-use opentelemetry::sdk::Resource;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use opentelemetry_otlp::MetricsExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::runtime;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
+use tonic::transport::ClientTlsConfig;
 use tower::BoxError;
 use url::Url;
 
-use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo_exporter::get_uname;
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
@@ -59,7 +60,9 @@ impl MetricsConfigurator for Config {
                 ..
             } => {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
-                    tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
+                    tracing::info!(
+                        "Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details"
+                    );
                 }
 
                 builder = Self::configure_apollo_metrics(
@@ -110,14 +113,15 @@ impl Config {
         let exporter = MetricsExporterBuilder::Tonic(
             opentelemetry_otlp::new_exporter()
                 .tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
                 .with_endpoint(endpoint.as_str())
                 .with_timeout(batch_processor.max_export_timeout)
-                .with_metadata(metadata)
+                .with_metadata(metadata.clone())
                 .with_compression(opentelemetry_otlp::Compression::Gzip),
         )
         .build_metrics_exporter(
             Box::new(CustomTemporalitySelector(
-                opentelemetry::sdk::metrics::data::Temporality::Delta,
+                opentelemetry_sdk::metrics::data::Temporality::Delta,
             )),
             Box::new(
                 CustomAggregationSelector::builder()
@@ -125,28 +129,61 @@ impl Config {
                     .build(),
             ),
         )?;
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio)
+
+        let realtime_exporter = MetricsExporterBuilder::Tonic(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_tls_config(ClientTlsConfig::new().with_native_roots())
+                .with_endpoint(endpoint.as_str())
+                .with_timeout(batch_processor.max_export_timeout)
+                .with_metadata(metadata.clone())
+                .with_compression(opentelemetry_otlp::Compression::Gzip),
+        )
+        .build_metrics_exporter(
+            Box::new(CustomTemporalitySelector(
+                opentelemetry_sdk::metrics::data::Temporality::Delta,
+            )),
+            Box::new(
+                CustomAggregationSelector::builder()
+                    .boundaries(default_buckets())
+                    .build(),
+            ),
+        )?;
+        let default_reader = PeriodicReader::builder(exporter, runtime::Tokio)
             .with_interval(Duration::from_secs(60))
+            .with_timeout(batch_processor.max_export_timeout)
             .build();
+
+        let realtime_reader = PeriodicReader::builder(realtime_exporter, runtime::Tokio)
+            .with_interval(batch_processor.scheduled_delay)
+            .with_timeout(batch_processor.max_export_timeout)
+            .build();
+
+        let resource = Resource::new([
+            KeyValue::new("apollo.router.id", router_id()),
+            KeyValue::new("apollo.graph.ref", reference.to_string()),
+            KeyValue::new("apollo.schema.id", schema_id.to_string()),
+            KeyValue::new(
+                "apollo.user.agent",
+                format!(
+                    "{}@{}",
+                    std::env!("CARGO_PKG_NAME"),
+                    std::env!("CARGO_PKG_VERSION")
+                ),
+            ),
+            KeyValue::new("apollo.client.host", hostname()?),
+            KeyValue::new("apollo.client.uname", get_uname()?),
+        ]);
 
         builder.apollo_meter_provider_builder = builder
             .apollo_meter_provider_builder
-            .with_reader(reader)
-            .with_resource(Resource::new([
-                KeyValue::new("apollo.router.id", router_id()),
-                KeyValue::new("apollo.graph.ref", reference.to_string()),
-                KeyValue::new("apollo.schema.id", schema_id.to_string()),
-                KeyValue::new(
-                    "apollo.user.agent",
-                    format!(
-                        "{}@{}",
-                        std::env!("CARGO_PKG_NAME"),
-                        std::env!("CARGO_PKG_VERSION")
-                    ),
-                ),
-                KeyValue::new("apollo.client.host", hostname()?),
-                KeyValue::new("apollo.client.uname", get_uname()?),
-            ]));
+            .with_reader(default_reader)
+            .with_resource(resource.clone());
+
+        builder.apollo_realtime_meter_provider_builder = builder
+            .apollo_realtime_meter_provider_builder
+            .with_reader(realtime_reader)
+            .with_resource(resource.clone());
         Ok(builder)
     }
 
@@ -181,28 +218,29 @@ mod test {
     use std::time::Duration;
 
     use http::header::HeaderName;
-    use tokio_stream::wrappers::ReceiverStream;
     use tokio_stream::StreamExt;
+    use tokio_stream::wrappers::ReceiverStream;
     use tower::ServiceExt;
     use url::Url;
 
     use super::super::super::config;
     use super::studio::SingleStatsReport;
     use super::*;
+    use crate::Context;
+    use crate::TestHarness;
     use crate::context::OPERATION_KIND;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
+    use crate::plugin::PluginPrivate;
     use crate::plugins::subscription;
-    use crate::plugins::telemetry::apollo;
-    use crate::plugins::telemetry::apollo::default_buffer_size;
-    use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
-    use crate::plugins::telemetry::apollo_exporter::Sender;
-    use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
+    use crate::plugins::telemetry::Telemetry;
+    use crate::plugins::telemetry::apollo;
+    use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
+    use crate::plugins::telemetry::apollo::default_buffer_size;
+    use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::query_planner::OperationKind;
     use crate::services::SupergraphRequest;
-    use crate::Context;
-    use crate::TestHarness;
 
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
@@ -349,6 +387,7 @@ mod test {
         is_subscription: bool,
     ) -> Result<Vec<SingleStatsReport>, BoxError> {
         let _ = tracing_subscriber::fmt::try_init();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -364,7 +403,7 @@ mod test {
                 request_builder.header("accept", "multipart/mixed;subscriptionSpec=1.0");
         }
         TestHarness::builder()
-            .extra_plugin(plugin)
+            .extra_private_plugin(plugin)
             .extra_plugin(create_subscription_plugin().await?)
             .build_router()
             .await?
@@ -395,6 +434,7 @@ mod test {
     }
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         create_plugin_with_apollo_config(apollo::Config {
             endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
             apollo_key: Some("key".to_string()),
@@ -421,7 +461,7 @@ mod test {
     }
 
     async fn create_subscription_plugin() -> Result<subscription::Subscription, BoxError> {
-        subscription::Subscription::new(PluginInit::fake_new(
+        <subscription::Subscription as Plugin>::new(PluginInit::fake_new(
             subscription::SubscriptionConfig::default(),
             Default::default(),
         ))

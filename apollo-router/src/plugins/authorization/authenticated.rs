@@ -2,21 +2,21 @@
 
 use std::collections::HashMap;
 
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::Name;
-use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::spec::Schema;
+use crate::spec::TYPENAME;
 use crate::spec::query::transform;
 use crate::spec::query::transform::TransformState;
 use crate::spec::query::traverse;
-use crate::spec::Schema;
-use crate::spec::TYPENAME;
 
 pub(crate) const AUTHENTICATED_DIRECTIVE_NAME: &str = "authenticated";
 pub(crate) const AUTHENTICATED_SPEC_BASE_URL: &str = "https://specs.apollo.dev/authenticated";
@@ -96,7 +96,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
     }
 }
 
-impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
+impl traverse::Visitor for AuthenticatedCheckVisitor<'_> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if !self.entity_query {
             traverse::operation(self, root_type, node)
@@ -225,7 +225,7 @@ impl<'a> AuthenticatedVisitor<'a> {
         t.directives().has(&self.authenticated_directive_name)
     }
 
-    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+    fn implementors<'s>(&'s self, type_name: &str) -> impl Iterator<Item = &'s Name> + use<'s> {
         self.implementers_map
             .get(type_name)
             .map(|implementers| implementers.iter())
@@ -319,7 +319,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     }
 }
 
-impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
+impl transform::Visitor for AuthenticatedVisitor<'_> {
     fn operation(
         &mut self,
         root_type: &str,
@@ -523,23 +523,24 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ast;
     use apollo_compiler::Schema;
+    use apollo_compiler::ast;
     use multimap::MultiMap;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
+    use crate::Context;
+    use crate::MockedSubgraphs;
+    use crate::TestHarness;
     use crate::http_ext::TryIntoHeaderName;
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::plugin::test::MockSubgraph;
+    use crate::plugins::authorization::APOLLO_AUTHENTICATION_JWT_CLAIMS;
     use crate::plugins::authorization::authenticated::AuthenticatedVisitor;
     use crate::services::router::ClientRequestAccepts;
     use crate::services::supergraph;
     use crate::spec::query::transform;
-    use crate::Context;
-    use crate::MockedSubgraphs;
-    use crate::TestHarness;
 
     static BASIC_SCHEMA: &str = r#"
 
@@ -560,7 +561,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -627,7 +628,7 @@ mod tests {
         paths: Vec<Path>,
     }
 
-    impl<'a> std::fmt::Display for TestResult<'a> {
+    impl std::fmt::Display for TestResult<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             write!(
                 f,
@@ -891,7 +892,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -978,7 +979,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1073,7 +1074,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1137,7 +1138,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1225,7 +1226,7 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
@@ -1310,7 +1311,7 @@ mod tests {
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
       SECURITY
-    
+
       """
       `EXECUTION` features provide metadata necessary for operation execution.
       """
@@ -1319,18 +1320,18 @@ mod tests {
         type Query {
             post(id: ID!): Post
           }
-          
+
           interface Post {
             id: ID!
             author: String!
             title: String!
             content: String!
           }
-          
+
           type Stats {
             views: Int
           }
-          
+
           type PublicBlog implements Post {
             id: ID!
             author: String!
@@ -1338,7 +1339,7 @@ mod tests {
             content: String!
             stats: Stats @authenticated
           }
-          
+
           type PrivateBlog implements Post @authenticated {
             id: ID!
             author: String!
@@ -1410,14 +1411,14 @@ mod tests {
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
 
-  
+
    scalar join__FieldSet
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
@@ -1502,10 +1503,7 @@ mod tests {
 
         let context = Context::new();
         context
-            .insert(
-                "apollo_authentication::JWT::claims",
-                "placeholder".to_string(),
-            )
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, "placeholder".to_string())
             .unwrap();
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id name phone } } }")
@@ -1584,7 +1582,7 @@ mod tests {
         let context = Context::new();
         /*context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             "placeholder".to_string(),
         )
         .unwrap();*/
@@ -1659,13 +1657,13 @@ mod tests {
         let context = Context::new();
         /*context
         .insert(
-            "apollo_authentication::JWT::claims",
+            APOLLO_AUTHENTICATION_JWT_CLAIMS,
             "placeholder".to_string(),
         )
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.extensions().with_lock(|mut lock| {
+        context.extensions().with_lock(|lock| {
             lock.insert(ClientRequestAccepts {
                 multipart_defer: true,
                 multipart_subscription: true,
@@ -1704,6 +1702,7 @@ mod tests {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(
         graph: join__Graph
         requires: join__FieldSet
@@ -1725,6 +1724,10 @@ mod tests {
         resolvable: Boolean! = true
         isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+    ) repeatable on UNION
 
     scalar join__FieldSet
     scalar link__Import
@@ -1787,6 +1790,7 @@ mod tests {
     }
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
     directive @authenticated on OBJECT | FIELD_DEFINITION | INTERFACE | SCALAR | ENUM
+    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
     directive @join__field(
         graph: join__Graph
         requires: join__FieldSet
@@ -1808,6 +1812,10 @@ mod tests {
         resolvable: Boolean! = true
         isInterfaceObject: Boolean! = false
         ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @join__unionMember(
+        graph: join__Graph!
+        member: String!
+    ) repeatable on UNION
 
     scalar join__FieldSet
     scalar link__Import
@@ -1935,7 +1943,7 @@ mod tests {
     #[tokio::test]
     async fn introspection_mixed_with_authenticated_fields() {
         // Note: in https://github.com/apollographql/router/pull/5952/ we moved introspection handling
-        // before authorization filtering in bridge_query_planner.rs, relying on the fact that queries
+        // before authorization filtering in query_planner_service.rs, relying on the fact that queries
         // mixing introspection and concrete fields are not supported, so introspection answers right
         // away. If this ever changes, we should make sure that unauthorized fields are still properly
         // filtered out

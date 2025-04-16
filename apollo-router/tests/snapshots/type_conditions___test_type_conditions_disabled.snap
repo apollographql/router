@@ -1,6 +1,7 @@
 ---
 source: apollo-router/tests/type_conditions.rs
 expression: response
+snapshot_kind: text
 ---
 {
   "data": {
@@ -72,14 +73,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "searchSubgraph",
               "variableUsages": [],
-              "operation": "query Search__searchSubgraph__0 { search { __typename ... on MovieResult { sections { __typename ... on EntityCollectionSection { __typename id } ... on GallerySection { __typename id } } id } ... on ArticleResult { id sections { __typename ... on GallerySection { __typename id } ... on EntityCollectionSection { __typename id } } } } }",
+              "operation": "query Search__searchSubgraph__0 { search { __typename ... on MovieResult { sections { ...c } id } ... on ArticleResult { id sections { ...c } } } } fragment a on EntityCollectionSection { __typename id } fragment b on GallerySection { __typename id } fragment c on Section { __typename ...a ...b }",
               "operationName": "Search__searchSubgraph__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "5201830580c9c5fadd9c59aea072878f84465c1ae9d905207fa281aa7c1d5340",
+              "schemaAwareHash": "c508776fb95baa51ab0f2073f588c5b65f8d0c2b0e77993f746acb3306e262ce",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -137,7 +138,7 @@ expression: response
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "62ff891f6971184d3e42b98f8166be72027b5479f9ec098af460a48ea6f6cbf4",
+                "schemaAwareHash": "6da6794e8b4382ebbc03f009762212fe42c0a7ea531c621877483fac81f2799a",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -148,7 +149,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        search {\n          __typename\n          ... on MovieResult {\n            sections {\n              __typename\n              ... on EntityCollectionSection {\n                __typename\n                id\n              }\n              ... on GallerySection {\n                __typename\n                id\n              }\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              __typename\n              ... on GallerySection {\n                __typename\n                id\n              }\n              ... on EntityCollectionSection {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      }\n    },\n    Flatten(path: \"search.@.sections.@\") {\n      Fetch(service: \"artworkSubgraph\") {\n        {\n          ... on EntityCollectionSection {\n            __typename\n            id\n          }\n          ... on GallerySection {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on EntityCollectionSection {\n            title\n            artwork(params: $movieResultParam)\n          }\n          ... on GallerySection {\n            artwork(params: $movieResultParam)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        search {\n          __typename\n          ... on MovieResult {\n            sections {\n              ...c\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              ...c\n            }\n          }\n        }\n      }\n\n      fragment a on EntityCollectionSection {\n        __typename\n        id\n      }\n\n      fragment b on GallerySection {\n        __typename\n        id\n      }\n\n      fragment c on Section {\n        __typename\n        ...a\n        ...b\n      }\n    },\n    Flatten(path: \"search.@.sections.@\") {\n      Fetch(service: \"artworkSubgraph\") {\n        {\n          ... on EntityCollectionSection {\n            __typename\n            id\n          }\n          ... on GallerySection {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on EntityCollectionSection {\n            title\n            artwork(params: $movieResultParam)\n          }\n          ... on GallerySection {\n            artwork(params: $movieResultParam)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

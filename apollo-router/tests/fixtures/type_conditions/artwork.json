@@ -50,7 +50,7 @@
         },
         {
             "request": {
-                "query": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}...on EntityCollectionSection{artwork(params:$articleResultParam)title}}}",
+                "query": "query Search__artworkSubgraph__2($representations:[_Any!]!,$articleResultParam:String){_entities(representations:$representations){... on GallerySection{artwork(params:$articleResultParam)}... on EntityCollectionSection{artwork(params:$articleResultParam)title}}}",
                 "operationName": "Search__artworkSubgraph__2",
                 "variables":{
                     "articleResultParam":"articleResultEnabled",
