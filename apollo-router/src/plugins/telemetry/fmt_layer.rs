@@ -843,6 +843,8 @@ connector:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -872,6 +874,7 @@ connector:
                             path: "@.id".to_string(),
                         },
                     ],
+                    supergraph_request: Default::default(),
                 };
                 let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
@@ -1194,6 +1197,8 @@ subgraph:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1223,6 +1228,7 @@ subgraph:
                             path: "@.id".to_string(),
                         },
                     ],
+                    supergraph_request: Default::default(),
                 };
                 let connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);

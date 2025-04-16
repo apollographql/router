@@ -4,6 +4,7 @@ use futures::stream::StreamExt;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
+use http::Request;
 use http::Uri;
 use http::header::CONTENT_TYPE;
 use http::header::VARY;
@@ -28,6 +29,7 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::router::service::from_supergraph_mock_callback;
 use crate::services::router::service::from_supergraph_mock_callback_and_configuration;
 use crate::services::router::service::process_vary_header;
@@ -295,30 +297,7 @@ async fn it_processes_a_valid_query_batch() {
     .unwrap();
 
     async fn with_config() -> router::Response {
-        let http_request = supergraph::Request::canned_builder()
-            .build()
-            .unwrap()
-            .supergraph_request
-            .map(|req_2: graphql::Request| {
-                // Create clones of our standard query and update it to have 3 unique queries
-                let mut req_1 = req_2.clone();
-                let mut req_3 = req_2.clone();
-                req_1.query = req_2.query.clone().map(|x| x.replace("upc\n", ""));
-                req_3.query = req_2.query.clone().map(|x| x.replace("id name", "name"));
-
-                // Modify the request so that it is a valid array of 3 requests.
-                let mut json_bytes_1 = serde_json::to_vec(&req_1).unwrap();
-                let mut json_bytes_2 = serde_json::to_vec(&req_2).unwrap();
-                let mut json_bytes_3 = serde_json::to_vec(&req_3).unwrap();
-                let mut result = vec![b'['];
-                result.append(&mut json_bytes_1);
-                result.push(b',');
-                result.append(&mut json_bytes_2);
-                result.push(b',');
-                result.append(&mut json_bytes_3);
-                result.push(b']');
-                router::body::from_bytes(result)
-            });
+        let http_request = batch_with_three_unique_queries();
         let config = serde_json::json!({
             "batching": {
                 "enabled": true,
@@ -627,7 +606,14 @@ async fn it_stores_operation_error_when_config_is_enabled() {
             serde_json::json!({
                 "apollo": {
                     "errors": {
-                        "experimental_otlp_error_metrics": "enabled"
+                        "preview_extended_error_metrics": "enabled",
+                        "subgraph": {
+                            "subgraphs": {
+                                "myIgnoredSubgraph": {
+                                    "send": false,
+                                }
+                            }
+                        }
                     }
                 }
             }),
@@ -652,6 +638,12 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                             .message("some other error")
                             .extension_code("SOME_OTHER_ERROR_CODE")
                             .extension("service", "myOtherSubgraph")
+                            .path(Path::from("obj/arr/@/firstElementField"))
+                            .build(),
+                        graphql::Error::builder()
+                            .message("some ignored error")
+                            .extension_code("SOME_IGNORED_ERROR_CODE")
+                            .extension("service", "myIgnoredSubgraph")
                             .path(Path::from("obj/arr/@/firstElementField"))
                             .build(),
                     ])
@@ -738,7 +730,129 @@ async fn it_stores_operation_error_when_config_is_enabled() {
                 KeyValue::new("apollo.router.error.service", ""),
             ]
         );
+        assert_counter_not_exists!(
+            "apollo.router.operations.error",
+            u64,
+            &[
+                KeyValue::new("apollo.operation.id", operation_id),
+                KeyValue::new("graphql.operation.name", operation_name),
+                KeyValue::new("graphql.operation.type", operation_type),
+                KeyValue::new("apollo.client.name", client_name),
+                KeyValue::new("apollo.client.version", client_version),
+                KeyValue::new("graphql.error.extensions.code", "SOME_IGNORED_ERROR_CODE"),
+                KeyValue::new("graphql.error.extensions.severity", "ERROR"),
+                KeyValue::new("graphql.error.path", "/obj/arr/@/firstElementField"),
+                KeyValue::new("apollo.router.error.service", "myIgnoredSubgraph"),
+            ]
+        );
     }
     .with_metrics()
     .await;
+}
+
+#[tokio::test]
+async fn it_processes_a_valid_query_batch_with_maximum_size() {
+    let expected_response: serde_json::Value = serde_json::from_str(include_str!(
+        "../query_batching/testdata/expected_good_response.json"
+    ))
+    .unwrap();
+
+    let http_request = batch_with_three_unique_queries();
+    let config = serde_json::json!({
+        "batching": {
+            "enabled": true,
+            "mode" : "batch_http_link",
+            "maximum_size": 3
+        }
+    });
+
+    // Send a request
+    let response = oneshot_request(http_request, config).await.response;
+    assert_eq!(response.status(), http::StatusCode::OK);
+
+    let data: serde_json::Value = serde_json::from_slice(
+        &router::body::into_bytes(response.into_body())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(expected_response, data);
+}
+
+#[tokio::test]
+async fn it_will_not_process_a_batch_that_exceeds_the_maximum_size() {
+    let expected_response: serde_json::Value = serde_json::from_str(include_str!(
+        "../query_batching/testdata/batch_exceeds_maximum_size_response.json"
+    ))
+    .unwrap();
+
+    // NB: make_fake_batch creates a request with a batch size of 2
+    let http_request = make_fake_batch(
+        supergraph::Request::canned_builder()
+            .build()
+            .unwrap()
+            .supergraph_request,
+        None,
+    );
+    let config = serde_json::json!({
+        "batching": {
+            "enabled": true,
+            "mode" : "batch_http_link",
+            "maximum_size": 1
+        }
+    });
+
+    // Send a request
+    let response = oneshot_request(http_request, config).await.response;
+    assert_eq!(response.status(), http::StatusCode::UNPROCESSABLE_ENTITY);
+
+    let data: serde_json::Value = serde_json::from_slice(
+        &router::body::into_bytes(response.into_body())
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(expected_response, data);
+}
+
+async fn oneshot_request(
+    http_request: Request<RouterBody>,
+    config: serde_json::Value,
+) -> router::Response {
+    crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .build_router()
+        .await
+        .unwrap()
+        .oneshot(router::Request::from(http_request))
+        .await
+        .unwrap()
+}
+
+fn batch_with_three_unique_queries() -> Request<RouterBody> {
+    supergraph::Request::canned_builder()
+        .build()
+        .unwrap()
+        .supergraph_request
+        .map(|req_2: graphql::Request| {
+            // Create clones of our standard query and update it to have 3 unique queries
+            let mut req_1 = req_2.clone();
+            let mut req_3 = req_2.clone();
+            req_1.query = req_2.query.clone().map(|x| x.replace("upc\n", ""));
+            req_3.query = req_2.query.clone().map(|x| x.replace("id name", "name"));
+
+            // Modify the request so that it is a valid array of 3 requests.
+            let mut json_bytes_1 = serde_json::to_vec(&req_1).unwrap();
+            let mut json_bytes_2 = serde_json::to_vec(&req_2).unwrap();
+            let mut json_bytes_3 = serde_json::to_vec(&req_3).unwrap();
+            let mut result = vec![b'['];
+            result.append(&mut json_bytes_1);
+            result.push(b',');
+            result.append(&mut json_bytes_2);
+            result.push(b',');
+            result.append(&mut json_bytes_3);
+            result.push(b']');
+            router::body::from_bytes(result)
+        })
 }

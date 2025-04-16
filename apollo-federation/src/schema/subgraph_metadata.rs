@@ -19,7 +19,7 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 
-fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
+fn unwrap_schema(fed_schema: &FederationSchema) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
     Valid::assume_valid_ref(fed_schema.schema())
 }
@@ -41,7 +41,7 @@ pub(crate) struct SubgraphMetadata {
 #[allow(dead_code)]
 impl SubgraphMetadata {
     pub(super) fn new(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_metadata = ExternalMetadata::new(schema, federation_spec_definition)?;
@@ -51,7 +51,13 @@ impl SubgraphMetadata {
         let key_fields = Self::collect_key_fields(schema)?;
         let provided_fields = Self::collect_provided_fields(schema)?;
         let required_fields = Self::collect_required_fields(schema)?;
-        let shareable_fields = Self::collect_shareable_fields(schema, federation_spec_definition)?;
+        let shareable_fields = if federation_spec_definition.is_fed1() {
+            // TODO (FED-428): Currently, `@shareable` is not used in Fed 1 schemas. But, the
+            // comments in the `collect_shareable_fields` function suggests that it may be used.
+            Default::default()
+        } else {
+            Self::collect_shareable_fields(schema, federation_spec_definition)?
+        };
 
         Ok(Self {
             federation_spec_definition,
@@ -117,10 +123,12 @@ impl SubgraphMetadata {
     }
 
     fn collect_key_fields(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut key_fields = IndexSet::default();
-        let applications = schema.key_directive_applications()?;
+        let Ok(applications) = schema.key_directive_applications() else {
+            return Ok(Default::default());
+        };
         for key_directive in applications.into_iter().filter_map(|res| res.ok()) {
             key_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
@@ -133,10 +141,12 @@ impl SubgraphMetadata {
     }
 
     fn collect_provided_fields(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut provided_fields = IndexSet::default();
-        let applications = schema.provides_directive_applications()?;
+        let Ok(applications) = schema.provides_directive_applications() else {
+            return Ok(Default::default());
+        };
         for provides_directive in applications.into_iter().filter_map(|res| res.ok()) {
             provided_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
@@ -149,10 +159,12 @@ impl SubgraphMetadata {
     }
 
     fn collect_required_fields(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut required_fields = IndexSet::default();
-        let applications = schema.requires_directive_applications()?;
+        let Ok(applications) = schema.requires_directive_applications() else {
+            return Ok(Default::default());
+        };
         for requires_directive in applications.into_iter().filter_map(|d| d.ok()) {
             required_fields.extend(collect_target_fields_from_field_set(
                 unwrap_schema(schema),
@@ -165,21 +177,21 @@ impl SubgraphMetadata {
     }
 
     fn collect_shareable_fields(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut shareable_fields = IndexSet::default();
-        // @shareable is only avalaible on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
+        // @shareable is only available on fed2 schemas, but the schema upgrader call this on fed1 schemas as a shortcut to
         // identify key fields (because if we know nothing is marked @shareable, then the only fields that are shareable
         // by default are key fields).
-        let Ok(shareable_directive_definition) =
-            federation_spec_definition.shareable_directive_definition(schema)
+        let Some(shareable_directive_name) =
+            federation_spec_definition.shareable_directive_name_in_schema(schema)?
         else {
             return Ok(shareable_fields);
         };
         let shareable_directive_referencers = schema
             .referencers
-            .get_directive(&shareable_directive_definition.name)?;
+            .get_directive(&shareable_directive_name)?;
 
         // Fields of shareable object types are shareable
         for object_type_position in &shareable_directive_referencers.object_types {
@@ -203,7 +215,7 @@ impl SubgraphMetadata {
     }
 
     fn collect_fields_used_by_context_directive(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let Ok(context_directive_applications) = schema.context_directive_applications() else {
             return Ok(Default::default());
@@ -249,7 +261,7 @@ impl SubgraphMetadata {
     }
 
     fn collect_fields_used_to_satisfy_interface_constraints(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut interface_constraint_fields = IndexSet::default();
         for ty in schema.schema().types.values() {
@@ -297,7 +309,7 @@ pub(crate) struct ExternalMetadata {
 
 impl ExternalMetadata {
     fn new(
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
         federation_spec_definition: &'static FederationSpecDefinition,
     ) -> Result<Self, FederationError> {
         let external_fields = Self::collect_external_fields(federation_spec_definition, schema)?;
@@ -326,15 +338,16 @@ impl ExternalMetadata {
 
     fn collect_external_fields(
         federation_spec_definition: &'static FederationSpecDefinition,
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let external_directive_definition = federation_spec_definition
-            .external_directive_definition(schema)?
-            .clone();
+        let Some(external_directive_name) =
+            federation_spec_definition.external_directive_name_in_schema(schema)?
+        else {
+            return Ok(Default::default());
+        };
 
-        let external_directive_referencers = schema
-            .referencers
-            .get_directive(&external_directive_definition.name)?;
+        let external_directive_referencers =
+            schema.referencers.get_directive(&external_directive_name)?;
 
         let mut external_fields = IndexSet::default();
 
@@ -357,13 +370,19 @@ impl ExternalMetadata {
 
     fn collect_fake_externals(
         federation_spec_definition: &'static FederationSpecDefinition,
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
         let mut fake_external_fields = IndexSet::default();
-        let extends_directive_definition =
-            federation_spec_definition.extends_directive_definition(schema)?;
-        let applications = schema.key_directive_applications()?;
-        for key_directive in applications.into_iter().filter_map(|k| k.ok()) {
+        let (Ok(extends_directive_definition), Ok(key_directive_applications)) = (
+            federation_spec_definition.extends_directive_definition(schema),
+            schema.key_directive_applications(),
+        ) else {
+            return Ok(Default::default());
+        };
+        for key_directive in key_directive_applications
+            .into_iter()
+            .filter_map(|k| k.ok())
+        {
             let has_extends_directive = key_directive
                 .sibling_directives
                 .has(&extends_directive_definition.name);
@@ -390,15 +409,16 @@ impl ExternalMetadata {
 
     fn collect_fields_on_external_types(
         federation_spec_definition: &'static FederationSpecDefinition,
-        schema: &Valid<FederationSchema>,
+        schema: &FederationSchema,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let external_directive_definition = federation_spec_definition
-            .external_directive_definition(schema)?
-            .clone();
+        let Some(external_directive_name) =
+            federation_spec_definition.external_directive_name_in_schema(schema)?
+        else {
+            return Ok(Default::default());
+        };
 
-        let external_directive_referencers = schema
-            .referencers
-            .get_directive(&external_directive_definition.name)?;
+        let external_directive_referencers =
+            schema.referencers.get_directive(&external_directive_name)?;
 
         let mut fields_on_external_types = IndexSet::default();
         for object_type_position in &external_directive_referencers.object_types {

@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::Supergraph;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
-use apollo_federation::Supergraph;
 
 pub(crate) fn run_bench(
     supergraph: Supergraph,

@@ -56,7 +56,7 @@ impl<T> Condition<T>
 where
     T: Selector,
 {
-    /// restricted_stage is Some if this condiiton will only applies at a specific stage like for events for example
+    /// restricted_stage is Some if this condition will only applies at a specific stage like for events for example
     pub(crate) fn validate(&self, restricted_stage: Option<Stage>) -> Result<(), String> {
         match self {
             Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => {

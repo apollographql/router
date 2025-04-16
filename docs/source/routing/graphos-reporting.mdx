@@ -388,8 +388,47 @@ telemetry:
             send: false
 ```
 
-<Note>
+<MinVersion version="2.1.2">
 
-If you're writing a plugin, you can get the Studio Trace ID by reading the value of `apollo::supergraph::operation_id` from the context.
+#### Enabling extended error reporting
 
-</Note>
+</MinVersion>
+
+<PreviewFeature />
+
+Enable richer error reporting via `preview_extended_error_metrics` and `redaction_policy` router configurations.
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    errors:
+      preview_extended_error_metrics: enabled # (default: disabled)
+      subgraph:
+        all:
+          # By default, subgraphs should report errors to GraphOS
+          send: true # (default: true)
+          redaction_policy: extended # (default: strict)
+        subgraphs:
+          account: # Override the default behavior for the "account" subgraph
+            send: false
+```
+
+When enabled, the router sends metrics to Studio
+with additional attributes including the `service` and `code` found in [GraphQL error extensions](https://spec.graphql.org/October2021/#sec-Errors.Error-result-format) (`errors[].extensions.service` and `errors[].extensions.code`, respectively).
+
+Additional diagnostic capabilities available in Studio now support viewing errors by `service` or `code`. The `service` dimension refers to the subgraph or connector where the error originated from.
+The `code` refers to the specific type of error that was raised by the router, federated subgraphs, or connectors.
+
+##### Cardinality limitations
+
+At scale, this feature is known to hit cardinality limitations in the OTel reporting agent. When this happens, some of the extended metrics attributes may no longer
+be visible in Studio. In the case of cardinality warnings in logs, adjusting the Apollo batch processing configuration to send reports more frequently can help to alleviate this.
+
+Additionally, this feature may increase the Router's memory usage profile. Similarly, lowering the `scheduled_delay` can help to alleviate that as well. See the example below.
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    batch_processor:
+      scheduled_delay: 100ms # default is 5s
+```

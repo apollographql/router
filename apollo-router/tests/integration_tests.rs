@@ -234,7 +234,7 @@ async fn queries_should_work_over_post() {
 async fn service_errors_should_be_propagated() {
     let message = "Unknown operation named \"invalidOperationName\"";
     let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
+    extensions_map.insert("code", "GRAPHQL_UNKNOWN_OPERATION_NAME".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
         .extensions(extensions_map)
@@ -430,16 +430,12 @@ async fn persisted_queries() {
         "name": "Ada Lovelace"
       }
     });
-    let map = [(
-        FullPersistedQueryOperationId {
-            operation_id: PERSISTED_QUERY_ID.to_string(),
-            client_name: None,
-        },
-        PERSISTED_QUERY_BODY.to_string(),
-    )]
-    .into_iter()
-    .collect();
-    let (_mock_guard, uplink_config) = mock_pq_uplink(&map).await;
+    let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
+        id: PERSISTED_QUERY_ID.to_string(),
+        body: PERSISTED_QUERY_BODY.to_string(),
+        client_name: None,
+    }]);
+    let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
     let config = serde_json::json!({
         "persisted_queries": {
