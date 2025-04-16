@@ -71,7 +71,7 @@ impl Events {
             .router
             .custom
             .iter()
-            .filter_map(|(name, config)| CustomEvent::from_config(name, &config))
+            .filter_map(|(name, config)| CustomEvent::from_config(name, config))
             .collect();
 
         RouterEvents {
@@ -87,7 +87,7 @@ impl Events {
             .supergraph
             .custom
             .iter()
-            .filter_map(|(name, config)| CustomEvent::from_config(name, &config))
+            .filter_map(|(name, config)| CustomEvent::from_config(name, config))
             .collect();
 
         SupergraphEvents {
@@ -103,7 +103,7 @@ impl Events {
             .subgraph
             .custom
             .iter()
-            .filter_map(|(name, config)| CustomEvent::from_config(name, &config))
+            .filter_map(|(name, config)| CustomEvent::from_config(name, config))
             .collect();
 
         SubgraphEvents {
@@ -657,9 +657,9 @@ where
         + Debug
         + Clone,
 {
-    pub(crate) fn from_config(name: &String, config: &Event<A, T>) -> Option<Self> {
+    pub(crate) fn from_config(name: &str, config: &Event<A, T>) -> Option<Self> {
         EventLevel::from_config(&config.level).map(|level| Self {
-            name: name.clone(),
+            name: name.to_owned(),
             level,
             event_on: config.on,
             message: config.message.clone(),

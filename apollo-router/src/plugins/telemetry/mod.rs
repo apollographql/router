@@ -660,7 +660,8 @@ impl PluginPrivate for Telemetry {
                         .new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
-                    let mut supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    let mut supergraph_events =
+                        config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
                     (
@@ -907,7 +908,8 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_connector_instruments(static_connector_instruments.clone());
                     custom_instruments.on_request(request);
-                    let mut custom_events = req_fn_config.instrumentation.events.new_connector_events();
+                    let mut custom_events =
+                        req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
 
                     let custom_span_attributes = req_fn_config
@@ -933,7 +935,11 @@ impl PluginPrivate for Telemetry {
                     let conf = res_fn_config.clone();
                     async move {
                         match custom_telemetry {
-                            Some((custom_instruments, mut custom_events, custom_span_attributes)) => {
+                            Some((
+                                custom_instruments,
+                                mut custom_events,
+                                custom_span_attributes,
+                            )) => {
                                 let span = Span::current();
                                 span.set_span_dyn_attributes(custom_span_attributes);
 

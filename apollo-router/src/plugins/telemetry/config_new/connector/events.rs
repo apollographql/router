@@ -1,14 +1,14 @@
+use std::sync::Arc;
+
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::sync::Arc;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::Context;
+use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
@@ -16,6 +16,7 @@ use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelect
 use crate::plugins::telemetry::config_new::events::CustomEvent;
 use crate::plugins::telemetry::config_new::events::CustomEvents;
 use crate::plugins::telemetry::config_new::events::Event;
+use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEvent;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
@@ -81,7 +82,7 @@ impl CustomEvents<ConnectorRequest, ConnectorResponse, (), ConnectorAttributes, 
 
         if let Some(response_event) = self.response.take() {
             request.context.extensions().with_lock(|lock| {
-                lock.insert(ConnectorEventResponse{
+                lock.insert(ConnectorEventResponse {
                     level: response_event.level,
                     condition: Arc::new(response_event.condition),
                 })
