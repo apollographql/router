@@ -466,18 +466,24 @@ struct RouterEventsConfig {
 
 #[derive(Clone)]
 pub(crate) struct SupergraphEventResponse {
+    // XXX(@IvanGoncharov): As part of removing Arc from StandardEvent I moved it here
+    // I think it's not nessary here but can't verify it right now, so in future can just wrap StandardEvent
     pub(crate) level: EventLevel,
     pub(crate) condition: Arc<Condition<SupergraphSelector>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SubgraphEventResponse {
+    // XXX(@IvanGoncharov): As part of removing Arc from StandardEvent I moved it here
+    // I think it's not nessary here but can't verify it right now, so in future can just wrap StandardEvent
     pub(crate) level: EventLevel,
     pub(crate) condition: Arc<Condition<SubgraphSelector>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SubgraphEventRequest {
+    // XXX(@IvanGoncharov): As part of removing Mutex from StandardEvent I moved it here
+    // I think it's not nessary here but can't verify it right now, so in future can just wrap StandardEvent
     pub(crate) level: EventLevel,
     pub(crate) condition: Arc<Mutex<Condition<SubgraphSelector>>>,
 }

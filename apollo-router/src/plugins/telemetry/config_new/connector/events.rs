@@ -24,12 +24,16 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 
 #[derive(Clone)]
 pub(crate) struct ConnectorEventRequest {
+    // XXX(@IvanGoncharov): As part of removing Mutex from StandardEvent I moved it here
+    // I think it's not nessary here but can't verify it right now, so in future can just wrap StandardEvent
     pub(crate) level: EventLevel,
     pub(crate) condition: Arc<Mutex<Condition<ConnectorSelector>>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ConnectorEventResponse {
+    // XXX(@IvanGoncharov): As part of removing Arc from StandardEvent I moved it here
+    // I think it's not nessary here but can't verify it right now, so in future can just wrap StandardEvent
     pub(crate) level: EventLevel,
     pub(crate) condition: Arc<Condition<ConnectorSelector>>,
 }
