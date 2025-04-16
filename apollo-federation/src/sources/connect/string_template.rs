@@ -209,7 +209,7 @@ impl Part {
                 .map_err(|err| err.into()),
             Part::Expression(Expression { expression, .. }) => {
                 let (value, warnings) = expression.apply_with_vars(&Value::Null, vars);
-                write_value(&mut output, value).map(|_| warnings)
+                write_value(&mut output, value.as_ref().unwrap_or(&Value::Null)).map(|_| warnings)
             }
         }
         .map_err(|err| Error {
@@ -224,9 +224,9 @@ impl Part {
 /// Used for string interpolation in templates and building URIs.
 pub(crate) fn write_value<Output: Write>(
     mut output: Output,
-    value: Option<Value>,
+    value: &Value,
 ) -> Result<(), Box<dyn core::error::Error>> {
-    match value.unwrap_or(Value::Null) {
+    match value {
         Value::Null => Ok(()),
         Value::Bool(b) => write!(output, "{b}"),
         Value::Number(n) => write!(output, "{n}"),

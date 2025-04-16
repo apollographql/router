@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
+use std::iter::once;
 use std::str::FromStr;
 
 use apollo_compiler::Node;
@@ -247,11 +248,11 @@ fn extend_path_from_expression(
     let Value::Array(values) = value else {
         return Err("Expression did not evaluate to an array".into());
     };
-    for value in values {
+    for value in &values {
         if !path.ends_with("/") {
             path.write_trusted("/");
         }
-        write_value(&mut *path, Some(value))?;
+        write_value(&mut *path, value)?;
     }
     Ok(warnings)
 }
@@ -278,13 +279,23 @@ fn extend_query_from_expression(
     let Value::Object(map) = value else {
         return Err("Expression did not evaluate to an object".into());
     };
-    for (key, value) in map {
+
+    let all_params = map.iter().flat_map(|(key, value)| {
+        if let Value::Array(values) = value {
+            // If the top-level value is an array, we're going to turn that into repeated params
+            Either::Left(values.iter().map(|value| (key.as_str(), value)))
+        } else {
+            Either::Right(once((key.as_str(), value)))
+        }
+    });
+
+    for (key, value) in all_params {
         if !query.is_empty() && !query.ends_with("&") {
             query.write_trusted("&");
         }
-        query.write_str(key.as_str())?;
+        query.write_str(key)?;
         query.write_trusted("=");
-        write_value(&mut *query, Some(value))?;
+        write_value(&mut *query, value)?;
     }
     Ok(warnings)
 }
