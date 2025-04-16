@@ -430,7 +430,6 @@ impl Request {
         }
         for (name, val) in &body.extensions {
             hasher.update(name.inner());
-            // TODO implement to_bytes() for value in serde_json_bytes
             hasher.update(val.to_bytes());
         }
 

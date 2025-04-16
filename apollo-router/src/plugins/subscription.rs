@@ -68,7 +68,7 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) enabled: bool,
     /// Select a subscription mode (callback or passthrough)
     pub(crate) mode: SubscriptionModeConfig,
-    /// Configure the deduplication of subscriptions (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
+    /// Configure subgraph subscription deduplication
     pub(crate) deduplication: DeduplicationConfig,
     /// This is a limit to only have maximum X opened subscriptions at the same time. By default if it's not set there is no limit.
     pub(crate) max_opened_subscriptions: Option<usize>,
@@ -76,15 +76,16 @@ pub(crate) struct SubscriptionConfig {
     pub(crate) queue_capacity: Option<usize>,
 }
 
-/// Deduplication configuration
+/// Subscription deduplication configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct DeduplicationConfig {
-    /// Enable the deduplication of subscriptions (for example if we detect the exact same request to subgraph we won't open a new websocket to the subgraph in passthrough mode)
+    /// Enable subgraph subscription deduplication. When enabled, multiple identical requests to the same subgraph will share one WebSocket connection in passthrough mode.
     /// (default: true)
     pub(crate) enabled: bool,
-    /// List of headers to ignore for deduplication, for example if you forward 'user-agent' header but doesn't interfere with data returned by the subscription we can just ignore it
-    /// to not create a new subscription connection
+    /// List of headers to ignore for deduplication. Even if these headers are different, the subscription request is considered identical.
+    /// For example, if you forward the "User-Agent" header, but the subgraph doesn't depend on the value of that header,
+    /// adding it to this list will let the router dedupe subgraph subscriptions even if the header value is different.
     pub(crate) ignored_headers: HashSet<String>,
 }
 
