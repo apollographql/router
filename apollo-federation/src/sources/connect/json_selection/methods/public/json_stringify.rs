@@ -6,7 +6,6 @@ use shape::location::SourceId;
 use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
@@ -28,7 +27,6 @@ fn json_stringify_method(
     data: &JSON,
     _vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    _tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if method_args.is_some() {
         return (

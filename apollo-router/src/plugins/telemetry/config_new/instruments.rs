@@ -3378,6 +3378,8 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
@@ -3393,6 +3395,7 @@ mod tests {
                                         transport_request,
                                         key: response_key.clone(),
                                         mapping_problems,
+                                        supergraph_request: Default::default(),
                                     };
                                     connector_instruments = Some({
                                         let connector_instruments = config
@@ -3440,6 +3443,8 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),

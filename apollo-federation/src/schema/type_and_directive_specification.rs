@@ -581,14 +581,14 @@ impl TypeAndDirectiveSpecification for DirectiveSpecification {
         }
 
         let directive_pos = DirectiveDefinitionPosition {
-            directive_name: actual_name,
+            directive_name: actual_name.clone(),
         };
         directive_pos.pre_insert(schema)?;
         directive_pos.insert(
             schema,
             Node::new(DirectiveDefinition {
                 description: None,
-                name: self.name.clone(),
+                name: actual_name,
                 arguments: resolved_args
                     .iter()
                     .map(|arg| Node::new(arg.into()))

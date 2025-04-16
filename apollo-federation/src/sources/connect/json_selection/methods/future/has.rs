@@ -7,9 +7,7 @@ use crate::impl_arrow_method;
 use crate::sources::connect::json_selection::ApplyToError;
 use crate::sources::connect::json_selection::ApplyToInternal;
 use crate::sources::connect::json_selection::MethodArgs;
-use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::VarsWithPathsMap;
-use crate::sources::connect::json_selection::apply_to::ApplyToResultMethods;
 use crate::sources::connect::json_selection::immutable::InputPath;
 use crate::sources::connect::json_selection::location::Ranged;
 use crate::sources::connect::json_selection::location::WithRange;
@@ -22,72 +20,38 @@ fn has_method(
     data: &JSON,
     vars: &VarsWithPathsMap,
     input_path: &InputPath<JSON>,
-    tail: &WithRange<PathList>,
 ) -> (Option<JSON>, Vec<ApplyToError>) {
     if let Some(MethodArgs { args, .. }) = method_args {
         match args.first() {
             Some(arg) => match arg.apply_to_path(data, vars, input_path) {
-                (Some(ref json_index @ JSON::Number(ref n)), arg_errors) => {
+                (Some(JSON::Number(ref n)), arg_errors) => {
                     match (data, n.as_i64()) {
                         (JSON::Array(array), Some(index)) => {
                             let ilen = array.len() as i64;
                             // Negative indices count from the end of the array
                             let index = if index < 0 { ilen + index } else { index };
-                            tail.apply_to_path(
-                                &JSON::Bool(index >= 0 && index < ilen),
-                                vars,
-                                &input_path.append(json_index.clone()),
-                            )
-                            .prepend_errors(arg_errors)
+                            (Some(JSON::Bool(index >= 0 && index < ilen)), arg_errors)
                         }
 
-                        (json_key @ JSON::String(s), Some(index)) => {
+                        (JSON::String(s), Some(index)) => {
                             let ilen = s.as_str().len() as i64;
                             // Negative indices count from the end of the array
                             let index = if index < 0 { ilen + index } else { index };
-                            tail.apply_to_path(
-                                &JSON::Bool(index >= 0 && index < ilen),
-                                vars,
-                                &input_path.append(json_key.clone()),
-                            )
-                            .prepend_errors(arg_errors)
+                            (Some(JSON::Bool(index >= 0 && index < ilen)), arg_errors)
                         }
 
-                        _ => tail
-                            .apply_to_path(
-                                &JSON::Bool(false),
-                                vars,
-                                &input_path.append(json_index.clone()),
-                            )
-                            .prepend_errors(arg_errors),
+                        _ => (Some(JSON::Bool(false)), arg_errors),
                     }
                 }
 
-                (Some(ref json_key @ JSON::String(ref s)), arg_errors) => match data {
-                    JSON::Object(map) => tail
-                        .apply_to_path(
-                            &JSON::Bool(map.contains_key(s.as_str())),
-                            vars,
-                            &input_path.append(json_key.clone()),
-                        )
-                        .prepend_errors(arg_errors),
-
-                    _ => tail
-                        .apply_to_path(
-                            &JSON::Bool(false),
-                            vars,
-                            &input_path.append(json_key.clone()),
-                        )
-                        .prepend_errors(arg_errors),
+                (Some(JSON::String(ref s)), arg_errors) => match data {
+                    JSON::Object(map) => {
+                        (Some(JSON::Bool(map.contains_key(s.as_str()))), arg_errors)
+                    }
+                    _ => (Some(JSON::Bool(false)), arg_errors),
                 },
 
-                (Some(value), arg_errors) => tail
-                    .apply_to_path(&JSON::Bool(false), vars, &input_path.append(value.clone()))
-                    .prepend_errors(arg_errors),
-
-                (None, arg_errors) => tail
-                    .apply_to_path(&JSON::Bool(false), vars, input_path)
-                    .prepend_errors(arg_errors),
+                (_, arg_errors) => (Some(JSON::Bool(false)), arg_errors),
             },
             None => (
                 None,

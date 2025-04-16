@@ -1,0 +1,41 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/federation/v2.11", import: ["@key"])
+  @link(url: "https://specs.apollo.dev/connect/v0.2", import: ["@connect"])
+
+"The auto-key here matches the first `@key`, but the second `@key` is still unresolved"
+type Product
+  @key(fields: "id store { id country { id region } }")
+  @key(fields: "id store { id country { key_id region } }")
+  @connect(
+    http: {
+      POST: "http://myapi/"
+      body: """
+      ids: $batch.id
+      store_ids: $batch.store.id
+      country_ids: $batch.store.country.id
+      country_regions: $batch.store.country.region
+      """
+    }
+    selection: "id store { id country { id key_id key_id2 region } } name"
+  ) {
+  id: ID!
+  store: Store!
+  name: String
+}
+
+type Store {
+  id: ID!
+  country: Country
+}
+
+type Country {
+  id: ID!
+  key_id: ID!
+  key_id2: ID!
+  region: Region
+}
+
+enum Region {
+  AMERICAS
+  EUROPE
+}
