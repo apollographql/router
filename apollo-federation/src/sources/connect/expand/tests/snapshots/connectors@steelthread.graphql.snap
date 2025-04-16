@@ -20,7 +20,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
             connect_template: StringTemplate {
@@ -100,7 +100,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
             connect_template: StringTemplate {
@@ -239,7 +239,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/st
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
             connect_template: StringTemplate {

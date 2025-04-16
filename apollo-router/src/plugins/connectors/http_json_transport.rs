@@ -38,7 +38,7 @@ pub(crate) fn make_request(
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let uri = make_uri(
-        transport.source_uri.as_ref(),
+        transport.source_url.as_ref(),
         &transport.connect_template,
         &inputs,
     )?;
@@ -136,7 +136,7 @@ pub(crate) fn make_request(
 }
 
 fn make_uri(
-    source_uri: Option<&Uri>,
+    source_url: Option<&Uri>,
     template: &StringTemplate,
     inputs: &IndexMap<String, Value>,
 ) -> Result<Uri, HttpJsonTransportError> {
@@ -144,7 +144,7 @@ fn make_uri(
         .interpolate_uri(inputs)
         .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?;
 
-    let Some(source_uri) = source_uri else {
+    let Some(source_uri) = source_url else {
         return Ok(connect_uri);
     };
 
@@ -722,7 +722,7 @@ mod tests {
 
         let req = super::make_request(
             &HttpJsonTransport {
-                source_uri: None,
+                source_url: None,
                 connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers: Default::default(),
@@ -781,7 +781,7 @@ mod tests {
 
         let req = super::make_request(
             &HttpJsonTransport {
-                source_uri: None,
+                source_url: None,
                 connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
                 headers,

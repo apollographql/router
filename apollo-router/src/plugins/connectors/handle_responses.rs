@@ -653,7 +653,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -764,7 +764,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -880,7 +880,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
                 headers: Default::default(),
@@ -1005,7 +1005,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -1132,7 +1132,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -1399,7 +1399,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),

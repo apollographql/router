@@ -339,7 +339,7 @@ fn extract_header_references<'a>(
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
-    pub source_uri: Option<Uri>,
+    pub source_url: Option<Uri>,
     pub connect_template: StringTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
@@ -377,7 +377,7 @@ impl HttpJsonTransport {
         }
 
         Ok(Self {
-            source_uri: source.map(|s| s.base_uri.clone()),
+            source_url: source.map(|s| s.base_url.clone()),
             connect_template: connect_url.parse().map_err(|e: string_template::Error| {
                 FederationError::internal(format!(
                     "could not parse URL template: {message}",
@@ -686,7 +686,7 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_uri: Some(
+                    source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
                     connect_template: StringTemplate {
@@ -797,7 +797,7 @@ mod tests {
                     ),
                 },
                 transport: HttpJsonTransport {
-                    source_uri: Some(
+                    source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
                     connect_template: StringTemplate {

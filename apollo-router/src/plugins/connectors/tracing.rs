@@ -76,7 +76,7 @@ mod tests {
                 "label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),

@@ -32,7 +32,7 @@ expression: "&connectors"
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
             connect_template: StringTemplate {
@@ -155,7 +155,7 @@ expression: "&connectors"
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 https://jsonplaceholder.typicode.com/,
             ),
             connect_template: StringTemplate {

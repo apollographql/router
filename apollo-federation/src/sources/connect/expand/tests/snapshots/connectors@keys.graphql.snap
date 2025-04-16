@@ -18,7 +18,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -153,7 +153,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -337,7 +337,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -472,7 +472,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -595,7 +595,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -767,7 +767,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -934,7 +934,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(
@@ -1078,7 +1078,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ke
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: None,
+            source_url: None,
             connect_template: StringTemplate {
                 parts: [
                     Constant(

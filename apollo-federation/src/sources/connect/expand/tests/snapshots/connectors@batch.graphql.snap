@@ -20,7 +20,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 http://localhost:4001/api,
             ),
             connect_template: StringTemplate {
@@ -88,7 +88,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
             ),
         },
         transport: HttpJsonTransport {
-            source_uri: Some(
+            source_url: Some(
                 http://localhost:4001/api,
             ),
             connect_template: StringTemplate {
