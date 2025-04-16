@@ -536,7 +536,6 @@ impl<T> Default for StandardEventConfig<T> {
     }
 }
 
-// FIXME: remove clone
 #[derive(Debug)]
 pub(crate) struct StandardEvent<T> {
     pub(crate) level: EventLevel,
