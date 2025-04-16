@@ -319,7 +319,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_observability() {
-        // In this test we expect the logged message to have
+        // make sure that the queue has been initialized by calling `execute`. if this
+        // step is skipped, the queue will _sometimes_ be initialized in the step below,
+        // which causes an additional log line and a snapshot mismatch.
+        execute(ComputeJobType::Introspection, |_| {})
+            .unwrap()
+            .await;
 
         async {
             let span = info_span!("test_observability");
@@ -334,10 +339,7 @@ mod tests {
             let result = job.await;
             assert_eq!(result, 1);
         }
-        .with_subscriber(assert_snapshot_subscriber!({
-            "[].fields.queue_capacity" => "[queue_capacity]",
-            "[].fields.threads" => "[threads]",
-        }))
+        .with_subscriber(assert_snapshot_subscriber!())
         .await;
     }
 
