@@ -132,12 +132,12 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
             } if *connector_http_method => Some(opentelemetry::Value::from(
-                request.connector.transport.method.as_str().to_string(),
+                request.connector.transport.method_attr(),
             )),
             ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
             } if *connector_url_template => Some(opentelemetry::Value::from(
-                request.connector.transport.connect_template.to_string(),
+                request.connector.transport.url_attr(),
             )),
             ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,
@@ -300,7 +300,6 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::StringTemplate;
@@ -350,9 +349,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_uri: None,
                 connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: None,
+                ..Default::default()
             },
             selection: JSONSelection::empty(),
             config: None,

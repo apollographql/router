@@ -3368,8 +3368,7 @@ mod tests {
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
-                                            headers: Default::default(),
-                                            body: None,
+                                            ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
                                         config: None,
@@ -3433,8 +3432,7 @@ mod tests {
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
-                                            headers: Default::default(),
-                                            body: None,
+                                            ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
                                         config: None,

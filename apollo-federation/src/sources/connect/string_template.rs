@@ -16,11 +16,12 @@ use http::Uri;
 use itertools::Itertools;
 use serde_json_bytes::Value;
 
-use self::encoding::UriString;
+pub(crate) use self::encoding::UriString;
+use crate::sources::connect::ApplyToError;
 use crate::sources::connect::JSONSelection;
 
 /// A parsed string template, containing a series of [`Part`]s.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StringTemplate {
     pub(crate) parts: Vec<Part>,
 }
@@ -110,8 +111,12 @@ impl StringTemplate {
     }
 
     /// Interpolate the expression as a URI, percent-encoding parts as needed.
-    pub fn interpolate_uri(&self, vars: &IndexMap<String, Value>) -> Result<Uri, Error> {
+    pub(crate) fn interpolate_uri(
+        &self,
+        vars: &IndexMap<String, Value>,
+    ) -> Result<(Uri, Vec<ApplyToError>), Error> {
         let mut result = UriString::new();
+        let mut warnings = Vec::new();
         for part in &self.parts {
             match part {
                 Part::Constant(constant) => {
@@ -120,14 +125,16 @@ impl StringTemplate {
                     result.write_trusted(&constant.value)
                 }
                 Part::Expression(_) => {
-                    part.interpolate(vars, &mut result)?;
+                    warnings.extend(part.interpolate(vars, &mut result)?);
                 }
             };
         }
-        Uri::from_str(result.as_ref()).map_err(|err| Error {
-            message: format!("Invalid URI: {}", err),
-            location: 0..result.as_ref().len(),
-        })
+        Uri::from_str(result.as_ref())
+            .map_err(|err| Error {
+                message: format!("Invalid URI: {}", err),
+                location: 0..result.as_ref().len(),
+            })
+            .map(|uri| (uri, warnings))
     }
 }
 
@@ -194,32 +201,41 @@ impl Part {
         &self,
         vars: &IndexMap<String, Value>,
         mut output: Output,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<ApplyToError>, Error> {
         match self {
-            Part::Constant(Constant { value, .. }) => output.write_str(value),
+            Part::Constant(Constant { value, .. }) => output
+                .write_str(value)
+                .map(|_| Vec::new())
+                .map_err(|err| err.into()),
             Part::Expression(Expression { expression, .. }) => {
-                // TODO: do something with the ApplyTo errors
-                let (value, _errs) = expression.apply_with_vars(&Value::Null, vars);
-
-                match value.unwrap_or(Value::Null) {
-                    Value::Null => Ok(()),
-                    Value::Bool(b) => write!(output, "{b}"),
-                    Value::Number(n) => write!(output, "{n}"),
-                    Value::String(s) => output.write_str(s.as_str()),
-                    Value::Array(_) | Value::Object(_) => {
-                        return Err(Error {
-                            message: "Expressions can't evaluate to arrays or objects.".to_string(),
-                            location: self.location(),
-                        });
-                    }
-                }
+                let (value, warnings) = expression.apply_with_vars(&Value::Null, vars);
+                write_value(&mut output, value).map(|_| warnings)
             }
         }
-        .map_err(|_err| Error {
-            message: "Error writing string".to_string(),
+        .map_err(|err| Error {
+            message: err.to_string(),
             location: self.location(),
         })
     }
+}
+
+/// A shared definition of what it means to write a [`Value`] into a string.
+///
+/// Used for string interpolation in templates and building URIs.
+pub(crate) fn write_value<Output: Write>(
+    mut output: Output,
+    value: Option<Value>,
+) -> Result<(), Box<dyn core::error::Error>> {
+    match value.unwrap_or(Value::Null) {
+        Value::Null => Ok(()),
+        Value::Bool(b) => write!(output, "{b}"),
+        Value::Number(n) => write!(output, "{n}"),
+        Value::String(s) => output.write_str(s.as_str()),
+        Value::Array(_) | Value::Object(_) => {
+            return Err("Expression is not allowed to evaluate to arrays or objects.".into());
+        }
+    }
+    .map_err(|err| err.into())
 }
 
 /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
@@ -262,24 +278,36 @@ mod encoding {
         .remove(b'_')
         .remove(b'~');
 
-    pub(super) struct UriString {
+    pub(crate) struct UriString {
         value: String,
     }
 
     impl UriString {
-        pub(super) fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self {
                 value: String::new(),
             }
         }
 
+        pub(crate) fn ends_with(&self, suffix: &str) -> bool {
+            self.value.ends_with(suffix)
+        }
+
+        pub(crate) fn is_empty(&self) -> bool {
+            self.value.is_empty()
+        }
+
         /// Write a bit of trusted input without encoding, like a constant piece of a template
-        pub(super) fn write_trusted(&mut self, s: &str) {
+        pub(crate) fn write_trusted(&mut self, s: &str) {
             self.value.push_str(s)
+        }
+
+        pub(crate) fn into_string(self) -> String {
+            self.value
         }
     }
 
-    impl Write for &mut UriString {
+    impl Write for UriString {
         fn write_str(&mut self, s: &str) -> std::fmt::Result {
             write!(&mut self.value, "{}", utf8_percent_encode(s, USER_INPUT))
         }

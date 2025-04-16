@@ -580,7 +580,6 @@ mod test {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
@@ -777,11 +776,9 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_uri: Some(Uri::from_str("http://localhost/api").unwrap()),
+                source_uri: Uri::from_str("http://localhost/api").ok(),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,

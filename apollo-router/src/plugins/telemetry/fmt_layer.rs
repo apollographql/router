@@ -830,11 +830,9 @@ connector:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_uri: None,
-                        connect_template: StringTemplate::from_str("/test").unwrap(),
                         method: HTTPMethod::Get,
-                        headers: Default::default(),
-                        body: None,
+                        connect_template: StringTemplate::from_str("/test").unwrap(),
+                        ..Default::default()
                     },
                     selection: JSONSelection::empty(),
                     config: None,
@@ -1184,11 +1182,9 @@ subgraph:
                         "label",
                     ),
                     transport: HttpJsonTransport {
-                        source_uri: None,
-                        connect_template: StringTemplate::from_str("/test").unwrap(),
                         method: HTTPMethod::Get,
-                        headers: Default::default(),
-                        body: None,
+                        connect_template: StringTemplate::from_str("/test").unwrap(),
+                        ..Default::default()
                     },
                     selection: JSONSelection::empty(),
                     config: None,
