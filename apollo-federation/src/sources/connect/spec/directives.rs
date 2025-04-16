@@ -9,13 +9,13 @@ use itertools::Itertools;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use super::schema::ConnectBatchArguments;
 use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
-use super::schema::SourceBatchArguments;
 use super::schema::SourceDirectiveArguments;
 use super::schema::SourceHTTPArguments;
 use super::versions::VersionInfo;
@@ -256,7 +256,7 @@ impl ConnectDirectiveArguments {
                     "`http` field in `@connect` directive is not an object"
                 ))?;
 
-                batch = Some(SourceBatchArguments::from_values(http_value)?);
+                batch = Some(ConnectBatchArguments::from_values(http_value)?);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or(internal!(
                     "`selection` field in `@connect` directive is not a string"
@@ -350,7 +350,7 @@ impl ConnectHTTPArguments {
     }
 }
 
-impl SourceBatchArguments {
+impl ConnectBatchArguments {
     fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
         let mut max_size = None;
         for (name, value) in values {
@@ -361,7 +361,7 @@ impl SourceBatchArguments {
                     "supplied 'max_size' field in `@connect` directive's `batch` field is not a positive integer"
                 ))?);
                 // Convert the int to a usize since it is used for chunking an array later.
-                // Much better to fail here than at run time.
+                // Much better to fail here than during the request lifecycle.
                 max_size = max_size_int.map(|i| usize::try_from(i).map_err(|_| internal!(
                     "supplied 'max_size' field in `@connect` directive's `batch` field is not a positive integer"
                 ))).transpose()?;

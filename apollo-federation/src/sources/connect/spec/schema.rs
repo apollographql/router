@@ -59,7 +59,7 @@ pub(crate) struct SourceHTTPArguments {
 
 /// Settings for the connector when it is doing a $batch entity resolver
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct SourceBatchArguments {
+pub(crate) struct ConnectBatchArguments {
     /// Set a maximum number of requests to be batched together.
     ///
     /// Over this maximum, will be split into multiple batch requests of max_size.
@@ -98,7 +98,7 @@ pub(crate) struct ConnectDirectiveArguments {
     pub(crate) entity: bool,
 
     /// Settings for the connector when it is doing a $batch entity resolver
-    pub(crate) batch: Option<SourceBatchArguments>,
+    pub(crate) batch: Option<ConnectBatchArguments>,
 }
 
 /// The HTTP arguments needed for a connect request
