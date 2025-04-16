@@ -2,24 +2,19 @@ mod http_json_transport;
 mod keys;
 
 use std::collections::HashMap;
-use std::error::Error;
-use std::fmt::Display;
-use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::ast;
 use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
-use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
-use http::HeaderName;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
 pub use self::http_json_transport::HTTPMethod;
+pub(crate) use self::http_json_transport::Header;
+pub(crate) use self::http_json_transport::HeaderParseError;
 pub use self::http_json_transport::HeaderSource;
 pub use self::http_json_transport::HttpJsonTransport;
 use super::ConnectId;
@@ -29,22 +24,15 @@ use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
-use super::spec::versions::AllowedHeaders;
 use super::spec::versions::VersionInfo;
-use super::string_template;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
 use crate::internal_error;
 use crate::link::Link;
 use crate::sources::connect::ConnectSpec;
-use crate::sources::connect::header::HeaderValue;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
-use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 
 // --- Connector ---------------------------------------------------------------
 
@@ -333,165 +321,6 @@ fn extract_header_references<'a>(
         .collect();
     headers
 }
-
-#[derive(Clone, Debug)]
-pub(crate) struct Header<'a> {
-    pub(crate) name: HeaderName,
-    pub(crate) name_node: &'a Node<ast::Value>,
-    pub(crate) source: HeaderSource,
-    pub(crate) source_node: &'a Node<ast::Value>,
-}
-
-impl<'a> Header<'a> {
-    /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
-    pub(crate) fn from_headers_arg(
-        node: &'a Node<ast::Value>,
-        allowed_headers: &AllowedHeaders,
-    ) -> Vec<Result<Self, HeaderParseError<'a>>> {
-        if let Some(values) = node.as_list() {
-            values
-                .iter()
-                .map(|v| Self::from_single(v, allowed_headers))
-                .collect()
-        } else if node.as_object().is_some() {
-            vec![Self::from_single(node, allowed_headers)]
-        } else {
-            vec![Err(HeaderParseError::Other {
-                message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
-                node,
-            })]
-        }
-    }
-
-    /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(
-        node: &'a Node<ast::Value>,
-        allowed_headers: &AllowedHeaders,
-    ) -> Result<Self, HeaderParseError<'a>> {
-        let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
-            message: "the HTTP header mapping is not an object".to_string(),
-            node,
-        })?;
-        let name_node = mappings
-            .iter()
-            .find_map(|(name, value)| {
-                (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
-            })
-            .ok_or_else(|| HeaderParseError::Other {
-                message: format!("missing `{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` field"),
-                node,
-            })?;
-        let name = name_node
-            .as_str()
-            .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME}` is not a string"))
-            .and_then(|name_str| {
-                HeaderName::try_from(name_str)
-                    .map_err(|_| format!("the value `{name_str}` is an invalid HTTP header name"))
-            })
-            .map_err(|message| HeaderParseError::Other {
-                message,
-                node: name_node,
-            })?;
-
-        if allowed_headers.header_name_is_reserved(&name) {
-            return Err(HeaderParseError::Other {
-                message: format!("header '{name}' is reserved and cannot be set by a connector"),
-                node: name_node,
-            });
-        }
-
-        let from = mappings
-            .iter()
-            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME);
-        let value = mappings
-            .iter()
-            .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
-
-        match (from, value) {
-            (Some(_), None) if allowed_headers.header_name_allowed_static(&name) => {
-                Err(HeaderParseError::Other{ message: format!(
-                    "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
-                ), node: name_node})
-            }
-            (Some((_, from_node)), None) => {
-                from_node.as_str()
-                    .ok_or_else(|| format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` is not a string"))
-                    .and_then(|from_str| {
-                        HeaderName::try_from(from_str).map_err(|_| {
-                            format!("the value `{from_str}` is an invalid HTTP header name")
-                        })
-                    })
-                    .map(|from| Self {
-                        name,
-                        name_node,
-                        source: HeaderSource::From(from),
-                        source_node: from_node,
-                    })
-                    .map_err(|message| HeaderParseError::Other{ message, node: from_node})
-            }
-            (None, Some((_, value_node))) => {
-                value_node
-                    .as_str()
-                    .ok_or_else(|| HeaderParseError::Other{ message: format!("`{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` field in HTTP header mapping must be a string"), node: value_node})
-                    .and_then(|value_str| {
-                        value_str
-                            .parse::<HeaderValue>()
-                            .map_err(|err| HeaderParseError::ValueError {err, node: value_node})
-                    })
-                    .map(|value| Self {
-                        name,
-                        name_node,
-                        source: HeaderSource::Value(value),
-                        source_node: value_node,
-                    })
-            }
-            (None, None) => {
-                Err(HeaderParseError::Other {
-                    message: format!("either `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` or `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` must be set"),
-                    node,
-                })
-            },
-            (Some((from_name, _)), Some((value_name, _))) => {
-                Err(HeaderParseError::ConflictingArguments {
-                    message: format!("`{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}` and `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}` can't be set at the same time"),
-                    from_location: from_name.location(),
-                    value_location: value_name.location(),
-                })
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) enum HeaderParseError<'a> {
-    ValueError {
-        err: string_template::Error,
-        node: &'a Node<ast::Value>,
-    },
-    /// Both `value` and `from` are set
-    ConflictingArguments {
-        message: String,
-        from_location: Option<SourceSpan>,
-        value_location: Option<SourceSpan>,
-    },
-    Other {
-        message: String,
-        node: &'a Node<ast::Value>,
-    },
-}
-
-impl Display for HeaderParseError<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ConflictingArguments { message, .. } | Self::Other { message, .. } => {
-                write!(f, "{}", message)
-            }
-            Self::ValueError { err, .. } => write!(f, "{err}"),
-        }
-    }
-}
-
-impl Error for HeaderParseError<'_> {}
 
 #[cfg(test)]
 mod tests {
