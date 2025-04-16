@@ -1,4 +1,4 @@
-pub(super) mod http_json_transport;
+mod http_json_transport;
 mod keys;
 
 use std::collections::HashMap;
@@ -9,10 +9,15 @@ use apollo_compiler::collections::HashSet;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::validation::Valid;
-use http_json_transport::HttpJsonTransport;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 
+pub use self::http_json_transport::HTTPMethod;
+pub(crate) use self::http_json_transport::Header;
+pub(crate) use self::http_json_transport::HeaderParseError;
+pub use self::http_json_transport::HeaderSource;
+pub use self::http_json_transport::HttpJsonTransport;
+pub use self::http_json_transport::MakeUriError;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;

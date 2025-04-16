@@ -20,25 +20,25 @@ use serde_json_bytes::Value;
 use serde_json_bytes::json;
 use thiserror::Error;
 
-use super::super::JSONSelection;
-use super::super::PathSelection;
-use super::super::json_selection::ExternalVarPaths;
-use super::super::spec::ConnectHTTPArguments;
-use super::super::spec::SourceHTTPArguments;
-use super::super::spec::versions::AllowedHeaders;
-use super::super::string_template;
-use super::super::string_template::StringTemplate;
-use super::super::variable::Namespace;
-use super::super::variable::VariableReference;
 use crate::error::FederationError;
 use crate::sources::connect::ApplyToError;
+use crate::sources::connect::JSONSelection;
+use crate::sources::connect::Namespace;
+use crate::sources::connect::PathSelection;
+use crate::sources::connect::StringTemplate;
 use crate::sources::connect::header::HeaderValue;
+use crate::sources::connect::json_selection::ExternalVarPaths;
+use crate::sources::connect::spec::ConnectHTTPArguments;
+use crate::sources::connect::spec::SourceHTTPArguments;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use crate::sources::connect::spec::versions::AllowedHeaders;
+use crate::sources::connect::string_template;
 use crate::sources::connect::string_template::UriString;
 use crate::sources::connect::string_template::write_value;
+use crate::sources::connect::variable::VariableReference;
 
 #[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
@@ -116,16 +116,14 @@ impl HttpJsonTransport {
         self.connect_template.to_string()
     }
 
-    pub(super) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
+    pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
+        let url_selections = self.connect_template.expressions().map(|e| &e.expression);
         let header_selections = self
             .headers
             .iter()
             .flat_map(|(_, source)| source.expressions());
-
-        let url_selections = self.connect_template.expressions().map(|e| &e.expression);
-
-        header_selections
-            .chain(url_selections)
+        url_selections
+            .chain(header_selections)
             .chain(self.body.iter())
             .chain(self.source_path.iter())
             .chain(self.source_query_params.iter())

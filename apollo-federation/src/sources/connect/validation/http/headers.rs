@@ -5,8 +5,8 @@ use http::HeaderName;
 use indexmap::IndexMap;
 
 use crate::sources::connect::HeaderSource;
-use crate::sources::connect::models::http_json_transport::Header;
-use crate::sources::connect::models::http_json_transport::HeaderParseError;
+use crate::sources::connect::models::Header;
+use crate::sources::connect::models::HeaderParseError;
 use crate::sources::connect::spec::schema::HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::string_template;
 use crate::sources::connect::validation::Code;
