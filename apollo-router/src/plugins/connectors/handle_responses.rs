@@ -326,11 +326,21 @@ impl MappedResponse {
                         .collect::<HashMap<_, _>>();
 
                     // Make a list of entities that matches the representations list
-                    let entities = key_values
+                    let new_entities = key_values
                         .map(|key| map.remove(&key).unwrap_or(Value::Null))
                         .collect_vec();
 
-                    data.insert(ENTITIES, Value::Array(entities));
+                    // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
+                    let entities = data
+                        .entry(ENTITIES)
+                        .or_insert(Value::Array(Vec::with_capacity(count)));
+
+                    entities
+                        .as_array_mut()
+                        .ok_or_else(|| {
+                            HandleResponseError::MergeError("_entities is not an array".into())
+                        })?
+                        .extend(new_entities);
                 }
             },
         }
@@ -653,6 +663,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
         });
@@ -761,6 +772,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
         });
@@ -876,6 +888,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
         });
@@ -998,6 +1011,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
         });
@@ -1122,6 +1136,7 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
         });
@@ -1385,6 +1400,7 @@ mod tests {
             config: Default::default(),
             max_requests: None,
             request_variables: Default::default(),
+            batch_settings: None,
             response_variables: selection
                 .variable_references()
                 .map(|var_ref| var_ref.namespace.namespace)
