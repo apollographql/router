@@ -90,6 +90,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "connectors-subgraph_Query_user_0": Connector {
         id: ConnectId {
@@ -241,5 +248,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/no
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }

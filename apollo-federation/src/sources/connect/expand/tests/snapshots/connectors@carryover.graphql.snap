@@ -173,6 +173,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_Query_t_0": Connector {
         id: ConnectId {
@@ -394,6 +401,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_T_r_0": Connector {
         id: ConnectId {
@@ -541,5 +555,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
             $this,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }

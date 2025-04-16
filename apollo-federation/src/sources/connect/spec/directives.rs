@@ -9,6 +9,7 @@ use itertools::Itertools;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use super::schema::ConnectBatchArguments;
 use super::schema::ConnectDirectiveArguments;
 use super::schema::ConnectHTTPArguments;
 use super::schema::HEADERS_ARGUMENT_NAME;
@@ -259,6 +260,7 @@ impl ConnectDirectiveArguments {
         let mut http = None;
         let mut selection = None;
         let mut entity = None;
+        let mut batch = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -274,6 +276,12 @@ impl ConnectDirectiveArguments {
                 ))?;
 
                 http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
+            } else if arg_name == "batch" {
+                let http_value = arg.value.as_object().ok_or(internal!(
+                    "`http` field in `@connect` directive is not an object"
+                ))?;
+
+                batch = Some(ConnectBatchArguments::from_values(http_value)?);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or(internal!(
                     "`selection` field in `@connect` directive is not a string"
@@ -299,6 +307,7 @@ impl ConnectDirectiveArguments {
             http,
             selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
+            batch,
         })
     }
 }
@@ -390,6 +399,28 @@ impl ConnectHTTPArguments {
     }
 }
 
+impl ConnectBatchArguments {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
+        let mut max_size = None;
+        for (name, value) in values {
+            let name = name.as_str();
+
+            if name == "maxSize" {
+                let max_size_int = Some(value.to_i32().ok_or(internal!(
+                    "supplied 'max_size' field in `@connect` directive's `batch` field is not a positive integer"
+                ))?);
+                // Convert the int to a usize since it is used for chunking an array later.
+                // Much better to fail here than during the request lifecycle.
+                max_size = max_size_int.map(|i| usize::try_from(i).map_err(|_| internal!(
+                    "supplied 'max_size' field in `@connect` directive's `batch` field is not a positive integer"
+                ))).transpose()?;
+            }
+        }
+
+        Ok(Self { max_size })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
@@ -467,7 +498,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
         );
 
         let fields = schema
@@ -643,6 +674,7 @@ mod tests {
                     },
                 ),
                 entity: false,
+                batch: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -717,6 +749,7 @@ mod tests {
                     },
                 ),
                 entity: false,
+                batch: None,
             },
         ]
         "###

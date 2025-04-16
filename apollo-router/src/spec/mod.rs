@@ -64,10 +64,9 @@ pub(crate) enum SpecError {
     QueryHashing(String),
 }
 
-pub(crate) const GRAPHQL_PARSE_FAILURE_ERROR_KEY: &str = "## GraphQLParseFailure\n";
-pub(crate) const GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY: &str =
-    "## GraphQLUnknownOperationName\n";
-pub(crate) const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "## GraphQLValidationFailure\n";
+const GRAPHQL_PARSE_FAILURE_ERROR_KEY: &str = "GraphQLParseFailure";
+const GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY: &str = "GraphQLUnknownOperationName";
+const GRAPHQL_VALIDATION_FAILURE_ERROR_KEY: &str = "GraphQLValidationFailure";
 
 impl SpecError {
     pub(crate) const fn get_error_key(&self) -> &'static str {
