@@ -677,9 +677,7 @@ fn upgrade_old_minor_configuration() {
             );
 
             if let Err(err) = result {
-                panic!(
-                    "minor upgrade should not raise errors, but it did for {file_name}: {err:?}"
-                )
+                panic!("minor upgrade should not raise errors, but it did for {file_name}: {err:?}")
             }
         }
     }
