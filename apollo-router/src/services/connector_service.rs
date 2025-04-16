@@ -160,9 +160,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             // TODO: apollo.connector.field.return_type
             // TODO: apollo.connector.field.selection_set
             let transport = &connector.transport;
-            let method = transport.method_attr();
-            let url = transport.url_attr();
-            if let Ok(detail) = serde_json::to_string(&serde_json::json!({ method: url })) {
+            if let Ok(detail) = serde_json::to_string(
+                &serde_json::json!({ transport.method.as_str(): transport.connect_template.to_string() }),
+            ) {
                 span.record("apollo.connector.detail", detail);
             }
             if let Some(source_name) = connector.id.source_name.as_ref() {

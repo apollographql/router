@@ -132,12 +132,12 @@ impl Selector for ConnectorSelector {
             ConnectorSelector::ConnectorHttpMethod {
                 connector_http_method,
             } if *connector_http_method => Some(opentelemetry::Value::from(
-                request.connector.transport.method_attr(),
+                request.connector.transport.method.as_str().to_string(),
             )),
             ConnectorSelector::ConnectorUrlTemplate {
                 connector_url_template,
             } if *connector_url_template => Some(opentelemetry::Value::from(
-                request.connector.transport.url_attr(),
+                request.connector.transport.connect_template.to_string(),
             )),
             ConnectorSelector::HttpRequestHeader {
                 connector_http_request_header: connector_request_header,

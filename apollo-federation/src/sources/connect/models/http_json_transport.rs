@@ -103,17 +103,7 @@ impl HttpJsonTransport {
     }
 
     pub(super) fn label(&self) -> String {
-        format!("http: {} {}", self.method_attr(), self.url_attr())
-    }
-
-    /// HTTP methods for use in tracing attributes
-    pub fn method_attr(&self) -> String {
-        self.method.to_string()
-    }
-
-    /// URL template for use in tracing attributes
-    pub fn url_attr(&self) -> String {
-        self.connect_template.to_string()
+        format!("http: {} {}", self.method, self.connect_template)
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
