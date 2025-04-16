@@ -720,9 +720,10 @@ impl ValueType for Result<QueryPlannerContent, Arc<QueryPlannerError>> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use mockall::mock;
     use serde_json_bytes::json;
-    use std::time::Duration;
     use test_log::test;
     use tower::Service;
 
