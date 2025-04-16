@@ -261,6 +261,8 @@ impl From<BoxError> for ServiceBuildError {
 }
 
 /// Error types for QueryPlanner
+///
+/// This error may be cached so no temporary errors may be defined here.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
     /// invalid query: {0}
@@ -281,11 +283,9 @@ pub(crate) enum QueryPlannerError {
     /// complexity limit exceeded
     LimitExceeded(OperationLimits<bool>),
 
+    // Safe to cache because user scopes and policies are included in the cache key.
     /// Unauthorized field or type
     Unauthorized(Vec<Path>),
-
-    /// Query planner pool error: {0}
-    PoolProcessing(String),
 
     /// Federation error: {0}
     FederationError(FederationErrorBridge),

@@ -149,6 +149,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
             $this,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     "connectors_Query_itfs_0": Connector {
         id: ConnectId {
@@ -244,6 +246,8 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
     "connectors_Query_itf_0": Connector {
         id: ConnectId {
@@ -402,5 +406,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
     },
 }
