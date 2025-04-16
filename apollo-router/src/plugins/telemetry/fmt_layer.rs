@@ -843,6 +843,9 @@ connector:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1195,6 +1198,9 @@ subgraph:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),

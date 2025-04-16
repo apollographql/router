@@ -318,6 +318,8 @@ pub enum SingleFederationError {
     QueryPlanComplexityExceeded { message: String },
     #[error("the caller requested cancellation")]
     PlanningCancelled,
+    #[error("No plan was found when subgraphs were disabled")]
+    NoPlanFoundWithDisabledSubgraphs,
 }
 
 impl SingleFederationError {
@@ -513,6 +515,9 @@ impl SingleFederationError {
                 ErrorCode::QueryPlanComplexityExceededError
             }
             SingleFederationError::PlanningCancelled => ErrorCode::Internal,
+            SingleFederationError::NoPlanFoundWithDisabledSubgraphs => {
+                ErrorCode::NoPlanFoundWithDisabledSubgraphs
+            }
         }
     }
 
@@ -1577,6 +1582,15 @@ static QUERY_PLAN_COMPLEXITY_EXCEEDED: LazyLock<ErrorCodeDefinition> = LazyLock:
     )
 });
 
+static NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS: LazyLock<ErrorCodeDefinition> = LazyLock::new(|| {
+    ErrorCodeDefinition::new(
+        "NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS".to_owned(),
+        "Indicates that the provided query could not be query planned due to subgraphs being disabled"
+            .to_owned(),
+        None,
+    )
+});
+
 #[derive(Debug, strum_macros::EnumIter)]
 pub enum ErrorCode {
     Internal,
@@ -1659,6 +1673,7 @@ pub enum ErrorCode {
     UnsupportedFederationVersion,
     UnsupportedFederationDirective,
     QueryPlanComplexityExceededError,
+    NoPlanFoundWithDisabledSubgraphs,
 }
 
 impl ErrorCode {
@@ -1759,6 +1774,7 @@ impl ErrorCode {
             ErrorCode::UnsupportedFederationVersion => &UNSUPPORTED_FEDERATION_VERSION,
             ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
             ErrorCode::QueryPlanComplexityExceededError => &QUERY_PLAN_COMPLEXITY_EXCEEDED,
+            ErrorCode::NoPlanFoundWithDisabledSubgraphs => &NO_PLAN_FOUND_WITH_DISABLED_SUBGRAPHS,
         }
     }
 }

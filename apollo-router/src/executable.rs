@@ -29,6 +29,7 @@ use crate::configuration::Discussed;
 use crate::configuration::expansion::Expansion;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
+use crate::configuration::schema::Mode;
 use crate::configuration::validate_yaml_configuration;
 use crate::metrics::meter_provider_internal;
 use crate::plugin::plugins;
@@ -444,7 +445,12 @@ impl Executable {
                 command: ConfigSubcommand::Validate { config_path },
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
-                validate_yaml_configuration(&config_string, Expansion::default()?)?.validate()?;
+                validate_yaml_configuration(
+                    &config_string,
+                    Expansion::default()?,
+                    Mode::NoUpgrade,
+                )?
+                .validate()?;
 
                 println!("Configuration at path {:?} is valid!", config_path);
 

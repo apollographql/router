@@ -87,6 +87,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         let connectors = Connectors {
