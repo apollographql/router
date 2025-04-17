@@ -36,6 +36,17 @@ static REQUEST_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
     )
 });
 
+static RESPONSE_SHAPE: LazyLock<Shape> = LazyLock::new(|| {
+    Shape::record(
+        [(
+            "headers".to_string(),
+            Shape::dict(Shape::list(Shape::string([]), []), []),
+        )]
+        .into(),
+        [],
+    )
+});
+
 /// Details about the available variables and shapes for the current expression.
 /// These should be consistent for all pieces of a connector in the request phase.
 pub(super) struct Context<'schema> {
@@ -120,6 +131,65 @@ impl<'schema> Context<'schema> {
             var_lookup,
             source,
             code,
+        }
+    }
+
+    /// Create a context valid for expressions within the errors.message or errors.extension of the `@connect` directive
+    /// TODO: We might be able to re-use this for the "selection" field later down the road
+    pub(super) fn for_connect_response(
+        schema: &'schema SchemaInfo,
+        coordinate: ConnectDirectiveCoordinate,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        match coordinate.element {
+            ConnectedElement::Field {
+                parent_type,
+                field_def,
+                parent_category,
+            } => {
+                let mut var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::Args, shape_for_arguments(field_def)),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Status, Shape::int([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Response, RESPONSE_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                if matches!(parent_category, ObjectCategory::Other) {
+                    var_lookup.insert(Namespace::This, Shape::from(parent_type));
+                }
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
+            ConnectedElement::Type { type_def } => {
+                let var_lookup: IndexMap<Namespace, Shape> = [
+                    (Namespace::This, Shape::from(type_def)),
+                    (Namespace::Batch, Shape::list(Shape::from(type_def), [])),
+                    (Namespace::Config, Shape::unknown([])),
+                    (Namespace::Context, Shape::unknown([])),
+                    (Namespace::Status, Shape::int([])),
+                    (Namespace::Request, REQUEST_SHAPE.clone()),
+                    (Namespace::Response, RESPONSE_SHAPE.clone()),
+                ]
+                .into_iter()
+                .collect();
+
+                Self {
+                    schema,
+                    var_lookup,
+                    source,
+                    code,
+                }
+            }
         }
     }
 }

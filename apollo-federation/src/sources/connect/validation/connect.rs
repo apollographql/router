@@ -21,10 +21,12 @@ use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::validation::connect::errors::Errors;
 use crate::sources::connect::validation::connect::http::Http;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 mod entity;
+mod errors;
 mod http;
 mod selection;
 
@@ -72,6 +74,7 @@ pub(super) fn fields_seen_by_all_connects(
 struct Connect<'schema> {
     selection: Selection<'schema>,
     http: Http<'schema>,
+    errors: Errors<'schema>,
     coordinate: ConnectDirectiveCoordinate<'schema>,
     schema: &'schema SchemaInfo<'schema>,
 }
@@ -186,18 +189,20 @@ impl<'schema> Connect<'schema> {
             }]);
         }
 
-        let (selection, http) = Selection::parse(coordinate, schema)
+        let (selection, http, errors) = Selection::parse(coordinate, schema)
             .map_err(|err| vec![err])
             .and_try(
                 validate_source_name(&coordinate, source_names, schema)
                     .map_err(|err| vec![err])
                     .and_then(|source_name| Http::parse(coordinate, source_name, schema)),
             )
+            .and_try(Errors::parse(coordinate, schema))
             .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
         Ok(Self {
             selection,
             http,
+            errors,
             coordinate,
             schema,
         })
@@ -210,6 +215,7 @@ impl<'schema> Connect<'schema> {
             .selection
             .variables()
             .chain(self.http.variables())
+            .chain(self.errors.variables())
             .collect::<HashSet<_>>();
         if all_variables.contains(&Namespace::Batch) && all_variables.contains(&Namespace::This) {
             messages.push(Message {
@@ -230,6 +236,13 @@ impl<'schema> Connect<'schema> {
         messages.extend(validate_entity_arg(self.coordinate, self.schema).err());
         messages.extend(
             self.http
+                .type_check(self.schema)
+                .err()
+                .into_iter()
+                .flatten(),
+        );
+        messages.extend(
+            self.errors
                 .type_check(self.schema)
                 .err()
                 .into_iter()

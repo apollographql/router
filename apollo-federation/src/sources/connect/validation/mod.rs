@@ -230,6 +230,10 @@ pub enum Code {
     InvalidSelection,
     /// The `http.body` provided in `@connect` was not valid.
     InvalidBody,
+    /// The `errors.message` provided in `@connect` was not valid.
+    InvalidErrorsMessage,
+    /// The `errors.extensions` provided in `@connect` was not valid.
+    InvalidErrorsExtensions,
     /// A circular reference was detected in a `@connect` directive's `selection` argument.
     CircularReference,
     /// A field included in a `@connect` directive's `selection` argument is not defined on the corresponding type.
