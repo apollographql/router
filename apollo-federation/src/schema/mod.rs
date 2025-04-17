@@ -52,6 +52,7 @@ pub(crate) mod position;
 pub(crate) mod referencer;
 pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
+pub(crate) mod validators;
 
 pub(crate) fn compute_subgraph_metadata(
     schema: &FederationSchema,

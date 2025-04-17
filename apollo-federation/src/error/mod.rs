@@ -110,6 +110,8 @@ impl From<SchemaRootKind> for String {
 pub enum UnsupportedFeatureKind {
     #[strum(to_string = "alias")]
     Alias,
+    #[strum(to_string = "directive")]
+    Directive,
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
