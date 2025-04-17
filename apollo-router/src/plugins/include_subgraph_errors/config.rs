@@ -13,10 +13,10 @@ use serde::de::{self};
 #[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct Config {
-    /// Configuration for all subgraphs, and handles subgraph errors
+    /// Global configuration for error redaction. Applies to all subgraphs.
     pub(crate) all: ErrorMode,
 
-    /// Override default configuration for specific subgraphs
+    /// Overrides global configuration on a per-subgraph basis
     pub(crate) subgraphs: HashMap<String, SubgraphConfig>,
 }
 
@@ -114,9 +114,9 @@ impl<'de> Deserialize<'de> for ErrorMode {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(untagged)]
 pub(crate) enum SubgraphConfig {
-    /// Enable or disable error inclusion for a subgraph
+    /// Enable or disable error redaction for a subgraph
     Included(bool),
-    /// Allow specific extension keys for a subgraph
+    /// Allow specific error extension keys for a subgraph
     Allow {
         /// Allow specific extension keys for a subgraph. Will extending global allow list or override a global deny list
         allow_extensions_keys: Vec<String>,
@@ -127,7 +127,7 @@ pub(crate) enum SubgraphConfig {
         #[serde(default)]
         exclude_global_keys: Vec<String>,
     },
-    /// Deny specific extension keys for a subgraph
+    /// Deny specific error extension keys for a subgraph
     Deny {
         /// Allow specific extension keys for a subgraph. Will extending global deny list or override a global allow list
         deny_extensions_keys: Vec<String>,
@@ -138,7 +138,7 @@ pub(crate) enum SubgraphConfig {
         #[serde(default)]
         exclude_global_keys: Vec<String>,
     },
-    /// Only common configuration options provided for a subgraph
+    /// Override global configuration, but don't allow or deny any new keys explicitly
     CommonOnly {
         /// Redact error messages for a subgraph
         #[serde(skip_serializing_if = "Option::is_none")]
