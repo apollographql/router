@@ -2,7 +2,7 @@ use apollo_compiler::Name;
 use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use http::HeaderName;
-use url::Url;
+use http::Uri;
 
 use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::HeaderSource;
@@ -50,7 +50,7 @@ pub(crate) struct SourceDirectiveArguments {
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
-    pub(crate) base_url: Url,
+    pub(crate) base_url: Uri,
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.

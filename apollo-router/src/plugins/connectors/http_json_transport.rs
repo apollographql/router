@@ -9,6 +9,7 @@ use displaydoc::Display;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::Uri;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
@@ -132,12 +133,16 @@ pub(crate) fn make_request(
 }
 
 fn make_uri(
-    source_url: Option<&Url>,
+    source_url: Option<&Uri>,
     template: &URLTemplate,
     inputs: &IndexMap<String, Value>,
 ) -> Result<Url, HttpJsonTransportError> {
     let mut url = source_url
-        .or(template.base.as_ref())
+        .map(|uri| {
+            // TODO: stop converting in https://github.com/apollographql/router/pull/7220
+            Url::parse(&uri.to_string()).expect("URL definitions are consistent")
+        })
+        .or(template.base.clone())
         .ok_or(HttpJsonTransportError::NoBaseUrl)?
         .clone();
 
@@ -224,6 +229,8 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod test_make_uri {
+    use std::str::FromStr;
+
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use serde_json_bytes::json;
@@ -242,7 +249,7 @@ mod test_make_uri {
     fn append_path() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
                 &"/hello/42".parse().unwrap(),
                 &Default::default(),
             )
@@ -256,7 +263,7 @@ mod test_make_uri {
     fn append_path_with_trailing_slash() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/").unwrap()),
                 &"/hello/42".parse().unwrap(),
                 &Default::default(),
             )
@@ -270,7 +277,7 @@ mod test_make_uri {
     fn append_path_test_with_trailing_slash_and_base_path() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1/").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1/").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &this! { "id": 42 },
             )
@@ -283,7 +290,7 @@ mod test_make_uri {
     fn append_path_test_with_and_base_path_and_params() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1?foo=bar").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1?foo=bar").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &this! {"id": 42 },
             )
@@ -296,7 +303,7 @@ mod test_make_uri {
     fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
         assert_eq!(
             make_uri(
-                Some(&Url::parse("https://localhost:8080/v1/?foo=bar").unwrap()),
+                Some(&Uri::from_str("https://localhost:8080/v1/?foo=bar").unwrap()),
                 &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
                 &this! {"id": 42 },
             )

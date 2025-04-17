@@ -33,21 +33,7 @@ expression: "&connectors"
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -176,21 +162,7 @@ expression: "&connectors"
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,
