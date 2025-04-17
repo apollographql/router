@@ -31,7 +31,6 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::Body;
-use super::ClientRequestAccepts;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
@@ -51,6 +50,7 @@ use crate::metrics::count_operation_error_codes;
 use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::content_negotiation::ClientRequestAccepts;
 use crate::plugins::content_negotiation::invalid_accept_header_response;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -370,7 +370,6 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-
                     let response = match response.subscribed {
                         Some(true) => http::Response::from_parts(
                             parts,

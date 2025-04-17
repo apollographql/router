@@ -1,5 +1,5 @@
-//! The content negotiation plugin performs HTTP content negotiation using the Accept and
-//! Content-Type headers, working at the router stage.
+//! The content negotiation plugin performs HTTP content negotiation using the `accept` and
+//! `content-type` headers, working at the router stage.
 use std::ops::ControlFlow;
 
 use http::HeaderMap;
@@ -23,11 +23,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::services::router;
-use crate::services::router::ClientRequestAccepts;
 use crate::services::router::body::RouterBody;
-
-// TODO: a lot of these headers are defined in multiple ways, ie up here as well as in the `is_*`
-//  functions below. would be nice to standardize that.
 
 register_plugin!("apollo", "content_negotiation", ContentNegotiation);
 
@@ -49,6 +45,26 @@ const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec";
 const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
 pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0");
+
+/// The `ClientRequestAccepts` struct is effectively a parsed version of a request's `accept` header.
+///
+/// Note that multiple values here can be set to true. For example, if the request provides
+/// header value `application/json,*/*`, both `json` and `wildcard` in the struct will be set to true.
+#[derive(Clone, Default, Debug)]
+pub(crate) struct ClientRequestAccepts {
+    pub(crate) multipart_defer: bool,
+    pub(crate) multipart_subscription: bool,
+    pub(crate) json: bool,
+    pub(crate) wildcard: bool,
+}
+
+impl ClientRequestAccepts {
+    /// Returns true if any of the struct's members are true, ie the request includes an `accept`
+    /// value that the router supports.
+    fn is_valid(&self) -> bool {
+        self.json || self.wildcard || self.multipart_defer || self.multipart_subscription
+    }
+}
 
 /// The `ContentNegotiation` plugin provides request and response layers at the router service.
 ///
