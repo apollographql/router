@@ -9,6 +9,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
 #[derive(Copy, Clone, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(super) enum Outcome {
     ExecutedOk,
     ExecutedError,
@@ -140,20 +141,20 @@ mod tests {
         {
             let _job_watcher = JobWatcher::new(ComputeJobType::Introspection);
         }
-        check_histogram_count(1, "Introspection", Outcome::Abandoned.into());
+        check_histogram_count(1, "introspection", "abandoned");
 
         {
             let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
             job_watcher.outcome = Outcome::ExecutedOk;
         }
-        check_histogram_count(1, "QueryParsing", Outcome::ExecutedOk.into());
+        check_histogram_count(1, "query_parsing", "executed_ok");
 
         for count in 1..5 {
             {
                 let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
                 job_watcher.outcome = Outcome::RejectedQueueFull;
             }
-            check_histogram_count(count, "QueryPlanning", Outcome::RejectedQueueFull.into());
+            check_histogram_count(count, "query_planning", "rejected_queue_full");
         }
     }
 
@@ -171,19 +172,19 @@ mod tests {
             let _introspection_1 = ActiveComputeMetric::register(ComputeJobType::Introspection);
             let _introspection_2 = ActiveComputeMetric::register(ComputeJobType::Introspection);
             let introspection_3 = ActiveComputeMetric::register(ComputeJobType::Introspection);
-            check_count(3, "Introspection");
+            check_count(3, "introspection");
 
             let _planning_1 = ActiveComputeMetric::register(ComputeJobType::QueryPlanning);
-            check_count(3, "Introspection");
-            check_count(1, "QueryPlanning");
+            check_count(3, "introspection");
+            check_count(1, "query_planning");
 
             drop(introspection_3);
-            check_count(2, "Introspection");
-            check_count(1, "QueryPlanning");
+            check_count(2, "introspection");
+            check_count(1, "query_planning");
         }
 
         // block ended, so should have no ongoing computation
-        check_count(0, "Introspection");
-        check_count(0, "QueryPlanning");
+        check_count(0, "introspection");
+        check_count(0, "query_planning");
     }
 }

@@ -248,16 +248,16 @@ async fn test_graphql_metrics() {
             .assert_metrics_contains(r#"custom_histogram_sum{graphql_field_name="topProducts",graphql_field_type="Product",graphql_type_name="Query",otel_scope_name="apollo/router"} 3"#, None)
             .await;
     router
-        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_count{job_outcome="ExecutedOk",job_type="QueryParsing",otel_scope_name="apollo/router"} 1"#, None)
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_count{job_outcome="executed_ok",job_type="query_parsing",otel_scope_name="apollo/router"} 1"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_count{job_outcome="ExecutedOk",job_type="QueryPlanning",otel_scope_name="apollo/router"} 1"#, None)
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_duration_count{job_outcome="executed_ok",job_type="query_planning",otel_scope_name="apollo/router"} 1"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_compute_jobs_queue_wait_duration_count{job_type="QueryParsing",otel_scope_name="apollo/router"} 1"#, None)
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_queue_wait_duration_count{job_type="query_parsing",otel_scope_name="apollo/router"} 1"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_compute_jobs_execution_duration_count{job_type="QueryPlanning",otel_scope_name="apollo/router"} 1"#, None)
+        .assert_metrics_contains(r#"apollo_router_compute_jobs_execution_duration_count{job_type="query_planning",otel_scope_name="apollo/router"} 1"#, None)
         .await;
 }
 
@@ -322,7 +322,7 @@ async fn test_gauges_on_reload() {
 
     router
         .assert_metrics_contains(
-            r#"apollo_router_compute_jobs_active_jobs{job_type="QueryParsing",otel_scope_name="apollo/router"} 0"#,
+            r#"apollo_router_compute_jobs_active_jobs{job_type="query_parsing",otel_scope_name="apollo/router"} 0"#,
             None,
         )
         .await;
