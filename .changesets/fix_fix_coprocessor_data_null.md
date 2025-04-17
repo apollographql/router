@@ -1,9 +1,23 @@
 ### Fix Parsing of Coprocessor GraphQL Responses ([PR #7141](https://github.com/apollographql/router/pull/7141))
 
-Standardized GraphQL response parsing and validation between coprocessors and subgraphs to ensure consistent behavior throughout the Router. 
+Previously Router ignored `data: null` property inside GraphQL response returned by coprocessor.
+According to [GraphQL Spectification](https://spec.graphql.org/draft/#sel-FAPHLJCAACEBxlY):
+> If an error was raised during the execution that prevented a valid response, the "data" entry in the response should be null.
 
-Previously, there were discrepancies in how responses were handled depending on their source. For example, when a coprocessor returned a GraphQL response with `data: null` alongside error information, the Router would improperly omit the `data` field during deserialization.
+That means if coprocessor returned valid execution error, for example:
+```json
+{
+  "data": null,
+  "errors": [{ "message": "Some execution error" }]
+}
+```
+Router violated above restriction from GraphQL Specification by returning following response to client:
+```json
+{
+  "errors": [{ "message": "Some execution error" }]
+}
+```
 
-This fix ensures that all GraphQL responses are processed using the same validation logic regardless of their origin, improving reliability and making error handling more predictable.
+This fix ensures that GraphQL response returned from coprocessor are fully parsed and validated.
 
 Contributed by [@IvanGoncharov](https://github.com/IvanGoncharov) in [#7141](https://github.com/apollographql/router/pull/7141)
