@@ -3361,7 +3361,6 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            source_url: None,
                                             connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
@@ -3426,7 +3425,6 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            source_url: None,
                                             connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )

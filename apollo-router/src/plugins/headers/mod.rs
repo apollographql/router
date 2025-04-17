@@ -1711,7 +1711,8 @@ mod test {
         let test_harness = PluginTestHarness::<Headers>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let service = test_harness.subgraph_service("test", move |r| {
             let output = output.clone();
             async move {

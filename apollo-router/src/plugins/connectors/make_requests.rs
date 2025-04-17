@@ -2208,7 +2208,6 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
                 ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
