@@ -29,14 +29,14 @@ pub(crate) enum ErrorMode {
     Allow {
         /// Allow specific extension keys
         allow_extensions_keys: Vec<String>,
-        /// redact errors messages for all subgraphs
+        /// redact error messages for all subgraphs
         redact_message: bool,
     },
     /// Deny specific extension keys with required redact_message
     Deny {
         /// Deny specific extension keys
         deny_extensions_keys: Vec<String>,
-        /// redact errors messages for all subgraphs
+        /// redact error messages for all subgraphs
         redact_message: bool,
     },
 }
