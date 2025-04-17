@@ -349,7 +349,8 @@ mod csrf_tests {
         let plugin = PluginTestHarness::<Csrf>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let router_service =
             plugin.router_service(|_r| async { router::Response::fake_builder().build() });
         let mut resp = router_service
@@ -372,7 +373,8 @@ mod csrf_tests {
         let plugin = PluginTestHarness::<Csrf>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let router_service =
             plugin.router_service(|_r| async { router::Response::fake_builder().build() });
         let mut resp = router_service
