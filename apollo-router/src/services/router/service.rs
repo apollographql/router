@@ -370,22 +370,30 @@ impl RouterService {
                         ACCEL_BUFFERING_HEADER_NAME.clone(),
                         ACCEL_BUFFERING_HEADER_VALUE.clone(),
                     );
-                    let response = match response.subscribed {
-                        Some(true) => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                body,
-                                ProtocolMode::Subscription,
-                            )),
-                        ),
-                        _ => http::Response::from_parts(
-                            parts,
-                            router::body::from_result_stream(Multipart::new(
-                                once(ready(response)).chain(body),
-                                ProtocolMode::Defer,
-                            )),
-                        ),
+
+                    // NB: here is where we decide what kind of streaming response we're going to
+                    //  send. insert it into the extensions so that the content negotiation plugin
+                    //  can read it.
+                    let protocol_mode = if matches!(response.subscribed, Some(true)) {
+                        ProtocolMode::Subscription
+                    } else {
+                        ProtocolMode::Defer
                     };
+                    context
+                        .extensions()
+                        .with_lock(|lock| lock.insert(protocol_mode));
+
+                    let response_multipart = match protocol_mode {
+                        ProtocolMode::Subscription => Multipart::new(body, protocol_mode),
+                        ProtocolMode::Defer => {
+                            Multipart::new(once(ready(response)).chain(body), ProtocolMode::Defer)
+                        }
+                    };
+
+                    let response = http::Response::from_parts(
+                        parts,
+                        router::body::from_result_stream(response_multipart),
+                    );
 
                     Ok(RouterResponse { response, context })
                 } else {

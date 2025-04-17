@@ -16,37 +16,27 @@ async fn test_content_negotiation() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query": "{ __typename }"});
-
-    let (_, response) = router
-        .execute_query(
-            Query::builder()
-                .body(query.clone())
-                .content_type("application/json")
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 200);
-
-    let (_, response) = router
-        .execute_query(
-            Query::builder()
-                .body(query)
-                .headers(HashMap::from([(
-                    "accept".to_string(),
-                    "application/json,multipart/mixed;subscriptionSpec=1.0".to_string(),
-                )]))
-                .build(),
-        )
-        .await;
-    assert_eq!(response.status(), 200);
-
-    // XX(@carodewig): this is the current behavior, but is not the behavior I would expect. Even
-    //  though the response type is really just json, the router returns a multipart header because
-    //  the client sends it in the accept header.
-    assert_eq!(
-        response.headers().get("content-type").unwrap(),
-        HeaderValue::from_str("multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0").unwrap()
-    );
+    for accept_header in [
+        "application/json",
+        "application/json,multipart/mixed;subscriptionSpec=1.0",
+    ] {
+        let (_, response) = router
+            .execute_query(
+                Query::builder()
+                    .body(query.clone())
+                    .headers(HashMap::from([(
+                        "accept".to_string(),
+                        accept_header.to_string(),
+                    )]))
+                    .build(),
+            )
+            .await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            HeaderValue::from_str("application/json").unwrap()
+        );
+    }
 
     Ok(())
 }

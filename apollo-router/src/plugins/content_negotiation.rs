@@ -22,6 +22,7 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::protocols::multipart::ProtocolMode;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
@@ -114,7 +115,8 @@ impl ContentNegotiation {
         let ClientRequestAccepts {
             multipart_defer: accepts_multipart_defer,
             multipart_subscription: accepts_multipart_subscription,
-            ..
+            json: accepts_json,
+            wildcard: accepts_wildcard,
         } = response.context.extensions().with_lock(|lock| {
             lock.get::<ClientRequestAccepts>()
                 .cloned()
@@ -124,15 +126,23 @@ impl ContentNegotiation {
         let headers = response.response.headers_mut();
         process_vary_header(headers);
 
-        // XX(@carodewig): I would've expected this to actually based on whether the result
-        // is a stream, but the tests' behavior indicate it should rely solely on the client
-        // headers
-        let content_type = if accepts_multipart_defer {
-            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE
-        } else if accepts_multipart_subscription {
-            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
-        } else {
-            HeaderValue::from_static(APPLICATION_JSON)
+        let protocol_mode = response
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ProtocolMode>().cloned());
+
+        let content_type = match protocol_mode {
+            Some(ProtocolMode::Defer) if accepts_multipart_defer => {
+                MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE
+            }
+            Some(ProtocolMode::Subscription) if accepts_multipart_subscription => {
+                MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
+            }
+            None if accepts_json || accepts_wildcard => HeaderValue::from_static(APPLICATION_JSON),
+            _ => {
+                // XX(@carodewig) this should be unreachable, but provide fallback of APPLICATION_JSON
+                HeaderValue::from_static(APPLICATION_JSON)
+            }
         };
         headers.insert(CONTENT_TYPE, content_type);
 
