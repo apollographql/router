@@ -82,7 +82,7 @@ impl HttpJsonTransport {
     }
 
     pub(crate) fn label(&self) -> String {
-        format!("http: {} {}", self.method.as_str(), self.connect_template)
+        format!("http: {} {}", self.method, self.connect_template)
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
