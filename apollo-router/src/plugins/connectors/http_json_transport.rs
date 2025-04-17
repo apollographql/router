@@ -271,7 +271,6 @@ mod test_make_uri {
         }};
     }
 
-    #[cfg(test)]
     mod combining_paths {
         use pretty_assertions::assert_eq;
         use rstest::rstest;
@@ -469,6 +468,63 @@ mod test_make_uri {
             .to_string(),
             "http://localhost/users/123?a=a&e=e",
         );
+    }
+
+    mod merge_query {
+        use pretty_assertions::assert_eq;
+
+        use super::*;
+        #[test]
+        fn source_only() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("http://localhost/users?a=b").unwrap()),
+                    &"/123".parse().unwrap(),
+                    &Default::default(),
+                )
+                .unwrap(),
+                "http://localhost/users/123?a=b"
+            );
+        }
+
+        #[test]
+        fn connect_only() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("http://localhost/users").unwrap()),
+                    &"?a=b&c=d".parse().unwrap(),
+                    &Default::default(),
+                )
+                .unwrap(),
+                "http://localhost/users?a=b&c=d"
+            )
+        }
+
+        #[test]
+        fn combine_from_both() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("http://localhost/users?a=b").unwrap()),
+                    &"?c=d".parse().unwrap(),
+                    &Default::default()
+                )
+                .unwrap(),
+                "http://localhost/users?a=b&c=d"
+            )
+        }
+
+        #[test]
+        fn source_and_connect_have_same_param() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("http://localhost/users?a=b").unwrap()),
+                    &"?a=d".parse().unwrap(),
+                    &Default::default()
+                )
+                .unwrap(),
+                "http://localhost/users?a=b&a=d"
+            )
+        }
     }
 
     #[test]
