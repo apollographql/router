@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -2800,7 +2801,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "EventLevel": {
+    "EventLevelConfig": {
       "enum": [
         "info",
         "warn",
@@ -2854,8 +2855,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_ConnectorSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2885,8 +2886,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_RouterSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2916,8 +2917,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2947,8 +2948,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -5975,8 +5976,8 @@ expression: "&schema"
     "StandardEventConfig_for_ConnectorSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -5985,8 +5986,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_ConnectorSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -6000,8 +6001,8 @@ expression: "&schema"
     "StandardEventConfig_for_RouterSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -6010,8 +6011,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_RouterSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -6025,8 +6026,8 @@ expression: "&schema"
     "StandardEventConfig_for_SubgraphSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -6035,8 +6036,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_SubgraphSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -6050,8 +6051,8 @@ expression: "&schema"
     "StandardEventConfig_for_SupergraphSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -6060,8 +6061,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_SupergraphSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
