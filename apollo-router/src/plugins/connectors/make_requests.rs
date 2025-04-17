@@ -816,7 +816,6 @@ mod tests {
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::ConnectorBatchSettings;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use http::Uri;
@@ -2088,7 +2087,6 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
                 ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
