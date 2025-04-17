@@ -326,16 +326,11 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let base_url_type = if spec >= &ConnectSpec::V0_2 {
-        ty!(String)
-    } else {
-        ty!(String!)
-    };
     let mut source_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
-            ty: base_url_type.into(),
+            ty: ty!(String!).into(),
             default_value: None,
             directives: Default::default(),
         },
@@ -597,7 +592,6 @@ mod tests {
           DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
-          origin: connect__JSONSelection
           path: connect__JSONSelection
           queryParams: connect__JSONSelection
         }
@@ -607,9 +601,8 @@ mod tests {
         }
 
         input connect__SourceHTTP {
-          baseURL: String
+          baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
-          origin: connect__JSONSelection
           path: connect__JSONSelection
           queryParams: connect__JSONSelection
         }

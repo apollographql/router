@@ -130,15 +130,17 @@ impl StringTemplate {
                 }
             };
         }
-        if result.contains("://") {Uri::from_str(result.as_ref())
-            } else {
+        if result.contains("://") {
+            Uri::from_str(result.as_ref())
+        } else {
             // Explicitly set this as a relative URI so it doesn't get confused for a domain name
             PathAndQuery::from_str(result.as_ref()).map(Uri::from)
-        }.map_err(|err| Error {
-                message: format!("Invalid URI: {}", err),
-                location: 0..result.as_ref().len(),
-            })
-            .map(|uri| (uri, warnings))
+        }
+        .map_err(|err| Error {
+            message: format!("Invalid URI: {}", err),
+            location: 0..result.as_ref().len(),
+        })
+        .map(|uri| (uri, warnings))
     }
 }
 
@@ -439,7 +441,7 @@ mod test_interpolate {
             @r###"
         Err(
             Error {
-                message: "Expressions can't evaluate to arrays or objects.",
+                message: "Expression is not allowed to evaluate to arrays or objects.",
                 location: 1..12,
             },
         )
@@ -481,7 +483,7 @@ mod test_interpolate {
             @r###"
         Err(
             Error {
-                message: "Expressions can't evaluate to arrays or objects.",
+                message: "Expression is not allowed to evaluate to arrays or objects.",
                 location: 1..12,
             },
         )

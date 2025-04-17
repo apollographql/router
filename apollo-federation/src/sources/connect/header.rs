@@ -437,7 +437,7 @@ mod test_interpolate {
             header_value.interpolate(&vars),
             @r###"
         Err(
-            "Expressions can't evaluate to arrays or objects.",
+            "Expression is not allowed to evaluate to arrays or objects.",
         )
         "###
         );
