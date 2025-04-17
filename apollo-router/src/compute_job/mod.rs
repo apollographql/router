@@ -125,7 +125,7 @@ impl From<ComputeJobType> for Priority {
         match job_type {
             ComputeJobType::QueryPlanning => Self::P8,       // high
             ComputeJobType::QueryParsing => Self::P4,        // medium
-            ComputeJobType::Introspection => Self::P1,       // low
+            ComputeJobType::Introspection => Self::P3,       // low
             ComputeJobType::QueryParsingWarmup => Self::P1,  // low
             ComputeJobType::QueryPlanningWarmup => Self::P2, // low
         }
