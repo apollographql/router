@@ -1,6 +1,6 @@
 ### Allow JWT authorization options to support multiple issuers ([Issue #6172](https://github.com/apollographql/router/issues/6172))
 
-Allow JWT authorization options to support multiple issuers using the same JWKs, similar to the support found on other tech stacks/frameworks.
+Allow JWT authorization options to support multiple issuers using the same JWKs.
 
 **Configuration change**: any `issuer` defined on currently existing `authentication.router.jwt.jwks` needs to be 
 migrated to an entry in the `issuers` list. For example:
