@@ -23,7 +23,7 @@ pub(crate) struct Config {
 #[derive(Clone, Debug, JsonSchema, Serialize)]
 #[serde(untagged)]
 pub(crate) enum ErrorMode {
-    /// Propagate original error or redact everything
+    /// When `true`, Propagate the original error as is. Otherwise, redact it.
     Included(bool),
     /// Allow specific extension keys with required redact_message
     Allow {
