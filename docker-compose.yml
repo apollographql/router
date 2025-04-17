@@ -8,8 +8,6 @@ services:
     image: openzipkin/zipkin:latest
     ports:
       - 9411:9411
-    environment:
-      - JAVA_OPTS
   datadog:
     image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:latest
     ports:

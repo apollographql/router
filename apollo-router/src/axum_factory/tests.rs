@@ -1708,7 +1708,6 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
             graphql::Response::builder().has_next(false).build(),
         ])
         .boxed();
-
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
             req.context,

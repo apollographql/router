@@ -1680,7 +1680,7 @@ mod tests {
     use crate::graphql::Error;
     use crate::graphql::Request;
     use crate::graphql::Response;
-    use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON_HEADER_VALUE;
+    use crate::plugins::content_negotiation::APPLICATION_GRAPHQL_JSON;
     use crate::plugins::subscription::HeartbeatInterval;
     use crate::plugins::subscription::SUBSCRIPTION_CALLBACK_HMAC_KEY;
     use crate::plugins::subscription::SubgraphPassthroughMode;
@@ -1810,7 +1810,7 @@ mod tests {
     ) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_GRAPHQL_JSON_HEADER_VALUE)
+                .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON))
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#"invalid"#.into())
                 .unwrap())
@@ -1836,7 +1836,7 @@ mod tests {
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, APPLICATION_GRAPHQL_JSON_HEADER_VALUE)
+                .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON))
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
                 .unwrap())

@@ -1,6 +1,5 @@
-//! Layers that do HTTP content negotiation using the Accept and Content-Type headers.
-//!
-//! Content negotiation uses a pair of layers that work together at the router and supergraph stages.
+//! The content negotiation plugin performs HTTP content negotiation using the Accept and
+//! Content-Type headers, working at the router stage.
 use std::ops::ControlFlow;
 
 use http::HeaderMap;
@@ -35,12 +34,6 @@ register_plugin!("apollo", "content_negotiation", ContentNegotiation);
 const APPLICATION_JSON: &str = "application/json";
 pub(crate) const APPLICATION_GRAPHQL_JSON: &str = "application/graphql-response+json";
 
-const APPLICATION_JSON_HEADER_VALUE: HeaderValue = HeaderValue::from_static(APPLICATION_JSON);
-
-#[cfg(test)]
-pub(crate) const APPLICATION_GRAPHQL_JSON_HEADER_VALUE: HeaderValue =
-    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON);
-
 const ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
 
 // set the supported `@defer` specification version to https://github.com/graphql/graphql-spec/pull/742/commits/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82
@@ -54,29 +47,29 @@ pub(crate) const MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
 const MULTIPART_SUBSCRIPTION_ACCEPT: &str = "multipart/mixed;subscriptionSpec=1.0";
 const MULTIPART_SUBSCRIPTION_SPEC_PARAMETER: &str = "subscriptionSpec";
 const MULTIPART_SUBSCRIPTION_SPEC_VALUE: &str = "1.0";
-
 pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static("multipart/mixed;boundary=\"graphql\";subscriptionSpec=1.0");
 
-/// TODO: unify the following doc comments
-/// from RouterLayer
-/// A layer for the router service that rejects requests that do not have an expected Content-Type,
-/// or that have an Accept header that is not supported by the router.
+/// The `ContentNegotiation` plugin provides request and response layers at the router service.
 ///
-/// In particular, the Content-Type must be JSON, and the Accept header must include */*, or one of
-/// the JSON/GraphQL MIME types.
+/// # Request
+/// The request layer rejects requests that do not have an expected `Content-Type`, or that have an 
+/// `Accept` header that is not supported by the router.
+///
+/// In particular:
+///   * the request must be a `GET` or have `CONTENT_TYPE = JSON`, and
+///   * the accept header must include `*/*`, one of the JSON/GraphQL MIME types, or one of the
+///     multipart types.
+///
+/// It will also add a `ClientRequestAccepts` value to the context if the request is valid.
+/// 
+/// # Response
+/// The response layer sets the `CONTENT_TYPE` header, using the `ClientRequestAccepts` value from
+/// the context (set on the request side of this plugin). It will also set the `VARY` header if it
+/// is not present.
 ///
 /// # Context
 /// If the request is valid, this layer adds a [`ClientRequestAccepts`] value to the context.
-///
-///
-/// from SupergraphLayer
-/// A layer for the supergraph service that populates the Content-Type response header.
-///
-/// The content type is decided based on the [`ClientRequestAccepts`] context value, which is
-/// populated by the content negotiation [`RouterLayer`].
-// XXX(@goto-bus-stop): this feels a bit odd. It probably works fine because we can only ever respond
-// with JSON, but maybe this should be done as close as possible to where we populate the response body..?
 struct ContentNegotiation {}
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Config {}
@@ -84,9 +77,6 @@ struct Config {}
 impl ContentNegotiation {
     /// Helper to build a `RouterBody` containing a `graphql::Error` with the provided extension
     /// code and message.
-    ///
-    /// NB: perhaps it's worth moving this somewhere else? might be generally useful outside this
-    /// plugin
     fn error_response_body(extension_code: &str, message: String) -> RouterBody {
         router::body::from_bytes(
             serde_json::json!({
@@ -108,7 +98,7 @@ impl ContentNegotiation {
         );
         http::Response::builder()
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_JSON))
             .body(Self::error_response_body(
                 "INVALID_CONTENT_TYPE_HEADER",
                 message,
@@ -126,9 +116,59 @@ impl ContentNegotiation {
         );
         http::Response::builder()
             .status(StatusCode::NOT_ACCEPTABLE)
-            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_JSON))
             .body(Self::error_response_body("INVALID_ACCEPT_HEADER", message))
             .expect("cannot fail")
+    }
+    
+    fn handle_request(request: router::Request) -> ControlFlow<router::Response, router::Request> {
+        let valid_content_type_header = request.router_request.method() == Method::GET
+            || content_type_includes_json(request.router_request.headers());
+        if !valid_content_type_header {
+            return ControlFlow::Break(Self::invalid_content_type_header_response().into());
+        }
+
+        let accepts = parse_accept_header(request.router_request.headers());
+        if !accepts.is_valid() {
+            return ControlFlow::Break(
+                Self::invalid_accept_header_response().into(),
+            );
+        }
+
+        request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.insert(accepts));
+        ControlFlow::Continue(request)
+    }
+
+    fn handle_response(mut response: router::Response) -> router::Response {
+        let ClientRequestAccepts {
+            multipart_defer: accepts_multipart_defer,
+            multipart_subscription: accepts_multipart_subscription,
+            ..
+        } = response.context.extensions().with_lock(|lock| {
+            lock.get::<ClientRequestAccepts>()
+                .cloned()
+                .unwrap_or_default()
+        });
+
+        let headers = response.response.headers_mut();
+        process_vary_header(headers);
+
+        // XX(@carodewig): I would've expected this to actually based on whether the result
+        // is a stream, but the tests' behavior indicate it should rely solely on the client
+        // headers
+        let content_type = if accepts_multipart_defer {
+            MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE
+        } else if accepts_multipart_subscription {
+            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
+        } else {
+            HeaderValue::from_static(APPLICATION_JSON)
+        };
+        headers.insert(CONTENT_TYPE, content_type);
+
+        response
     }
 }
 
@@ -143,78 +183,16 @@ impl Plugin for ContentNegotiation {
         Ok(ContentNegotiation {})
     }
 
-    /// A layer for the router service that rejects requests that do not have an expected Content-Type,
-    /// or that have an Accept header that is not supported by the router.
-    ///
-    /// In particular, the Content-Type must be JSON, and the Accept header must include */*, or one of
-    /// the JSON/GraphQL MIME types.
-    ///
-    /// # Context
-    /// If the request is valid, this layer adds a [`ClientRequestAccepts`] value to the context.
-    ///
-    /// TODO: update these docs
-    ///     // /// A layer for the execution service that populates the Content-Type response header.
-    //     // ///
-    //     // /// The content type is decided based on a combination of:
-    //     // /// * [`ClientRequestAccepts`] context value, which is populated by the `router` layer of this plugin, and
-    //     // /// * [`ProtocolMode`] context value, populated by the `execution` service
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
-            .checkpoint(|request: router::Request| {
-                let valid_content_type_header = request.router_request.method() == Method::GET
-                    || content_type_includes_json(request.router_request.headers());
-                if !valid_content_type_header {
-                    return Ok(ControlFlow::Break(
-                        Self::invalid_content_type_header_response().into(),
-                    ));
-                }
-
-                let accepts = parse_accept_header(request.router_request.headers());
-                if !accepts.is_valid() {
-                    return Ok(ControlFlow::Break(
-                        Self::invalid_accept_header_response().into(),
-                    ));
-                }
-
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.insert(accepts));
-                Ok(ControlFlow::Continue(request))
-            })
+            .checkpoint(|request: router::Request| Ok(Self::handle_request(request)))
             .service(service)
-            .map_response(|mut response: router::Response| {
-                let ClientRequestAccepts {
-                    multipart_defer: accepts_multipart_defer,
-                    multipart_subscription: accepts_multipart_subscription,
-                    ..
-                } = response.context.extensions().with_lock(|lock| {
-                    lock.get::<ClientRequestAccepts>()
-                        .cloned()
-                        .unwrap_or_default()
-                });
-
-                let headers = response.response.headers_mut();
-                process_vary_header(headers);
-
-                // XX(@carodewig): I would've expected this to actually based on whether the result
-                // is a stream, but the tests' behavior indicate it should rely solely on the client
-                // headers
-                let content_type = if accepts_multipart_defer {
-                    MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE
-                } else if accepts_multipart_subscription {
-                    MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
-                } else {
-                    APPLICATION_JSON_HEADER_VALUE
-                };
-                headers.insert(CONTENT_TYPE, content_type);
-
-                response
-            })
+            .map_response(Self::handle_response)
             .boxed()
     }
 }
 
+/// Returns `true` if the media type is either `application/json` or `application/graphql-response+json`.
 fn is_json_type(mime: &MediaType) -> bool {
     use mediatype::names::APPLICATION;
     use mediatype::names::JSON;
@@ -225,11 +203,13 @@ fn is_json_type(mime: &MediaType) -> bool {
     mime.ty == APPLICATION && (is_json(mime) || is_gql_json(mime))
 }
 
+/// Returns `true` if the media type is `*/*`.
 fn is_wildcard(mime: &MediaType) -> bool {
     use mediatype::names::_STAR;
     mime.ty == _STAR && mime.subty == _STAR
 }
 
+/// Returns `true` if media type is a multipart defer, ie `multipart/mixed;deferSpec=20220824`.
 fn is_multipart_defer(mime: &MediaType) -> bool {
     use mediatype::names::MIXED;
     use mediatype::names::MULTIPART;
@@ -244,6 +224,7 @@ fn is_multipart_defer(mime: &MediaType) -> bool {
     mime.ty == MULTIPART && mime.subty == MIXED && mime.get_param(parameter) == Some(value)
 }
 
+/// Returns `true` if media type is a multipart subscription, ie `multipart/mixed;subscriptionSpec=1.0`.
 fn is_multipart_subscription(mime: &MediaType) -> bool {
     use mediatype::names::MIXED;
     use mediatype::names::MULTIPART;
@@ -258,7 +239,7 @@ fn is_multipart_subscription(mime: &MediaType) -> bool {
     mime.ty == MULTIPART && mime.subty == MIXED && mime.get_param(parameter) == Some(value)
 }
 
-/// Returns true if the `CONTENT_TYPE` header contains `application/json` or
+/// Returns `true` if the `CONTENT_TYPE` header contains `application/json` or
 /// `application/graphql-response+json`.
 fn content_type_includes_json(headers: &HeaderMap) -> bool {
     headers
@@ -298,7 +279,7 @@ fn parse_accept_header(headers: &HeaderMap) -> ClientRequestAccepts {
     accepts
 }
 
-// Process the headers to make sure that `VARY` is set correctly
+/// Process the headers to make sure that `VARY` is set correctly.
 fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
     if headers.get(VARY).is_none() {
         // We don't have a VARY header, add one with value "origin"
@@ -412,8 +393,6 @@ mod tests {
         let accepts = parse_accept_header(&default_headers);
         assert!(accepts.json);
     }
-
-    // Test Vary processing
 
     #[test]
     fn it_adds_default_with_value_origin_if_no_vary_header() {
