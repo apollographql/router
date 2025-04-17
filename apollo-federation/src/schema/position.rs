@@ -11,6 +11,7 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::ComponentOrigin;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
@@ -271,6 +272,20 @@ impl TypeDefinitionPosition {
         _directive_name: &Name,
     ) -> bool {
         todo!();
+    }
+
+    pub(crate) fn remove_extensions(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Object(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Interface(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Union(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::Enum(type_) => type_.remove_extensions(schema),
+            TypeDefinitionPosition::InputObject(type_) => type_.remove_extensions(schema),
+        }
     }
 }
 
@@ -553,6 +568,18 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             )),
         }
     }
+
+    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                let _ = type_.remove(schema);
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                let _ = type_.remove(schema);
+            }
+        }
+        Ok(())
+    }
 }
 
 fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
@@ -700,6 +727,13 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Component<FieldDefinition>> {
         self.get(schema).ok()
+    }
+
+    pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        match self {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.remove(schema),
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.remove(schema),
+        }
     }
 
     pub(crate) fn insert_directive(
@@ -1413,6 +1447,18 @@ impl ScalarTypeDefinitionPosition {
 
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        for directive in self
+            .make_mut(&mut schema.schema)?
+            .make_mut()
+            .directives
+            .iter_mut()
+        {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        Ok(())
+    }
 }
 
 impl Display for ScalarTypeDefinitionPosition {
@@ -1925,6 +1971,26 @@ impl ObjectTypeDefinitionPosition {
         let type_ = self.make_mut(&mut schema.schema)?.make_mut();
         type_.implements_interfaces.swap_remove(old_name);
         type_.implements_interfaces.insert(new_name.into());
+        Ok(())
+    }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        type_.implements_interfaces = type_
+            .implements_interfaces
+            .iter()
+            .map(|i| {
+                let mut i = i.clone();
+                i.origin = ComponentOrigin::Definition;
+                i
+            })
+            .collect();
+        for (_, field) in type_.fields.iter_mut() {
+            field.origin = ComponentOrigin::Definition;
+        }
         Ok(())
     }
 }
@@ -3062,6 +3128,26 @@ impl InterfaceTypeDefinitionPosition {
         type_.implements_interfaces.insert(new_name.into());
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        type_.implements_interfaces = type_
+            .implements_interfaces
+            .iter()
+            .map(|i| {
+                let mut i = i.clone();
+                i.origin = ComponentOrigin::Definition;
+                i
+            })
+            .collect();
+        for (_, field) in type_.fields.iter_mut() {
+            field.origin = ComponentOrigin::Definition;
+        }
+        Ok(())
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
@@ -4060,6 +4146,23 @@ impl UnionTypeDefinitionPosition {
 
         Ok(())
     }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        type_.members = type_
+            .members
+            .iter()
+            .map(|m| {
+                let mut m = m.clone();
+                m.origin = ComponentOrigin::Definition;
+                m
+            })
+            .collect();
+        Ok(())
+    }
 }
 
 impl Display for UnionTypeDefinitionPosition {
@@ -4421,6 +4524,17 @@ impl EnumTypeDefinitionPosition {
                 .insert(new_name, enum_type_referencers);
         }
 
+        Ok(())
+    }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        for (_, v) in type_.values.iter_mut() {
+            v.origin = ComponentOrigin::Definition;
+        }
         Ok(())
     }
 }
@@ -4920,6 +5034,17 @@ impl InputObjectTypeDefinitionPosition {
                 .insert(new_name, input_object_type_referencers);
         }
 
+        Ok(())
+    }
+
+    fn remove_extensions(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        for directive in type_.directives.iter_mut() {
+            directive.origin = ComponentOrigin::Definition;
+        }
+        for (_, field) in type_.fields.iter_mut() {
+            field.origin = ComponentOrigin::Definition;
+        }
         Ok(())
     }
 }
