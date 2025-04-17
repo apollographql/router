@@ -21,21 +21,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "example",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://example/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -85,6 +71,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         spec: V0_1,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
@@ -103,21 +96,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "example",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://example/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -231,6 +210,13 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             $args,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
@@ -249,21 +235,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "example",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://example/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -429,5 +401,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/si
             $this,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }

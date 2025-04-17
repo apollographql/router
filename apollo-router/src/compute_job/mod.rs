@@ -8,6 +8,11 @@ use std::time::Instant;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
 use tokio::sync::oneshot;
+use tracing::Instrument;
+use tracing::Span;
+use tracing::info_span;
+use tracing_core::Dispatch;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use self::metrics::ActiveComputeMetric;
 use self::metrics::JobWatcher;
@@ -18,6 +23,8 @@ use crate::ageing_priority_queue::AgeingPriorityQueue;
 use crate::ageing_priority_queue::Priority;
 use crate::ageing_priority_queue::SendError;
 use crate::metrics::meter_provider;
+use crate::plugins::telemetry::consts::COMPUTE_JOB_EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::COMPUTE_JOB_SPAN_NAME;
 
 /// We generate backpressure in tower `poll_ready` when the number of queued jobs
 /// reaches `QUEUE_SOFT_CAPACITY_PER_THREAD * thread_pool_size()`
@@ -105,6 +112,7 @@ impl crate::graphql::IntoGraphQLErrors for ComputeBackPressureError {
 }
 
 #[derive(Copy, Clone, Hash, Eq, PartialEq, Debug, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(crate) enum ComputeJobType {
     QueryParsing,
     QueryPlanning,
@@ -129,6 +137,8 @@ impl From<ComputeJobType> for opentelemetry::Value {
 }
 
 pub(crate) struct Job {
+    subscriber: Dispatch,
+    parent_span: Span,
     ty: ComputeJobType,
     queue_start: Instant,
     job_fn: Box<dyn FnOnce() + Send + 'static>,
@@ -148,16 +158,33 @@ pub(crate) fn queue() -> &'static AgeingPriorityQueue<Job> {
 
                 let mut receiver = queue.receiver();
                 loop {
-                    let job = receiver.blocking_recv();
-                    observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
+                    let (job, age) = receiver.blocking_recv();
+                    let job_type: &'static str = job.ty.into();
+                    let age: &'static str = age.into();
+                    let _subscriber = job.subscriber.set_default();
+                    job.parent_span.in_scope(|| {
+                        let span = info_span!(
+                            COMPUTE_JOB_EXECUTION_SPAN_NAME,
+                            "job.type" = job_type,
+                            "job.age" = age
+                        );
+                        span.in_scope(|| {
+                            observe_queue_wait_duration(job.ty, job.queue_start.elapsed());
 
-                    let _active_metric = ActiveComputeMetric::register(job.ty);
-                    let job_start = Instant::now();
-                    (job.job_fn)();
-                    observe_compute_duration(job.ty, job_start.elapsed());
+                            let _active_metric = ActiveComputeMetric::register(job.ty);
+                            let job_start = Instant::now();
+                            (job.job_fn)();
+                            observe_compute_duration(job.ty, job_start.elapsed());
+                        })
+                    })
                 }
             });
         }
+        tracing::info!(
+            threads = pool_size,
+            queue_capacity = QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size,
+            "compute job thread pool created",
+        );
         AgeingPriorityQueue::bounded(QUEUE_SOFT_CAPACITY_PER_THREAD * pool_size)
     })
 }
@@ -171,91 +198,102 @@ where
     F: FnOnce(JobStatus<'_, T>) -> T + Send + 'static,
     T: Send + 'static,
 {
-    let mut job_watcher = JobWatcher::new(compute_job_type);
-
-    let (tx, rx) = oneshot::channel();
-    let wrapped_job_fn = Box::new(move || {
-        let status = JobStatus { result_sender: &tx };
-        // `AssertUnwindSafe` here is correct because this `catch_unwind`
-        // is paired with `resume_unwind` below, so the overall effect on unwind safety
-        // is the same as if the caller had executed `job` directly without a thread pool.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || job(status)));
-        match tx.send(result) {
-            Ok(()) => {}
-            Err(_) => {
-                // `rx` was dropped: `result` is no longer needed and we can safely drop it
+    let compute_job_type_str: &'static str = compute_job_type.into();
+    let span = info_span!(
+        COMPUTE_JOB_SPAN_NAME,
+        "job.type" = compute_job_type_str,
+        "job.outcome" = tracing::field::Empty
+    );
+    span.in_scope(|| {
+        let mut job_watcher = JobWatcher::new(compute_job_type);
+        let (tx, rx) = oneshot::channel();
+        let wrapped_job_fn = Box::new(move || {
+            let status = JobStatus { result_sender: &tx };
+            // `AssertUnwindSafe` here is correct because this `catch_unwind`
+            // is paired with `resume_unwind` below, so the overall effect on unwind safety
+            // is the same as if the caller had executed `job` directly without a thread pool.
+            let result =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || job(status)));
+            match tx.send(result) {
+                Ok(()) => {}
+                Err(_) => {
+                    // `rx` was dropped: `result` is no longer needed and we can safely drop it
+                }
             }
-        }
-    });
+        });
 
-    let queue = queue();
-    let job = Job {
-        ty: compute_job_type,
-        job_fn: wrapped_job_fn,
-        queue_start: Instant::now(),
-    };
-
-    queue
-        .send(Priority::from(compute_job_type), job)
-        .map_err(|e| match e {
-            SendError::QueueIsFull => {
-                u64_counter!(
-                    "apollo.router.compute_jobs.queue_is_full",
-                    "Number of requests rejected because the queue for compute jobs is full",
-                    1u64
-                );
-                job_watcher.outcome = Outcome::RejectedQueueFull;
-                ComputeBackPressureError
-            }
-            SendError::Disconnected => {
-                // This never panics because this channel can never be disconnect:
-                // the receiver is owned by `queue` which we can access here:
-                let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
-                unreachable!("compute thread pool queue is disconnected")
-            }
-        })?;
-
-    Ok(async move {
-        let result = rx.await;
-
-        // This local variable MUST exist. Otherwise, only the field from the JobWatcher struct is moved and drop will occur before the outcome is set.
-        // This is predicated on all the fields in the struct being Copy!!!
-        let mut local_job_watcher = job_watcher;
-        local_job_watcher.outcome = match &result {
-            Ok(Ok(_)) => Outcome::ExecutedOk,
-            // We don't know what the cardinality of errors are so we just say there was a response error
-            Ok(Err(_)) => Outcome::ExecutedError,
-            // We got an error reading the response from the channel
-            Err(_) => Outcome::ChannelError,
+        let queue = queue();
+        let job = Job {
+            subscriber: Dispatch::default(),
+            parent_span: Span::current(),
+            ty: compute_job_type,
+            job_fn: wrapped_job_fn,
+            queue_start: Instant::now(),
         };
 
-        match result {
-            Ok(Ok(value)) => value,
-            Ok(Err(panic_payload)) => {
-                // The `job` callback panicked.
-                //
-                // We try to to avoid this (by returning errors instead) and consider this a bug.
-                // But if it does happen, propagating the panic to the caller from here
-                // has the same effect as if they had executed `job` directly
-                // without a thread pool.
-                //
-                // Additionally we have a panic handler in `apollo-router/src/executable.rs`
-                // that exits the process,
-                // so in practice a Router thread should never start unwinding
-                // an this code path should be unreachable.
-                std::panic::resume_unwind(panic_payload)
-            }
-            Err(e) => {
-                let _: tokio::sync::oneshot::error::RecvError = e;
-                // This should never happen because this oneshot channel can never be disconnect:
-                // the sender is owned by `job` which, if we reach here,
-                // was successfully sent to the queue.
-                // The queue or thread pool never drop a job without executing it.
-                // When executing, `catch_unwind` ensures that
-                // the sender cannot be dropped without sending.
-                unreachable!("compute result oneshot channel is disconnected")
+        queue
+            .send(Priority::from(compute_job_type), job)
+            .map_err(|e| match e {
+                SendError::QueueIsFull => {
+                    u64_counter!(
+                        "apollo.router.compute_jobs.queue_is_full",
+                        "Number of requests rejected because the queue for compute jobs is full",
+                        1u64
+                    );
+                    job_watcher.outcome = Outcome::RejectedQueueFull;
+                    ComputeBackPressureError
+                }
+                SendError::Disconnected => {
+                    // This never panics because this channel can never be disconnect:
+                    // the receiver is owned by `queue` which we can access here:
+                    let _proof_of_life: &'static AgeingPriorityQueue<_> = queue;
+                    unreachable!("compute thread pool queue is disconnected")
+                }
+            })?;
+
+        Ok(async move {
+            let result = rx.await;
+
+            // This local variable MUST exist. Otherwise, only the field from the JobWatcher struct is moved and drop will occur before the outcome is set.
+            // This is predicated on all the fields in the struct being Copy!!!
+            let mut local_job_watcher = job_watcher;
+            local_job_watcher.outcome = match &result {
+                Ok(Ok(_)) => Outcome::ExecutedOk,
+                // We don't know what the cardinality of errors are so we just say there was a response error
+                Ok(Err(_)) => Outcome::ExecutedError,
+                // We got an error reading the response from the channel
+                Err(_) => Outcome::ChannelError,
+            };
+
+            match result {
+                Ok(Ok(value)) => value,
+                Ok(Err(panic_payload)) => {
+                    // The `job` callback panicked.
+                    //
+                    // We try to to avoid this (by returning errors instead) and consider this a bug.
+                    // But if it does happen, propagating the panic to the caller from here
+                    // has the same effect as if they had executed `job` directly
+                    // without a thread pool.
+                    //
+                    // Additionally we have a panic handler in `apollo-router/src/executable.rs`
+                    // that exits the process,
+                    // so in practice a Router thread should never start unwinding
+                    // an this code path should be unreachable.
+                    std::panic::resume_unwind(panic_payload)
+                }
+                Err(e) => {
+                    let _: tokio::sync::oneshot::error::RecvError = e;
+                    // This should never happen because this oneshot channel can never be disconnect:
+                    // the sender is owned by `job` which, if we reach here,
+                    // was successfully sent to the queue.
+                    // The queue or thread pool never drop a job without executing it.
+                    // When executing, `catch_unwind` ensures that
+                    // the sender cannot be dropped without sending.
+                    unreachable!("compute result oneshot channel is disconnected")
+                }
             }
         }
+        .in_current_span())
     })
 }
 
@@ -275,7 +313,36 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
 
+    use tracing_futures::WithSubscriber;
+
     use super::*;
+    use crate::assert_snapshot_subscriber;
+
+    #[tokio::test]
+    async fn test_observability() {
+        // make sure that the queue has been initialized by calling `execute`. if this
+        // step is skipped, the queue will _sometimes_ be initialized in the step below,
+        // which causes an additional log line and a snapshot mismatch.
+        execute(ComputeJobType::Introspection, |_| {})
+            .unwrap()
+            .await;
+
+        async {
+            let span = info_span!("test_observability");
+            let job = span.in_scope(|| {
+                tracing::info!("Outer");
+                execute(ComputeJobType::QueryParsing, |_| {
+                    tracing::info!("Inner");
+                    1
+                })
+                .unwrap()
+            });
+            let result = job.await;
+            assert_eq!(result, 1);
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await;
+    }
 
     #[tokio::test]
     async fn test_executes_on_different_thread() {

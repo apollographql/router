@@ -274,6 +274,7 @@ mod tests {
     use http::header::CONTENT_LENGTH;
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
+    use tests::events::EventLevel;
     use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
@@ -287,9 +288,7 @@ mod tests {
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::mapping::Problem;
     use crate::plugins::telemetry::config_new::events;
-    use crate::plugins::telemetry::config_new::events::EventLevel;
     use crate::plugins::telemetry::config_new::events::log_event;
-    use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
@@ -727,7 +726,7 @@ connector:
 
                 error!(http.method = "GET", "Hello from test");
 
-                let router_events = event_config.new_router_events();
+                let mut router_events = event_config.new_router_events();
                 let router_req = router::Request::fake_builder()
                     .header(CONTENT_LENGTH, "0")
                     .header("custom-header", "val1")
@@ -745,7 +744,7 @@ connector:
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
 
-                let supergraph_events = event_config.new_supergraph_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
                 let supergraph_req = supergraph::Request::fake_builder()
                     .query("query { foo }")
                     .header("x-log-request", HeaderValue::from_static("log"))
@@ -761,7 +760,7 @@ connector:
                     .expect("expecting valid response");
                 supergraph_events.on_response(&supergraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -786,7 +785,7 @@ connector:
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -843,6 +842,9 @@ connector:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -874,7 +876,7 @@ connector:
                     ],
                     supergraph_request: Default::default(),
                 };
-                let connector_events = event_config.new_connector_events();
+                let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {
@@ -961,9 +963,9 @@ subgraph:
                 let test_span = info_span!("test");
                 let _enter = test_span.enter();
 
-                let router_events = event_config.new_router_events();
-                let supergraph_events = event_config.new_supergraph_events();
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut router_events = event_config.new_router_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
 
                 // In: Router -> Supergraph -> Subgraphs
                 let router_req = router::Request::fake_builder().build().unwrap();
@@ -1073,7 +1075,7 @@ subgraph:
 
                 error!(http.method = "GET", "Hello from test");
 
-                let router_events = event_config.new_router_events();
+                let mut router_events = event_config.new_router_events();
                 let router_req = router::Request::fake_builder()
                     .header(CONTENT_LENGTH, "0")
                     .header("custom-header", "val1")
@@ -1097,7 +1099,7 @@ subgraph:
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
 
-                let supergraph_events = event_config.new_supergraph_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
                 let supergraph_req = supergraph::Request::fake_builder()
                     .query("query { foo }")
                     .header("x-log-request", HeaderValue::from_static("log"))
@@ -1113,7 +1115,7 @@ subgraph:
                     .expect("expecting valid response");
                 supergraph_events.on_response(&supergraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -1138,7 +1140,7 @@ subgraph:
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -1195,6 +1197,9 @@ subgraph:
                     spec: ConnectSpec::V0_1,
                     request_variables: Default::default(),
                     response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
                 });
                 let response_key = ResponseKey::RootField {
                     name: "hello".to_string(),
@@ -1226,7 +1231,7 @@ subgraph:
                     ],
                     supergraph_request: Default::default(),
                 };
-                let connector_events = event_config.new_connector_events();
+                let mut connector_events = event_config.new_connector_events();
                 connector_events.on_request(&connector_request);
 
                 let connector_response = Response {

@@ -573,6 +573,7 @@ register_private_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::name;
@@ -584,13 +585,13 @@ mod test {
     use apollo_federation::sources::connect::JSONSelection;
     use bytes::Bytes;
     use http::HeaderMap;
+    use http::Uri;
     use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use serde_json_bytes::json;
     use tower::Service;
-    use url::Url;
 
     use super::*;
     use crate::Configuration;
@@ -776,7 +777,7 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -788,6 +789,9 @@ mod test {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
         let key = ResponseKey::RootField {
             name: "hello".to_string(),

@@ -33,21 +33,7 @@ expression: "&connectors"
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -138,6 +124,13 @@ expression: "&connectors"
         spec: V0_2,
         request_variables: {},
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     ConnectId {
         label: "connectors.json http: POST /posts",
@@ -169,21 +162,7 @@ expression: "&connectors"
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "https",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "jsonplaceholder.typicode.com",
-                        ),
-                    ),
-                    port: None,
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                https://jsonplaceholder.typicode.com/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -342,5 +321,12 @@ expression: "&connectors"
             $batch,
         },
         response_variables: {},
+        request_headers: {},
+        response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }

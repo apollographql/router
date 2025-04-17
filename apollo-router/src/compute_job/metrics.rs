@@ -1,9 +1,15 @@
 use std::time::Duration;
 use std::time::Instant;
 
+use tracing::Span;
+
 use crate::compute_job::ComputeJobType;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 
 #[derive(Copy, Clone, strum_macros::IntoStaticStr)]
+#[strum(serialize_all = "snake_case")]
 pub(super) enum Outcome {
     ExecutedOk,
     ExecutedError,
@@ -20,6 +26,7 @@ impl From<Outcome> for opentelemetry::Value {
 }
 
 pub(super) struct JobWatcher {
+    span: Span,
     queue_start: Instant,
     compute_job_type: ComputeJobType,
     pub(super) outcome: Outcome,
@@ -28,6 +35,7 @@ pub(super) struct JobWatcher {
 impl JobWatcher {
     pub(super) fn new(compute_job_type: ComputeJobType) -> Self {
         Self {
+            span: Span::current(),
             queue_start: Instant::now(),
             outcome: Outcome::Abandoned,
             compute_job_type,
@@ -37,6 +45,18 @@ impl JobWatcher {
 
 impl Drop for JobWatcher {
     fn drop(&mut self) {
+        let outcome: &'static str = self.outcome.into();
+        self.span.record("job.outcome", outcome);
+
+        match &self.outcome {
+            Outcome::ExecutedOk => {
+                self.span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
+            }
+            Outcome::ExecutedError | Outcome::ChannelError | Outcome::RejectedQueueFull => {
+                self.span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
+            }
+            _ => {}
+        }
         let full_duration = self.queue_start.elapsed();
         f64_histogram_with_unit!(
             "apollo.router.compute_jobs.duration",
@@ -44,7 +64,7 @@ impl Drop for JobWatcher {
             "s",
             full_duration.as_secs_f64(),
             "job.type" = self.compute_job_type,
-            "job.outcome" = self.outcome
+            "job.outcome" = outcome
         );
     }
 }
@@ -123,20 +143,20 @@ mod tests {
         {
             let _job_watcher = JobWatcher::new(ComputeJobType::Introspection);
         }
-        check_histogram_count(1, "Introspection", Outcome::Abandoned.into());
+        check_histogram_count(1, "introspection", "abandoned");
 
         {
             let mut job_watcher = JobWatcher::new(ComputeJobType::QueryParsing);
             job_watcher.outcome = Outcome::ExecutedOk;
         }
-        check_histogram_count(1, "QueryParsing", Outcome::ExecutedOk.into());
+        check_histogram_count(1, "query_parsing", "executed_ok");
 
         for count in 1..5 {
             {
                 let mut job_watcher = JobWatcher::new(ComputeJobType::QueryPlanning);
                 job_watcher.outcome = Outcome::RejectedQueueFull;
             }
-            check_histogram_count(count, "QueryPlanning", Outcome::RejectedQueueFull.into());
+            check_histogram_count(count, "query_planning", "rejected_queue_full");
         }
     }
 
@@ -154,19 +174,19 @@ mod tests {
             let _introspection_1 = ActiveComputeMetric::register(ComputeJobType::Introspection);
             let _introspection_2 = ActiveComputeMetric::register(ComputeJobType::Introspection);
             let introspection_3 = ActiveComputeMetric::register(ComputeJobType::Introspection);
-            check_count(3, "Introspection");
+            check_count(3, "introspection");
 
             let _planning_1 = ActiveComputeMetric::register(ComputeJobType::QueryPlanning);
-            check_count(3, "Introspection");
-            check_count(1, "QueryPlanning");
+            check_count(3, "introspection");
+            check_count(1, "query_planning");
 
             drop(introspection_3);
-            check_count(2, "Introspection");
-            check_count(1, "QueryPlanning");
+            check_count(2, "introspection");
+            check_count(1, "query_planning");
         }
 
         // block ended, so should have no ongoing computation
-        check_count(0, "Introspection");
-        check_count(0, "QueryPlanning");
+        check_count(0, "introspection");
+        check_count(0, "query_planning");
     }
 }

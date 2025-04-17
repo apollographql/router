@@ -81,6 +81,7 @@ impl RawResponse {
         connector: Arc<Connector>,
         context: &Context,
         debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+        supergraph_request: Arc<http::Request<crate::graphql::Request>>,
     ) -> connector::request_service::Response {
         let mapped_response = match self {
             RawResponse::Error { error, key } => MappedResponse::Error { error, key },
@@ -92,9 +93,12 @@ impl RawResponse {
             } => {
                 let inputs = key.inputs().merge(
                     &connector.response_variables,
+                    &connector.response_headers,
                     connector.config.as_ref(),
                     context,
                     Some(parts.status.as_u16()),
+                    supergraph_request,
+                    Some(&parts),
                 );
 
                 let (res, apply_to_errors) = key.selection().apply_with_vars(&data, &inputs);
@@ -174,7 +178,7 @@ impl RawResponse {
                     )
                     .path::<Path>((&key).into())
                     .build()
-                    .add_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
+                    .with_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
 
                 if let Some(debug) = debug_context {
                     debug
@@ -322,11 +326,21 @@ impl MappedResponse {
                         .collect::<HashMap<_, _>>();
 
                     // Make a list of entities that matches the representations list
-                    let entities = key_values
+                    let new_entities = key_values
                         .map(|key| map.remove(&key).unwrap_or(Value::Null))
                         .collect_vec();
 
-                    data.insert(ENTITIES, Value::Array(entities));
+                    // Because we may have multiple batch entities requests, we should add to ENTITIES as the requests come in so it is additive
+                    let entities = data
+                        .entry(ENTITIES)
+                        .or_insert(Value::Array(Vec::with_capacity(count)));
+
+                    entities
+                        .as_array_mut()
+                        .ok_or_else(|| {
+                            HandleResponseError::MergeError("_entities is not an array".into())
+                        })?
+                        .extend(new_entities);
                 }
             },
         }
@@ -344,6 +358,7 @@ pub(crate) async fn process_response<T: HttpBody>(
     context: &Context,
     debug_request: Option<ConnectorDebugHttpRequest>,
     debug_context: &Option<Arc<Mutex<ConnectorContext>>>,
+    supergraph_request: Arc<http::Request<crate::graphql::Request>>,
 ) -> connector::request_service::Response {
     match result {
         // This occurs when we short-circuit the request when over the limit
@@ -393,7 +408,13 @@ pub(crate) async fn process_response<T: HttpBody>(
             };
             if is_success {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_OK);
-                raw.map_response(result, connector, context, debug_context)
+                raw.map_response(
+                    result,
+                    connector,
+                    context,
+                    debug_context,
+                    supergraph_request,
+                )
             } else {
                 Span::current().record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                 raw.map_error(result, connector, context, debug_context)
@@ -475,7 +496,7 @@ async fn deserialize_response<T: HttpBody>(
             )
             .path(path)
             .build()
-            .add_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
+            .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
     let path: Path = response_key.into();
@@ -486,37 +507,34 @@ async fn deserialize_response<T: HttpBody>(
     let log_response_level = context
         .extensions()
         .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
-        .and_then(|event| match event.0.condition() {
-            Some(condition) => {
-                // Create a temporary response here so we can evaluate the condition. This response
-                // is missing any information about the mapped response, because we don't have that
-                // yet. This means that we cannot correctly evaluate any condition that relies on
-                // the mapped response data or mapping problems. But we can't wait until we do have
-                // that information, because this is the only place we have the body bytes (without
-                // making an expensive clone of the body). So we either need to not expose any
-                // selector which can be used as a condition that requires mapping information, or
-                // we must document that such selectors cannot be used as conditions on standard
-                // connectors events.
+        .and_then(|event| {
+            // Create a temporary response here so we can evaluate the condition. This response
+            // is missing any information about the mapped response, because we don't have that
+            // yet. This means that we cannot correctly evaluate any condition that relies on
+            // the mapped response data or mapping problems. But we can't wait until we do have
+            // that information, because this is the only place we have the body bytes (without
+            // making an expensive clone of the body). So we either need to not expose any
+            // selector which can be used as a condition that requires mapping information, or
+            // we must document that such selectors cannot be used as conditions on standard
+            // connectors events.
 
-                let response = connector::request_service::Response {
-                    context: context.clone(),
-                    connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
-                        inner: parts.clone(),
-                    })),
-                    mapped_response: MappedResponse::Data {
-                        data: Value::Null,
-                        key: response_key.clone(),
-                        problems: vec![],
-                    },
-                };
-                if condition.lock().evaluate_response(&response) {
-                    Some(event.0.level())
-                } else {
-                    None
-                }
+            let response = connector::request_service::Response {
+                context: context.clone(),
+                connector: connector.clone(),
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: parts.clone(),
+                })),
+                mapped_response: MappedResponse::Data {
+                    data: Value::Null,
+                    key: response_key.clone(),
+                    problems: vec![],
+                },
+            };
+            if event.condition.evaluate_response(&response) {
+                Some(event.level)
+            } else {
+                None
             }
-            None => Some(event.0.level()),
         });
 
     if let Some(level) = log_response_level {
@@ -595,6 +613,7 @@ async fn deserialize_response<T: HttpBody>(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::Schema;
@@ -606,11 +625,12 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
+    use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
-    use url::Url;
 
     use crate::Context;
+    use crate::graphql;
     use crate::plugins::connectors::handle_responses::process_response;
     use crate::plugins::connectors::make_requests::RequestInputs;
     use crate::plugins::connectors::make_requests::ResponseKey;
@@ -630,7 +650,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -642,6 +662,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -662,6 +685,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -670,6 +699,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -680,6 +710,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -730,7 +761,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -742,6 +773,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -762,6 +796,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -770,6 +810,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -780,6 +821,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -835,7 +877,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
                 headers: Default::default(),
@@ -847,6 +889,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let keys = connector
@@ -880,6 +925,12 @@ mod tests {
             inputs,
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -888,6 +939,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -950,7 +1002,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -962,6 +1014,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -986,6 +1041,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -994,6 +1055,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -1004,6 +1066,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -1066,7 +1129,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -1078,6 +1141,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -1118,6 +1184,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response_plaintext),
@@ -1126,6 +1198,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -1136,6 +1209,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -1146,6 +1220,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request.clone(),
             )
             .await
             .mapped_response,
@@ -1156,6 +1231,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,
@@ -1217,7 +1293,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1253,7 +1329,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1289,7 +1365,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1320,7 +1396,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -1331,7 +1407,13 @@ mod tests {
             config: Default::default(),
             max_requests: None,
             request_variables: Default::default(),
-            response_variables: selection.external_variables().collect(),
+            batch_settings: None,
+            response_variables: selection
+                .variable_references()
+                .map(|var_ref| var_ref.namespace.namespace)
+                .collect(),
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -1344,6 +1426,12 @@ mod tests {
             selection: Arc::new(JSONSelection::parse("$status").unwrap()),
         };
 
+        let supergraph_request = Arc::new(
+            http::Request::builder()
+                .body(graphql::Request::builder().build())
+                .unwrap(),
+        );
+
         let res = super::aggregate_responses(vec![
             process_response(
                 Ok(response1),
@@ -1352,6 +1440,7 @@ mod tests {
                 &Context::default(),
                 None,
                 &None,
+                supergraph_request,
             )
             .await
             .mapped_response,

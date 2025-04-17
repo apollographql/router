@@ -2,6 +2,73 @@
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [2.1.3] - 2025-04-16
+
+## 🐛 Fixes
+
+### Entity-cache: handle multiple key directives ([PR #7228](https://github.com/apollographql/router/pull/7228))
+
+This PR fixes a bug in entity caching introduced by the fix in https://github.com/apollographql/router/pull/6888 for cases where several `@key` directives with different fields were declared on a type as documented [here](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#managing-types).
+
+For example if you have this kind of entity in your schema:
+
+```graphql
+type Product @key(fields: "upc") @key(fields: "sku") {
+  upc: ID!
+  sku: ID!
+  name: String
+}
+```
+
+By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7228
+
+### Improve Error Message for Invalid JWT Header Values ([PR #7121](https://github.com/apollographql/router/pull/7121))
+
+Enhanced parsing error messages for JWT Authorization header values now provide developers with clear, actionable feedback while ensuring that no sensitive data is exposed.
+
+Examples of the updated error messages:
+```diff
+-         Header Value: '<invalid value>' is not correctly formatted. prefix should be 'Bearer'
++         Value of 'authorization' JWT header should be prefixed with 'Bearer'
+```
+
+```diff
+-         Header Value: 'Bearer' is not correctly formatted. Missing JWT
++         Value of 'authorization' JWT header has only 'Bearer' prefix but no JWT token
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/7121
+
+### Fix crash when an invalid query plan is generated ([PR #7214](https://github.com/apollographql/router/pull/7214))
+
+When an invalid query plan is generated, the router could panic and crash.
+This could happen if there are gaps in the GraphQL validation implementation.
+Now, even if there are unresolved gaps, the router will handle it gracefully and reject the request.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/7214
+
+# [2.1.2] - 2025-04-14
+
+## 🐛 Fixes
+
+### Support `@context`/`@fromContext` when using Connectors ([PR #7132](https://github.com/apollographql/router/pull/7132))
+
+This fixes a bug that dropped the `@context` and `@fromContext` directives when introducing a connector.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/7132
+
+## 📃 Configuration
+
+### Add new configurable delivery pathway for high cardinality Apollo Studio metrics ([PR #7138](https://github.com/apollographql/router/pull/7138))
+
+This change provides a secondary pathway for new "realtime" Studio metrics whose delivery interval is configurable due to their higher cardinality. These metrics will respect `telemetry.apollo.batch_processor.scheduled_delay` as configured on the realtime path.
+
+All other Apollo metrics will maintain the previous hardcoded 60s send interval.
+
+By [@rregitsky](https://github.com/rregitsky) and [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/7138
+
+
+
 # [2.1.1] - 2025-04-07
 
 ## 🔒 Security
