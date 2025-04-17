@@ -18,6 +18,8 @@ use crate::query_planner::fetch::Variables;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::query_planner::subscription::SubscriptionNode;
 
+/// This extension key is private to apollo and may change in the future. Users should not rely on
+/// its existence.
 const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.subgraph.name";
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
