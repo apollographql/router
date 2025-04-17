@@ -4,6 +4,7 @@ pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
 mod connectors;
+mod content_negotiation;
 mod coprocessor;
 mod docs;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
