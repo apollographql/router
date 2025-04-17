@@ -13,6 +13,8 @@ use futures::future::join_all;
 use futures::future::ready;
 use futures::stream::StreamExt;
 use futures::stream::once;
+use http::HeaderName;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::header::CONTENT_TYPE;
@@ -80,6 +82,9 @@ use crate::services::router::pipeline_handle::PipelineHandle;
 use crate::services::router::pipeline_handle::PipelineRef;
 use crate::services::supergraph;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
+
+static ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
+static ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -356,6 +361,12 @@ impl RouterService {
                             &self.apollo_telemetry_config.errors,
                         );
                     }
+
+                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+                    parts.headers.insert(
+                        ACCEL_BUFFERING_HEADER_NAME.clone(),
+                        ACCEL_BUFFERING_HEADER_VALUE.clone(),
+                    );
 
                     let response = match response.subscribed {
                         Some(true) => http::Response::from_parts(

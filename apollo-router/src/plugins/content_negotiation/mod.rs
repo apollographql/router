@@ -4,7 +4,6 @@
 use std::ops::ControlFlow;
 
 use http::HeaderMap;
-use http::HeaderName;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -24,7 +23,6 @@ use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::protocols::multipart::ProtocolMode;
 use crate::services::router;
 use crate::services::router::ClientRequestAccepts;
 use crate::services::router::body::RouterBody;
@@ -44,8 +42,6 @@ pub(crate) const APPLICATION_GRAPHQL_JSON_HEADER_VALUE: HeaderValue =
     HeaderValue::from_static(APPLICATION_GRAPHQL_JSON);
 
 const ORIGIN_HEADER_VALUE: HeaderValue = HeaderValue::from_static("origin");
-const ACCEL_BUFFERING_HEADER_NAME: HeaderName = HeaderName::from_static("x-accel-buffering");
-const ACCEL_BUFFERING_HEADER_VALUE: HeaderValue = HeaderValue::from_static("no");
 
 // set the supported `@defer` specification version to https://github.com/graphql/graphql-spec/pull/742/commits/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82
 const MULTIPART_DEFER_SPEC_PARAMETER: &str = "deferSpec";
@@ -201,8 +197,9 @@ impl Plugin for ContentNegotiation {
                 let headers = response.response.headers_mut();
                 process_vary_header(headers);
 
-                // XX(@carodewig): I would've expected this to be based on stream protocol mode, but
-                // the tests indicate it should rely solely on the client headers
+                // XX(@carodewig): I would've expected this to actually based on whether the result
+                // is a stream, but the tests' behavior indicate it should rely solely on the client
+                // headers
                 let content_type = if accepts_multipart_defer {
                     MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE
                 } else if accepts_multipart_subscription {
@@ -211,16 +208,6 @@ impl Plugin for ContentNegotiation {
                     APPLICATION_JSON_HEADER_VALUE
                 };
                 headers.insert(CONTENT_TYPE, content_type);
-
-                let is_stream = response
-                    .context
-                    .extensions()
-                    .with_lock(|lock| lock.get::<ProtocolMode>().is_some());
-                if is_stream {
-                    // Useful when you're using a proxy like nginx which enable proxy_buffering by default
-                    // (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
-                    headers.insert(ACCEL_BUFFERING_HEADER_NAME, ACCEL_BUFFERING_HEADER_VALUE);
-                }
 
                 response
             })
