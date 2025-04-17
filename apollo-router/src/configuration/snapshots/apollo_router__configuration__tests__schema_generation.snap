@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -1810,16 +1811,16 @@ expression: "&schema"
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
         "all": {
-          "default": false,
-          "description": "Include errors from all subgraphs",
-          "type": "boolean"
+          "$ref": "#/definitions/ErrorMode",
+          "description": "#/definitions/ErrorMode"
         },
         "subgraphs": {
           "additionalProperties": {
-            "type": "boolean"
+            "$ref": "#/definitions/SubgraphConfig",
+            "description": "#/definitions/SubgraphConfig"
           },
           "default": {},
-          "description": "Include errors from specific subgraphs",
+          "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
         }
       },
@@ -2756,6 +2757,56 @@ expression: "&schema"
         }
       ]
     },
+    "ErrorMode": {
+      "anyOf": [
+        {
+          "description": "When `true`, Propagate the original error as is. Otherwise, redact it.",
+          "type": "boolean"
+        },
+        {
+          "description": "Allow specific extension keys with required redact_message",
+          "properties": {
+            "allow_extensions_keys": {
+              "description": "Allow specific extension keys",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "redact error messages for all subgraphs",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allow_extensions_keys",
+            "redact_message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Deny specific extension keys with required redact_message",
+          "properties": {
+            "deny_extensions_keys": {
+              "description": "Deny specific extension keys",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "redact error messages for all subgraphs",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "deny_extensions_keys",
+            "redact_message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ErrorRedactionPolicy": {
       "description": "Allow some error fields to be send to Apollo Studio even when `redact` is true.",
       "oneOf": [
@@ -2800,7 +2851,7 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "EventLevel": {
+    "EventLevelConfig": {
       "enum": [
         "info",
         "warn",
@@ -2854,8 +2905,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_ConnectorSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2885,8 +2936,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_RouterSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2916,8 +2967,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2947,8 +2998,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -4106,10 +4157,14 @@ expression: "&schema"
           },
           "type": "array"
         },
-        "issuer": {
-          "description": "Expected issuer for tokens verified by that JWKS",
+        "issuers": {
+          "description": "Expected issuers for tokens verified by that JWKS",
+          "items": {
+            "type": "string"
+          },
           "nullable": true,
-          "type": "string"
+          "type": "array",
+          "uniqueItems": true
         },
         "poll_interval": {
           "default": {
@@ -5816,6 +5871,31 @@ expression: "&schema"
         }
       ]
     },
+    "Server": {
+      "additionalProperties": false,
+      "properties": {
+        "http": {
+          "$ref": "#/definitions/ServerHttpConfig",
+          "description": "#/definitions/ServerHttpConfig"
+        }
+      },
+      "type": "object"
+    },
+    "ServerHttpConfig": {
+      "additionalProperties": false,
+      "description": "Configuration for HTTP",
+      "properties": {
+        "header_read_timeout": {
+          "default": {
+            "nanos": 0,
+            "secs": 10
+          },
+          "description": "Header read timeout in human-readable format; defaults to 10s",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "Source": {
       "oneOf": [
         {
@@ -5971,8 +6051,8 @@ expression: "&schema"
     "StandardEventConfig_for_ConnectorSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -5981,8 +6061,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_ConnectorSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -5996,8 +6076,8 @@ expression: "&schema"
     "StandardEventConfig_for_RouterSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -6006,8 +6086,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_RouterSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -6021,8 +6101,8 @@ expression: "&schema"
     "StandardEventConfig_for_SubgraphSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -6031,8 +6111,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_SubgraphSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -6046,8 +6126,8 @@ expression: "&schema"
     "StandardEventConfig_for_SupergraphSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -6056,8 +6136,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_SupergraphSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -6237,6 +6317,91 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "SubgraphConfig": {
+      "anyOf": [
+        {
+          "description": "Enable or disable error redaction for a subgraph",
+          "type": "boolean"
+        },
+        {
+          "description": "Allow specific error extension keys for a subgraph",
+          "properties": {
+            "allow_extensions_keys": {
+              "description": "Allow specific extension keys for a subgraph. Will extending global allow list or override a global deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "exclude_global_keys": {
+              "default": [],
+              "description": "Exclude specific extension keys from global allow/deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "Redact error messages for a subgraph",
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allow_extensions_keys"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Deny specific error extension keys for a subgraph",
+          "properties": {
+            "deny_extensions_keys": {
+              "description": "Allow specific extension keys for a subgraph. Will extending global deny list or override a global allow list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "exclude_global_keys": {
+              "default": [],
+              "description": "Exclude specific extension keys from global allow/deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "Redact error messages for a subgraph",
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "deny_extensions_keys"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Override global configuration, but don't allow or deny any new keys explicitly",
+          "properties": {
+            "exclude_global_keys": {
+              "default": [],
+              "description": "Exclude specific extension keys from global allow/deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "Redact error messages for a subgraph",
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      ]
     },
     "SubgraphConfiguration_for_CommonBatchingConfig": {
       "description": "Configuration options pertaining to the subgraph server component.",
@@ -9007,6 +9172,10 @@ expression: "&schema"
     "sandbox": {
       "$ref": "#/definitions/Sandbox",
       "description": "#/definitions/Sandbox"
+    },
+    "server": {
+      "$ref": "#/definitions/Server",
+      "description": "#/definitions/Server"
     },
     "subscription": {
       "$ref": "#/definitions/SubscriptionConfig",

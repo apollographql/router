@@ -237,7 +237,7 @@ impl RawResponse {
                 let error = error
                     .extension_code(extension_code)
                     .build()
-                    .add_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
+                    .with_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
 
                 if let Some(debug) = debug_context {
                     debug
@@ -567,7 +567,7 @@ async fn deserialize_response<T: HttpBody>(
             )
             .path(path)
             .build()
-            .add_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
+            .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
     let path: Path = response_key.into();
@@ -578,37 +578,34 @@ async fn deserialize_response<T: HttpBody>(
     let log_response_level = context
         .extensions()
         .with_lock(|lock| lock.get::<ConnectorEventResponse>().cloned())
-        .and_then(|event| match event.0.condition() {
-            Some(condition) => {
-                // Create a temporary response here so we can evaluate the condition. This response
-                // is missing any information about the mapped response, because we don't have that
-                // yet. This means that we cannot correctly evaluate any condition that relies on
-                // the mapped response data or mapping problems. But we can't wait until we do have
-                // that information, because this is the only place we have the body bytes (without
-                // making an expensive clone of the body). So we either need to not expose any
-                // selector which can be used as a condition that requires mapping information, or
-                // we must document that such selectors cannot be used as conditions on standard
-                // connectors events.
+        .and_then(|event| {
+            // Create a temporary response here so we can evaluate the condition. This response
+            // is missing any information about the mapped response, because we don't have that
+            // yet. This means that we cannot correctly evaluate any condition that relies on
+            // the mapped response data or mapping problems. But we can't wait until we do have
+            // that information, because this is the only place we have the body bytes (without
+            // making an expensive clone of the body). So we either need to not expose any
+            // selector which can be used as a condition that requires mapping information, or
+            // we must document that such selectors cannot be used as conditions on standard
+            // connectors events.
 
-                let response = connector::request_service::Response {
-                    context: context.clone(),
-                    connector: connector.clone(),
-                    transport_result: Ok(TransportResponse::Http(HttpResponse {
-                        inner: parts.clone(),
-                    })),
-                    mapped_response: MappedResponse::Data {
-                        data: Value::Null,
-                        key: response_key.clone(),
-                        problems: vec![],
-                    },
-                };
-                if condition.lock().evaluate_response(&response) {
-                    Some(event.0.level())
-                } else {
-                    None
-                }
+            let response = connector::request_service::Response {
+                context: context.clone(),
+                connector: connector.clone(),
+                transport_result: Ok(TransportResponse::Http(HttpResponse {
+                    inner: parts.clone(),
+                })),
+                mapped_response: MappedResponse::Data {
+                    data: Value::Null,
+                    key: response_key.clone(),
+                    problems: vec![],
+                },
+            };
+            if event.condition.evaluate_response(&response) {
+                Some(event.level)
+            } else {
+                None
             }
-            None => Some(event.0.level()),
         });
 
     if let Some(level) = log_response_level {
@@ -687,6 +684,7 @@ async fn deserialize_response<T: HttpBody>(
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use apollo_compiler::Schema;
@@ -698,9 +696,9 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
+    use http::Uri;
     use insta::assert_debug_snapshot;
     use itertools::Itertools;
-    use url::Url;
 
     use crate::Context;
     use crate::graphql;
@@ -723,7 +721,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -835,7 +833,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -952,7 +950,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
                 headers: Default::default(),
@@ -1078,7 +1076,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -1206,7 +1204,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
@@ -1371,7 +1369,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1407,7 +1405,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1443,7 +1441,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1474,7 +1472,7 @@ mod tests {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),

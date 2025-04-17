@@ -21,23 +21,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -180,23 +164,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -288,23 +256,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/in
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/,
             ),
             connect_template: URLTemplate {
                 base: None,
