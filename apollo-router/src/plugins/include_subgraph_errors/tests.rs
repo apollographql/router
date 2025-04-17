@@ -38,13 +38,11 @@ async fn build_harness(
 
 async fn run_test_case(
     config: &Value,
-    mock_responses: &[&str], // Raw bytes representing the *original* supergraph response
+    mock_responses: &[&str], // The array of responses
     snapshot_suffix: &str,   // Suffix for the snapshot file name
 ) {
     let harness = build_harness(config).await.expect("plugin should load");
 
-    // Parse the raw bytes into the mock response element(s)
-    // Assuming a single response element for simplicity in these tests
     let mock_response_elements = mock_responses
         .iter()
         .map(|response| {
