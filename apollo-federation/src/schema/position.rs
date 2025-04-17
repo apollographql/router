@@ -266,14 +266,6 @@ impl TypeDefinitionPosition {
         Ok(())
     }
 
-    pub(crate) fn has_applied_directive(
-        &self,
-        _schema: &FederationSchema,
-        _directive_name: &Name,
-    ) -> bool {
-        todo!();
-    }
-
     pub(crate) fn remove_extensions(
         &self,
         schema: &mut FederationSchema,
