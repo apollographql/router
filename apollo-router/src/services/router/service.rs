@@ -47,9 +47,11 @@ use crate::http_ext;
 use crate::json_ext::Value;
 use crate::layers::DEFAULT_BUFFER_SIZE;
 use crate::layers::ServiceBuilderExt;
+use crate::metrics::count_operation_error_codes;
 use crate::metrics::count_operation_errors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::plugins::content_negotiation::invalid_accept_header_response;
 use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
@@ -279,7 +281,8 @@ impl RouterService {
         let ClientRequestAccepts {
             wildcard: accepts_wildcard,
             json: accepts_json,
-            ..
+            multipart_defer: accepts_multipart_defer,
+            multipart_subscription: accepts_multipart_subscription,
         } = context
             .extensions()
             .with_lock(|lock| lock.get().cloned())
@@ -353,7 +356,7 @@ impl RouterService {
                         response: http::Response::from_parts(parts, router::body::from_bytes(body)),
                         context,
                     })
-                } else {
+                } else if accepts_multipart_defer || accepts_multipart_subscription {
                     if !response.errors.is_empty() {
                         count_operation_errors(
                             &response.errors,
@@ -386,6 +389,15 @@ impl RouterService {
                     };
 
                     Ok(RouterResponse { response, context })
+                } else {
+                    count_operation_error_codes(
+                        &["INVALID_ACCEPT_HEADER"],
+                        &context,
+                        &self.apollo_telemetry_config.errors,
+                    );
+
+                    // this should be unreachable due to a previous check, but just to be sure...
+                    Ok(invalid_accept_header_response().into())
                 }
             }
         }

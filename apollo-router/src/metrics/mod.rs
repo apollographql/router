@@ -1338,7 +1338,6 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
-#[cfg(test)]
 pub(crate) fn count_operation_error_codes(
     codes: &[&str],
     context: &Context,

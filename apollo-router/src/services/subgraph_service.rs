@@ -1810,7 +1810,10 @@ mod tests {
     ) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON))
+                .header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
+                )
                 .status(StatusCode::UNAUTHORIZED)
                 .body(r#"invalid"#.into())
                 .unwrap())
@@ -1836,7 +1839,10 @@ mod tests {
     async fn emulate_subgraph_application_graphql_response(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
-                .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_GRAPHQL_JSON))
+                .header(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static(APPLICATION_GRAPHQL_JSON),
+                )
                 .status(StatusCode::OK)
                 .body(r#"{"data": null}"#.into())
                 .unwrap())

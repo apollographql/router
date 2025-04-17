@@ -53,7 +53,7 @@ pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
 /// The `ContentNegotiation` plugin provides request and response layers at the router service.
 ///
 /// # Request
-/// The request layer rejects requests that do not have an expected `Content-Type`, or that have an 
+/// The request layer rejects requests that do not have an expected `Content-Type`, or that have an
 /// `Accept` header that is not supported by the router.
 ///
 /// In particular:
@@ -62,7 +62,7 @@ pub(crate) const MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE: HeaderValue =
 ///     multipart types.
 ///
 /// It will also add a `ClientRequestAccepts` value to the context if the request is valid.
-/// 
+///
 /// # Response
 /// The response layer sets the `CONTENT_TYPE` header, using the `ClientRequestAccepts` value from
 /// the context (set on the request side of this plugin). It will also set the `VARY` header if it
@@ -75,64 +75,16 @@ struct ContentNegotiation {}
 struct Config {}
 
 impl ContentNegotiation {
-    /// Helper to build a `RouterBody` containing a `graphql::Error` with the provided extension
-    /// code and message.
-    fn error_response_body(extension_code: &str, message: String) -> RouterBody {
-        router::body::from_bytes(
-            serde_json::json!({
-                "errors": [
-                    graphql::Error::builder()
-                        .message(message)
-                        .extension_code(extension_code)
-                        .build()
-                ]
-            })
-            .to_string(),
-        )
-    }
-
-    fn invalid_content_type_header_response() -> http::Response<RouterBody> {
-        let message = format!(
-            r#"'content-type' header must be one of: {:?} or {:?}"#,
-            APPLICATION_JSON, APPLICATION_GRAPHQL_JSON,
-        );
-        http::Response::builder()
-            .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-            .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_JSON))
-            .body(Self::error_response_body(
-                "INVALID_CONTENT_TYPE_HEADER",
-                message,
-            ))
-            .expect("cannot fail")
-    }
-
-    fn invalid_accept_header_response() -> http::Response<RouterBody> {
-        let message = format!(
-            r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
-            APPLICATION_JSON,
-            APPLICATION_GRAPHQL_JSON,
-            MULTIPART_SUBSCRIPTION_ACCEPT,
-            MULTIPART_DEFER_ACCEPT_HEADER_VALUE
-        );
-        http::Response::builder()
-            .status(StatusCode::NOT_ACCEPTABLE)
-            .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_JSON))
-            .body(Self::error_response_body("INVALID_ACCEPT_HEADER", message))
-            .expect("cannot fail")
-    }
-    
     fn handle_request(request: router::Request) -> ControlFlow<router::Response, router::Request> {
         let valid_content_type_header = request.router_request.method() == Method::GET
             || content_type_includes_json(request.router_request.headers());
         if !valid_content_type_header {
-            return ControlFlow::Break(Self::invalid_content_type_header_response().into());
+            return ControlFlow::Break(invalid_content_type_header_response().into());
         }
 
         let accepts = parse_accept_header(request.router_request.headers());
         if !accepts.is_valid() {
-            return ControlFlow::Break(
-                Self::invalid_accept_header_response().into(),
-            );
+            return ControlFlow::Break(invalid_accept_header_response().into());
         }
 
         request
@@ -285,6 +237,51 @@ fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
         // We don't have a VARY header, add one with value "origin"
         headers.insert(VARY, ORIGIN_HEADER_VALUE);
     }
+}
+
+/// Helper to build a `RouterBody` containing a `graphql::Error` with the provided extension
+/// code and message.
+fn error_response_body(extension_code: &str, message: String) -> RouterBody {
+    router::body::from_bytes(
+        serde_json::json!({
+            "errors": [
+                graphql::Error::builder()
+                    .message(message)
+                    .extension_code(extension_code)
+                    .build()
+            ]
+        })
+        .to_string(),
+    )
+}
+
+/// Helper to build an HTTP response with a standardized invalid `CONTENT_TYPE` header message.
+fn invalid_content_type_header_response() -> http::Response<RouterBody> {
+    let message = format!(
+        r#"'content-type' header must be one of: {:?} or {:?}"#,
+        APPLICATION_JSON, APPLICATION_GRAPHQL_JSON,
+    );
+    http::Response::builder()
+        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+        .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_JSON))
+        .body(error_response_body("INVALID_CONTENT_TYPE_HEADER", message))
+        .expect("cannot fail")
+}
+
+/// Helper to build an HTTP response with a standardized invalid `ACCEPT` header message.
+pub(crate) fn invalid_accept_header_response() -> http::Response<RouterBody> {
+    let message = format!(
+        r#"'accept' header must be one of: \"*/*\", {:?}, {:?}, {:?} or {:?}"#,
+        APPLICATION_JSON,
+        APPLICATION_GRAPHQL_JSON,
+        MULTIPART_SUBSCRIPTION_ACCEPT,
+        MULTIPART_DEFER_ACCEPT_HEADER_VALUE
+    );
+    http::Response::builder()
+        .status(StatusCode::NOT_ACCEPTABLE)
+        .header(CONTENT_TYPE, HeaderValue::from_static(APPLICATION_JSON))
+        .body(error_response_body("INVALID_ACCEPT_HEADER", message))
+        .expect("cannot fail")
 }
 
 #[cfg(test)]
