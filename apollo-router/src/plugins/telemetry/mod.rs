@@ -1140,7 +1140,7 @@ impl Telemetry {
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
         custom_instruments: SupergraphInstruments,
-        mut custom_events: SupergraphEvents,
+        custom_events: SupergraphEvents,
         custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
         let res = match result {

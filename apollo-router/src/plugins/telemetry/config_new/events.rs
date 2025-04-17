@@ -225,7 +225,7 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
     }
 
     pub(crate) fn on_response(&mut self, response: &router::Response) {
-        if let Some(response_event) = &mut self.response {
+        if let Some(response_event) = &self.response {
             if !response_event.condition.evaluate_response(response) {
                 return;
             }
@@ -275,7 +275,7 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &mut self.error {
+        if let Some(error_event) = &self.error {
             if !error_event.condition.evaluate_error(error, ctx) {
                 return;
             }
@@ -373,14 +373,14 @@ impl
         }
     }
 
-    pub(crate) fn on_response_event(&mut self, response: &graphql::Response, ctx: &Context) {
-        for custom_event in &mut self.custom {
+    pub(crate) fn on_response_event(&self, response: &graphql::Response, ctx: &Context) {
+        for custom_event in &self.custom {
             custom_event.on_response_event(response, ctx);
         }
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &mut self.error {
+        if let Some(error_event) = &self.error {
             if !error_event.condition.evaluate_error(error, ctx) {
                 return;
             }
@@ -433,7 +433,7 @@ impl CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes,
     }
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
-        if let Some(error_event) = &mut self.error {
+        if let Some(error_event) = &self.error {
             if !error_event.condition.evaluate_error(error, ctx) {
                 return;
             }
@@ -706,7 +706,7 @@ where
         log_event(self.level, &self.name, attrs, &self.message);
     }
 
-    pub(crate) fn on_response_event(&mut self, response: &EventResponse, ctx: &Context) {
+    pub(crate) fn on_response_event(&self, response: &EventResponse, ctx: &Context) {
         if self.event_on != EventOn::EventResponse {
             return;
         }
