@@ -17,9 +17,9 @@ use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
 use either::Either;
 use http::HeaderName;
+use http::Uri;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
-use url::Url;
 
 use super::ConnectId;
 use super::JSONSelection;
@@ -339,7 +339,7 @@ fn extract_header_references<'a>(
 // --- HTTP JSON ---------------------------------------------------------------
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
-    pub source_url: Option<Url>,
+    pub source_url: Option<Uri>,
     pub connect_template: URLTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
@@ -655,7 +655,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r#"
+        assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -687,21 +687,7 @@ mod tests {
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
-                        Url {
-                            scheme: "https",
-                            cannot_be_a_base: false,
-                            username: "",
-                            password: None,
-                            host: Some(
-                                Domain(
-                                    "jsonplaceholder.typicode.com",
-                                ),
-                            ),
-                            port: None,
-                            path: "/",
-                            query: None,
-                            fragment: None,
-                        },
+                        https://jsonplaceholder.typicode.com/,
                     ),
                     connect_template: URLTemplate {
                         base: None,
@@ -818,21 +804,7 @@ mod tests {
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
-                        Url {
-                            scheme: "https",
-                            cannot_be_a_base: false,
-                            username: "",
-                            password: None,
-                            host: Some(
-                                Domain(
-                                    "jsonplaceholder.typicode.com",
-                                ),
-                            ),
-                            port: None,
-                            path: "/",
-                            query: None,
-                            fragment: None,
-                        },
+                        https://jsonplaceholder.typicode.com/,
                     ),
                     connect_template: URLTemplate {
                         base: None,
@@ -932,7 +904,7 @@ mod tests {
                 ),
             },
         }
-        "#);
+        "###);
     }
 
     #[test]
