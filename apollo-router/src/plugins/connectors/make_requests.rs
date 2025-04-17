@@ -1306,9 +1306,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("field").unwrap(),
             entity_resolver: Some(super::EntityResolver::Explicit),
@@ -2090,9 +2088,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("id field").unwrap(),
             entity_resolver: Some(super::EntityResolver::TypeBatch),
