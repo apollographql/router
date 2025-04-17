@@ -11,10 +11,10 @@ use crate::plugins::test::PluginTestHarness;
 use crate::services::supergraph; // Required for collect
 
 const PRODUCT_ERROR_RESPONSE: &[&str] = &[
-    r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR", "apollo.subgraph.name": "products"}}]}"#,
+    r#"{"data":{"topProducts":null},"errors":[{"message":"Could not query products","path":[],"extensions":{"test":"value","code":"FETCH_ERROR", "apollo.private.subgraph.name": "products"}}]}"#,
 ];
 const ACCOUNT_ERROR_RESPONSE: &[&str] = &[
-    r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL", "apollo.subgraph.name": "accounts"}}]}"#,
+    r#"{"data":null,"errors":[{"message":"Account service error","path":[],"extensions":{"code":"ACCOUNT_FAIL", "apollo.private.subgraph.name": "accounts"}}]}"#,
 ];
 const VALID_RESPONSE: &[&str] = &[
     r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#,
@@ -23,8 +23,8 @@ const NON_SUBGRAPH_ERROR: &[&str] = &[
     r#"{"data":{"topProducts":null},"errors":[{"message":"Authentication error","path":[],"extensions":{"test":"value","code":"AUTH_ERROR"}}]}"#,
 ];
 const INCREMENTAL_RESPONSE: &[&str] = &[
-    r#"{"data":{"topProducts":null},"errors":[{"message":"Main errors error","path":[],"extensions":{"test":"value","code":"MAIN_ERROR", "apollo.subgraph.name": "products"}}]}"#,
-    r#"{"incremental":[{"data":{"topProducts":null},"errors":[{"message":"Incremental error","path":[],"extensions":{"test":"value","code":"INCREMENTAL_ERROR", "apollo.subgraph.name": "products"}}]}]}"#,
+    r#"{"data":{"topProducts":null},"errors":[{"message":"Main errors error","path":[],"extensions":{"test":"value","code":"MAIN_ERROR", "apollo.private.subgraph.name": "products"}}]}"#,
+    r#"{"incremental":[{"data":{"topProducts":null},"errors":[{"message":"Incremental error","path":[],"extensions":{"test":"value","code":"INCREMENTAL_ERROR", "apollo.private.subgraph.name": "products"}}]}]}"#,
 ];
 
 async fn build_harness(
