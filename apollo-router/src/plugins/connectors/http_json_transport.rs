@@ -161,7 +161,9 @@ fn make_uri(
     let connect_query = connect_path_and_query.query().unwrap_or("");
 
     // Merge paths (ensuring proper slash handling)
-    let merged_path = if source_path.ends_with('/') {
+    let merged_path = if connect_path.is_empty() || connect_path == "/" {
+        source_path.to_string()
+    } else if source_path.ends_with('/') {
         format!("{}{}", source_path, connect_path.trim_start_matches('/'))
     } else if connect_path.starts_with('/') {
         format!("{}{}", source_path, connect_path)
@@ -269,72 +271,129 @@ mod test_make_uri {
         }};
     }
 
-    #[test]
-    fn append_path() {
-        assert_eq!(
-            make_uri(
-                Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
-                &"/hello/42".parse().unwrap(),
-                &Default::default(),
-            )
-            .unwrap()
-            .to_string(),
-            "https://localhost:8080/v1/hello/42"
-        );
-    }
+    #[cfg(test)]
+    mod combining_paths {
+        use pretty_assertions::assert_eq;
+        use rstest::rstest;
 
-    #[test]
-    fn append_path_with_trailing_slash() {
-        assert_eq!(
-            make_uri(
-                Some(&Uri::from_str("https://localhost:8080/").unwrap()),
-                &"/hello/42".parse().unwrap(),
-                &Default::default(),
-            )
-            .unwrap()
-            .to_string(),
-            "https://localhost:8080/hello/42"
-        );
-    }
+        use super::*;
+        #[rstest]
+        #[case::connect_only("https://localhost:8080/v1", "/hello")]
+        #[case::source_only("https://localhost:8080/v1/", "hello")]
+        #[case::neither("https://localhost:8080/v1", "hello")]
+        #[case::both("https://localhost:8080/v1/", "/hello")]
+        fn slashes_between_source_and_connect(
+            #[case] source_uri: &str,
+            #[case] connect_path: &str,
+        ) {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str(source_uri).unwrap()),
+                    &connect_path.parse().unwrap(),
+                    &Default::default(),
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/hello"
+            );
+        }
 
-    #[test]
-    fn append_path_test_with_trailing_slash_and_base_path() {
-        assert_eq!(
-            make_uri(
-                Some(&Uri::from_str("https://localhost:8080/v1/").unwrap()),
-                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &this! { "id": 42 },
-            )
-            .unwrap()
-            .to_string(),
-            "https://localhost:8080/v1/hello/42?id=42"
-        );
-    }
-    #[test]
-    fn append_path_test_with_and_base_path_and_params() {
-        assert_eq!(
-            make_uri(
-                Some(&Uri::from_str("https://localhost:8080/v1?foo=bar").unwrap()),
-                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &this! {"id": 42 },
-            )
-            .unwrap()
-            .to_string(),
-            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-        );
-    }
-    #[test]
-    fn append_path_test_with_and_base_path_and_trailing_slash_and_params() {
-        assert_eq!(
-            make_uri(
-                Some(&Uri::from_str("https://localhost:8080/v1/?foo=bar").unwrap()),
-                &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                &this! {"id": 42 },
-            )
-            .unwrap()
-            .to_string(),
-            "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-        );
+        #[test]
+        fn preserve_trailing_slash_from_connect() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
+                    &"/hello/".parse().unwrap(),
+                    &Default::default(),
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/hello/"
+            );
+        }
+
+        #[test]
+        fn preserve_trailing_slash_from_source() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1/").unwrap()),
+                    &"/".parse().unwrap(),
+                    &Default::default(),
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/"
+            );
+        }
+
+        #[test]
+        fn preserve_no_trailing_slash_from_source() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
+                    &"/".parse().unwrap(),
+                    &Default::default(),
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1"
+            );
+        }
+
+        #[test]
+        fn add_path_before_query_params() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1?something").unwrap()),
+                    &"/hello".parse().unwrap(),
+                    &this! { "id": 42 },
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/hello?something"
+            );
+        }
+
+        #[test]
+        fn trailing_slash_plus_query_params() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1?something").unwrap()),
+                    &"/hello/".parse().unwrap(),
+                    &this! { "id": 42 },
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/hello/?something"
+            );
+        }
+
+        #[test]
+        fn with_merged_query_params() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1?foo=bar").unwrap()),
+                    &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
+                    &this! {"id": 42 },
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/hello/42?foo=bar&id=42"
+            );
+        }
+        #[test]
+        fn with_trailing_slash_in_base_plus_query_params() {
+            assert_eq!(
+                make_uri(
+                    Some(&Uri::from_str("https://localhost:8080/v1/?foo=bar").unwrap()),
+                    &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
+                    &this! {"id": 42 },
+                )
+                .unwrap()
+                .to_string(),
+                "https://localhost:8080/v1/hello/42?foo=bar&id=42"
+            );
+        }
     }
 
     #[test]
