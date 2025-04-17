@@ -1,3 +1,4 @@
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use apollo_compiler::name;
 
@@ -5,7 +6,12 @@ use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::error::FederationError;
 use crate::internal_error;
+use crate::link::federation_spec_definition::FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
+use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::KeyDirective;
 use crate::schema::blueprint::FederationBlueprint;
@@ -233,6 +239,30 @@ impl<S: HasMetadata> Subgraph<S> {
 
     pub(crate) fn schema(&self) -> &FederationSchema {
         self.state.schema()
+    }
+
+    pub(crate) fn extends_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_EXTENDS_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn key_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn provides_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)
+    }
+
+    pub(crate) fn requires_directive_name(&self) -> Result<Option<Name>, FederationError> {
+        self.metadata()
+            .federation_spec_definition()
+            .directive_name_in_schema(self.schema(), &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)
     }
 }
 

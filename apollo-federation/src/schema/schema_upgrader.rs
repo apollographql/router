@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
@@ -12,9 +14,14 @@ use super::position::InterfaceTypeDefinitionPosition;
 use super::position::ObjectFieldDefinitionPosition;
 use super::position::ObjectTypeDefinitionPosition;
 use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::schema::SubgraphMetadata;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
+use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
 use crate::utils::FallibleIterator;
 
 #[derive(Clone, Debug)]
@@ -207,33 +214,140 @@ impl<'a> SchemaUpgrader<'a> {
         todo!();
     }
 
-    fn fix_inactive_provides_and_requires(&self) {
-        todo!();
+    fn fix_inactive_provides_and_requires(&mut self) -> Result<(), FederationError> {
+        remove_inactive_requires_and_provides_from_subgraph(
+            self.original_subgraph.schema(),
+            &mut self.schema,
+        )
     }
 
-    fn remove_type_extensions(&self) {
-        todo!();
+    fn remove_type_extensions(&mut self) -> Result<(), FederationError> {
+        let types: Vec<_> = self.schema.get_types().collect();
+        for ty in types {
+            if !self.is_federation_type_extension(&ty)? && !self.is_root_type_extension(&ty) {
+                continue;
+            }
+            ty.remove_extensions(&mut self.schema)?;
+        }
+        Ok(())
+    }
+
+    /// Whether the type represents a type extension in the sense of federation 1.
+    /// That is, type extensions are a thing in GraphQL, but federation 1 overloads the notion for entities. This method
+    /// returns true if the type is used in the federation 1 sense of an extension.
+    /// We recognize federation 1 type extensions as type extensions that:
+    ///  1. are on object types or interface types (note that federation 1 doesn't really handle interface type extensions properly but it "accepts" them
+    ///     so we do it here too).
+    ///  2. do not have a definition for the same type in the same subgraph (this is a GraphQL extension otherwise).
+    ///
+    /// Not that type extensions in federation 1 generally have a @key, but in reality the code considers something a type extension even without
+    /// it (which one could argue is an unintended bug of fed1 since this leads to various problems). So, we don't check for the presence of @key here.
+    fn is_federation_type_extension(
+        &self,
+        ty: &TypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let type_ = ty.get(self.schema.schema())?;
+        let has_extend = self
+            .original_subgraph
+            .extends_directive_name()?
+            .is_some_and(|extends| type_.directives().has(extends.as_str()));
+        Ok((Self::has_extension_elements(type_) || has_extend)
+            && (type_.is_object() || type_.is_interface())
+            && (has_extend || !Self::has_non_extension_elements(type_)))
+    }
+
+    fn has_extension_elements(ty: &ExtendedType) -> bool {
+        match ty {
+            ExtendedType::Object(obj) => !obj.extensions().is_empty(),
+            ExtendedType::Interface(itf) => !itf.extensions().is_empty(),
+            ExtendedType::Union(u) => !u.extensions().is_empty(),
+            ExtendedType::Enum(e) => !e.extensions().is_empty(),
+            ExtendedType::InputObject(io) => !io.extensions().is_empty(),
+            ExtendedType::Scalar(s) => !s.extensions().is_empty(),
+        }
+    }
+
+    fn has_non_extension_elements(ty: &ExtendedType) -> bool {
+        ty.directives()
+            .iter()
+            .any(|d| d.origin.extension_id().is_none())
+            || Self::has_non_extension_inner_elements(ty)
+    }
+
+    fn has_non_extension_inner_elements(ty: &ExtendedType) -> bool {
+        match ty {
+            ExtendedType::Scalar(_) => false,
+            ExtendedType::Object(t) => {
+                t.implements_interfaces
+                    .iter()
+                    .any(|itf| itf.origin.extension_id().is_none())
+                    || t.fields.values().any(|f| f.origin.extension_id().is_none())
+            }
+            ExtendedType::Interface(t) => {
+                t.implements_interfaces
+                    .iter()
+                    .any(|itf| itf.origin.extension_id().is_none())
+                    || t.fields.values().any(|f| f.origin.extension_id().is_none())
+            }
+            ExtendedType::Union(t) => t.members.iter().any(|m| m.origin.extension_id().is_none()),
+            ExtendedType::Enum(t) => t.values.values().any(|v| v.origin.extension_id().is_none()),
+            ExtendedType::InputObject(t) => {
+                t.fields.values().any(|f| f.origin.extension_id().is_none())
+            }
+        }
+    }
+
+    /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
+    fn is_root_type_extension(&self, pos: &TypeDefinitionPosition) -> bool {
+        if !matches!(pos, TypeDefinitionPosition::Object(_)) || !self.is_root_type(pos) {
+            return false;
+        }
+        let Ok(ty) = pos.get(self.schema.schema()) else {
+            return false;
+        };
+        let has_extends_directive = self
+            .original_subgraph
+            .extends_directive_name()
+            .ok()
+            .flatten()
+            .is_some_and(|extends| ty.directives().has(extends.as_str()));
+
+        has_extends_directive
+            || (Self::has_extension_elements(ty) && !Self::has_non_extension_elements(ty))
+    }
+
+    fn is_root_type(&self, ty: &TypeDefinitionPosition) -> bool {
+        self.schema
+            .schema()
+            .schema_definition
+            .iter_root_operations()
+            .any(|op| op.1.as_str() == ty.type_name().as_str())
     }
 
     fn remove_directives_on_interface(&mut self) -> Result<(), FederationError> {
-        let schema = &mut self.schema;
-        let Some(metadata) = &schema.subgraph_metadata else {
-            return Ok(());
-        };
+        if let Some(key) = self.original_subgraph.key_directive_name()? {
+            for pos in &self
+                .schema
+                .referencers()
+                .get_directive(&key)?
+                .interface_types
+                .clone()
+            {
+                pos.remove_directive_name(&mut self.schema, &key);
 
-        let _provides_directive = metadata
-            .federation_spec_definition()
-            .provides_directive_definition(schema)?;
+                let fields: Vec<_> = pos.fields(self.schema.schema())?.collect();
+                for field in fields {
+                    if let Some(provides) = self.original_subgraph.provides_directive_name()? {
+                        field.remove_directive_name(&mut self.schema, &provides);
+                    }
+                    if let Some(requires) = self.original_subgraph.requires_directive_name()? {
+                        field.remove_directive_name(&mut self.schema, &requires);
+                    }
+                }
+            }
+        }
 
-        let _requires_directive = metadata
-            .federation_spec_definition()
-            .requires_directive_definition(schema)?;
-
-        let _key_directive = metadata
-            .federation_spec_definition()
-            .key_directive_definition(schema)?;
-
-        todo!();
+        Ok(())
     }
 
     fn remove_provides_on_non_composite(&mut self) -> Result<(), FederationError> {
@@ -266,8 +380,61 @@ impl<'a> SchemaUpgrader<'a> {
         Ok(())
     }
 
-    fn remove_unused_externals(&self) {
-        todo!();
+    fn remove_unused_externals(&mut self) -> Result<(), FederationError> {
+        let mut error = MultipleFederationErrors::new();
+        let mut fields_to_remove: HashSet<ObjectOrInterfaceFieldDefinitionPosition> =
+            HashSet::new();
+        let mut types_to_remove: HashSet<ObjectOrInterfaceTypeDefinitionPosition> = HashSet::new();
+        for type_ in self.schema.get_types() {
+            if let Ok(pos) = ObjectOrInterfaceTypeDefinitionPosition::try_from(type_) {
+                let mut has_fields = false;
+                for field in pos.fields(self.schema.schema())? {
+                    has_fields = true;
+                    let field_def = FieldDefinitionPosition::from(field.clone());
+                    if self
+                        .original_subgraph
+                        .metadata()
+                        .is_field_external(&field_def)
+                        && !self.original_subgraph.metadata().is_field_used(&field_def)
+                    {
+                        fields_to_remove.insert(field);
+                    }
+                }
+                if !has_fields {
+                    let is_referenced = match &pos {
+                        ObjectOrInterfaceTypeDefinitionPosition::Object(obj_pos) => self
+                            .schema
+                            .referencers()
+                            .object_types
+                            .get(&obj_pos.type_name)
+                            .is_some_and(|r| r.len() > 0),
+                        ObjectOrInterfaceTypeDefinitionPosition::Interface(itf_pos) => self
+                            .schema
+                            .referencers()
+                            .interface_types
+                            .get(&itf_pos.type_name)
+                            .is_some_and(|r| r.len() > 0),
+                    };
+                    if is_referenced {
+                        error
+                            .errors
+                            .push(SingleFederationError::TypeWithOnlyUnusedExternal {
+                                type_name: pos.type_name().clone(),
+                            });
+                    } else {
+                        types_to_remove.insert(pos);
+                    }
+                }
+            }
+        }
+
+        for field in fields_to_remove {
+            field.remove(&mut self.schema)?;
+        }
+        for type_ in types_to_remove {
+            type_.remove(&mut self.schema)?;
+        }
+        error.into_result()
     }
 
     fn add_shareable(&self) {
