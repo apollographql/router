@@ -261,7 +261,7 @@ impl<'a> SchemaUpgrader<'a> {
                 .iter()
                 .filter_map(|v| v.as_str())
                 .collect::<Vec<_>>()
-                .join(",");
+                .join(" ");
 
             return Ok(Some(combined));
         }
@@ -287,7 +287,7 @@ impl<'a> SchemaUpgrader<'a> {
                     for directive in directives.get_all(directive_name) {
                         if let Ok(arg) = directive.argument_by_name("fields", schema.schema()) {
                             if let Some(new_fields_string) =
-                                SchemaUpgrader::<'a>::make_fields_string_if_not(arg)?
+                                Self::make_fields_string_if_not(arg)?
                             {
                                 change_list.push((
                                     directive.clone(),
@@ -358,8 +358,6 @@ impl<'a> SchemaUpgrader<'a> {
         }
         Ok(())
     }
-
-    // Skip the trait definitions for now - we'll use a simpler approach
 
     fn remove_external_on_interface(&mut self) -> Result<(), FederationError> {
         let schema = &mut self.schema;
