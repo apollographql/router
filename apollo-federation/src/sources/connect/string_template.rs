@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use apollo_compiler::collections::IndexMap;
 use http::Uri;
+use http::uri::PathAndQuery;
 use itertools::Itertools;
 use serde_json_bytes::Value;
 
@@ -124,7 +125,13 @@ impl StringTemplate {
                 }
             };
         }
-        Uri::from_str(result.as_ref()).map_err(|err| Error {
+        if result.contains("://") {
+            Uri::from_str(result.as_ref())
+        } else {
+            // Explicitly set this as a relative URI so it doesn't get confused for a domain name
+            PathAndQuery::from_str(result.as_ref()).map(Uri::from)
+        }
+        .map_err(|err| Error {
             message: format!("Invalid URI: {}", err),
             location: 0..result.as_ref().len(),
         })
@@ -276,6 +283,10 @@ mod encoding {
         /// Write a bit of trusted input without encoding, like a constant piece of a template
         pub(super) fn write_trusted(&mut self, s: &str) {
             self.value.push_str(s)
+        }
+
+        pub(super) fn contains(&self, pattern: &str) -> bool {
+            self.value.contains(pattern)
         }
     }
 
