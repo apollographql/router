@@ -35,6 +35,23 @@ impl Display for ConnectDirectiveCoordinate<'_> {
     }
 }
 
+/// The location of a `@source` directive.
+#[derive(Clone, Copy)]
+pub(super) struct SourceDirectiveCoordinate<'a> {
+    pub(super) directive: &'a Node<Directive>,
+}
+
+impl Display for SourceDirectiveCoordinate<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let Self { directive } = self;
+        write!(
+            f,
+            "`@{connect_directive_name}`",
+            connect_directive_name = directive.name
+        )
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) struct SelectionCoordinate<'a> {
     pub(crate) connect: ConnectDirectiveCoordinate<'a>,

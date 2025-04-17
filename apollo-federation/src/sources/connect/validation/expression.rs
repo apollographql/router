@@ -113,27 +113,6 @@ impl<'schema> Context<'schema> {
         }
     }
 
-    /// Create a context valid for expressions within the `@source` directive
-    pub(super) fn for_source(
-        schema: &'schema SchemaInfo,
-        source: &'schema GraphQLString,
-        code: Code,
-    ) -> Self {
-        let var_lookup: IndexMap<Namespace, Shape> = [
-            (Namespace::Config, Shape::unknown([])),
-            (Namespace::Context, Shape::unknown([])),
-            (Namespace::Request, REQUEST_SHAPE.clone()),
-        ]
-        .into_iter()
-        .collect();
-        Self {
-            schema,
-            var_lookup,
-            source,
-            code,
-        }
-    }
-
     /// Create a context valid for expressions within the errors.message or errors.extension of the `@connect` directive
     /// TODO: We might be able to re-use this for the "selection" field later down the road
     pub(super) fn for_connect_response(
@@ -190,6 +169,52 @@ impl<'schema> Context<'schema> {
                     code,
                 }
             }
+        }
+    }
+
+    /// Create a context valid for expressions within the `@source` directive
+    pub(super) fn for_source(
+        schema: &'schema SchemaInfo,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
+        ]
+        .into_iter()
+        .collect();
+        Self {
+            schema,
+            var_lookup,
+            source,
+            code,
+        }
+    }
+
+    /// Create a context valid for expressions within the errors.message or errors.extension of the `@source` directive
+    /// Note that we can't use stuff like "this" here cause we have no idea what the "type" is when on a @source block
+    pub(super) fn for_source_response(
+        schema: &'schema SchemaInfo,
+        source: &'schema GraphQLString,
+        code: Code,
+    ) -> Self {
+        let var_lookup: IndexMap<Namespace, Shape> = [
+            (Namespace::Config, Shape::unknown([])),
+            (Namespace::Context, Shape::unknown([])),
+            (Namespace::Status, Shape::int([])),
+            (Namespace::Request, REQUEST_SHAPE.clone()),
+            (Namespace::Response, RESPONSE_SHAPE.clone()),
+        ]
+        .into_iter()
+        .collect();
+
+        Self {
+            schema,
+            var_lookup,
+            source,
+            code,
         }
     }
 }
