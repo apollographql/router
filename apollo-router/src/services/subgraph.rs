@@ -21,18 +21,18 @@ use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tower::BoxError;
 
+use crate::Context;
 use crate::error::Error;
 use crate::graphql;
-use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
+use crate::http_ext::header_map;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::QueryHash;
-use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -269,7 +269,7 @@ impl Response {
         *response.headers_mut() = headers.unwrap_or_default();
 
         // Warning: the id argument for this builder is an Option to make that a non breaking change
-        // but this means that if a subgraph response is created explicitely without an id, it will
+        // but this means that if a subgraph response is created explicitly without an id, it will
         // be generated here and not match the id from the subgraph request
         let id = id.unwrap_or_default();
 

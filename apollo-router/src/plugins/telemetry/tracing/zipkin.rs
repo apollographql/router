@@ -49,10 +49,9 @@ impl TracingConfigurator for Config {
     ) -> Result<Builder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let common: opentelemetry_sdk::trace::Config = trace.into();
+        let endpoint = &self.endpoint.to_full_uri(&DEFAULT_ENDPOINT);
         let exporter = opentelemetry_zipkin::new_pipeline()
-            .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |b, endpoint| {
-                b.with_collector_endpoint(endpoint.to_string())
-            })
+            .with_collector_endpoint(endpoint.to_string())
             .with(
                 &common.resource.get(SERVICE_NAME.into()),
                 |builder, service_name| {

@@ -1,13 +1,13 @@
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::subgraph;
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use prost::Message;
 use prost_types::Timestamp;
+use proto::reports::Trace;
+use proto::reports::trace::Node;
 use proto::reports::trace::node::Id::Index;
 use proto::reports::trace::node::Id::ResponseName;
-use proto::reports::trace::Node;
-use proto::reports::Trace;
 use serde_json::json;
 use tower::ServiceExt;
 

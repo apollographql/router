@@ -114,6 +114,7 @@ fn runtime_types_implies(
 
 /// Constructs a set of object types
 /// - Slow: calls `possible_runtime_types` and sorts the result.
+/// - Note: May return an empty set if the type has no runtime types.
 fn get_ground_types(
     ty: &CompositeTypeDefinitionPosition,
     schema: &ValidFederationSchema,
@@ -172,8 +173,7 @@ impl DisplayTypeCondition {
 #[derive(Debug, Clone)]
 pub struct NormalizedTypeCondition {
     // The set of object types that are used for comparison.
-    // - The empty ground_set means the `_Entity` type.
-    // - The ground_set must be non-empty, if it's not the `_Entity` type.
+    // - The ground_set must be non-empty.
     // - The ground_set must be sorted by type name.
     ground_set: Vec<ObjectTypeDefinitionPosition>,
 
@@ -198,15 +198,20 @@ impl std::hash::Hash for NormalizedTypeCondition {
 // Public constructors & accessors
 impl NormalizedTypeCondition {
     /// Construct a new type condition with a single named type condition.
+    /// - Returns None if the name type has no runtime types (an interface with no implementors).
     pub(crate) fn from_type_name(
         name: Name,
         schema: &ValidFederationSchema,
-    ) -> Result<Self, FederationError> {
+    ) -> Result<Option<Self>, FederationError> {
         let ty: CompositeTypeDefinitionPosition = schema.get_type(name)?.try_into()?;
-        Ok(NormalizedTypeCondition {
-            ground_set: get_ground_types(&ty, schema)?,
+        let ground_set = get_ground_types(&ty, schema)?;
+        if ground_set.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(NormalizedTypeCondition {
+            ground_set,
             for_display: DisplayTypeCondition::new(ty),
-        })
+        }))
     }
 
     pub(crate) fn from_object_type(ty: &ObjectTypeDefinitionPosition) -> Self {
@@ -216,24 +221,19 @@ impl NormalizedTypeCondition {
         }
     }
 
+    /// Precondition: `types` must be non-empty.
     pub(crate) fn from_object_types(
         types: impl Iterator<Item = ObjectTypeDefinitionPosition>,
-    ) -> Self {
+    ) -> Result<Self, FederationError> {
         let mut ground_set: Vec<_> = types.collect();
+        if ground_set.is_empty() {
+            bail!("Unexpected empty type list for from_object_types")
+        }
         ground_set.sort_by(|a, b| a.type_name.cmp(&b.type_name));
-        NormalizedTypeCondition {
+        Ok(NormalizedTypeCondition {
             ground_set,
             for_display: DisplayTypeCondition::deduced(),
-        }
-    }
-
-    /// Special constructor with empty conditions (logically contains *all* types).
-    /// - Used for the `_Entity` type.
-    pub(crate) fn unconstrained() -> Self {
-        NormalizedTypeCondition {
-            ground_set: Vec::new(),
-            for_display: DisplayTypeCondition::deduced(),
-        }
+        })
     }
 
     pub(crate) fn ground_set(&self) -> &[ObjectTypeDefinitionPosition] {
@@ -266,7 +266,6 @@ impl NormalizedTypeCondition {
         display_rest.is_empty() && display_first.is_object_type()
     }
 
-    /// precondition: `self` and `other` are not empty.
     pub fn implies(&self, other: &Self) -> bool {
         self.ground_set.iter().all(|t| other.ground_set.contains(t))
     }
@@ -274,6 +273,7 @@ impl NormalizedTypeCondition {
 
 impl NormalizedTypeCondition {
     /// Construct a new type condition with a named type condition added.
+    /// - Returns None if the new type condition is unsatisfiable.
     pub(crate) fn add_type_name(
         &self,
         name: Name,
@@ -282,14 +282,6 @@ impl NormalizedTypeCondition {
         let other_ty: CompositeTypeDefinitionPosition =
             schema.get_type(name.clone())?.try_into()?;
         let other_types = get_ground_types(&other_ty, schema)?;
-        if self.ground_set.is_empty() {
-            // Special case: The `self` is the `_Entity` type.
-            // - Just returns `other`, since _Entity ∩ other = other.
-            return Ok(Some(NormalizedTypeCondition {
-                ground_set: other_types,
-                for_display: DisplayTypeCondition::new(other_ty),
-            }));
-        }
         let ground_set: Vec<ObjectTypeDefinitionPosition> = self
             .ground_set
             .iter()
@@ -313,11 +305,13 @@ impl NormalizedTypeCondition {
         }
     }
 
+    /// Compute the `field`'s type condition considering the parent type condition.
+    /// - Returns None if the resulting type condition has no possible object types.
     fn field_type_condition(
         &self,
         field: &Field,
         schema: &ValidFederationSchema,
-    ) -> Result<Self, FederationError> {
+    ) -> Result<Option<Self>, FederationError> {
         let declared_type = field.ty().inner_named_type();
 
         // Collect all possible object types for the field in the given parent type condition.
@@ -345,22 +339,27 @@ impl NormalizedTypeCondition {
             let pos_types = schema.possible_runtime_types(pos)?;
             ground_types.extend(pos_types.into_iter());
         }
-
-        // Simple case #2 - `declared_type` is same as the collected types.
-        let declared_type_cond =
-            NormalizedTypeCondition::from_type_name(declared_type.clone(), schema)?;
-        if declared_type_cond.ground_set.len() == ground_types.len()
-            && declared_type_cond
-                .ground_set
-                .iter()
-                .all(|t| ground_types.contains(t))
-        {
-            return Ok(declared_type_cond);
+        if ground_types.is_empty() {
+            return Ok(None);
         }
 
-        Ok(NormalizedTypeCondition::from_object_types(
+        // Simple case #2 - `declared_type` is same as the collected types.
+        if let Some(declared_type_cond) =
+            NormalizedTypeCondition::from_type_name(declared_type.clone(), schema)?
+        {
+            if declared_type_cond.ground_set.len() == ground_types.len()
+                && declared_type_cond
+                    .ground_set
+                    .iter()
+                    .all(|t| ground_types.contains(t))
+            {
+                return Ok(Some(declared_type_cond));
+            }
+        }
+
+        Ok(Some(NormalizedTypeCondition::from_object_types(
             ground_types.into_iter(),
-        ))
+        )?))
     }
 }
 
@@ -388,13 +387,34 @@ impl Literal {
 // A clause is a conjunction of literals.
 // Empty Clause means "true".
 // "false" can't be represented. Any cases with false condition must be dropped entirely.
-// This vector must be deduplicated.
+// This vector must be sorted by the variable name.
+// This vector must be deduplicated (every variant appears only once).
+// Thus, no conflicting literals are allowed (e.g., `x` and `¬x`).
 #[derive(Debug, Clone, Default, Eq)]
 pub struct Clause(Vec<Literal>);
 
 impl Clause {
+    pub fn literals(&self) -> &[Literal] {
+        &self.0
+    }
+
     pub fn is_always_true(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// check if `self` implies `other`
+    /// - The literals in `other` is a subset of `self`.
+    pub fn implies(&self, other: &Clause) -> bool {
+        let mut self_variables: IndexMap<Name, bool> = IndexMap::default();
+        // Assume that `self` has no conflicts.
+        for lit in &self.0 {
+            self_variables.insert(lit.variable().clone(), lit.polarity());
+        }
+        other.0.iter().all(|lit| {
+            self_variables
+                .get(lit.variable())
+                .is_some_and(|pol| *pol == lit.polarity())
+        })
     }
 
     /// Creates a clause from a vector of literals.
@@ -420,6 +440,8 @@ impl Clause {
         Clause(buf)
     }
 
+    /// `self` ∧ `other` (logical conjunction of clauses, which is also set-union)
+    /// - Returns None if there is a conflict.
     pub fn concatenate(&self, other: &Clause) -> Option<Clause> {
         let mut variables: IndexMap<Name, bool> = IndexMap::default();
         // Assume that `self` has no conflicts.
@@ -431,6 +453,33 @@ impl Clause {
             let entry = variables.entry(var.clone()).or_insert(lit.polarity());
             if *entry != lit.polarity() {
                 return None; // conflict
+            }
+        }
+        Some(Self::from_variable_map(&variables))
+    }
+
+    /// `self` - `other` (set subtraction)
+    /// - Returns None if `self` and `other` are conflicting.
+    pub fn subtract(&self, other: &Clause) -> Option<Clause> {
+        let mut other_variables: IndexMap<Name, bool> = IndexMap::default();
+        for lit in &other.0 {
+            other_variables.insert(lit.variable().clone(), lit.polarity());
+        }
+
+        let mut variables: IndexMap<Name, bool> = IndexMap::default();
+        for lit in &self.0 {
+            let var = lit.variable();
+            if let Some(pol) = other_variables.get(var) {
+                if *pol == lit.polarity() {
+                    // Match => Skip `lit`
+                    continue;
+                } else {
+                    // Conflict
+                    return None;
+                }
+            } else {
+                // Keep `lit`
+                variables.insert(var.clone(), lit.polarity());
             }
         }
         Some(Self::from_variable_map(&variables))
@@ -641,6 +690,14 @@ impl DefinitionVariant {
         self.sub_selection_response_shape.as_ref()
     }
 
+    pub fn with_updated_clause(&self, boolean_clause: Clause) -> Self {
+        DefinitionVariant {
+            boolean_clause,
+            representative_field: self.representative_field.clone(),
+            sub_selection_response_shape: self.sub_selection_response_shape.clone(),
+        }
+    }
+
     pub fn with_updated_sub_selection_response_shape(&self, new_shape: ResponseShape) -> Self {
         DefinitionVariant {
             boolean_clause: self.boolean_clause.clone(),
@@ -658,6 +715,18 @@ impl DefinitionVariant {
             boolean_clause,
             sub_selection_response_shape,
             representative_field: self.representative_field.clone(),
+        }
+    }
+
+    pub fn new(
+        boolean_clause: Clause,
+        representative_field: Field,
+        sub_selection_response_shape: Option<ResponseShape>,
+    ) -> Self {
+        DefinitionVariant {
+            boolean_clause,
+            representative_field,
+            sub_selection_response_shape,
         }
     }
 }
@@ -687,6 +756,16 @@ impl PossibleDefinitionsPerTypeCondition {
         PossibleDefinitionsPerTypeCondition {
             field_selection_key: self.field_selection_key.clone(),
             conditional_variants: new_variants,
+        }
+    }
+
+    pub fn new(
+        field_selection_key: FieldSelectionKey,
+        conditional_variants: Vec<DefinitionVariant>,
+    ) -> Self {
+        PossibleDefinitionsPerTypeCondition {
+            field_selection_key,
+            conditional_variants,
         }
     }
 
@@ -890,12 +969,8 @@ impl ResponseShapeContext {
         match selection {
             Selection::Field(field) => self.process_field_selection(response_shape, field),
             Selection::FragmentSpread(fragment_spread) => {
-                let fragment_def = self
-                    .fragment_defs
-                    .get(&fragment_spread.fragment_name)
-                    .ok_or_else(|| {
-                        internal_error!("Fragment not found: {}", fragment_spread.fragment_name)
-                    })?;
+                let fragment_def =
+                    get_fragment_definition(&self.fragment_defs, &fragment_spread.fragment_name)?;
                 // Note: `@skip/@include` directives are not allowed on fragment definitions.
                 //       Thus, no need to check their directives for Boolean conditions.
                 self.process_fragment_selection(
@@ -964,19 +1039,21 @@ impl ResponseShapeContext {
             // A brand new context with the new type condition.
             // - Still inherits the boolean conditions for simplification purposes.
             let parent_type = field.selection_set.ty.clone();
-            let type_condition = self
-                .type_condition
-                .field_type_condition(field, &self.schema)?;
-            let context = ResponseShapeContext {
-                schema: self.schema.clone(),
-                fragment_defs: self.fragment_defs.clone(),
-                parent_type,
-                type_condition,
-                inherited_clause,
-                current_clause: Clause::default(), // empty
-                skip_introspection: false,         // false by default
-            };
-            Some(context.process_selection_set(&field.selection_set)?)
+            self.type_condition
+                .field_type_condition(field, &self.schema)?
+                .map(|type_condition| {
+                    let context = ResponseShapeContext {
+                        schema: self.schema.clone(),
+                        fragment_defs: self.fragment_defs.clone(),
+                        parent_type,
+                        type_condition,
+                        inherited_clause,
+                        current_clause: Clause::default(), // empty
+                        skip_introspection: false,         // false by default
+                    };
+                    context.process_selection_set(&field.selection_set)
+                })
+                .transpose()?
         };
         // Record this selection's definition.
         let value = response_shape
@@ -1081,6 +1158,16 @@ fn get_operation_and_fragment_definitions(
     Ok((first.clone(), fragment_defs))
 }
 
+fn get_fragment_definition<'a>(
+    fragment_defs: &'a Arc<IndexMap<Name, Node<Fragment>>>,
+    fragment_name: &Name,
+) -> Result<&'a Node<Fragment>, FederationError> {
+    let fragment_def = fragment_defs
+        .get(fragment_name)
+        .ok_or_else(|| internal_error!("Fragment definition not found: {}", fragment_name))?;
+    Ok(fragment_def)
+}
+
 pub fn compute_response_shape_for_operation(
     operation_doc: &Valid<ExecutableDocument>,
     schema: &ValidFederationSchema,
@@ -1090,7 +1177,11 @@ pub fn compute_response_shape_for_operation(
     // Start a new root context and process the root selection set.
     // - Not using `process_selection_set` because there is no parent context.
     let parent_type = operation.selection_set.ty.clone();
-    let type_condition = NormalizedTypeCondition::from_type_name(parent_type.clone(), schema)?;
+    let Some(type_condition) =
+        NormalizedTypeCondition::from_type_name(parent_type.clone(), schema)?
+    else {
+        bail!("Unexpected empty type condition for the root type: {parent_type}")
+    };
     let context = ResponseShapeContext {
         schema: schema.clone(),
         fragment_defs,
@@ -1110,10 +1201,12 @@ pub fn compute_the_root_type_condition_for_operation(
     Ok(operation.selection_set.ty.clone())
 }
 
+/// Entity fetch operation may have multiple entity selections.
+/// This function returns a vector of response shapes per each individual entity selection.
 pub fn compute_response_shape_for_entity_fetch_operation(
     operation_doc: &Valid<ExecutableDocument>,
     schema: &ValidFederationSchema,
-) -> Result<ResponseShape, FederationError> {
+) -> Result<Vec<ResponseShape>, FederationError> {
     let (operation, fragment_defs) = get_operation_and_fragment_definitions(operation_doc)?;
 
     // drill down the `_entities` selection set
@@ -1131,24 +1224,76 @@ pub fn compute_response_shape_for_entity_fetch_operation(
         bail!("Entity fetch is expected to have a field selection named `_entities`")
     }
 
-    // Start a new root context and process the `_entities` selection set.
-    // - Not using `process_selection_set` because there is no parent context.
-    let parent_type = crate::subgraph::spec::ENTITY_UNION_NAME.clone();
-    let type_condition = NormalizedTypeCondition::unconstrained();
+    field
+        .selection_set
+        .selections
+        .iter()
+        .map(|selection| {
+            let type_condition = get_fragment_type_condition(&fragment_defs, selection)?;
+            let Some(normalized_type_condition) =
+                NormalizedTypeCondition::from_type_name(type_condition.clone(), schema)?
+            else {
+                bail!("Unexpected empty type condition for the entity type: {type_condition}")
+            };
+            let context = ResponseShapeContext {
+                schema: schema.clone(),
+                fragment_defs: fragment_defs.clone(),
+                parent_type: type_condition.clone(),
+                type_condition: normalized_type_condition,
+                inherited_clause: Clause::default(), // empty
+                current_clause: Clause::default(),   // empty
+                skip_introspection: false,           // false by default
+            };
+            let mut response_shape = ResponseShape::new(type_condition);
+            context.process_selection(&mut response_shape, selection)?;
+            Ok(response_shape)
+        })
+        .collect()
+}
+
+fn get_fragment_type_condition(
+    fragment_defs: &Arc<FragmentMap>,
+    selection: &Selection,
+) -> Result<Name, FederationError> {
+    Ok(match selection {
+        Selection::FragmentSpread(fragment_spread) => {
+            let fragment_def =
+                get_fragment_definition(fragment_defs, &fragment_spread.fragment_name)?;
+            fragment_def.type_condition().clone()
+        }
+        Selection::InlineFragment(inline) => {
+            let Some(type_condition) = &inline.type_condition else {
+                bail!(
+                    "Expected a type condition on the inline fragment under the `_entities` selection"
+                )
+            };
+            type_condition.clone()
+        }
+        _ => bail!("Expected a fragment under the `_entities` selection"),
+    })
+}
+
+/// Used for field sets like `@key`/`@requires` fields.
+pub fn compute_response_shape_for_selection_set(
+    schema: &ValidFederationSchema,
+    selection_set: &SelectionSet,
+) -> Result<ResponseShape, FederationError> {
+    let type_condition = &selection_set.ty;
+    let Some(normalized_type_condition) =
+        NormalizedTypeCondition::from_type_name(type_condition.clone(), schema)?
+    else {
+        bail!("Unexpected empty type condition for field set: {type_condition}")
+    };
     let context = ResponseShapeContext {
         schema: schema.clone(),
-        fragment_defs,
-        parent_type: parent_type.clone(),
-        type_condition: type_condition.clone(),
+        fragment_defs: Default::default(), // empty
+        parent_type: type_condition.clone(),
+        type_condition: normalized_type_condition,
         inherited_clause: Clause::default(), // empty
         current_clause: Clause::default(),   // empty
         skip_introspection: false,           // false by default
     };
-    // Note: Can't call `context.process_selection_set` here, since the type condition is
-    //       special for the `_entities` field.
-    let mut response_shape = ResponseShape::new(parent_type);
-    context.process_selection_set_within(&mut response_shape, &field.selection_set)?;
-    Ok(response_shape)
+    context.process_selection_set(selection_set)
 }
 
 //==================================================================================================
@@ -1173,8 +1318,7 @@ impl fmt::Display for DisplayTypeCondition {
 impl fmt::Display for NormalizedTypeCondition {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.ground_set.is_empty() {
-            write!(f, "<any>")?;
-            return Ok(());
+            return Err(fmt::Error);
         }
 
         write!(f, "{}", self.for_display)?;

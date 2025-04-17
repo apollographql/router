@@ -2,13 +2,14 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ffi::OsStr;
 use std::sync::Arc;
 
-use apollo_router::Context;
 use apollo_router::_private::create_test_service_factory_from_yaml;
+use apollo_router::Configuration;
+use apollo_router::Context;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -16,14 +17,13 @@ use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use apollo_router::test_harness::mocks::persisted_queries::*;
-use apollo_router::Configuration;
 use futures::StreamExt;
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
 use parking_lot::Mutex;
@@ -234,7 +234,7 @@ async fn queries_should_work_over_post() {
 async fn service_errors_should_be_propagated() {
     let message = "Unknown operation named \"invalidOperationName\"";
     let mut extensions_map = serde_json_bytes::map::Map::new();
-    extensions_map.insert("code", "GRAPHQL_VALIDATION_FAILED".into());
+    extensions_map.insert("code", "GRAPHQL_UNKNOWN_OPERATION_NAME".into());
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
         .extensions(extensions_map)
@@ -430,16 +430,12 @@ async fn persisted_queries() {
         "name": "Ada Lovelace"
       }
     });
-    let map = [(
-        FullPersistedQueryOperationId {
-            operation_id: PERSISTED_QUERY_ID.to_string(),
-            client_name: None,
-        },
-        PERSISTED_QUERY_BODY.to_string(),
-    )]
-    .into_iter()
-    .collect();
-    let (_mock_guard, uplink_config) = mock_pq_uplink(&map).await;
+    let manifest = PersistedQueryManifest::from(vec![ManifestOperation {
+        id: PERSISTED_QUERY_ID.to_string(),
+        body: PERSISTED_QUERY_BODY.to_string(),
+        client_name: None,
+    }]);
+    let (_mock_guard, uplink_config) = mock_pq_uplink(&manifest).await;
 
     let config = serde_json::json!({
         "persisted_queries": {
@@ -471,12 +467,14 @@ async fn persisted_queries() {
     let actual = query_with_router(router.clone(), pq_request(UNKNOWN_QUERY_ID)).await;
     assert_eq!(
         actual.errors,
-        vec![apollo_router::graphql::Error::builder()
-            .message(format!(
-                "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
-            ))
-            .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
-            .build()]
+        vec![
+            apollo_router::graphql::Error::builder()
+                .message(format!(
+                    "Persisted query '{UNKNOWN_QUERY_ID}' not found in the persisted query list"
+                ))
+                .extension_code("PERSISTED_QUERY_NOT_IN_LIST")
+                .build()
+        ]
     );
     assert_eq!(actual.data, None);
     assert_eq!(registry.totals(), hashmap! {"accounts".to_string() => 1});
@@ -1107,11 +1105,13 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router.clone(), unknown_operation_name).await;
     // "## GraphQLUnknownOperationName\n"
-    assert!(response
-        .context
-        .get::<_, String>("apollo::supergraph::operation_id")
-        .unwrap()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, String>("apollo::supergraph::operation_id")
+            .unwrap()
+            .is_none()
+    );
 
     let validation_error: router::Request = supergraph::Request::fake_builder()
         .query(
@@ -1130,11 +1130,13 @@ async fn query_operation_id() {
 
     let response = http_query_with_router(router, validation_error).await;
     // "## GraphQLValidationFailure\n"
-    assert!(response
-        .context
-        .get::<_, String>("apollo::supergraph::operation_id")
-        .unwrap()
-        .is_none());
+    assert!(
+        response
+            .context
+            .get::<_, String>("apollo::supergraph::operation_id")
+            .unwrap()
+            .is_none()
+    );
 }
 
 async fn http_query_rust(

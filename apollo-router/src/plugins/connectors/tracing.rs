@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::expand::Connectors;
+use opentelemetry::KeyValue;
 use opentelemetry::metrics::MeterProvider as _;
 use opentelemetry::metrics::ObservableGauge;
-use opentelemetry::KeyValue;
 
 use crate::metrics::meter_provider;
 
@@ -48,13 +48,13 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
-    use apollo_federation::sources::connect::expand::Connectors;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::sources::connect::expand::Connectors;
     use url::Url;
 
     use crate::metrics::FutureMetricsExt as _;
@@ -87,6 +87,9 @@ mod tests {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
 
         let connectors = Connectors {
@@ -99,6 +102,7 @@ mod tests {
                 .into(),
             ),
             labels_by_service_name: Default::default(),
+            source_config_keys: Default::default(),
         };
 
         assert_eq!(

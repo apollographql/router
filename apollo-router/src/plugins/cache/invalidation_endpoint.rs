@@ -3,9 +3,9 @@ use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
-use http::header::AUTHORIZATION;
 use http::Method;
 use http::StatusCode;
+use http::header::AUTHORIZATION;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -18,13 +18,13 @@ use tracing_futures::Instrument;
 use super::entity::Subgraph;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
+use crate::ListenAddr;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::services::router;
-use crate::ListenAddr;
 
 pub(crate) const INVALIDATION_ENDPOINT_SPAN_NAME: &str = "invalidation_endpoint";
 
@@ -272,7 +272,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -318,7 +318,7 @@ mod tests {
         let config = Arc::new(SubgraphConfiguration {
             all: Subgraph {
                 ttl: None,
-                enabled: true,
+                enabled: Some(true),
                 redis: None,
                 private_id: None,
                 invalidation: Some(SubgraphInvalidationConfig {
@@ -330,7 +330,7 @@ mod tests {
                 String::from("test"),
                 Subgraph {
                     ttl: None,
-                    enabled: true,
+                    enabled: Some(true),
                     redis: None,
                     private_id: None,
                     invalidation: Some(SubgraphInvalidationConfig {

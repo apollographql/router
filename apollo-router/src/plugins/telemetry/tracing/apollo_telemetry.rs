@@ -3,19 +3,22 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
 use derivative::Derivative;
-use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use lru::LruCache;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
+use opentelemetry::Value;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::trace::SpanId;
@@ -23,27 +26,36 @@ use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceError;
 use opentelemetry::trace::TraceId;
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
+use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::Resource;
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
+use serde_json::Value as JSONValue;
 use thiserror::Error;
 use tracing::Level;
 use url::Url;
 
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
+use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
+use crate::plugins::telemetry::apollo::ErrorRedactionPolicy;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::OperationSubType;
 use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_exporter::proto;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Method;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
@@ -57,11 +69,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ParallelNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ResponsePathElement;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Sampler;
@@ -76,15 +83,8 @@ use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
-use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::BoxError;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
-use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
-use crate::query_planner::OperationKind;
+use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -93,9 +93,11 @@ use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
+use crate::query_planner::OperationKind;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
 use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
 use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_NAME;
@@ -429,11 +431,7 @@ impl Exporter {
         let otlp_tracing_ratio = match otlp_tracing_sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
                 // can't use std::cmp::min because f64 is not Ord
-                if *ratio > 1.0 {
-                    1.0
-                } else {
-                    *ratio
-                }
+                if *ratio > 1.0 { 1.0 } else { *ratio }
             }
             SamplerOption::Always(s) => match s {
                 Sampler::AlwaysOn => 1f64,
@@ -1057,6 +1055,27 @@ pub(crate) fn extract_ftv1_trace(
     None
 }
 
+fn perform_extended_redaction(error_json: &str) -> String {
+    serde_json::from_str::<JSONValue>(error_json)
+        .ok()
+        .and_then(|error_json_value| {
+            let error_code = &error_json_value["extensions"]["code"];
+            if !error_code.is_null() {
+                Some(
+                    serde_json_bytes::json!({
+                        "extensions": {
+                            "code": error_code,
+                        }
+                    })
+                    .to_string(),
+                )
+            } else {
+                None
+            }
+        })
+        .unwrap_or_default()
+}
+
 fn preprocess_errors(
     t: &mut proto::reports::trace::Node,
     error_config: &ErrorConfiguration,
@@ -1067,7 +1086,14 @@ fn preprocess_errors(
             t.error.iter_mut().for_each(|err| {
                 err.message = String::from("<redacted>");
                 err.location = Vec::new();
-                err.json = String::new();
+                err.json = if matches!(
+                    error_config.redaction_policy,
+                    ErrorRedactionPolicy::Extended
+                ) {
+                    perform_extended_redaction(&err.json)
+                } else {
+                    String::new()
+                }
             });
         }
         error_count += u64::try_from(t.error.len()).expect("expected u64");
@@ -1257,7 +1283,6 @@ impl SpanExporter for Exporter {
     fn set_resource(&mut self, _resource: &Resource) {
         // This is intentionally a NOOP. The reason for this is that we do not allow users to set the resource attributes
         // for telemetry that is sent to Apollo. To do so would expose potential private information that the user did not intend for us.
-        tracing::warn!("setting resource attributes is not allowed for Apollo telemetry");
     }
 }
 
@@ -1355,7 +1380,7 @@ mod test {
     use opentelemetry::Value;
     use opentelemetry::trace::{SpanId, SpanKind, TraceId};
     use serde_json::json;
-    use crate::plugins::telemetry::apollo::ErrorConfiguration;
+    use crate::plugins::telemetry::apollo::{ErrorConfiguration, ErrorRedactionPolicy};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
@@ -1562,6 +1587,7 @@ mod test {
             &ErrorConfiguration {
                 send: true,
                 redact: false,
+                redaction_policy: ErrorRedactionPolicy::Strict,
             },
         )
         .expect("there was a trace here")
@@ -1571,13 +1597,15 @@ mod test {
     }
 
     #[test]
-    fn test_preprocess_errors() {
+    fn test_preprocess_errors_with_strict_redaction() {
         let sub_node = Node {
             error: vec![Error {
                 message: "this is my error".to_string(),
                 location: Vec::new(),
                 time_ns: 5,
-                json: String::from(r#"{"foo": "bar"}"#),
+                json: String::from(
+                    r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,
+                ),
             }],
             ..Default::default()
         };
@@ -1602,6 +1630,7 @@ mod test {
         let error_config = ErrorConfiguration {
             send: true,
             redact: true,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         };
         let error_count = preprocess_errors(&mut node, &error_config);
         assert_eq!(error_count, 3);
@@ -1618,13 +1647,18 @@ mod test {
         assert!(node.child[0].error[0].location.is_empty());
         assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
+    }
 
+    #[test]
+    fn test_preprocess_errors_with_redaction_disabled() {
         let sub_node = Node {
             error: vec![Error {
                 message: "this is my error".to_string(),
                 location: Vec::new(),
                 time_ns: 5,
-                json: String::from(r#"{"foo": "bar"}"#),
+                json: String::from(
+                    r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,
+                ),
             }],
             ..Default::default()
         };
@@ -1649,6 +1683,7 @@ mod test {
         let error_config = ErrorConfiguration {
             send: true,
             redact: false,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         };
         let error_count = preprocess_errors(&mut node, &error_config);
         assert_eq!(error_count, 3);
@@ -1658,8 +1693,68 @@ mod test {
         assert_eq!(node.error[1].message.as_str(), "this is my other error");
         assert_eq!(node.error[1].time_ns, 5u64);
 
-        assert!(!node.child[0].error[0].json.is_empty());
+        assert_eq!(
+            node.child[0].error[0].json,
+            String::from(r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,)
+        );
         assert_eq!(node.child[0].error[0].message.as_str(), "this is my error");
+        assert_eq!(node.child[0].error[0].time_ns, 5u64);
+    }
+
+    #[test]
+    fn test_preprocess_errors_with_extended_redaction_enabled() {
+        let sub_node = Node {
+            error: vec![Error {
+                message: "this is my error".to_string(),
+                location: Vec::new(),
+                time_ns: 5,
+                json: String::from(
+                    r#"{"extensions":{"code":"AN_ERROR_CODE","ignored":"other stuff"}}"#,
+                ),
+            }],
+            ..Default::default()
+        };
+        let mut node = Node {
+            error: vec![
+                Error {
+                    message: "this is my error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+                Error {
+                    message: "this is my other error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+            ],
+            ..Default::default()
+        };
+        node.child.push(sub_node);
+        let error_config = ErrorConfiguration {
+            send: true,
+            redact: true,
+            redaction_policy: ErrorRedactionPolicy::Extended,
+        };
+        let error_count = preprocess_errors(&mut node, &error_config);
+        assert_eq!(error_count, 3);
+        assert!(node.error[0].location.is_empty());
+        assert_eq!(node.error[0].message.as_str(), "<redacted>");
+        assert_eq!(node.error[0].time_ns, 5u64);
+        assert!(node.error[1].json.is_empty());
+        assert!(node.error[1].location.is_empty());
+        assert_eq!(node.error[1].message.as_str(), "<redacted>");
+        assert_eq!(node.error[1].time_ns, 5u64);
+
+        // the "ignored" field should be filtered out in this scenario, but the
+        // code left alone.
+        assert_eq!(
+            node.child[0].error[0].json,
+            String::from(r#"{"extensions":{"code":"AN_ERROR_CODE"}}"#,)
+        );
+        assert!(node.child[0].error[0].location.is_empty());
+        assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
     }
 
@@ -1695,6 +1790,7 @@ mod test {
         let error_config = ErrorConfiguration {
             send: false,
             redact: true,
+            redaction_policy: ErrorRedactionPolicy::Strict,
         };
         let error_count = preprocess_errors(&mut node, &error_config);
         assert_eq!(error_count, 0);

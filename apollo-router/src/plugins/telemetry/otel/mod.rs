@@ -6,8 +6,8 @@ pub(crate) mod span_ext;
 /// Protocols for OpenTelemetry Tracers that are compatible with Tracing
 pub(crate) mod tracer;
 
-pub(crate) use layer::layer;
 pub(crate) use layer::OpenTelemetryLayer;
+pub(crate) use layer::layer;
 use opentelemetry::Key;
 use opentelemetry::Value;
 pub(crate) use span_ext::OpenTelemetrySpanExt;

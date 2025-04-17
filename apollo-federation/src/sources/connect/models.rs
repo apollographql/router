@@ -7,7 +7,6 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
@@ -18,7 +17,6 @@ use apollo_compiler::parser::SourceSpan;
 use apollo_compiler::validation::Valid;
 use either::Either;
 use http::HeaderName;
-use http::header;
 use keys::make_key_field_set_from_variables;
 use serde_json::Value;
 use url::Url;
@@ -27,11 +25,14 @@ use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
 use super::URLTemplate;
+use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
+use super::spec::versions::AllowedHeaders;
+use super::spec::versions::VersionInfo;
 use super::string_template;
 use super::variable::Namespace;
 use super::variable::VariableReference;
@@ -64,6 +65,26 @@ pub struct Connector {
 
     pub request_variables: HashSet<Namespace>,
     pub response_variables: HashSet<Namespace>,
+
+    /// The request headers referenced in the connectors request mapping
+    pub request_headers: HashSet<String>,
+    /// The request or response headers referenced in the connectors response mapping
+    pub response_headers: HashSet<String>,
+
+    pub batch_settings: Option<ConnectorBatchSettings>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectorBatchSettings {
+    pub max_size: Option<usize>,
+}
+
+impl ConnectorBatchSettings {
+    fn from_directive(connect: &ConnectDirectiveArguments) -> Option<Self> {
+        Some(Self {
+            max_size: connect.batch.as_ref().and_then(|b| b.max_size),
+        })
+    }
 }
 
 pub type CustomConfiguration = Arc<HashMap<String, Value>>;
@@ -80,6 +101,12 @@ pub enum EntityResolver {
 
     /// The user defined a connector on a field of a type, so we need an entity resolver for that type
     Implicit,
+
+    /// The user defined a connector on the type directly and uses the $batch variable
+    TypeBatch,
+
+    /// The user defined a connector on the type directly and uses the $this variable
+    TypeSingle,
 }
 
 impl Connector {
@@ -99,11 +126,14 @@ impl Connector {
             return Ok(Default::default());
         };
 
+        let version: VersionInfo = spec.into();
+
         let source_name = ConnectSpec::source_directive_name(&link);
-        let source_arguments = extract_source_directive_arguments(schema, &source_name)?;
+        let source_arguments = extract_source_directive_arguments(schema, &source_name, &version)?;
 
         let connect_name = ConnectSpec::connect_directive_name(&link);
-        let connect_arguments = extract_connect_directive_arguments(schema, &connect_name)?;
+        let connect_arguments =
+            extract_connect_directive_arguments(schema, &connect_name, &version)?;
 
         connect_arguments
             .into_iter()
@@ -126,24 +156,25 @@ impl Connector {
         let source_name = source.map(|s| s.name.clone());
         let connect_http = connect
             .http
+            .as_ref()
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
 
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+        let request_variables: HashSet<Namespace> = transport
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+            .collect();
+        let request_headers = extract_header_references(transport.variable_references());
 
-        let parent_type_name = connect.position.field.type_name().clone();
-        let schema_def = &schema.schema_definition;
-        let on_query = schema_def
-            .query
-            .as_ref()
-            .map(|ty| ty.name == parent_type_name)
-            .unwrap_or(false);
-        let on_mutation = schema_def
-            .mutation
-            .as_ref()
-            .map(|ty| ty.name == parent_type_name)
-            .unwrap_or(false);
-        let on_root_type = on_query || on_mutation;
+        let response_variables: HashSet<Namespace> = connect
+            .selection
+            .variable_references()
+            .map(|var_ref| var_ref.namespace.namespace)
+            .collect();
+        let response_headers = extract_header_references(connect.selection.variable_references());
+        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
+        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
 
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
@@ -151,15 +182,6 @@ impl Connector {
             source_name: source_name.clone(),
             directive: connect.position,
         };
-
-        let entity_resolver = match (connect.entity, on_root_type) {
-            (true, _) => Some(EntityResolver::Explicit),
-            (_, false) => Some(EntityResolver::Implicit),
-            _ => None,
-        };
-
-        let request_variables = transport.variables().collect();
-        let response_variables = connect.selection.external_variables().collect();
 
         let connector = Connector {
             id: id.clone(),
@@ -171,13 +193,12 @@ impl Connector {
             spec,
             request_variables,
             response_variables,
+            request_headers,
+            response_headers,
+            batch_settings,
         };
 
         Ok((id, connector))
-    }
-
-    pub fn field_name(&self) -> &Name {
-        self.id.directive.field.field_name()
     }
 
     pub(crate) fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
@@ -190,44 +211,68 @@ impl Connector {
     }
 
     /// Create a field set for a `@key` using $args and $this variables.
-    pub(crate) fn resolvable_key(
-        &self,
-        schema: &Schema,
-    ) -> Result<Option<Valid<FieldSet>>, FederationError> {
+    pub fn resolvable_key(&self, schema: &Schema) -> Result<Option<Valid<FieldSet>>, String> {
         match &self.entity_resolver {
             None => Ok(None),
             Some(EntityResolver::Explicit) => {
-                let output_type = self
-                    .id
-                    .directive
-                    .field
-                    .get(schema)
-                    .map(|f| f.ty.inner_named_type())
-                    .map_err(|_| {
-                        internal_error!(
-                            "Missing field {}.{}",
-                            self.id.directive.field.type_name(),
-                            self.id.directive.field.field_name()
-                        )
-                    })?;
                 make_key_field_set_from_variables(
                     schema,
-                    output_type,
+                    &self.id.directive.base_type_name(schema).ok_or_else(|| {
+                        format!("Missing field {}", self.id.directive.coordinate())
+                    })?,
                     self.variable_references(),
-                    EntityResolver::Explicit,
+                    Namespace::Args,
                 )
-                .map_err(|_| {
-                    internal_error!("Failed to create key for connector {}", self.id.label)
-                })
             }
-            Some(EntityResolver::Implicit) => make_key_field_set_from_variables(
-                schema,
-                self.id.directive.field.type_name(),
-                self.variable_references(),
-                EntityResolver::Implicit,
-            )
-            .map_err(|_| internal_error!("Failed to create key for connector {}", self.id.label)),
+            Some(EntityResolver::Implicit) => {
+                make_key_field_set_from_variables(
+                    schema,
+                    &self.id.directive.parent_type_name().ok_or_else(|| {
+                        format!("Missing type {}", self.id.directive.coordinate())
+                    })?,
+                    self.variable_references(),
+                    Namespace::This,
+                )
+            }
+            Some(EntityResolver::TypeBatch) => {
+                make_key_field_set_from_variables(
+                    schema,
+                    &self.id.directive.base_type_name(schema).ok_or_else(|| {
+                        format!("Missing type {}", self.id.directive.coordinate())
+                    })?,
+                    self.variable_references(),
+                    Namespace::Batch,
+                )
+            }
+            Some(EntityResolver::TypeSingle) => {
+                make_key_field_set_from_variables(
+                    schema,
+                    &self.id.directive.base_type_name(schema).ok_or_else(|| {
+                        format!("Missing type {}", self.id.directive.coordinate())
+                    })?,
+                    self.variable_references(),
+                    Namespace::This,
+                )
+            }
         }
+        .map_err(|_| {
+            format!(
+                "Failed to create key for connector {}",
+                self.id.coordinate()
+            )
+        })
+    }
+
+    /// Create an identifier for this connector that can be used for configuration and service identification
+    /// source_name will be "none" here when we are using a "sourceless" connector. In this situation, we'll use
+    /// the synthetic_name instead so that we have some kind of a unique identifier for this source.
+    pub fn source_config_key(&self) -> String {
+        let source_name = self
+            .id
+            .source_name
+            .clone()
+            .unwrap_or(self.id.synthetic_name());
+        format!("{}.{}", self.id.subgraph_name, source_name)
     }
 }
 
@@ -238,6 +283,57 @@ fn make_label(
 ) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
     format!("{}{} {}", subgraph_name, source, transport.label())
+}
+
+fn determine_entity_resolver(
+    connect: &ConnectDirectiveArguments,
+    schema: &Schema,
+    request_variables: &HashSet<Namespace>,
+) -> Option<EntityResolver> {
+    match connect.position {
+        ConnectorPosition::Field(_) => {
+            match (connect.entity, connect.position.on_root_type(schema)) {
+                (true, _) => Some(EntityResolver::Explicit), // Query.foo @connect(entity: true)
+                (_, false) => Some(EntityResolver::Implicit), // Foo.bar @connect
+                _ => None,
+            }
+        }
+        ConnectorPosition::Type(_) => {
+            if request_variables.contains(&Namespace::Batch) {
+                Some(EntityResolver::TypeBatch) // Foo @connect($batch)
+            } else {
+                Some(EntityResolver::TypeSingle) // Foo @connect($this)
+            }
+        }
+    }
+}
+
+/// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
+fn extract_header_references<'a>(
+    variable_references: impl Iterator<Item = VariableReference<'a, Namespace>> + 'a,
+) -> HashSet<String> {
+    let headers: HashSet<String> = variable_references
+        .filter_map(|var_ref| {
+            if var_ref.namespace.namespace != Namespace::Request
+                && var_ref.namespace.namespace != Namespace::Response
+            {
+                return None;
+            }
+
+            // We only care if the path references starts with "headers"
+            if var_ref
+                .path
+                .first()
+                .is_none_or(|path| path.part != "headers")
+            {
+                return None;
+            }
+
+            // Grab the name of the header from the path
+            var_ref.path.get(1).map(|path| path.part.to_string())
+        })
+        .collect();
+    headers
 }
 
 // --- HTTP JSON ---------------------------------------------------------------
@@ -252,7 +348,7 @@ pub struct HttpJsonTransport {
 
 impl HttpJsonTransport {
     fn from_directive(
-        http: ConnectHTTPArguments,
+        http: &ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
         let (method, connect_url) = if let Some(url) = &http.get {
@@ -271,7 +367,7 @@ impl HttpJsonTransport {
 
         #[allow(clippy::mutable_key_type)]
         // HeaderName is internally mutable, but we don't mutate it
-        let mut headers = http.headers;
+        let mut headers = http.headers.clone();
         for (header_name, header_source) in
             source.map(|source| &source.headers).into_iter().flatten()
         {
@@ -298,11 +394,6 @@ impl HttpJsonTransport {
         format!("http: {} {}", self.method.as_str(), self.connect_template)
     }
 
-    fn variables(&self) -> impl Iterator<Item = Namespace> {
-        self.variable_references()
-            .map(|var_ref| var_ref.namespace.namespace)
-    }
-
     fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> {
         let url_selections = self.connect_template.expressions().map(|e| &e.expression);
         let header_selections = self
@@ -321,7 +412,7 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[derive(Debug, Clone, strum_macros::Display)]
+#[derive(Debug, Clone, Copy)]
 pub enum HTTPMethod {
     Get,
     Post,
@@ -358,6 +449,12 @@ impl FromStr for HTTPMethod {
     }
 }
 
+impl Display for HTTPMethod {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum HeaderSource {
     From(HeaderName),
@@ -385,11 +482,15 @@ impl<'a> Header<'a> {
     /// Get a list of headers from the `headers` argument in a `@connect` or `@source` directive.
     pub(crate) fn from_headers_arg(
         node: &'a Node<ast::Value>,
+        allowed_headers: &AllowedHeaders,
     ) -> Vec<Result<Self, HeaderParseError<'a>>> {
         if let Some(values) = node.as_list() {
-            values.iter().map(Self::from_single).collect()
+            values
+                .iter()
+                .map(|v| Self::from_single(v, allowed_headers))
+                .collect()
         } else if node.as_object().is_some() {
-            vec![Self::from_single(node)]
+            vec![Self::from_single(node, allowed_headers)]
         } else {
             vec![Err(HeaderParseError::Other {
                 message: format!("`{HEADERS_ARGUMENT_NAME}` must be an object or list of objects"),
@@ -399,7 +500,10 @@ impl<'a> Header<'a> {
     }
 
     /// Build a single [`Self`] from a single entry in the `headers` arg.
-    fn from_single(node: &'a Node<ast::Value>) -> Result<Self, HeaderParseError<'a>> {
+    fn from_single(
+        node: &'a Node<ast::Value>,
+        allowed_headers: &AllowedHeaders,
+    ) -> Result<Self, HeaderParseError<'a>> {
         let mappings = node.as_object().ok_or_else(|| HeaderParseError::Other {
             message: "the HTTP header mapping is not an object".to_string(),
             node,
@@ -425,7 +529,7 @@ impl<'a> Header<'a> {
                 node: name_node,
             })?;
 
-        if Self::is_reserved(&name) {
+        if allowed_headers.header_name_is_reserved(&name) {
             return Err(HeaderParseError::Other {
                 message: format!("header '{name}' is reserved and cannot be set by a connector"),
                 node: name_node,
@@ -440,7 +544,7 @@ impl<'a> Header<'a> {
             .find(|(name, _value)| *name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME);
 
         match (from, value) {
-            (Some(_), None) if Self::is_static(&name) => {
+            (Some(_), None) if allowed_headers.header_name_allowed_static(&name) => {
                 Err(HeaderParseError::Other{ message: format!(
                     "header '{name}' can't be set with `{HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME}`, only with `{HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME}`"
                 ), node: name_node})
@@ -492,37 +596,6 @@ impl<'a> Header<'a> {
             }
         }
     }
-
-    /// These headers are not allowed to be defined by connect directives at all.
-    /// Copied from Router's plugins::headers
-    /// Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
-    /// These are not propagated by default using a regex match as they will not make sense for the
-    /// second hop.
-    /// In addition, because our requests are not regular proxy requests content-type, content-length
-    /// and host are also in the exclude list.
-    fn is_reserved(header_name: &HeaderName) -> bool {
-        static KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
-        matches!(
-            *header_name,
-            header::CONNECTION
-                | header::PROXY_AUTHENTICATE
-                | header::PROXY_AUTHORIZATION
-                | header::TE
-                | header::TRAILER
-                | header::TRANSFER_ENCODING
-                | header::UPGRADE
-                | header::CONTENT_LENGTH
-                | header::CONTENT_ENCODING
-                | header::HOST
-                | header::ACCEPT_ENCODING
-        ) || header_name == KEEP_ALIVE
-    }
-
-    /// These headers can be defined as static values in connect directives, but can't be
-    /// forwarded by the user.
-    fn is_static(header_name: &HeaderName) -> bool {
-        matches!(*header_name, header::CONTENT_TYPE | header::ACCEPT,)
-    }
 }
 
 #[derive(Debug)]
@@ -567,6 +640,7 @@ mod tests {
     use crate::supergraph::extract_subgraphs_from_supergraph;
 
     static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
+    static SIMPLE_SUPERGRAPH_V0_2: &str = include_str!("./tests/schemas/simple_v0_2.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
@@ -581,7 +655,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -589,11 +663,13 @@ mod tests {
                 source_name: Some(
                     "json",
                 ),
-                directive: ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.users),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
+                directive: Field(
+                    ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.users),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                ),
             }: Connector {
                 id: ConnectId {
                     label: "connectors.json http: GET /users",
@@ -601,11 +677,13 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
-                    directive: ObjectOrInterfaceFieldDirectivePosition {
-                        field: Object(Query.users),
-                        directive_name: "connect",
-                        directive_index: 0,
-                    },
+                    directive: Field(
+                        ObjectOrInterfaceFieldDirectivePosition {
+                            field: Object(Query.users),
+                            directive_name: "connect",
+                            directive_index: 0,
+                        },
+                    ),
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
@@ -702,6 +780,13 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                request_headers: {},
+                response_headers: {},
+                batch_settings: Some(
+                    ConnectorBatchSettings {
+                        max_size: None,
+                    },
+                ),
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -709,11 +794,13 @@ mod tests {
                 source_name: Some(
                     "json",
                 ),
-                directive: ObjectOrInterfaceFieldDirectivePosition {
-                    field: Object(Query.posts),
-                    directive_name: "connect",
-                    directive_index: 0,
-                },
+                directive: Field(
+                    ObjectOrInterfaceFieldDirectivePosition {
+                        field: Object(Query.posts),
+                        directive_name: "connect",
+                        directive_index: 0,
+                    },
+                ),
             }: Connector {
                 id: ConnectId {
                     label: "connectors.json http: GET /posts",
@@ -721,11 +808,13 @@ mod tests {
                     source_name: Some(
                         "json",
                     ),
-                    directive: ObjectOrInterfaceFieldDirectivePosition {
-                        field: Object(Query.posts),
-                        directive_name: "connect",
-                        directive_index: 0,
-                    },
+                    directive: Field(
+                        ObjectOrInterfaceFieldDirectivePosition {
+                            field: Object(Query.posts),
+                            directive_name: "connect",
+                            directive_index: 0,
+                        },
+                    ),
                 },
                 transport: HttpJsonTransport {
                     source_url: Some(
@@ -834,8 +923,25 @@ mod tests {
                 spec: V0_1,
                 request_variables: {},
                 response_variables: {},
+                request_headers: {},
+                response_headers: {},
+                batch_settings: Some(
+                    ConnectorBatchSettings {
+                        max_size: None,
+                    },
+                ),
             },
         }
-        "###);
+        "#);
+    }
+
+    #[test]
+    fn test_from_schema_v0_2() {
+        let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH_V0_2);
+        let subgraph = subgraphs.get("connectors").unwrap();
+        let connectors =
+            Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_2)
+                .unwrap();
+        assert_debug_snapshot!(&connectors);
     }
 }

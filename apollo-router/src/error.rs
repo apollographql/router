@@ -1,5 +1,4 @@
 //! Router errors.
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -22,8 +21,8 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
+use crate::spec::operation_limits::OperationLimits;
 
 /// Return up to this many GraphQL parsing or validation errors.
 ///
@@ -220,10 +219,12 @@ impl IntoGraphQLErrors for CacheResolverError {
                 .into_graphql_errors()
                 .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error)),
             CacheResolverError::Backpressure(e) => Ok(vec![e.to_graphql_error()]),
-            CacheResolverError::BatchingError(msg) => Ok(vec![Error::builder()
-                .message(msg)
-                .extension_code("BATCH_PROCESSING_FAILED")
-                .build()]),
+            CacheResolverError::BatchingError(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code("BATCH_PROCESSING_FAILED")
+                    .build(),
+            ]),
         }
     }
 }
@@ -260,6 +261,8 @@ impl From<BoxError> for ServiceBuildError {
 }
 
 /// Error types for QueryPlanner
+///
+/// This error may be cached so no temporary errors may be defined here.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
     /// invalid query: {0}
@@ -269,7 +272,7 @@ pub(crate) enum QueryPlannerError {
     JoinError(String),
 
     /// empty query plan. This behavior is unexpected and we suggest opening an issue to apollographql/router with a reproduction.
-    EmptyPlan(UsageReporting), // usage_reporting_signature
+    EmptyPlan(String), // usage_reporting stats_report_key
 
     /// unhandled planner result
     UnhandledPlannerResult,
@@ -280,11 +283,9 @@ pub(crate) enum QueryPlannerError {
     /// complexity limit exceeded
     LimitExceeded(OperationLimits<bool>),
 
+    // Safe to cache because user scopes and policies are included in the cache key.
     /// Unauthorized field or type
     Unauthorized(Vec<Path>),
-
-    /// Query planner pool error: {0}
-    PoolProcessing(String),
 
     /// Federation error: {0}
     FederationError(FederationErrorBridge),
@@ -297,7 +298,7 @@ impl From<FederationErrorBridge> for QueryPlannerError {
 }
 
 /// A temporary error type used to extract a few variants from `apollo-federation`'s
-/// `FederationError`. For backwards compatability, these other variant need to be extracted so
+/// `FederationError`. For backwards compatibility, these other variant need to be extracted so
 /// that the correct status code (GRAPHQL_VALIDATION_ERROR) can be added to the response. For
 /// router 2.0, apollo-federation should split its error type into internal and external types.
 /// When this happens, this temp type should be replaced with that type.
@@ -329,14 +330,18 @@ impl From<FederationError> for FederationErrorBridge {
 impl IntoGraphQLErrors for FederationErrorBridge {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            FederationErrorBridge::UnknownOperation(msg) => Ok(vec![Error::builder()
-                .message(msg)
-                .extension_code("GRAPHQL_VALIDATION_FAILED")
-                .build()]),
-            FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![Error::builder()
-                .message(msg)
-                .extension_code("GRAPHQL_VALIDATION_FAILED")
-                .build()]),
+            FederationErrorBridge::UnknownOperation(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ]),
+            FederationErrorBridge::OperationNameNotProvided(msg) => Ok(vec![
+                Error::builder()
+                    .message(msg)
+                    .extension_code("GRAPHQL_VALIDATION_FAILED")
+                    .build(),
+            ]),
             // All other errors will be pushed on and be treated as internal server errors
             err => Err(err),
         }
@@ -428,10 +433,9 @@ impl IntoGraphQLErrors for QueryPlannerError {
 impl QueryPlannerError {
     pub(crate) fn usage_reporting(&self) -> Option<UsageReporting> {
         match self {
-            QueryPlannerError::SpecError(e) => Some(UsageReporting {
-                stats_report_key: e.get_error_key().to_string(),
-                referenced_fields_by_type: HashMap::new(),
-            }),
+            QueryPlannerError::SpecError(e) => {
+                Some(UsageReporting::Error(e.get_error_key().to_string()))
+            }
             _ => None,
         }
     }

@@ -6,11 +6,11 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::validation::Valid;
+use dashmap::DashMap;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
-use dashmap::DashMap;
 use derivative::Derivative;
 use extensions::sync::ExtensionsMutex;
 use serde::Deserialize;
@@ -54,13 +54,13 @@ use crate::plugins::telemetry::STUDIO_EXCLUDE;
 use crate::plugins::telemetry::SUBGRAPH_FTV1;
 use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::query_planner::DEPRECATED_APOLLO_OPERATION_ID;
+use crate::services::DEPRECATED_FIRST_EVENT_CONTEXT_KEY;
+use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_CACHE_HIT;
 use crate::services::layers::apq::DEPRECATED_PERSISTED_QUERY_REGISTERED;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
 use crate::services::layers::apq::PERSISTED_QUERY_REGISTERED;
 use crate::services::layers::query_analysis::ParsedDocument;
-use crate::services::DEPRECATED_FIRST_EVENT_CONTEXT_KEY;
-use crate::services::FIRST_EVENT_CONTEXT_KEY;
 
 pub(crate) mod extensions;
 
@@ -367,10 +367,10 @@ pub(crate) fn context_key_from_deprecated(key: String) -> String {
 
 #[cfg(test)]
 mod test {
-    use crate::spec::Query;
-    use crate::spec::Schema;
     use crate::Configuration;
     use crate::Context;
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     #[test]
     fn test_context_insert() {

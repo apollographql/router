@@ -581,6 +581,7 @@ mod tests {
 
     use crate::error::FederationError;
     use crate::operation::Field;
+    use crate::operation::never_cancel;
     use crate::operation::normalize_operation;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
@@ -715,9 +716,14 @@ mod tests {
             "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
-        let normalized_operation =
-            normalize_operation(operation, Default::default(), &schema, &Default::default())
-                .unwrap();
+        let normalized_operation = normalize_operation(
+            operation,
+            &Default::default(),
+            &schema,
+            &Default::default(),
+            &never_cancel,
+        )
+        .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
         let paths = vec![

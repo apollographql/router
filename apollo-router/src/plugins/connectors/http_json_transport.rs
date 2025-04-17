@@ -6,26 +6,26 @@ use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::URLTemplate;
 use displaydoc::Display;
-use http::header::CONTENT_LENGTH;
-use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use http::header::CONTENT_LENGTH;
+use http::header::CONTENT_TYPE;
 use parking_lot::Mutex;
-use serde_json_bytes::json;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use thiserror::Error;
 use url::Url;
 
 use super::form_encoding::encode_json_as_form;
-use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::mapping::Problem;
-use crate::plugins::connectors::plugin::debug::serialize_request;
+use crate::plugins::connectors::mapping::aggregate_apply_to_errors;
 use crate::plugins::connectors::plugin::debug::ConnectorContext;
 use crate::plugins::connectors::plugin::debug::SelectionData;
+use crate::plugins::connectors::plugin::debug::serialize_request;
 use crate::services::connect;
-use crate::services::connector::request_service::transport::http::HttpRequest;
 use crate::services::connector::request_service::TransportRequest;
+use crate::services::connector::request_service::transport::http::HttpRequest;
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
@@ -617,14 +617,14 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
     use apollo_federation::sources::connect::JSONSelection;
-    use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::header::CONTENT_ENCODING;
     use insta::assert_debug_snapshot;
 
     use super::*;
-    use crate::services::router::body;
     use crate::Context;
+    use crate::services::router::body;
 
     #[test]
     fn test_headers_to_add_no_directives() {
@@ -706,6 +706,7 @@ mod tests {
                 operation: Arc::from(doc),
                 supergraph_request: Arc::from(http::Request::default()),
                 variables: Default::default(),
+                keys: Default::default(),
             },
             &None,
         )
@@ -764,6 +765,7 @@ mod tests {
                 operation: Arc::from(doc),
                 supergraph_request: Arc::from(http::Request::default()),
                 variables: Default::default(),
+                keys: Default::default(),
             },
             &None,
         )

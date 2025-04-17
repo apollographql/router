@@ -7,6 +7,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast;
+use apollo_compiler::ast::Argument;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -241,6 +242,27 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::Enum(type_) => type_.insert_directive(schema, directive),
             TypeDefinitionPosition::InputObject(type_) => type_.insert_directive(schema, directive),
         }
+    }
+
+    pub(crate) fn rename(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Object(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Interface(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Union(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::Enum(type_) => type_.rename(schema, new_name.clone())?,
+            TypeDefinitionPosition::InputObject(type_) => type_.rename(schema, new_name.clone())?,
+        }
+
+        if let Some(existing_type) = schema.schema.types.swap_remove(self.type_name()) {
+            schema.schema.types.insert(new_name.clone(), existing_type);
+        }
+
+        Ok(())
     }
 }
 
@@ -821,6 +843,67 @@ impl SchemaDefinitionPosition {
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum TagDirectiveTargetPosition {
+    ObjectField(ObjectFieldDefinitionPosition),
+    InterfaceField(InterfaceFieldDefinitionPosition),
+    UnionField(UnionTypenameFieldDefinitionPosition),
+    Object(ObjectTypeDefinitionPosition),
+    Interface(InterfaceTypeDefinitionPosition),
+    Union(UnionTypeDefinitionPosition),
+    ArgumentDefinition(DirectiveArgumentDefinitionPosition),
+    Scalar(ScalarTypeDefinitionPosition),
+    Enum(EnumTypeDefinitionPosition),
+    EnumValue(EnumValueDefinitionPosition),
+    InputObject(InputObjectTypeDefinitionPosition),
+    InputObjectFieldDefinition(InputObjectFieldDefinitionPosition),
+}
+
+impl Debug for TagDirectiveTargetPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ObjectField(p) => write!(f, "ObjectField({p})"),
+            Self::InterfaceField(p) => write!(f, "InterfaceField({p})"),
+            Self::UnionField(p) => write!(f, "UnionField({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+            Self::ArgumentDefinition(p) => write!(f, "ArgumentDefinition({p})"),
+            Self::Scalar(p) => write!(f, "Scalar({p})"),
+            Self::Enum(p) => write!(f, "Enum({p})"),
+            Self::EnumValue(p) => write!(f, "EnumValue({p})"),
+            Self::InputObject(p) => write!(f, "InputObject({p})"),
+            Self::InputObjectFieldDefinition(p) => write!(f, "InputObjectFieldDefinition({p})"),
+        }
+    }
+}
+
+fallible_conversions!(TagDirectiveTargetPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TagDirectiveTargetPosition::InputObject -> InputObjectTypeDefinitionPosition);
+
+impl TryFrom<TagDirectiveTargetPosition> for FieldDefinitionPosition {
+    type Error = &'static str;
+
+    fn try_from(dl: TagDirectiveTargetPosition) -> Result<Self, Self::Error> {
+        match dl {
+            TagDirectiveTargetPosition::ObjectField(field) => {
+                Ok(FieldDefinitionPosition::Object(field))
+            }
+            TagDirectiveTargetPosition::InterfaceField(field) => {
+                Ok(FieldDefinitionPosition::Interface(field))
+            }
+            TagDirectiveTargetPosition::UnionField(field) => {
+                Ok(FieldDefinitionPosition::Union(field))
+            }
+            _ => Err("No valid conversion"),
+        }
+    }
+}
+
 #[derive(
     Debug,
     Copy,
@@ -1004,6 +1087,32 @@ impl SchemaRootDefinitionPosition {
             return Ok(());
         };
         object_type_referencers.schema_roots.shift_remove(self);
+        Ok(())
+    }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let parent = self.parent().make_mut(&mut schema.schema).make_mut();
+        match self.root_kind {
+            SchemaRootDefinitionKind::Query => {
+                if let Some(query) = &mut parent.query {
+                    query.name = new_name;
+                }
+            }
+            SchemaRootDefinitionKind::Mutation => {
+                if let Some(mutation) = &mut parent.mutation {
+                    mutation.name = new_name;
+                }
+            }
+            SchemaRootDefinitionKind::Subscription => {
+                if let Some(subscription) = &mut parent.subscription {
+                    subscription.name = new_name;
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1248,6 +1357,36 @@ impl ScalarTypeDefinitionPosition {
             return;
         };
         directive_referencers.scalar_types.shift_remove(self);
+    }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(scalar_type_referencers) =
+            schema.referencers.scalar_types.swap_remove(&self.type_name)
+        {
+            for pos in scalar_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.object_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.interface_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in scalar_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            schema
+                .referencers
+                .scalar_types
+                .insert(new_name, scalar_type_referencers);
+        }
+
+        Ok(())
     }
 }
 
@@ -1703,6 +1842,46 @@ impl ObjectTypeDefinitionPosition {
         }
         Ok(())
     }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(object_type_referencers) =
+            schema.referencers.object_types.swap_remove(&self.type_name)
+        {
+            for pos in object_type_referencers.schema_roots.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in object_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in object_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in object_type_referencers.union_types.iter() {
+                pos.rename_member(schema, &self.type_name, new_name.clone())?;
+            }
+
+            schema
+                .referencers
+                .object_types
+                .insert(new_name, object_type_referencers);
+        }
+
+        Ok(())
+    }
+
+    fn rename_implemented_interface(
+        &self,
+        schema: &mut FederationSchema,
+        old_name: &Name,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        type_.implements_interfaces.swap_remove(old_name);
+        type_.implements_interfaces.insert(new_name.into());
+        Ok(())
+    }
 }
 
 impl Display for ObjectTypeDefinitionPosition {
@@ -1714,6 +1893,21 @@ impl Display for ObjectTypeDefinitionPosition {
 impl Debug for ObjectTypeDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Object({self})")
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub(crate) enum FieldArgumentDefinitionPosition {
+    Interface(InterfaceFieldArgumentDefinitionPosition),
+    Object(ObjectFieldArgumentDefinitionPosition),
+}
+
+impl Debug for FieldArgumentDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Object(p) => write!(f, "Object({p})"),
+        }
     }
 }
 
@@ -2047,6 +2241,16 @@ impl ObjectFieldDefinitionPosition {
             enum_type_referencers.object_fields.shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?.make_mut();
+        rename_type(&mut field.ty, new_name);
+        Ok(())
+    }
 }
 
 impl Display for ObjectFieldDefinitionPosition {
@@ -2302,6 +2506,16 @@ impl ObjectFieldArgumentDefinitionPosition {
                 .shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?.make_mut();
+        rename_type(field.ty.make_mut(), new_name);
+        Ok(())
+    }
 }
 
 impl Display for ObjectFieldArgumentDefinitionPosition {
@@ -2327,6 +2541,51 @@ pub(crate) struct ObjectOrInterfaceFieldDirectivePosition {
     pub(crate) directive_index: usize,
 }
 
+impl ObjectOrInterfaceFieldDirectivePosition {
+    // NOTE: this is used only for connectors "expansion" code and can be
+    // deleted after connectors switches to use the composition port
+    pub(crate) fn add_argument(
+        &self,
+        schema: &mut FederationSchema,
+        argument: Node<Argument>,
+    ) -> Result<(), FederationError> {
+        let directive = match self.field {
+            ObjectOrInterfaceFieldDefinitionPosition::Object(ref field) => {
+                let field = field.make_mut(&mut schema.schema)?;
+
+                field
+                    .make_mut()
+                    .directives
+                    .get_mut(self.directive_index)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Object field \"{}\"'s directive application at index {} does not exist",
+                            self.field, self.directive_index,
+                        ),
+                    })?
+            }
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(ref field) => {
+                let field = field.make_mut(&mut schema.schema)?;
+
+                field
+                    .make_mut()
+                    .directives
+                    .get_mut(self.directive_index)
+                    .ok_or_else(|| SingleFederationError::Internal {
+                        message: format!(
+                            "Interface field \"{}\"'s directive application at index {} does not exist",
+                            self.field, self.directive_index,
+                        ),
+                    })?
+            }
+        };
+
+        directive.make_mut().arguments.push(argument);
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct InterfaceTypeDefinitionPosition {
     pub(crate) type_name: Name,
@@ -2334,6 +2593,10 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 
 impl InterfaceTypeDefinitionPosition {
     const EXPECTED: &'static str = "an interface type";
+
+    pub(crate) fn new(type_name: Name) -> Self {
+        Self { type_name }
+    }
 
     pub(crate) fn field(&self, field_name: Name) -> InterfaceFieldDefinitionPosition {
         InterfaceFieldDefinitionPosition {
@@ -2697,6 +2960,47 @@ impl InterfaceTypeDefinitionPosition {
             .interface_types
             .shift_remove(self);
     }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(interface_type_referencers) = schema
+            .referencers
+            .interface_types
+            .swap_remove(&self.type_name)
+        {
+            for pos in interface_type_referencers.object_types.iter() {
+                pos.rename_implemented_interface(schema, &self.type_name, new_name.clone())?;
+            }
+            for pos in interface_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in interface_type_referencers.interface_types.iter() {
+                pos.rename_implemented_interface(schema, &self.type_name, new_name.clone())?;
+            }
+            for pos in interface_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            schema
+                .referencers
+                .interface_types
+                .insert(new_name, interface_type_referencers);
+        }
+
+        Ok(())
+    }
+
+    fn rename_implemented_interface(
+        &self,
+        schema: &mut FederationSchema,
+        old_name: &Name,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        type_.implements_interfaces.swap_remove(old_name);
+        type_.implements_interfaces.insert(new_name.into());
+        Ok(())
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
@@ -3041,6 +3345,21 @@ impl InterfaceFieldDefinitionPosition {
             enum_type_referencers.interface_fields.shift_remove(self);
         }
     }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let field = self.make_mut(&mut schema.schema)?.make_mut();
+        match field.ty.clone() {
+            ast::Type::Named(_) => field.ty = ast::Type::Named(new_name.clone()),
+            ast::Type::NonNullNamed(_) => field.ty = ast::Type::NonNullNamed(new_name.clone()),
+            ast::Type::List(_) => todo!(),
+            ast::Type::NonNullList(_) => todo!(),
+        }
+        Ok(())
+    }
 }
 
 impl Display for InterfaceFieldDefinitionPosition {
@@ -3292,6 +3611,23 @@ impl InterfaceFieldArgumentDefinitionPosition {
                 .interface_field_arguments
                 .shift_remove(self);
         }
+    }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let argument = self.make_mut(&mut schema.schema)?.make_mut();
+        match argument.ty.as_ref() {
+            ast::Type::Named(_) => *argument.ty.make_mut() = ast::Type::Named(new_name.clone()),
+            ast::Type::NonNullNamed(_) => {
+                *argument.ty.make_mut() = ast::Type::NonNullNamed(new_name.clone())
+            }
+            ast::Type::List(_) => todo!(),
+            ast::Type::NonNullList(_) => todo!(),
+        }
+        Ok(())
     }
 }
 
@@ -3618,6 +3954,34 @@ impl UnionTypeDefinitionPosition {
             return;
         };
         object_type_referencers.union_types.shift_remove(self);
+    }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(union_type_referencers) =
+            schema.referencers.union_types.swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .union_types
+                .insert(new_name, union_type_referencers);
+        }
+
+        Ok(())
+    }
+
+    fn rename_member(
+        &self,
+        schema: &mut FederationSchema,
+        old_name: &Name,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        let type_ = self.make_mut(&mut schema.schema)?.make_mut();
+        type_.members.swap_remove(old_name);
+        type_.members.insert(new_name.into());
+
+        Ok(())
     }
 }
 
@@ -3951,6 +4315,36 @@ impl EnumTypeDefinitionPosition {
             return;
         };
         directive_referencers.enum_types.shift_remove(self);
+    }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(enum_type_referencers) =
+            schema.referencers.enum_types.swap_remove(&self.type_name)
+        {
+            for pos in enum_type_referencers.object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.object_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.interface_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.interface_field_arguments.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            for pos in enum_type_referencers.input_object_fields.iter() {
+                pos.rename_type(schema, new_name.clone())?;
+            }
+            schema
+                .referencers
+                .enum_types
+                .insert(new_name, enum_type_referencers);
+        }
+
+        Ok(())
     }
 }
 
@@ -4434,6 +4828,23 @@ impl InputObjectTypeDefinitionPosition {
         };
         directive_referencers.input_object_types.shift_remove(self);
     }
+
+    fn rename(&self, schema: &mut FederationSchema, new_name: Name) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+
+        if let Some(input_object_type_referencers) = schema
+            .referencers
+            .input_object_types
+            .swap_remove(&self.type_name)
+        {
+            schema
+                .referencers
+                .input_object_types
+                .insert(new_name, input_object_type_referencers);
+        }
+
+        Ok(())
+    }
 }
 
 impl Display for InputObjectTypeDefinitionPosition {
@@ -4714,6 +5125,15 @@ impl InputObjectFieldDefinitionPosition {
                 .input_object_fields
                 .shift_remove(self);
         }
+    }
+
+    fn rename_type(
+        &self,
+        schema: &mut FederationSchema,
+        new_name: Name,
+    ) -> Result<(), FederationError> {
+        self.make_mut(&mut schema.schema)?.make_mut().name = new_name.clone();
+        Ok(())
     }
 }
 
@@ -5212,6 +5632,15 @@ fn validate_arguments(arguments: &[Node<InputValueDefinition>]) -> Result<(), Fe
     Ok(())
 }
 
+fn rename_type(ast_type: &mut ast::Type, new_name: Name) {
+    match ast_type {
+        ast::Type::Named(name) => *name = new_name,
+        ast::Type::NonNullNamed(name) => *name = new_name,
+        ast::Type::List(boxed) => rename_type(boxed, new_name),
+        ast::Type::NonNullList(boxed) => rename_type(boxed, new_name),
+    }
+}
+
 impl FederationSchema {
     /// Note that the input schema must be partially valid, in that:
     ///
@@ -5222,110 +5651,132 @@ impl FederationSchema {
     ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
-    pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
-        let metadata = links_metadata(&schema)?;
-        let mut referencers: Referencers = Default::default();
+    pub(crate) fn new(schema: Schema) -> Result<Self, FederationError> {
+        let mut schema = Self::new_uninitialized(schema)?;
+        schema.collect_links_metadata()?;
+        schema.collect_shallow_references();
+        schema.collect_deep_references()?;
+        Ok(schema)
+    }
 
-        // Shallow pass to populate referencers for types/directives.
-        for (type_name, type_) in schema.types.iter() {
+    pub(crate) fn new_uninitialized(schema: Schema) -> Result<FederationSchema, FederationError> {
+        Ok(Self {
+            schema,
+            referencers: Default::default(),
+            links_metadata: None,
+            subgraph_metadata: None,
+        })
+    }
+
+    pub(crate) fn collect_links_metadata(&mut self) -> Result<(), FederationError> {
+        self.links_metadata = links_metadata(self.schema())?.map(Box::new);
+        Ok(())
+    }
+
+    pub(crate) fn collect_shallow_references(&mut self) {
+        for (type_name, type_) in self.schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(_) => {
-                    referencers
+                    self.referencers
                         .scalar_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Object(_) => {
-                    referencers
+                    self.referencers
                         .object_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Interface(_) => {
-                    referencers
+                    self.referencers
                         .interface_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Union(_) => {
-                    referencers
+                    self.referencers
                         .union_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::Enum(_) => {
-                    referencers
+                    self.referencers
                         .enum_types
                         .insert(type_name.clone(), Default::default());
                 }
                 ExtendedType::InputObject(_) => {
-                    referencers
+                    self.referencers
                         .input_object_types
                         .insert(type_name.clone(), Default::default());
                 }
             }
         }
-        for directive_name in schema.directive_definitions.keys() {
-            referencers
+
+        for directive_name in self.schema.directive_definitions.keys() {
+            self.referencers
                 .directives
                 .insert(directive_name.clone(), Default::default());
         }
+    }
 
-        // Deep pass to find references.
+    pub(crate) fn collect_deep_references(&mut self) -> Result<(), FederationError> {
         SchemaDefinitionPosition.insert_references(
-            &schema.schema_definition,
-            &schema,
-            &mut referencers,
+            &self.schema.schema_definition,
+            &self.schema,
+            &mut self.referencers,
         )?;
-        for (type_name, type_) in schema.types.iter() {
+        for (type_name, type_) in self.schema.types.iter() {
             match type_ {
                 ExtendedType::Scalar(type_) => {
                     ScalarTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::Object(type_) => {
                     ObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
                 ExtendedType::Interface(type_) => {
                     InterfaceTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(
+                        type_,
+                        &self.schema,
+                        &mut self.referencers,
+                    )?;
                 }
                 ExtendedType::Union(type_) => {
                     UnionTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::Enum(type_) => {
                     EnumTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
                 ExtendedType::InputObject(type_) => {
                     InputObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &mut referencers)?;
+                    .insert_references(type_, &mut self.referencers)?;
                 }
             }
         }
-        for (directive_name, directive) in schema.directive_definitions.iter() {
+        for (directive_name, directive) in self.schema.directive_definitions.iter() {
             DirectiveDefinitionPosition {
                 directive_name: directive_name.clone(),
             }
-            .insert_references(directive, &mut referencers)?;
+            .insert_references(directive, &mut self.referencers)?;
         }
-
-        Ok(FederationSchema {
-            schema,
-            referencers,
-            links_metadata: metadata.map(Box::new),
-            subgraph_metadata: None,
-        })
+        Ok(())
     }
 }
 
@@ -5403,6 +5854,114 @@ mod tests {
 
             type Query {
               me: User
+            }
+        "#);
+    }
+
+    #[test]
+    fn rename_type() {
+        let schema = Schema::parse_and_validate(
+            r#"
+            schema {
+                query: MyQuery
+            }
+
+            type MyQuery {
+                a: MyData
+            }
+
+            interface OtherInterface {
+                b: MyValue
+            }
+
+            interface IMyData implements OtherInterface {
+                b: MyValue
+            }
+
+            type MyData implements IMyData & OtherInterface {
+                b: MyValue
+                c: String
+            }
+
+            type OtherData {
+                d: String
+                e: MyAorB
+            }
+
+            union MyUnionData = MyData | OtherData
+
+            scalar MyValue
+
+            enum MyAorB {
+                A
+                B
+            }
+        "#,
+            "test-schema.graphqls",
+        )
+        .unwrap();
+        let mut schema = FederationSchema::new(schema.into_inner()).unwrap();
+
+        let query_position = ObjectTypeDefinitionPosition::new(name!("MyQuery"));
+        let interface_position = InterfaceTypeDefinitionPosition {
+            type_name: name!("IMyData"),
+        };
+        let data_position = ObjectTypeDefinitionPosition::new(name!("MyData"));
+        let scalar_position = ScalarTypeDefinitionPosition {
+            type_name: name!("MyValue"),
+        };
+        let union_position = UnionTypeDefinitionPosition {
+            type_name: name!("MyUnionData"),
+        };
+        let enum_position = EnumTypeDefinitionPosition {
+            type_name: name!("MyAorB"),
+        };
+
+        query_position.rename(&mut schema, name!("Query")).unwrap();
+        interface_position
+            .rename(&mut schema, name!("IData"))
+            .unwrap();
+        data_position.rename(&mut schema, name!("Data")).unwrap();
+        scalar_position.rename(&mut schema, name!("Value")).unwrap();
+        union_position
+            .rename(&mut schema, name!("UnionData"))
+            .unwrap();
+        enum_position.rename(&mut schema, name!("AorB")).unwrap();
+
+        insta::assert_snapshot!(schema.schema(), @r#"
+            schema {
+              query: Query
+            }
+
+            type Query {
+              a: Data
+            }
+
+            interface OtherInterface {
+              b: Value
+            }
+
+            interface IData implements OtherInterface {
+              b: Value
+            }
+
+            type Data implements OtherInterface & IData {
+              b: Value
+              c: String
+            }
+
+            type OtherData {
+              d: String
+              e: AorB
+            }
+
+            union UnionData = OtherData | Data
+
+            scalar Value
+
+            enum AorB {
+              A
+              B
             }
         "#);
     }

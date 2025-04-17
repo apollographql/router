@@ -6,15 +6,15 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
+use apollo_compiler::Name;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Name;
-use apollo_federation::schema::ValidFederationSchema;
-use apollo_federation::sources::connect::expand::expand_connectors;
-use apollo_federation::sources::connect::expand::Connectors;
-use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::ApiSchemaOptions;
 use apollo_federation::Supergraph;
+use apollo_federation::schema::ValidFederationSchema;
+use apollo_federation::sources::connect::expand::Connectors;
+use apollo_federation::sources::connect::expand::ExpansionResult;
+use apollo_federation::sources::connect::expand::expand_connectors;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
@@ -23,12 +23,12 @@ use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 
+use crate::Configuration;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::plugins::connectors::configuration::apply_config;
 use crate::query_planner::OperationKind;
 use crate::uplink::schema::SchemaState;
-use crate::Configuration;
 
 /// A GraphQL schema.
 pub(crate) struct Schema {
@@ -148,7 +148,7 @@ impl Schema {
 
         f64_histogram!(
             "apollo.router.schema.load.duration",
-            "Time spent loading the supergraph schema.",
+            "Time spent loading the supergraph schema, in seconds.",
             start.elapsed().as_secs_f64()
         );
 

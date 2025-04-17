@@ -3,15 +3,16 @@
 use std::future::Future;
 use std::ops::ControlFlow;
 
-use tower::buffer::BufferLayer;
-use tower::layer::util::Stack;
 use tower::BoxError;
 use tower::ServiceBuilder;
+use tower::buffer::BufferLayer;
+use tower::layer::util::Stack;
 use tower_service::Service;
 use tracing::Span;
 
 use self::map_first_graphql_response::MapFirstGraphqlResponseLayer;
 use self::map_first_graphql_response::MapFirstGraphqlResponseService;
+use crate::Context;
 use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::instrument::InstrumentLayer;
@@ -19,7 +20,6 @@ use crate::layers::map_future_with_request_data::MapFutureWithRequestDataLayer;
 use crate::layers::map_future_with_request_data::MapFutureWithRequestDataService;
 use crate::layers::sync_checkpoint::CheckpointLayer;
 use crate::services::supergraph;
-use crate::Context;
 
 pub mod async_checkpoint;
 pub mod instrument;
@@ -80,13 +80,13 @@ pub trait ServiceBuilderExt<L>: Sized {
     fn checkpoint<S, Request>(
         self,
         checkpoint_fn: impl Fn(
-                Request,
-            ) -> Result<
-                ControlFlow<<S as Service<Request>>::Response, Request>,
-                <S as Service<Request>>::Error,
-            > + Send
-            + Sync
-            + 'static,
+            Request,
+        ) -> Result<
+            ControlFlow<<S as Service<Request>>::Response, Request>,
+            <S as Service<Request>>::Error,
+        > + Send
+        + Sync
+        + 'static,
     ) -> ServiceBuilder<Stack<CheckpointLayer<S, Request>, L>>
     where
         S: Service<Request> + Send + 'static,

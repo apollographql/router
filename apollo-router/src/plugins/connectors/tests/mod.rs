@@ -12,22 +12,24 @@ use req_asserts::Matcher;
 use serde_json::Value;
 use serde_json_bytes::json;
 use tower::ServiceExt;
+use tracing_core::Event;
+use tracing_core::Metadata;
 use tracing_core::span::Attributes;
 use tracing_core::span::Id;
 use tracing_core::span::Record;
-use tracing_core::Event;
-use tracing_core::Metadata;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
 use wiremock::matchers::body_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
-use wiremock::Mock;
-use wiremock::MockServer;
-use wiremock::ResponseTemplate;
 
+use crate::Configuration;
 use crate::json_ext::ValueExt;
 use crate::metrics::FutureMetricsExt;
+use crate::plugins::connectors::tests::req_asserts::Plan;
 use crate::plugins::telemetry::consts::CONNECT_SPAN_NAME;
 use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -36,11 +38,10 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router::Request;
 use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
-use crate::Configuration;
 
+mod connect_on_type;
 mod mock_api;
 mod quickstart;
-#[allow(dead_code)]
 mod req_asserts;
 
 const STEEL_THREAD_SCHEMA: &str = include_str!("../testdata/steelthread.graphql");
@@ -342,17 +343,20 @@ async fn test_root_field_plus_entity_plus_requires() {
     }
     "###);
 
-    req_asserts::matches(
-        &mock_server.received_requests().await.unwrap(),
-        vec![
-            Matcher::new().method("GET").path("/users"),
+    let plan = Plan::Sequence(vec![
+        Plan::Fetch(Matcher::new().method("GET").path("/users")),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
             Matcher::new().method("POST").path("/graphql"),
+        ]),
+        Plan::Parallel(vec![
             Matcher::new().method("GET").path("/users/1"),
             Matcher::new().method("GET").path("/users/2"),
-        ],
-    );
+        ]),
+    ]);
+
+    plan.assert_matches(&mock_server.received_requests().await.unwrap())
 }
 
 /// Tests that a connector can vend an entity reference like `user: { id: userId }`
@@ -601,49 +605,155 @@ async fn test_headers() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("GET")
-            .header(
-                HeaderName::from_str("x-forward").unwrap(),
-                HeaderValue::from_str("forwarded").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-forward").unwrap(),
-                HeaderValue::from_str("forwarded-again").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-new-name").unwrap(),
-                HeaderValue::from_str("renamed-by-connect").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-insert").unwrap(),
-                HeaderValue::from_str("inserted").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-insert-multi-value").unwrap(),
-                HeaderValue::from_str("first").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-insert-multi-value").unwrap(),
-                HeaderValue::from_str("second").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-config-variable-source").unwrap(),
-                HeaderValue::from_str("before val-from-config-source after").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-config-variable-connect").unwrap(),
-                HeaderValue::from_str("before val-from-config-connect after").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-context-value-source").unwrap(),
-                HeaderValue::from_str("before val-from-request-context after").unwrap(),
-            )
-            .header(
-                HeaderName::from_str("x-context-value-connect").unwrap(),
-                HeaderValue::from_str("before val-from-request-context after").unwrap(),
-            )
-            .path("/users")],
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded-again").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-new-name").unwrap(),
+                    HeaderValue::from_str("renamed-by-connect").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("first").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("second").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-config-variable-source").unwrap(),
+                    HeaderValue::from_str("before val-from-config-source after").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-config-variable-connect").unwrap(),
+                    HeaderValue::from_str("before val-from-config-connect after").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-context-value-source").unwrap(),
+                    HeaderValue::from_str("before val-from-request-context after").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-context-value-connect").unwrap(),
+                    HeaderValue::from_str("before val-from-request-context after").unwrap(),
+                )
+                .path("/users"),
+        ],
+    );
+}
+
+#[tokio::test]
+async fn test_override_headers_with_config() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        Some(json!({
+            "connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "$config": {
+                          "source": {
+                            "val": "val-from-config-source"
+                          },
+                          "connect": {
+                            "val": "val-from-config-connect"
+                          },
+                        }
+                    }
+                }
+            },
+            "headers": {
+              "connector": {
+                "all": {
+                  "request": [
+                  // This is additive to the existing forwarding rule
+                  {
+                    "propagate": {
+                      "named": "x-forward-2",
+                      "rename": "x-forward"
+                    }
+                  },
+                  // This is an override
+                  {
+                    "insert": {
+                      "name": "x-insert",
+                      "value": "inserted-by-config"
+                    }
+                  },
+                  // This is an override
+                  {
+                    "insert": {
+                      "name": "x-insert-multi-value",
+                      "value": "third,fourth"
+                    }
+                  }
+                  ]
+                }
+              }
+            }
+        })),
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.insert("x-rename-source", "renamed-by-source".parse().unwrap());
+            headers.insert("x-rename-connect", "renamed-by-connect".parse().unwrap());
+            headers.insert("x-forward", "forwarded".parse().unwrap());
+            headers.insert("x-forward-2", "forwarded-by-config".parse().unwrap());
+            headers.append("x-forward", "forwarded-again".parse().unwrap());
+            request
+                .context
+                .insert("val", String::from("val-from-request-context"))
+                .unwrap();
+        },
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![
+            Matcher::new()
+                .method("GET")
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded-again").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-forward").unwrap(),
+                    HeaderValue::from_str("forwarded-by-config").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert").unwrap(),
+                    HeaderValue::from_str("inserted-by-config").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("third").unwrap(),
+                )
+                .header(
+                    HeaderName::from_str("x-insert-multi-value").unwrap(),
+                    HeaderValue::from_str("fourth").unwrap(),
+                )
+                .path("/users"),
+        ],
     );
 }
 
@@ -709,26 +819,36 @@ async fn test_tracing_connect_span() {
     mock_subscriber.expect_new_span().returning(|attributes| {
         if attributes.metadata().name() == CONNECT_SPAN_NAME {
             assert!(attributes.fields().field("apollo.connector.type").is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.detail")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.field.name")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.selection")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.source.name")
-                .is_some());
-            assert!(attributes
-                .fields()
-                .field("apollo.connector.source.detail")
-                .is_some());
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.detail")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.coordinate")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.selection")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.source.name")
+                    .is_some()
+            );
+            assert!(
+                attributes
+                    .fields()
+                    .field("apollo.connector.source.detail")
+                    .is_some()
+            );
             assert!(attributes.fields().field(OTEL_STATUS_CODE).is_some());
             Id::from_u64(1)
         } else {
@@ -834,10 +954,12 @@ async fn test_mutation() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .body(serde_json::json!({ "username": "New User" }))
-            .path("/user")],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .body(serde_json::json!({ "username": "New User" }))
+                .path("/user"),
+        ],
     );
 }
 
@@ -879,10 +1001,12 @@ async fn test_mutation_empty_body() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .body(serde_json::json!({ "username": "New User" }))
-            .path("/user")],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .body(serde_json::json!({ "username": "New User" }))
+                .path("/user"),
+        ],
     );
 }
 
@@ -1029,16 +1153,18 @@ async fn test_default_argument_values() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .path("/default-args")
-            .body(serde_json::json!({
-              "str": "default",
-              "int": 42,
-              "float": 1.23,
-              "bool": true,
-              "arr": ["default"],
-            }))],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/default-args")
+                .body(serde_json::json!({
+                  "str": "default",
+                  "int": 42,
+                  "float": 1.23,
+                  "bool": true,
+                  "arr": ["default"],
+                })),
+        ],
     );
 }
 
@@ -1071,16 +1197,18 @@ async fn test_default_argument_overrides() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new()
-            .method("POST")
-            .path("/default-args")
-            .body(serde_json::json!({
-              "str": "hi",
-              "int": 108,
-              "float": 9.87,
-              "bool": false,
-              "arr": ["hi again"],
-            }))],
+        vec![
+            Matcher::new()
+                .method("POST")
+                .path("/default-args")
+                .body(serde_json::json!({
+                  "str": "hi",
+                  "int": 108,
+                  "float": 9.87,
+                  "bool": false,
+                  "arr": ["hi again"],
+                })),
+        ],
     );
 }
 
@@ -1169,7 +1297,10 @@ async fn test_form_encoding() {
 
     let reqs = mock_server.received_requests().await.unwrap();
     let body = String::from_utf8_lossy(&reqs[0].body).to_string();
-    assert_eq!(body, "int=1&str=s&bool=true&id=id&intArr%5B0%5D=1&intArr%5B1%5D=2&strArr%5B0%5D=a&strArr%5B1%5D=b&boolArr%5B0%5D=true&boolArr%5B1%5D=false&idArr%5B0%5D=id1&idArr%5B1%5D=id2&obj%5Ba%5D=1&obj%5Bb%5D=b&obj%5Bc%5D=true&obj%5Bnested%5D%5Bd%5D=1&obj%5Bnested%5D%5Be%5D=e&obj%5Bnested%5D%5Bf%5D=true&objArr%5B0%5D%5Ba%5D=1&objArr%5B0%5D%5Bb%5D=b&objArr%5B0%5D%5Bc%5D=true&objArr%5B0%5D%5Bnested%5D%5Bd%5D=1&objArr%5B0%5D%5Bnested%5D%5Be%5D=e&objArr%5B0%5D%5Bnested%5D%5Bf%5D=true&objArr%5B1%5D%5Ba%5D=2&objArr%5B1%5D%5Bb%5D=bb&objArr%5B1%5D%5Bc%5D=false&objArr%5B1%5D%5Bnested%5D%5Bd%5D=1&objArr%5B1%5D%5Bnested%5D%5Be%5D=e&objArr%5B1%5D%5Bnested%5D%5Bf%5D=true");
+    assert_eq!(
+        body,
+        "int=1&str=s&bool=true&id=id&intArr%5B0%5D=1&intArr%5B1%5D=2&strArr%5B0%5D=a&strArr%5B1%5D=b&boolArr%5B0%5D=true&boolArr%5B1%5D=false&idArr%5B0%5D=id1&idArr%5B1%5D=id2&obj%5Ba%5D=1&obj%5Bb%5D=b&obj%5Bc%5D=true&obj%5Bnested%5D%5Bd%5D=1&obj%5Bnested%5D%5Be%5D=e&obj%5Bnested%5D%5Bf%5D=true&objArr%5B0%5D%5Ba%5D=1&objArr%5B0%5D%5Bb%5D=b&objArr%5B0%5D%5Bc%5D=true&objArr%5B0%5D%5Bnested%5D%5Bd%5D=1&objArr%5B0%5D%5Bnested%5D%5Be%5D=e&objArr%5B0%5D%5Bnested%5D%5Bf%5D=true&objArr%5B1%5D%5Ba%5D=2&objArr%5B1%5D%5Bb%5D=bb&objArr%5B1%5D%5Bc%5D=false&objArr%5B1%5D%5Bnested%5D%5Bd%5D=1&objArr%5B1%5D%5Bnested%5D%5Be%5D=e&objArr%5B1%5D%5Bnested%5D%5Bf%5D=true"
+    );
 }
 
 #[tokio::test]
@@ -1507,7 +1638,11 @@ async fn test_variables() {
         .await;
     Mock::given(method("POST"))
         .and(path("/f"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({}))
+                .insert_header("value", "myothercoolheader"),
+        )
         .mount(&mock_server)
         .await;
     let uri = mock_server.uri();
@@ -1515,7 +1650,7 @@ async fn test_variables() {
     let response = execute(
         &VARIABLES_SCHEMA.replace("http://localhost:4001/", &mock_server.uri()),
         &uri,
-        "{ f(arg: \"arg\") { arg context config sibling status extra f(arg: \"arg\") { arg context config sibling status } } }",
+        "{ f(arg: \"arg\") { arg context config sibling status extra request response f(arg: \"arg\") { arg context config sibling status } } }",
         Default::default(),
         Some(json!({
           "connectors": {
@@ -1536,7 +1671,10 @@ async fn test_variables() {
             }
           }
         })),
-        |_| {},
+        |request| {
+          let headers = request.router_request.headers_mut();
+          headers.insert("value", "coolheader".parse().unwrap());
+        },
     )
     .await;
 
@@ -1555,6 +1693,8 @@ async fn test_variables() {
             "config": "C",
             "status": 200
           },
+          "request": "coolheader",
+          "response": "myothercoolheader",
           "f": {
             "arg": "arg",
             "context": "B",
@@ -1574,13 +1714,13 @@ async fn test_variables() {
             Matcher::new()
                 .method("POST")
                 .path("/f")
-                .query("arg=rg&context=B&config=C")
+                .query("arg=rg&context=B&config=C&header=coolheader")
                 .header("x-source-context".into(), "B".try_into().unwrap())
                 .header("x-source-config".into(), "C".try_into().unwrap())
                 .header("x-connect-arg".into(), "g".try_into().unwrap())
                 .header("x-connect-context".into(), "B".try_into().unwrap())
                 .header("x-connect-config".into(), "C".try_into().unwrap())
-                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C" }))
+                .body(serde_json::json!({ "arg": "arg", "context": "B", "config": "C", "request": "coolheader" }))
                 ,
             Matcher::new()
                 .method("POST")

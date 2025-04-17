@@ -6,19 +6,19 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use crate::Context;
 use crate::plugins::connectors::handle_responses::MappedResponse;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::Selector;
+use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::connector::ConnectorRequest;
 use crate::plugins::telemetry::config_new::connector::ConnectorResponse;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::selectors::ErrorRepr;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-use crate::plugins::telemetry::config_new::Selector;
-use crate::plugins::telemetry::config_new::Stage;
 use crate::services::connector::request_service::TransportRequest;
 use crate::services::connector::request_service::TransportResponse;
-use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -313,18 +313,18 @@ mod tests {
     use super::ConnectorSelector;
     use super::ConnectorSource;
     use super::MappingProblems;
+    use crate::Context;
     use crate::plugins::connectors::handle_responses::MappedResponse;
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::mapping::Problem;
-    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::Selector;
-    use crate::services::connector::request_service::transport;
+    use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::services::connector::request_service::Request;
     use crate::services::connector::request_service::Response;
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
+    use crate::services::connector::request_service::transport;
     use crate::services::router::body;
-    use crate::Context;
 
     const TEST_SUBGRAPH_NAME: &str = "test_subgraph_name";
     const TEST_SOURCE_NAME: &str = "test_source_name";
@@ -361,6 +361,9 @@ mod tests {
             spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         }
     }
 
@@ -403,6 +406,7 @@ mod tests {
             }),
             key: response_key(),
             mapping_problems,
+            supergraph_request: Default::default(),
         }
     }
 

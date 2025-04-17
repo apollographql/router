@@ -31,3 +31,7 @@ jobs:
           title: 'chore: Update Uplink schema'
           body: |
             This updates the copy of `uplink.graphql` which this repository relies on with the latest copy fetched via `rover graph introspect`.
+
+            > [!IMPORTANT]
+            > This PR will be continuously force-pushed with the new `uplink.graphql` copy. If the update requires code changes, apply them
+            > in a separate PR. This PR will be automatically closed if it is no longer necessary.

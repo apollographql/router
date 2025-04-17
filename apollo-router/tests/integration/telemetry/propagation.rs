@@ -1,10 +1,10 @@
 use serde_json::json;
 use tower::BoxError;
 
-use crate::integration::common::graph_os_enabled;
 use crate::integration::common::IntegrationTest;
 use crate::integration::common::Query;
 use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id_via_header() -> Result<(), BoxError> {

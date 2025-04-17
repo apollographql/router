@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use parking_lot::Mutex;
+
 pub(crate) use self::execution::service::*;
 pub(crate) use self::query_planner::*;
 pub(crate) use self::subgraph_service::*;
@@ -23,9 +25,9 @@ pub(crate) use crate::services::router::Request as RouterRequest;
 pub(crate) use crate::services::router::Response as RouterResponse;
 pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
-pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
+pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 
 pub(crate) mod connect;
 pub(crate) mod connector;
@@ -56,26 +58,18 @@ impl AsRef<Request> for Arc<http_ext::Request<Request>> {
     }
 }
 
-#[cfg(test)]
+// Public-hidden for tests
+#[allow(missing_docs)]
+pub static APOLLO_KEY: Mutex<Option<String>> = Mutex::new(None);
+#[allow(missing_docs)]
+pub static APOLLO_GRAPH_REF: Mutex<Option<String>> = Mutex::new(None);
+
 pub(crate) fn apollo_key() -> Option<String> {
-    // During tests we don't want env variables to affect defaults
-    None
+    APOLLO_KEY.lock().clone()
 }
 
-#[cfg(not(test))]
-pub(crate) fn apollo_key() -> Option<String> {
-    std::env::var("APOLLO_KEY").ok()
-}
-
-#[cfg(test)]
 pub(crate) fn apollo_graph_reference() -> Option<String> {
-    // During tests we don't want env variables to affect defaults
-    None
-}
-
-#[cfg(not(test))]
-pub(crate) fn apollo_graph_reference() -> Option<String> {
-    std::env::var("APOLLO_GRAPH_REF").ok()
+    APOLLO_GRAPH_REF.lock().clone()
 }
 
 // set the supported `@defer` specification version to https://github.com/graphql/graphql-spec/pull/742/commits/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82

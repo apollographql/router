@@ -8,14 +8,14 @@ use opentelemetry::trace::TraceId;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::integration::common::graph_os_enabled;
-use crate::integration::common::Query;
-use crate::integration::common::Telemetry;
-use crate::integration::telemetry::verifier::Verifier;
-use crate::integration::telemetry::DatadogId;
-use crate::integration::telemetry::TraceSpec;
 use crate::integration::IntegrationTest;
 use crate::integration::ValueExt;
+use crate::integration::common::Query;
+use crate::integration::common::Telemetry;
+use crate::integration::common::graph_os_enabled;
+use crate::integration::telemetry::DatadogId;
+use crate::integration::telemetry::TraceSpec;
+use crate::integration::telemetry::verifier::Verifier;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_no_sample() -> Result<(), BoxError> {
@@ -422,8 +422,8 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent() -> Result<
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling(
-) -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sampling()
+-> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
 
     if !graph_os_enabled() {
@@ -481,8 +481,8 @@ async fn test_priority_sampling_parent_sampler_very_small_no_parent_no_agent_sam
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling(
-) -> Result<(), BoxError> {
+async fn test_priority_sampling_parent_sampler_very_small_parent_no_agent_sampling()
+-> Result<(), BoxError> {
     // Note that there is a very small chance this test will fail. We are trying to test a non-zero sampler.
 
     if !graph_os_enabled() {

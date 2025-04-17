@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic;
@@ -67,6 +68,7 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::utils::FallibleIterator;
+use crate::utils::logging::snapshot;
 
 #[derive(Clone, serde::Serialize, Debug, Eq, PartialEq)]
 pub(crate) struct ContextUsageEntry {
@@ -255,7 +257,7 @@ pub(crate) struct SubgraphEnteringEdgeInfo {
 ///
 /// NOTE: This ID does not ensure that IDs are unique because its internal counter resets on
 /// startup. It currently implements `Serialize` for debugging purposes. It should not implement
-/// `Deserialize`, and, more specfically, it should not be used for caching until uniqueness is
+/// `Deserialize`, and, more specifically, it should not be used for caching until uniqueness is
 /// provided (i.e. the inner type is a `Uuid` or the like).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
 pub(crate) struct OverrideId(usize);
@@ -478,6 +480,15 @@ impl OpPathElement {
             OpPathElement::Field(_) => None, // @defer cannot be on field at the moment
             OpPathElement::InlineFragment(inline_fragment) => {
                 inline_fragment.defer_directive_arguments().ok().flatten()
+            }
+        }
+    }
+
+    pub(crate) fn has_defer(&self) -> bool {
+        match self {
+            OpPathElement::Field(_) => false,
+            OpPathElement::InlineFragment(inline_fragment) => {
+                inline_fragment.directives.has("defer")
             }
         }
     }
@@ -1008,7 +1019,7 @@ impl GraphPathTriggerVariant for QueryGraphEdgeTransition {}
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: GraphPathTriggerVariant,
+    TTrigger: GraphPathTriggerVariant + Display,
     for<'a> &'a TTrigger: Into<GraphPathTriggerRef<'a>>,
     for<'a> &'a mut TTrigger: Into<GraphPathTriggerRefMut<'a>>,
     Arc<TTrigger>: Into<GraphPathTrigger>,
@@ -1930,7 +1941,11 @@ where
             *cost += total_cost;
             *ctx_map = Some(context_map);
         }
-        debug!("Condition resolution: {resolution:?}");
+        snapshot!(
+            "ConditionResolution",
+            resolution.to_string(),
+            "Condition resolution"
+        );
         Ok(resolution)
     }
 
@@ -1960,6 +1975,7 @@ where
             &Arc<TTrigger>,
             &EnabledOverrideConditions,
         ) -> Option<TEdge>,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<IndirectPaths<TTrigger, TEdge>, FederationError> {
         // If we're asked for indirect paths after an "@interfaceObject fake down cast" but that
         // down cast comes just after non-collecting edge(s), then we can ignore the ask (skip
@@ -2000,11 +2016,14 @@ where
         heap.push(HeapElement(self.clone()));
 
         while let Some(HeapElement(to_advance)) = heap.pop() {
-            debug!("From {to_advance:?}");
+            debug!("From {to_advance}");
             let span = debug_span!(" |");
             let _guard = span.enter();
             for edge in to_advance.next_edges()? {
-                debug!("Testing edge {edge:?}");
+                debug!(
+                    "Testing edge {edge}",
+                    edge = EdgeIndexDisplay::new(edge, &self.graph)
+                );
                 let span = debug_span!(" |");
                 let _guard = span.enter();
                 let edge_weight = self.graph.edge_weight(edge)?;
@@ -2016,6 +2035,11 @@ where
 
                 if excluded_destinations.is_excluded(&edge_tail_weight.source) {
                     debug!("Ignored: edge is excluded");
+                    continue;
+                }
+
+                if disabled_subgraphs.contains(&edge_tail_weight.source) {
+                    debug!("Ignored: subgraph is disabled");
                     continue;
                 }
 
@@ -2334,7 +2358,7 @@ where
                         }
                     }
                 } else {
-                    debug!("Condition unsatisfiable: {condition_resolution:?}");
+                    debug!("Condition unsatisfiable");
                 }
             }
         }
@@ -2982,6 +3006,7 @@ impl OpGraphPath {
         name = "GraphPath::advance_with_operation_element"
         fields(label = operation_element.to_string())
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn advance_with_operation_element(
         &self,
         supergraph_schema: ValidFederationSchema,
@@ -2989,6 +3014,8 @@ impl OpGraphPath {
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
         let span = debug_span!(
             "Trying to advance directly",
@@ -3263,6 +3290,8 @@ impl OpGraphPath {
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
                                     override_conditions,
+                                    check_cancellation,
+                                    disabled_subgraphs,
                                 )?;
                             // If we find no options for that implementation, we bail (as we need to
                             // simultaneously advance all implementations).
@@ -3300,6 +3329,8 @@ impl OpGraphPath {
                                         operation_element,
                                         condition_resolver,
                                         override_conditions,
+                                        check_cancellation,
+                                        disabled_subgraphs,
                                     )?;
                                 let Some(field_options_for_implementation) =
                                     field_options_for_implementation
@@ -3339,6 +3370,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
+                            check_cancellation,
                         )?;
                         if let Some(interface_path) = interface_path {
                             let (interface_path, all_options) =
@@ -3486,6 +3518,8 @@ impl OpGraphPath {
                                     &implementation_inline_fragment.into(),
                                     condition_resolver,
                                     override_conditions,
+                                    check_cancellation,
+                                    disabled_subgraphs,
                                 )?;
                             let Some(implementation_options) = implementation_options else {
                                 drop(guard);
@@ -3512,6 +3546,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
+                            check_cancellation,
                         )?;
                         debug!("Type-exploded options: {}", DisplaySlice(&all_options));
                         Ok((Some(all_options), None))
@@ -3719,11 +3754,59 @@ impl OpGraphPath {
     }
 }
 
-impl Display for OpGraphPath {
+struct EdgeIndexDisplay<'graph, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    _phantom_data_for_edge: PhantomData<TEdge>,
+    graph: &'graph Arc<QueryGraph>,
+    edge_index: EdgeIndex,
+}
+
+impl<'graph, TEdge> EdgeIndexDisplay<'graph, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn new(edge_index: EdgeIndex, graph: &'graph Arc<QueryGraph>) -> Self {
+        Self {
+            _phantom_data_for_edge: Default::default(),
+            graph,
+            edge_index,
+        }
+    }
+}
+
+impl<TEdge> Display for EdgeIndexDisplay<'_, TEdge>
+where
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let e = self.edge_index;
+        let graph = self.graph.graph();
+        let (head_idx, tail_idx) = graph.edge_endpoints(e).ok_or(std::fmt::Error)?;
+        let head = &graph[head_idx];
+        let tail = &graph[tail_idx];
+        let edge = &graph[e];
+        let transition = &edge.transition;
+        write!(f, "{head} -> {tail} ({transition})")
+    }
+}
+
+impl<TTrigger, TEdge> Display for GraphPath<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash + Display,
+    Arc<TTrigger>: Into<GraphPathTrigger>,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+    EdgeIndex: Into<TEdge>,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // If the path is length is 0 return "[]"
         // Traverse the path, getting the of the edge.
-        let head = &self.graph.graph()[self.head];
+        let graph = self.graph.graph();
+        let head = &graph[self.head];
         let head_is_root_node = head.is_root_node();
         if head_is_root_node && self.edges.is_empty() {
             return write!(f, "_");
@@ -3735,14 +3818,14 @@ impl Display for OpGraphPath {
             .iter()
             .cloned()
             .enumerate()
-            .try_for_each(|(i, e)| match e {
+            .try_for_each(|(i, e)| match e.into() {
                 Some(e) => {
-                    let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
-                    let node = &self.graph.graph()[tail];
+                    let tail = graph.edge_endpoints(e).ok_or(std::fmt::Error)?.1;
+                    let node = &graph[tail];
                     if i == 0 && head_is_root_node {
                         write!(f, "{node}")
                     } else {
-                        let edge = &self.graph.graph()[e];
+                        let edge = &graph[e];
                         let label = edge.transition.to_string();
 
                         if let Some(conditions) = &edge.conditions {
@@ -3764,8 +3847,14 @@ impl Display for OpGraphPath {
         }
         if !self.runtime_types_of_tail.is_empty() {
             write!(f, " (types: [")?;
-            for ty in self.runtime_types_of_tail.iter() {
+            let mut iter = self.runtime_types_of_tail.iter();
+            if let Some(ty) = iter.next() {
+                // First item
                 write!(f, "{ty}")?;
+                // The rest
+                for ty in iter {
+                    write!(f, " {ty}")?;
+                }
             }
             write!(f, "])")?;
         }
@@ -3778,6 +3867,7 @@ impl SimultaneousPaths {
     /// the options for the `SimultaneousPaths` as a whole.
     fn flat_cartesian_product(
         options_for_each_path: Vec<Vec<SimultaneousPaths>>,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
     ) -> Result<Vec<SimultaneousPaths>, FederationError> {
         // This can be written more tersely with a bunch of `reduce()`/`flat_map()`s and friends,
         // but when interfaces type-explode into many implementations, this can end up with fairly
@@ -3808,6 +3898,7 @@ impl SimultaneousPaths {
 
         // Compute the cartesian product.
         for _ in 0..num_options {
+            check_cancellation()?;
             let num_simultaneous_paths = options_for_each_path
                 .iter()
                 .zip(&option_indexes)
@@ -3895,24 +3986,20 @@ impl SimultaneousPathsWithLazyIndirectPaths {
     /// For a given "input" path (identified by an idx in `paths`), each of its indirect options.
     fn indirect_options(
         &mut self,
-        updated_context: &OpGraphPathContext,
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
-        // Note that the provided context will usually be one we had during construction (the
-        // `updated_context` will be `self.context` updated by whichever operation we're looking at,
-        // but only operation elements with a @skip/@include will change the context so it's pretty
-        // rare), which is why we save recomputation by caching the computed value in that case, but
-        // in case it's different, we compute without caching.
-        if *updated_context != self.context {
-            self.compute_indirect_paths(path_index, condition_resolver, override_conditions)?;
-        }
         if let Some(indirect_paths) = &self.lazily_computed_indirect_paths[path_index] {
             Ok(indirect_paths.clone())
         } else {
-            let new_indirect_paths =
-                self.compute_indirect_paths(path_index, condition_resolver, override_conditions)?;
+            let new_indirect_paths = self.compute_indirect_paths(
+                path_index,
+                condition_resolver,
+                override_conditions,
+                disabled_subgraphs,
+            )?;
             self.lazily_computed_indirect_paths[path_index] = Some(new_indirect_paths.clone());
             Ok(new_indirect_paths)
         }
@@ -3923,6 +4010,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         path_index: usize,
         condition_resolver: &mut impl ConditionResolver,
         overridden_conditions: &EnabledOverrideConditions,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<OpIndirectPaths, FederationError> {
         self.paths.0[path_index].advance_with_non_collecting_and_type_preserving_transitions(
             &self.context,
@@ -3937,6 +4025,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             |graph, node, trigger, overridden_conditions| {
                 graph.edge_for_op_graph_path_trigger(node, trigger, overridden_conditions)
             },
+            disabled_subgraphs,
         )
     }
 
@@ -3973,6 +4062,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
         override_conditions: &EnabledOverrideConditions,
+        check_cancellation: &dyn Fn() -> Result<(), SingleFederationError>,
+        disabled_subgraphs: &IndexSet<Arc<str>>,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
         debug!(
             "Trying to advance paths for operation: path = {}, operation = {operation_element}",
@@ -3987,6 +4078,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         // references to `self`, which means cloning these paths when iterating.
         let paths = self.paths.0.clone();
         for (path_index, path) in paths.iter().enumerate() {
+            check_cancellation()?;
             debug!("Computing options for {path}");
             let span = debug_span!(" |");
             let gaurd = span.enter();
@@ -4004,6 +4096,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         &updated_context,
                         condition_resolver,
                         override_conditions,
+                        check_cancellation,
+                        disabled_subgraphs,
                     )?;
                 debug!("{advance_options:?}");
                 drop(gaurd);
@@ -4052,10 +4146,10 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                 // Add whatever options can be obtained by taking some non-collecting edges first.
                 let paths_with_non_collecting_edges = self
                     .indirect_options(
-                        &updated_context,
                         path_index,
                         condition_resolver,
                         override_conditions,
+                        disabled_subgraphs,
                     )?
                     .filter_non_collecting_paths_for_field(operation_field)?;
                 if !paths_with_non_collecting_edges.paths.is_empty() {
@@ -4076,6 +4170,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                                 &updated_context,
                                 condition_resolver,
                                 override_conditions,
+                                check_cancellation,
+                                disabled_subgraphs,
                             )?;
                         // If we can't advance the operation element after that path, ignore it,
                         // it's just not an option.
@@ -4164,6 +4260,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                     &updated_context,
                     condition_resolver,
                     override_conditions,
+                    check_cancellation,
+                    disabled_subgraphs,
                 )?;
                 options = advance_options.unwrap_or_else(Vec::new);
                 debug!("{options:?}");
@@ -4180,7 +4278,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             }
         }
 
-        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path)?;
+        let all_options =
+            SimultaneousPaths::flat_cartesian_product(options_for_each_path, check_cancellation)?;
         debug!("{all_options:?}");
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }
@@ -4188,6 +4287,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
 
 // PORT_NOTE: JS passes a ConditionResolver here, we do not: see port note for
 // `SimultaneousPathsWithLazyIndirectPaths`
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn create_initial_options(
     initial_path: GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>,
     initial_type: &QueryGraphNodeType,
@@ -4196,6 +4296,7 @@ pub(crate) fn create_initial_options(
     excluded_edges: ExcludedDestinations,
     excluded_conditions: ExcludedConditions,
     override_conditions: &EnabledOverrideConditions,
+    disabled_subgraphs: &IndexSet<Arc<str>>,
 ) -> Result<Vec<SimultaneousPathsWithLazyIndirectPaths>, FederationError> {
     let initial_paths = SimultaneousPaths::from(initial_path);
     let mut lazy_initial_path = SimultaneousPathsWithLazyIndirectPaths::new(
@@ -4207,10 +4308,10 @@ pub(crate) fn create_initial_options(
 
     if initial_type.is_federated_root_type() {
         let initial_options = lazy_initial_path.indirect_options(
-            &initial_context,
             0,
             condition_resolver,
             override_conditions,
+            disabled_subgraphs,
         )?;
         let options = initial_options
             .paths

@@ -4,25 +4,22 @@ use apollo_compiler::name;
 use http::HeaderName;
 use url::Url;
 
-use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::sources::connect::ConnectorPosition;
 use crate::sources::connect::HeaderSource;
 use crate::sources::connect::json_selection::JSONSelection;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
-pub(crate) const CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME: Name = name!("GET");
-pub(crate) const CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME: Name = name!("POST");
-pub(crate) const CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME: Name = name!("PUT");
-pub(crate) const CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME: Name = name!("PATCH");
-pub(crate) const CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME: Name = name!("DELETE");
 pub(crate) const CONNECT_SELECTION_ARGUMENT_NAME: Name = name!("selection");
 pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
+pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
+pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
@@ -60,12 +57,21 @@ pub(crate) struct SourceHTTPArguments {
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 }
 
+/// Settings for the connector when it is doing a $batch entity resolver
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct ConnectBatchArguments {
+    /// Set a maximum number of requests to be batched together.
+    ///
+    /// Over this maximum, will be split into multiple batch requests of max_size.
+    pub(crate) max_size: Option<usize>,
+}
+
 /// Arguments to the `@connect` directive
 ///
 /// Refer to [ConnectSpecDefinition] for more info.
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct ConnectDirectiveArguments {
-    pub(crate) position: ObjectOrInterfaceFieldDirectivePosition,
+    pub(crate) position: ConnectorPosition,
 
     /// The upstream source for shared connector configuration.
     ///
@@ -90,6 +96,9 @@ pub(crate) struct ConnectDirectiveArguments {
     /// identified domain model.) If true, the connector must be defined on a field
     /// of the Query type.
     pub(crate) entity: bool,
+
+    /// Settings for the connector when it is doing a $batch entity resolver
+    pub(crate) batch: Option<ConnectBatchArguments>,
 }
 
 /// The HTTP arguments needed for a connect request
