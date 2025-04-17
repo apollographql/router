@@ -15,6 +15,7 @@ pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
+pub(crate) const CONNECT_ERRORS_NAME_IN_SPEC: Name = name!("ConnectErrors");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
@@ -22,9 +23,13 @@ pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
+pub(crate) const SOURCE_ERRORS_NAME_IN_SPEC: Name = name!("SourceErrors");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
 pub(crate) const HTTP_ARGUMENT_NAME: Name = name!("http");
+pub(crate) const ERRORS_ARGUMENT_NAME: Name = name!("errors");
 pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
+pub(crate) const ERRORS_MESSAGE_ARGUMENT_NAME: Name = name!("message");
+pub(crate) const ERRORS_EXTENSIONS_ARGUMENT_NAME: Name = name!("extensions");
 
 pub(crate) const HTTP_HEADER_MAPPING_NAME_IN_SPEC: Name = name!("HTTPHeaderMapping");
 pub(crate) const HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME: Name = name!("name");
@@ -44,6 +49,9 @@ pub(crate) struct SourceDirectiveArguments {
 
     /// Common HTTP options
     pub(crate) http: SourceHTTPArguments,
+
+    /// Configure the error mapping functionality for this source
+    pub(crate) errors: Option<SourceErrorsArguments>,
 }
 
 /// Common HTTP options for a connector [SourceSpecDefinition]
@@ -57,13 +65,14 @@ pub(crate) struct SourceHTTPArguments {
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
 }
 
-/// Settings for the connector when it is doing a $batch entity resolver
+/// Configure the error mapping functionality for a source
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectBatchArguments {
-    /// Set a maximum number of requests to be batched together.
-    ///
-    /// Over this maximum, will be split into multiple batch requests of max_size.
-    pub(crate) max_size: Option<usize>,
+pub(crate) struct SourceErrorsArguments {
+    /// Configure the mapping for the "message" portion of an error
+    pub(crate) message: Option<JSONSelection>,
+
+    /// Configure the mapping for the "extensions" portion of an error
+    pub(crate) extensions: Option<JSONSelection>,
 }
 
 /// Arguments to the `@connect` directive
@@ -99,6 +108,9 @@ pub(crate) struct ConnectDirectiveArguments {
 
     /// Settings for the connector when it is doing a $batch entity resolver
     pub(crate) batch: Option<ConnectBatchArguments>,
+
+    /// Configure the error mapping functionality for this connect
+    pub(crate) errors: Option<ConnectErrorsArguments>,
 }
 
 /// The HTTP arguments needed for a connect request
@@ -121,4 +133,23 @@ pub(crate) struct ConnectHTTPArguments {
     ///
     /// Overrides headers from the associated @source by name.
     pub(crate) headers: IndexMap<HeaderName, HeaderSource>,
+}
+
+/// Settings for the connector when it is doing a $batch entity resolver
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct ConnectBatchArguments {
+    /// Set a maximum number of requests to be batched together.
+    ///
+    /// Over this maximum, will be split into multiple batch requests of max_size.
+    pub(crate) max_size: Option<usize>,
+}
+
+/// Configure the error mapping functionality for a connect
+#[cfg_attr(test, derive(Debug))]
+pub(crate) struct ConnectErrorsArguments {
+    /// Configure the mapping for the "message" portion of an error
+    pub(crate) message: Option<JSONSelection>,
+
+    /// Configure the mapping for the "extensions" portion of an error
+    pub(crate) extensions: Option<JSONSelection>,
 }

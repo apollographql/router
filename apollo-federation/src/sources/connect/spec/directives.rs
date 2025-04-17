@@ -6,17 +6,23 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use itertools::Itertools;
 
+use super::schema::BATCH_ARGUMENT_NAME;
 use super::schema::CONNECT_BODY_ARGUMENT_NAME;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use super::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use super::schema::ConnectBatchArguments;
 use super::schema::ConnectDirectiveArguments;
+use super::schema::ConnectErrorsArguments;
 use super::schema::ConnectHTTPArguments;
+use super::schema::ERRORS_ARGUMENT_NAME;
+use super::schema::ERRORS_EXTENSIONS_ARGUMENT_NAME;
+use super::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
 use super::schema::HEADERS_ARGUMENT_NAME;
 use super::schema::HTTP_ARGUMENT_NAME;
 use super::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::SourceDirectiveArguments;
+use super::schema::SourceErrorsArguments;
 use super::schema::SourceHTTPArguments;
 use super::versions::VersionInfo;
 use crate::error::FederationError;
@@ -148,6 +154,7 @@ impl SourceDirectiveArguments {
         // We'll have to iterate over the arg list and keep the properties by their name
         let mut name = None;
         let mut http = None;
+        let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -162,6 +169,13 @@ impl SourceDirectiveArguments {
                 let http_value = SourceHTTPArguments::from_values(http_value, version_info)?;
 
                 http = Some(http_value);
+            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or(internal!(
+                    "`errors` field in `@source` directive is not an object"
+                ))?;
+                let errors_value = SourceErrorsArguments::from_values(http_value)?;
+
+                errors = Some(errors_value);
             } else {
                 return Err(internal!(format!(
                     "unknown argument in `@source` directive: {arg_name}"
@@ -174,6 +188,7 @@ impl SourceDirectiveArguments {
                 .ok_or(internal!("missing `name` field in `@source` directive"))?
                 .to_string(),
             http: http.ok_or(internal!("missing `http` field in `@source` directive"))?,
+            errors,
         })
     }
 }
@@ -222,6 +237,39 @@ impl SourceHTTPArguments {
     }
 }
 
+impl SourceErrorsArguments {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
+        let mut message = None;
+        let mut extensions = None;
+        for (name, value) in values {
+            let name = name.as_str();
+
+            if name == ERRORS_MESSAGE_ARGUMENT_NAME.as_str() {
+                let message_value = value.as_str().ok_or(internal!(
+                    "`message` field in `@source` directive's `errors` field is not a string"
+                ))?;
+                message =
+                    Some(JSONSelection::parse(message_value).map_err(|e| internal!(e.message))?);
+            } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
+                let extensions_value = value.as_str().ok_or(internal!(
+                    "`extensions` field in `@source` directive's `errors` field is not a string"
+                ))?;
+                extensions =
+                    Some(JSONSelection::parse(extensions_value).map_err(|e| internal!(e.message))?);
+            } else {
+                return Err(internal!(format!(
+                    "unknown argument in `@source` directive's `errors` field: {name}"
+                )));
+            }
+        }
+
+        Ok(Self {
+            message,
+            extensions,
+        })
+    }
+}
+
 impl ConnectDirectiveArguments {
     fn from_position_and_directive(
         position: ConnectorPosition,
@@ -236,6 +284,7 @@ impl ConnectDirectiveArguments {
         let mut selection = None;
         let mut entity = None;
         let mut batch = None;
+        let mut errors = None;
         for arg in args {
             let arg_name = arg.name.as_str();
 
@@ -251,12 +300,20 @@ impl ConnectDirectiveArguments {
                 ))?;
 
                 http = Some(ConnectHTTPArguments::from_values(http_value, version_info)?);
-            } else if arg_name == "batch" {
+            } else if arg_name == BATCH_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or(internal!(
                     "`http` field in `@connect` directive is not an object"
                 ))?;
 
                 batch = Some(ConnectBatchArguments::from_values(http_value)?);
+            } else if arg_name == ERRORS_ARGUMENT_NAME.as_str() {
+                let http_value = arg.value.as_object().ok_or(internal!(
+                    "`errors` field in `@connect` directive is not an object"
+                ))?;
+
+                let errors_value = ConnectErrorsArguments::from_values(http_value)?;
+
+                errors = Some(errors_value);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg.value.as_str().ok_or(internal!(
                     "`selection` field in `@connect` directive is not a string"
@@ -283,6 +340,7 @@ impl ConnectDirectiveArguments {
             selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
             batch,
+            errors,
         })
     }
 }
@@ -346,6 +404,39 @@ impl ConnectHTTPArguments {
             delete,
             body,
             headers: headers.unwrap_or_default(),
+        })
+    }
+}
+
+impl ConnectErrorsArguments {
+    fn from_values(values: &ObjectNode) -> Result<Self, FederationError> {
+        let mut message = None;
+        let mut extensions = None;
+        for (name, value) in values {
+            let name = name.as_str();
+
+            if name == ERRORS_MESSAGE_ARGUMENT_NAME.as_str() {
+                let message_value = value.as_str().ok_or(internal!(
+                    "`message` field in `@connect` directive's `errors` field is not a string"
+                ))?;
+                message =
+                    Some(JSONSelection::parse(message_value).map_err(|e| internal!(e.message))?);
+            } else if name == ERRORS_EXTENSIONS_ARGUMENT_NAME.as_str() {
+                let extensions_value = value.as_str().ok_or(internal!(
+                    "`extensions` field in `@connect` directive's `errors` field is not a string"
+                ))?;
+                extensions =
+                    Some(JSONSelection::parse(extensions_value).map_err(|e| internal!(e.message))?);
+            } else {
+                return Err(internal!(format!(
+                    "unknown argument in `@connect` directive's `errors` field: {name}"
+                )));
+            }
+        }
+
+        Ok(Self {
+            message,
+            extensions,
         })
     }
 }

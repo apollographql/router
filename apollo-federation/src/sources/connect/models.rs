@@ -30,7 +30,9 @@ use super::json_selection::ExternalVarPaths;
 use super::spec::ConnectHTTPArguments;
 use super::spec::SourceHTTPArguments;
 use super::spec::schema::ConnectDirectiveArguments;
+use super::spec::schema::ConnectErrorsArguments;
 use super::spec::schema::SourceDirectiveArguments;
+use super::spec::schema::SourceErrorsArguments;
 use super::spec::versions::AllowedHeaders;
 use super::spec::versions::VersionInfo;
 use super::string_template;
@@ -72,6 +74,8 @@ pub struct Connector {
     pub response_headers: HashSet<String>,
 
     pub batch_settings: Option<ConnectorBatchSettings>,
+
+    pub error_settings: Option<ConnectorErrorsSettings>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +87,43 @@ impl ConnectorBatchSettings {
     fn from_directive(connect: &ConnectDirectiveArguments) -> Option<Self> {
         Some(Self {
             max_size: connect.batch.as_ref().and_then(|b| b.max_size),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConnectorErrorsSettings {
+    pub message: Option<JSONSelection>,
+    pub extensions: Option<JSONSelection>,
+}
+
+impl ConnectorErrorsSettings {
+    fn from_directive(
+        connect_errors: Option<&ConnectErrorsArguments>,
+        source_errors: Option<&Option<SourceErrorsArguments>>,
+    ) -> Option<Self> {
+        let source_errors = source_errors.and_then(|s| s.as_ref());
+
+        // `errors` set at @connect always overrides whatever is set at @source
+        let message = if let Some(connect_errors) = connect_errors {
+            connect_errors.message.clone()
+        } else if let Some(source_errors) = source_errors {
+            source_errors.message.clone()
+        } else {
+            None
+        };
+
+        let extensions = if let Some(connect_errors) = connect_errors {
+            connect_errors.extensions.clone()
+        } else if let Some(source_errors) = source_errors {
+            source_errors.extensions.clone()
+        } else {
+            None
+        };
+
+        Some(Self {
+            message,
+            extensions,
         })
     }
 }
@@ -152,30 +193,76 @@ impl Connector {
             .source
             .as_ref()
             .and_then(|name| source_arguments.iter().find(|s| s.name == *name));
-
         let source_name = source.map(|s| s.name.clone());
+
+        // Create our transport
         let connect_http = connect
             .http
             .as_ref()
             .ok_or_else(|| internal_error!("@connect(http:) missing"))?;
         let source_http = source.map(|s| &s.http);
-
         let transport = HttpJsonTransport::from_directive(connect_http, source_http)?;
+
+        // Get our batch and error settings
+        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
+        let connect_errors = connect.errors.as_ref();
+        let source_errors = source.map(|s| &s.errors);
+        let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
+
+        // Calculate which variables are in use on the request and the response (including errors.message and errors.extensions)
         let request_variables: HashSet<Namespace> = transport
             .variable_references()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let request_headers = extract_header_references(transport.variable_references());
-
-        let response_variables: HashSet<Namespace> = connect
+        let errors_message_variables: HashSet<Namespace> = connect
+            .errors
+            .as_ref()
+            .map_or(Default::default(), |e| e.message.as_ref())
+            .map_or(Default::default(), |m| {
+                m.variable_references()
+                    .map(|var_ref| var_ref.namespace.namespace)
+                    .collect()
+            });
+        let errors_extensions_variables: HashSet<Namespace> = connect
+            .errors
+            .as_ref()
+            .map_or(Default::default(), |e| e.extensions.as_ref())
+            .map_or(Default::default(), |m| {
+                m.variable_references()
+                    .map(|var_ref| var_ref.namespace.namespace)
+                    .collect()
+            });
+        let mut response_variables: HashSet<Namespace> = connect
             .selection
             .variable_references()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let response_headers = extract_header_references(connect.selection.variable_references());
-        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
-        let batch_settings = ConnectorBatchSettings::from_directive(&connect);
+        response_variables.extend(errors_message_variables);
+        response_variables.extend(errors_extensions_variables);
 
+        // Calculate which headers are in use on the request and the response (including errors.message and errors.extensions)
+        let request_headers = extract_header_references(transport.variable_references());
+        let errors_message_headers = connect
+            .errors
+            .as_ref()
+            .map_or(Default::default(), |e| e.message.as_ref())
+            .map_or(Default::default(), |m| {
+                extract_header_references(m.variable_references())
+            });
+        let errors_extensions_headers = connect
+            .errors
+            .as_ref()
+            .map_or(Default::default(), |e| e.extensions.as_ref())
+            .map_or(Default::default(), |m| {
+                extract_header_references(m.variable_references())
+            });
+        let mut response_headers =
+            extract_header_references(connect.selection.variable_references());
+        response_headers.extend(errors_message_headers);
+        response_headers.extend(errors_extensions_headers);
+
+        // Last couple of items here!
+        let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
         let id = ConnectId {
             label: make_label(subgraph_name, &source_name, &transport),
             subgraph_name: subgraph_name.to_string(),
@@ -196,6 +283,7 @@ impl Connector {
             request_headers,
             response_headers,
             batch_settings,
+            error_settings,
         };
 
         Ok((id, connector))

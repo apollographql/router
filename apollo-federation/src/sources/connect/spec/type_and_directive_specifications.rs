@@ -35,10 +35,13 @@ use crate::sources::connect::spec::ConnectSpec;
 use crate::sources::connect::spec::schema::BATCH_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_BATCH_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_ERRORS_NAME_IN_SPEC;
+use crate::sources::connect::spec::schema::ERRORS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::SOURCE_ERRORS_NAME_IN_SPEC;
 
 pub(super) fn check_or_add(
     link: &Link,
@@ -210,6 +213,41 @@ pub(super) fn check_or_add(
         type_name: connect_batch.name.clone(),
     };
 
+    // @connect error settings
+
+    let connect_errors_field_list = vec![
+        InputValueDefinition {
+            description: None,
+            name: name!(message),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: name!(extensions),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ];
+
+    let mut connect_errors_fields = IndexMap::with_hasher(Default::default());
+    for field in connect_errors_field_list {
+        connect_errors_fields.insert(field.name.clone(), Component::new(field));
+    }
+
+    let connect_errors = InputObjectType {
+        name: link.type_name_in_schema(&CONNECT_ERRORS_NAME_IN_SPEC),
+        description: None,
+        directives: Default::default(),
+        fields: connect_errors_fields,
+    };
+
+    let connect_errors_pos = InputObjectTypeDefinitionPosition {
+        type_name: connect_errors.name.clone(),
+    };
+
     // -------------------------------------------------------------------------
 
     // connect/v0.1:
@@ -227,6 +265,7 @@ pub(super) fn check_or_add(
     //   selection: JSONSelection!
     //   entity: Boolean = false
     //   batch: ConnectBatch
+    //   errors: ConnectErrors
     // ) repeatable on FIELD_DEFINITION | OBJECT
     let connect_spec = DirectiveSpecification::new(
         link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC),
@@ -265,6 +304,22 @@ pub(super) fn check_or_add(
                             .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&CONNECT_BATCH_NAME_IN_SPEC);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: ERRORS_ARGUMENT_NAME.clone(),
+                    get_type: |s, _| {
+                        let name = s
+                            .metadata()
+                            .ok_or_else(|| internal!("missing metadata"))?
+                            .for_identity(&ConnectSpec::identity())
+                            .ok_or_else(|| internal!("missing connect spec"))?
+                            .type_name_in_schema(&CONNECT_ERRORS_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -345,6 +400,41 @@ pub(super) fn check_or_add(
         type_name: source_http_spec.name.clone(),
     };
 
+    // @source error settings
+
+    let source_errors_field_list = vec![
+        InputValueDefinition {
+            description: None,
+            name: name!(message),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: name!(extensions),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ];
+
+    let mut source_errors_fields = IndexMap::with_hasher(Default::default());
+    for field in source_errors_field_list {
+        source_errors_fields.insert(field.name.clone(), Component::new(field));
+    }
+
+    let source_errors = InputObjectType {
+        name: link.type_name_in_schema(&SOURCE_ERRORS_NAME_IN_SPEC),
+        description: None,
+        directives: Default::default(),
+        fields: source_errors_fields,
+    };
+
+    let source_errors_pos = InputObjectTypeDefinitionPosition {
+        type_name: source_errors.name.clone(),
+    };
+
     // -------------------------------------------------------------------------
 
     // directive @source(
@@ -378,6 +468,22 @@ pub(super) fn check_or_add(
                 },
                 composition_strategy: None,
             },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: ERRORS_ARGUMENT_NAME.clone(),
+                    get_type: |s, _| {
+                        let name = s
+                            .metadata()
+                            .ok_or_else(|| internal!("missing metadata"))?
+                            .for_identity(&ConnectSpec::identity())
+                            .ok_or_else(|| internal!("missing connect spec"))?
+                            .type_name_in_schema(&SOURCE_ERRORS_NAME_IN_SPEC);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
         ],
         true,
         &[DirectiveLocation::Schema],
@@ -395,10 +501,14 @@ pub(super) fn check_or_add(
     connect_http_pos.insert(schema, connect_http.into())?;
     connect_batch_pos.pre_insert(schema)?;
     connect_batch_pos.insert(schema, connect_batch.into())?;
+    connect_errors_pos.pre_insert(schema)?;
+    connect_errors_pos.insert(schema, connect_errors.into())?;
     connect_spec.check_or_add(schema, None)?;
 
     source_http_pos.pre_insert(schema)?;
     source_http_pos.insert(schema, source_http_spec.into())?;
+    source_errors_pos.pre_insert(schema)?;
+    source_errors_pos.insert(schema, source_errors.into())?;
     source_spec.check_or_add(schema, None)?;
 
     Ok(())
