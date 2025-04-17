@@ -20,7 +20,7 @@ use crate::query_planner::subscription::SubscriptionNode;
 
 /// This extension key is private to apollo and may change in the future. Users should not rely on
 /// its existence.
-const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.subgraph.name";
+const SUBGRAPH_NAME_EXTENSION_KEY: &str = "apollo.private.subgraph.name";
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 
