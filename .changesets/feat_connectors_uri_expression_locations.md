@@ -7,7 +7,7 @@ Previously, we only allowed expressions in very specific locations in Connectors
 
 Expressions can now be used anywhere in or after the path of the URI.
 For example, you can do
-`@connect(http: {GET: "/users?{$args.filterName}={$args.filterValue}#{$args.fragmentStuff}"})`.
+`@connect(http: {GET: "/users?{$args.filterName}={$args.filterValue}"})`.
 The result of any expression will _always_ be percent encoded.
 
 > Note: Parts of this feature are only available when composing with Apollo Federation v2.11 or above (currently in preview).
