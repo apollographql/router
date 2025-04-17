@@ -443,7 +443,7 @@ impl PluginPrivate for Telemetry {
                         .new_router_instruments(static_router_instruments.clone());
                     custom_instruments.on_request(request);
 
-                    let custom_events: RouterEvents =
+                    let mut custom_events: RouterEvents =
                         config_request.instrumentation.events.new_router_events();
                     custom_events.on_request(request);
 
@@ -454,7 +454,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -651,12 +651,30 @@ impl PluginPrivate for Telemetry {
                         .instruments.new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
-                    let supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    let mut supergraph_events =
+                        config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
                     (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
                 },
+<<<<<<< HEAD
                 move |(ctx, custom_instruments, mut custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
+=======
+                move |(
+                    ctx,
+                    custom_instruments,
+                    mut custom_attributes,
+                    mut supergraph_events,
+                    custom_graphql_instruments,
+                ): (
+                    Context,
+                    SupergraphInstruments,
+                    Vec<KeyValue>,
+                    SupergraphEvents,
+                    GraphQLInstruments,
+                ),
+                      fut| {
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -766,7 +784,7 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_subgraph_instruments(static_subgraph_instruments.clone());
                     custom_instruments.on_request(sub_request);
-                    let custom_events = config.instrumentation.events.new_subgraph_events();
+                    let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
                     let custom_cache_instruments: CacheInstruments = config
@@ -787,7 +805,7 @@ impl PluginPrivate for Telemetry {
                     context,
                     custom_instruments,
                     custom_attributes,
-                    custom_events,
+                    mut custom_events,
                     custom_cache_instruments,
                 ): (
                     Context,
@@ -856,6 +874,104 @@ impl PluginPrivate for Telemetry {
             .boxed()
     }
 
+<<<<<<< HEAD
+=======
+    fn connector_request_service(
+        &self,
+        service: connector::request_service::BoxService,
+        source_name: String,
+    ) -> connector::request_service::BoxService {
+        let req_fn_config = self.config.clone();
+        let res_fn_config = self.config.clone();
+        let span_mode = self.config.instrumentation.spans.mode;
+        let static_connector_instruments = self
+            .builtin_instruments
+            .read()
+            .connector_custom_instruments
+            .clone();
+        ServiceBuilder::new()
+            .instrument(move |_req: &connector::request_service::Request| {
+                span_mode.create_connector(source_name.as_str())
+            })
+            .map_future_with_request_data(
+                move |request: &connector::request_service::Request| {
+                    let custom_instruments = req_fn_config
+                        .instrumentation
+                        .instruments
+                        .new_connector_instruments(static_connector_instruments.clone());
+                    custom_instruments.on_request(request);
+                    let mut custom_events =
+                        req_fn_config.instrumentation.events.new_connector_events();
+                    custom_events.on_request(request);
+
+                    let custom_span_attributes = req_fn_config
+                        .instrumentation
+                        .spans
+                        .connector
+                        .attributes
+                        .on_request(request);
+
+                    (
+                        request.context.clone(),
+                        Some((custom_instruments, custom_events, custom_span_attributes)),
+                    )
+                },
+                move |(context, custom_telemetry): (
+                    Context,
+                    Option<(ConnectorInstruments, ConnectorEvents, Vec<KeyValue>)>,
+                ),
+                      f: BoxFuture<
+                    'static,
+                    Result<connector::request_service::Response, BoxError>,
+                >| {
+                    let conf = res_fn_config.clone();
+                    async move {
+                        match custom_telemetry {
+                            Some((
+                                custom_instruments,
+                                mut custom_events,
+                                custom_span_attributes,
+                            )) => {
+                                let span = Span::current();
+                                span.set_span_dyn_attributes(custom_span_attributes);
+
+                                let result = f.await;
+                                match &result {
+                                    Ok(response) => {
+                                        span.set_span_dyn_attributes(
+                                            conf.instrumentation
+                                                .spans
+                                                .connector
+                                                .attributes
+                                                .on_response(response),
+                                        );
+                                        custom_instruments.on_response(response);
+                                        custom_events.on_response(response);
+                                    }
+                                    Err(err) => {
+                                        span.set_span_dyn_attributes(
+                                            conf.instrumentation
+                                                .spans
+                                                .connector
+                                                .attributes
+                                                .on_error(err, &context),
+                                        );
+                                        custom_instruments.on_error(err, &context);
+                                        custom_events.on_error(err, &context);
+                                    }
+                                }
+                                result
+                            }
+                            _ => f.await,
+                        }
+                    }
+                },
+            )
+            .service(service)
+            .boxed()
+    }
+
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }

@@ -1,6 +1,7 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
+snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -2311,6 +2312,7 @@ expression: "&schema"
       },
       "type": "object"
     },
+<<<<<<< HEAD
     "ErrorsForward": {
       "additionalProperties": false,
       "properties": {
@@ -2332,6 +2334,9 @@ expression: "&schema"
       "type": "object"
     },
     "EventLevel": {
+=======
+    "EventLevelConfig": {
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
       "enum": [
         "info",
         "warn",
@@ -2373,6 +2378,40 @@ expression: "&schema"
         }
       ]
     },
+<<<<<<< HEAD
+=======
+    "Event_for_ConnectorAttributes_and_ConnectorSelector": {
+      "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_ConnectorSelector",
+          "description": "#/definitions/Condition_for_ConnectorSelector"
+        },
+        "level": {
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
+        },
+        "message": {
+          "description": "The event message.",
+          "type": "string"
+        },
+        "on": {
+          "$ref": "#/definitions/EventOn",
+          "description": "#/definitions/EventOn"
+        }
+      },
+      "required": [
+        "level",
+        "message",
+        "on"
+      ],
+      "type": "object"
+    },
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
     "Event_for_RouterAttributes_and_RouterSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
@@ -2385,8 +2424,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_RouterSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2416,8 +2455,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_SubgraphSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -2447,8 +2486,8 @@ expression: "&schema"
           "description": "#/definitions/Condition_for_SupergraphSelector"
         },
         "level": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         "message": {
           "description": "The event message.",
@@ -5449,11 +5488,39 @@ expression: "&schema"
         }
       ]
     },
+<<<<<<< HEAD
+=======
+    "StandardEventConfig_for_ConnectorSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_ConnectorSelector",
+              "description": "#/definitions/Condition_for_ConnectorSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
     "StandardEventConfig_for_RouterSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -5462,8 +5529,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_RouterSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -5477,8 +5544,8 @@ expression: "&schema"
     "StandardEventConfig_for_SubgraphSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -5487,8 +5554,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_SubgraphSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [
@@ -5502,8 +5569,8 @@ expression: "&schema"
     "StandardEventConfig_for_SupergraphSelector": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/EventLevelConfig",
+          "description": "#/definitions/EventLevelConfig"
         },
         {
           "properties": {
@@ -5512,8 +5579,8 @@ expression: "&schema"
               "description": "#/definitions/Condition_for_SupergraphSelector"
             },
             "level": {
-              "$ref": "#/definitions/EventLevel",
-              "description": "#/definitions/EventLevel"
+              "$ref": "#/definitions/EventLevelConfig",
+              "description": "#/definitions/EventLevelConfig"
             }
           },
           "required": [

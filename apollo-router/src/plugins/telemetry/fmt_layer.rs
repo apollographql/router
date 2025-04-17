@@ -266,6 +266,13 @@ mod tests {
 
     use http::HeaderValue;
     use http::header::CONTENT_LENGTH;
+<<<<<<< HEAD
+=======
+    use parking_lot::Mutex;
+    use parking_lot::MutexGuard;
+    use tests::events::EventLevel;
+    use tests::events::RouterResponseBodyExtensionType;
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -275,9 +282,7 @@ mod tests {
     use super::*;
     use crate::graphql;
     use crate::plugins::telemetry::config_new::events;
-    use crate::plugins::telemetry::config_new::events::EventLevel;
     use crate::plugins::telemetry::config_new::events::log_event;
-    use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
@@ -706,7 +711,7 @@ subgraph:
 
                 error!(http.method = "GET", "Hello from test");
 
-                let router_events = event_config.new_router_events();
+                let mut router_events = event_config.new_router_events();
                 let router_req = router::Request::fake_builder()
                     .header(CONTENT_LENGTH, "0")
                     .header("custom-header", "val1")
@@ -724,7 +729,7 @@ subgraph:
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
 
-                let supergraph_events = event_config.new_supergraph_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
                 let supergraph_req = supergraph::Request::fake_builder()
                     .query("query { foo }")
                     .header("x-log-request", HeaderValue::from_static("log"))
@@ -740,7 +745,7 @@ subgraph:
                     .expect("expecting valid response");
                 supergraph_events.on_response(&supergraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -764,7 +769,7 @@ subgraph:
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -787,6 +792,221 @@ subgraph:
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
+<<<<<<< HEAD
+=======
+
+                let context = crate::Context::default();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                http_request
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                    inner: http_request,
+                    debug: None,
+                });
+                let connector = Arc::new(Connector {
+                    id: ConnectId::new(
+                        "connector_subgraph".into(),
+                        Some("source".into()),
+                        name!(Query),
+                        name!(users),
+                        0,
+                        "label",
+                    ),
+                    transport: HttpJsonTransport {
+                        source_url: None,
+                        connect_template: URLTemplate::from_str("/test").unwrap(),
+                        method: HTTPMethod::Get,
+                        headers: Default::default(),
+                        body: None,
+                    },
+                    selection: JSONSelection::empty(),
+                    config: None,
+                    max_requests: None,
+                    entity_resolver: None,
+                    spec: ConnectSpec::V0_1,
+                    request_variables: Default::default(),
+                    response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
+                });
+                let response_key = ResponseKey::RootField {
+                    name: "hello".to_string(),
+                    inputs: Default::default(),
+                    selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+                };
+                let connector_request = Request {
+                    context: context.clone(),
+                    connector: connector.clone(),
+                    service_name: Default::default(),
+                    transport_request,
+                    key: response_key.clone(),
+                    mapping_problems: vec![
+                        Problem {
+                            count: 1,
+                            message: "error message".to_string(),
+                            path: "@.id".to_string(),
+                        },
+                        Problem {
+                            count: 2,
+                            message: "warn message".to_string(),
+                            path: "@.id".to_string(),
+                        },
+                        Problem {
+                            count: 3,
+                            message: "info message".to_string(),
+                            path: "@.id".to_string(),
+                        },
+                    ],
+                    supergraph_request: Default::default(),
+                };
+                let mut connector_events = event_config.new_connector_events();
+                connector_events.on_request(&connector_request);
+
+                let connector_response = Response {
+                    context,
+                    connector: connector.clone(),
+                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                        inner: http::Response::builder()
+                            .status(200)
+                            .header("x-log-response", HeaderValue::from_static("log"))
+                            .body(body::empty())
+                            .expect("expecting valid response")
+                            .into_parts()
+                            .0,
+                    })),
+                    mapped_response: MappedResponse::Data {
+                        data: serde_json::json!({})
+                            .try_into()
+                            .expect("expecting valid JSON"),
+                        key: response_key,
+                        problems: vec![
+                            Problem {
+                                count: 1,
+                                message: "error message".to_string(),
+                                path: "@.id".to_string(),
+                            },
+                            Problem {
+                                count: 2,
+                                message: "warn message".to_string(),
+                                path: "@.id".to_string(),
+                            },
+                            Problem {
+                                count: 3,
+                                message: "info message".to_string(),
+                                path: "@.id".to_string(),
+                            },
+                        ],
+                    },
+                };
+                connector_events.on_response(&connector_response);
+            },
+        );
+
+        insta::assert_snapshot!(buff.to_string());
+    }
+
+    #[tokio::test]
+    async fn test_json_logging_deduplicates_attributes() {
+        let buff = LogBuffer::default();
+        let text_format = JsonFormat {
+            display_span_list: false,
+            display_current_span: false,
+            display_resource: false,
+            ..Default::default()
+        };
+        let format = Json::new(Default::default(), text_format);
+        let fmt_layer = FmtLayer::new(
+            RateLimitFormatter::new(format, &RateLimit::default()),
+            buff.clone(),
+        )
+        .boxed();
+
+        let event_config: events::Events = serde_yaml::from_str(
+            r#"
+subgraph:
+  request: info
+  response: warn
+  error: error
+  event.with.duplicate.attribute:
+    message: "this event has a duplicate attribute"
+    level: error
+    on: response
+    attributes:
+      subgraph.name: true
+      static: foo # This shows up twice without attribute deduplication
+        "#,
+        )
+        .unwrap();
+
+        ::tracing::subscriber::with_default(
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
+            move || {
+                let test_span = info_span!("test");
+                let _enter = test_span.enter();
+
+                let mut router_events = event_config.new_router_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
+
+                // In: Router -> Supergraph -> Subgraphs
+                let router_req = router::Request::fake_builder().build().unwrap();
+                router_events.on_request(&router_req);
+
+                let supergraph_req = supergraph::Request::fake_builder()
+                    .query("query { foo }")
+                    .build()
+                    .unwrap();
+                supergraph_events.on_request(&supergraph_req);
+
+                let subgraph_req_1 = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph")
+                    .subgraph_request(http::Request::new(
+                        graphql::Request::fake_builder()
+                            .query("query { foo }")
+                            .build(),
+                    ))
+                    .build();
+                subgraph_events.on_request(&subgraph_req_1);
+
+                let subgraph_req_2 = subgraph::Request::fake_builder()
+                    .subgraph_name("subgraph_bis")
+                    .subgraph_request(http::Request::new(
+                        graphql::Request::fake_builder()
+                            .query("query { foo }")
+                            .build(),
+                    ))
+                    .build();
+                subgraph_events.on_request(&subgraph_req_2);
+
+                // Out: Subgraphs -> Supergraph -> Router
+                let subgraph_resp_1 = subgraph::Response::fake2_builder()
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}]}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp_1);
+
+                let subgraph_resp_2 = subgraph::Response::fake2_builder()
+                    .data(serde_json::json!({"products": [{"id": 1234, "name": "first_name"}, {"id": 567, "name": "second_name"}], "other": {"foo": "bar"}}))
+                    .build()
+                    .expect("expecting valid response");
+                subgraph_events.on_response(&subgraph_resp_2);
+
+                let supergraph_resp = supergraph::Response::fake_builder()
+                    .data(serde_json::json!({"data": "res"}).to_string())
+                    .build()
+                    .expect("expecting valid response");
+                supergraph_events.on_response(&supergraph_resp);
+
+                let router_resp = router::Response::fake_builder()
+                    .data(serde_json_bytes::json!({"data": "res"}))
+                    .build()
+                    .expect("expecting valid response");
+                router_events.on_response(&router_resp);
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
             },
         );
 
@@ -845,7 +1065,7 @@ subgraph:
 
                 error!(http.method = "GET", "Hello from test");
 
-                let router_events = event_config.new_router_events();
+                let mut router_events = event_config.new_router_events();
                 let router_req = router::Request::fake_builder()
                     .header(CONTENT_LENGTH, "0")
                     .header("custom-header", "val1")
@@ -863,7 +1083,7 @@ subgraph:
                     .expect("expecting valid response");
                 router_events.on_response(&router_resp);
 
-                let supergraph_events = event_config.new_supergraph_events();
+                let mut supergraph_events = event_config.new_supergraph_events();
                 let supergraph_req = supergraph::Request::fake_builder()
                     .query("query { foo }")
                     .header("x-log-request", HeaderValue::from_static("log"))
@@ -879,7 +1099,7 @@ subgraph:
                     .expect("expecting valid response");
                 supergraph_events.on_response(&supergraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -903,7 +1123,7 @@ subgraph:
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
 
-                let subgraph_events = event_config.new_subgraph_events();
+                let mut subgraph_events = event_config.new_subgraph_events();
                 let mut subgraph_req = http::Request::new(
                     graphql::Request::fake_builder()
                         .query("query { foo }")
@@ -926,6 +1146,116 @@ subgraph:
                     .build()
                     .expect("expecting valid response");
                 subgraph_events.on_response(&subgraph_resp);
+<<<<<<< HEAD
+=======
+
+                let context = crate::Context::default();
+                let mut http_request = http::Request::builder().body("".into()).unwrap();
+                http_request
+                    .headers_mut()
+                    .insert("x-log-request", HeaderValue::from_static("log"));
+                let transport_request = TransportRequest::Http(transport::http::HttpRequest {
+                    inner: http_request,
+                    debug: None,
+                });
+                let connector = Arc::new(Connector {
+                    id: ConnectId::new(
+                        "connector_subgraph".into(),
+                        Some("source".into()),
+                        name!(Query),
+                        name!(users),
+                        0,
+                        "label",
+                    ),
+                    transport: HttpJsonTransport {
+                        source_url: None,
+                        connect_template: URLTemplate::from_str("/test").unwrap(),
+                        method: HTTPMethod::Get,
+                        headers: Default::default(),
+                        body: None,
+                    },
+                    selection: JSONSelection::empty(),
+                    config: None,
+                    max_requests: None,
+                    entity_resolver: None,
+                    spec: ConnectSpec::V0_1,
+                    request_variables: Default::default(),
+                    response_variables: Default::default(),
+                    batch_settings: None,
+                    request_headers: Default::default(),
+                    response_headers: Default::default(),
+                });
+                let response_key = ResponseKey::RootField {
+                    name: "hello".to_string(),
+                    inputs: Default::default(),
+                    selection: Arc::new(JSONSelection::parse("$.data").unwrap()),
+                };
+                let connector_request = Request {
+                    context: context.clone(),
+                    connector: connector.clone(),
+                    service_name: Default::default(),
+                    transport_request,
+                    key: response_key.clone(),
+                    mapping_problems: vec![
+                        Problem {
+                            count: 1,
+                            message: "error message".to_string(),
+                            path: "@.id".to_string(),
+                        },
+                        Problem {
+                            count: 2,
+                            message: "warn message".to_string(),
+                            path: "@.id".to_string(),
+                        },
+                        Problem {
+                            count: 3,
+                            message: "info message".to_string(),
+                            path: "@.id".to_string(),
+                        },
+                    ],
+                    supergraph_request: Default::default(),
+                };
+                let mut connector_events = event_config.new_connector_events();
+                connector_events.on_request(&connector_request);
+
+                let connector_response = Response {
+                    context,
+                    connector: connector.clone(),
+                    transport_result: Ok(TransportResponse::Http(transport::http::HttpResponse {
+                        inner: http::Response::builder()
+                            .status(200)
+                            .header("x-log-response", HeaderValue::from_static("log"))
+                            .body(body::empty())
+                            .expect("expecting valid response")
+                            .into_parts()
+                            .0,
+                    })),
+                    mapped_response: MappedResponse::Data {
+                        data: serde_json::json!({})
+                            .try_into()
+                            .expect("expecting valid JSON"),
+                        key: response_key,
+                        problems: vec![
+                            Problem {
+                                count: 1,
+                                message: "error message".to_string(),
+                                path: "@.id".to_string(),
+                            },
+                            Problem {
+                                count: 2,
+                                message: "warn message".to_string(),
+                                path: "@.id".to_string(),
+                            },
+                            Problem {
+                                count: 3,
+                                message: "info message".to_string(),
+                                path: "@.id".to_string(),
+                            },
+                        ],
+                    },
+                };
+                connector_events.on_response(&connector_response);
+>>>>>>> e7d8e7bb (Simplify implementation of telementry's events (#7280))
             },
         );
 
