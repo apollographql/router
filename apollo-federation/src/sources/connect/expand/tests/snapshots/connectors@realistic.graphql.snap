@@ -310,6 +310,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 max_size: None,
             },
         ),
+        error_settings: Some(
+            ConnectorErrorsSettings {
+                message: None,
+                extensions: None,
+            },
+        ),
     },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
         id: ConnectId {
@@ -484,6 +490,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         batch_settings: Some(
             ConnectorBatchSettings {
                 max_size: None,
+            },
+        ),
+        error_settings: Some(
+            ConnectorErrorsSettings {
+                message: None,
+                extensions: None,
             },
         ),
     },
@@ -704,6 +716,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         batch_settings: Some(
             ConnectorBatchSettings {
                 max_size: None,
+            },
+        ),
+        error_settings: Some(
+            ConnectorErrorsSettings {
+                message: None,
+                extensions: None,
             },
         ),
     },
@@ -1073,6 +1091,12 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
         batch_settings: Some(
             ConnectorBatchSettings {
                 max_size: None,
+            },
+        ),
+        error_settings: Some(
+            ConnectorErrorsSettings {
+                message: None,
+                extensions: None,
             },
         ),
     },

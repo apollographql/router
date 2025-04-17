@@ -496,7 +496,7 @@ mod tests {
             .get(subgraph.schema.schema())
             .unwrap();
 
-        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA");
+        insta::assert_snapshot!(actual_definition.to_string(), @"directive @source(name: String!, http: connect__SourceHTTP, errors: connect__SourceErrors) repeatable on SCHEMA");
 
         insta::assert_debug_snapshot!(
             subgraph.schema
@@ -540,7 +540,7 @@ mod tests {
 
         insta::assert_snapshot!(
             actual_definition.to_string(),
-            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
+            @"directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION"
         );
 
         let fields = schema
@@ -587,7 +587,7 @@ mod tests {
 
         insta::assert_debug_snapshot!(
             sources.unwrap(),
-            @r###"
+            @r#"
         [
             SourceDirectiveArguments {
                 name: "json",
@@ -627,9 +627,10 @@ mod tests {
                         ),
                     },
                 },
+                errors: None,
             },
         ]
-        "###
+        "#
         );
     }
 
@@ -709,6 +710,7 @@ mod tests {
                 ),
                 entity: false,
                 batch: None,
+                errors: None,
             },
             ConnectDirectiveArguments {
                 position: Field(
@@ -781,6 +783,7 @@ mod tests {
                 ),
                 entity: false,
                 batch: None,
+                errors: None,
             },
         ]
         "#

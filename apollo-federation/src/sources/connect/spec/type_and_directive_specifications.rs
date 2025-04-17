@@ -553,9 +553,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
 
-        directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__SourceErrors) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -592,9 +592,19 @@ mod tests {
           maxSize: Int
         }
 
+        input connect__ConnectErrors {
+          message: connect__JSONSelection
+          extensions: connect__JSONSelection
+        }
+
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
+        }
+
+        input connect__SourceErrors {
+          message: connect__JSONSelection
+          extensions: connect__JSONSelection
         }
         "#);
     }
@@ -629,9 +639,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__SourceErrors) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -668,9 +678,19 @@ mod tests {
           maxSize: Int
         }
 
+        input connect__ConnectErrors {
+          message: connect__JSONSelection
+          extensions: connect__JSONSelection
+        }
+
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
+        }
+
+        input connect__SourceErrors {
+          message: connect__JSONSelection
+          extensions: connect__JSONSelection
         }
         "#);
     }

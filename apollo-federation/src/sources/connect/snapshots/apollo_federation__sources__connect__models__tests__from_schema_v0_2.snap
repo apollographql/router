@@ -145,6 +145,12 @@ expression: "&connectors"
                 max_size: None,
             },
         ),
+        error_settings: Some(
+            ConnectorErrorsSettings {
+                message: None,
+                extensions: None,
+            },
+        ),
     },
     ConnectId {
         label: "connectors.json http: POST /posts",
@@ -354,6 +360,12 @@ expression: "&connectors"
         batch_settings: Some(
             ConnectorBatchSettings {
                 max_size: None,
+            },
+        ),
+        error_settings: Some(
+            ConnectorErrorsSettings {
+                message: None,
+                extensions: None,
             },
         ),
     },

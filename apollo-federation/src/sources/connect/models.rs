@@ -875,6 +875,12 @@ mod tests {
                         max_size: None,
                     },
                 ),
+                error_settings: Some(
+                    ConnectorErrorsSettings {
+                        message: None,
+                        extensions: None,
+                    },
+                ),
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -1016,6 +1022,12 @@ mod tests {
                 batch_settings: Some(
                     ConnectorBatchSettings {
                         max_size: None,
+                    },
+                ),
+                error_settings: Some(
+                    ConnectorErrorsSettings {
+                        message: None,
+                        extensions: None,
                     },
                 ),
             },
