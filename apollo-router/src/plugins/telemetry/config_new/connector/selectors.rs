@@ -300,7 +300,6 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::StringTemplate;
@@ -350,9 +349,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: None,
                 connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: None,
+                ..Default::default()
             },
             selection: JSONSelection::empty(),
             config: None,

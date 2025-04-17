@@ -20,7 +20,7 @@ use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
 
 /// A parsed string template, containing a series of [`Part`]s.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StringTemplate {
     pub(crate) parts: Vec<Part>,
 }
