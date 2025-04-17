@@ -2,11 +2,9 @@ use std::collections::HashSet;
 
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
-use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 
 use super::FederationSchema;
@@ -274,87 +272,50 @@ impl<'a> SchemaUpgrader<'a> {
     fn fix_federation_directives_arguments(&mut self) -> Result<(), FederationError> {
         let schema = &mut self.schema;
 
-        // both @provides and @requirers will only have an object_fields referencer
+        // both @provides and @requires will only have an object_fields referencer
         for directive_name in ["requires", "provides"] {
-            let mut change_list: Vec<(Node<Directive>, ObjectFieldDefinitionPosition, String)> =
-                Vec::new();
-
             let referencers = schema.referencers().get_directive(directive_name)?;
+            for field in &referencers.object_fields.clone() {
+                let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
-            for field in &referencers.object_fields {
-                if let Ok(field_type) = field.get(schema.schema()) {
-                    let directives = &field_type.directives;
-                    for directive in directives.get_all(directive_name) {
-                        if let Ok(arg) = directive.argument_by_name("fields", schema.schema()) {
-                            if let Some(new_fields_string) =
-                                Self::make_fields_string_if_not(arg)?
-                            {
-                                change_list.push((
-                                    directive.clone(),
-                                    field.clone(),
-                                    new_fields_string.clone(),
-                                ));
+                for directive in field_type.directives.0.iter_mut() {
+                    if directive.name == directive_name {
+                        for arg in directive.make_mut().arguments.iter_mut() {
+                            if arg.name == "fields" {
+                                if let Some(new_fields_string) =
+                                    Self::make_fields_string_if_not(&arg.value)?
+                                {
+                                    *arg.make_mut().value.make_mut() =
+                                        Value::String(new_fields_string);
+                                }
+                                break;
                             }
                         }
                     }
                 }
             }
-
-            for (directive, field, new_fields_string) in change_list {
-                // First add the new directive with the combined fields string
-                let arg = Node::new(Argument {
-                    name: Name::new_unchecked("fields"),
-                    value: Node::new(Value::String(new_fields_string)),
-                });
-                field.remove_directive(schema, &directive);
-                field.insert_directive(
-                    schema,
-                    Node::new(Directive {
-                        name: directive.name.clone(),
-                        arguments: vec![arg],
-                    }),
-                )?;
-            }
         }
 
         // now do the exact same thing for @key. The difference is that the directive location will be object_types
         // rather than object_fields
-        let mut change_list: Vec<(Component<Directive>, ObjectTypeDefinitionPosition, String)> =
-            Vec::new();
         let referencers = schema.referencers().get_directive("key")?;
+        for field in &referencers.object_types.clone() {
+            let field_type = field.make_mut(&mut schema.schema)?.make_mut();
 
-        for field in &referencers.object_types {
-            if let Ok(field_type) = field.get(schema.schema()) {
-                let directives = &field_type.directives;
-                for directive in directives.get_all("key") {
-                    if let Ok(arg) = directive.argument_by_name("fields", schema.schema()) {
-                        if let Some(new_fields_string) =
-                            SchemaUpgrader::<'a>::make_fields_string_if_not(arg)?
-                        {
-                            change_list.push((
-                                directive.clone(),
-                                field.clone(),
-                                new_fields_string.clone(),
-                            ));
+            for directive in field_type.directives.0.iter_mut() {
+                if directive.name == "key" {
+                    for arg in directive.make_mut().arguments.iter_mut() {
+                        if arg.name == "fields" {
+                            if let Some(new_fields_string) =
+                                Self::make_fields_string_if_not(&arg.value)?
+                            {
+                                *arg.make_mut().value.make_mut() = Value::String(new_fields_string);
+                            }
+                            break;
                         }
                     }
                 }
             }
-        }
-        for (directive, field, new_fields_string) in change_list {
-            // First add the new directive with the combined fields string
-            let arg = Node::new(Argument {
-                name: Name::new_unchecked("fields"),
-                value: Node::new(Value::String(new_fields_string)),
-            });
-            field.remove_directive(schema, &directive);
-            field.insert_directive(
-                schema,
-                Component::new(Directive {
-                    name: directive.name.clone(),
-                    arguments: vec![arg],
-                }),
-            )?;
         }
         Ok(())
     }

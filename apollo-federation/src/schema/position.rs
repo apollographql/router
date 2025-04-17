@@ -1528,7 +1528,7 @@ impl ObjectTypeDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Node<ObjectType>, PositionLookupError> {
@@ -1709,26 +1709,6 @@ impl ObjectTypeDefinitionPosition {
             .make_mut()
             .directives
             .retain(|other_directive| other_directive.name != name);
-    }
-
-    // TODO: Should this exist in TypeDefinitionPosition?
-    pub(crate) fn remove_directive(
-        &self,
-        schema: &mut FederationSchema,
-        directive: &Component<Directive>,
-    ) {
-        let Some(object_type) = self.try_make_mut(&mut schema.schema) else {
-            return;
-        };
-        if !object_type.directives.iter().any(|other_directive| {
-            (other_directive.name == directive.name) && !other_directive.ptr_eq(directive)
-        }) {
-            self.remove_directive_name_references(&mut schema.referencers, &directive.name);
-        }
-        object_type
-            .make_mut()
-            .directives
-            .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
 
     pub(crate) fn insert_implements_interface(
@@ -2060,7 +2040,7 @@ impl ObjectFieldDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
