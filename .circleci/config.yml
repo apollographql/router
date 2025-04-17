@@ -32,13 +32,13 @@ executors:
       CARGO_BUILD_JOBS: 4
   arm_linux_build: &arm_linux_build_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:0.1.4-PR113.b297b9652835c3bb7735af8eb248f67989dc9737-arm64
+      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:0.1.4-PR113.b297b9652835c3bb7735af8eb248f67989dc9737
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
   arm_linux_test: &arm_linux_test_executor
     docker:
-      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:0.1.4-PR113.b297b9652835c3bb7735af8eb248f67989dc9737-arm64
+      - image: ghcr.io/apollographql/ci-utility-docker-images/binary-builder-glibc:0.1.4-PR113.b297b9652835c3bb7735af8eb248f67989dc9737
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
