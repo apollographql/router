@@ -203,31 +203,34 @@ impl Subgraph<Expanded> {
         SERVICE_TYPE_SPEC.check_or_add(schema, None)?;
         entity_type_spec(schema)?.check_or_add(schema, None)?;
 
-        // Add the root `Query` Type (if not already present)
+        // Add the root `Query` Type (if not already present) and get the actual name in the schema.
         let query_root_pos = SchemaRootDefinitionPosition {
             root_kind: SchemaRootDefinitionKind::Query,
         };
-        if query_root_pos.try_get(schema.schema()).is_none() {
+        let query_root_type_name = if query_root_pos.try_get(schema.schema()).is_none() {
+            // If not present, add the default Query type with empty fields.
             EMPTY_QUERY_TYPE_SPEC.check_or_add(schema, None)?;
             query_root_pos.insert(schema, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
-        }
+            EMPTY_QUERY_TYPE_SPEC.name
+        } else {
+            query_root_pos.get(schema.schema())?.name.clone()
+        };
 
         // Add or remove `Query._entities` (if applicable)
-        let query_root_type_name = query_root_pos.get(schema.schema())?.name.clone();
         let entity_field_pos = ObjectFieldDefinitionPosition {
             type_name: query_root_type_name.clone(),
             field_name: FEDERATION_ENTITIES_FIELD_NAME,
         };
         if let Some(_entity_type) = schema.entity_type()? {
-            if let Some(_entity_field_def) = entity_field_pos.try_get(schema.schema()) {
-                // PORT_NOTE: JS version checks if `entity_field_def.ty` is null, but it is
-                //            not possible in Rust version.
-            } else {
+            if entity_field_pos.try_get(schema.schema()).is_none() {
                 entity_field_pos
                     .insert(schema, Component::new(entities_field_spec(schema)?.into()))?;
             }
+            // PORT_NOTE: JS version checks if the entity field definition's type is null when the
+            //            definition is found, but the `type` field is not nullable in Rust.
         } else {
             // Remove the `_entities` field if it is present
+            // PORT_NOTE: It's unclear why this is necessary. Maybe it's to avoid schema confusion?
             entity_field_pos.remove(schema)?;
         }
 
