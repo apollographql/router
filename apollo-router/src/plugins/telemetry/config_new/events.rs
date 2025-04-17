@@ -799,7 +799,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             test_harness
@@ -836,7 +837,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             // Without the header to enable custom event
@@ -874,7 +876,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             // Without the header to enable custom event
@@ -908,7 +911,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             test_harness
@@ -940,7 +944,8 @@ mod tests {
                 "../testdata/custom_events_exists_condition.router.yaml"
             ))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             let ctx = Context::new();
@@ -985,7 +990,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             test_harness
@@ -1019,7 +1025,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             test_harness
@@ -1048,7 +1055,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             let mut subgraph_req = http::Request::new(
@@ -1085,7 +1093,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             let mut subgraph_req = http::Request::new(
@@ -1123,7 +1132,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             let context = crate::Context::default();
@@ -1209,7 +1219,8 @@ mod tests {
         let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
             .config(include_str!("../testdata/custom_events.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
 
         async {
             let context = crate::Context::default();

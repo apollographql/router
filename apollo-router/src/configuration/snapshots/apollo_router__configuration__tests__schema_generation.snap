@@ -1811,16 +1811,16 @@ snapshot_kind: text
       "description": "Configuration for exposing errors that originate from subgraphs",
       "properties": {
         "all": {
-          "default": false,
-          "description": "Include errors from all subgraphs",
-          "type": "boolean"
+          "$ref": "#/definitions/ErrorMode",
+          "description": "#/definitions/ErrorMode"
         },
         "subgraphs": {
           "additionalProperties": {
-            "type": "boolean"
+            "$ref": "#/definitions/SubgraphConfig",
+            "description": "#/definitions/SubgraphConfig"
           },
           "default": {},
-          "description": "Include errors from specific subgraphs",
+          "description": "Overrides global configuration on a per-subgraph basis",
           "type": "object"
         }
       },
@@ -2754,6 +2754,56 @@ snapshot_kind: text
             "disabled"
           ],
           "type": "string"
+        }
+      ]
+    },
+    "ErrorMode": {
+      "anyOf": [
+        {
+          "description": "When `true`, Propagate the original error as is. Otherwise, redact it.",
+          "type": "boolean"
+        },
+        {
+          "description": "Allow specific extension keys with required redact_message",
+          "properties": {
+            "allow_extensions_keys": {
+              "description": "Allow specific extension keys",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "redact error messages for all subgraphs",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allow_extensions_keys",
+            "redact_message"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Deny specific extension keys with required redact_message",
+          "properties": {
+            "deny_extensions_keys": {
+              "description": "Deny specific extension keys",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "redact error messages for all subgraphs",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "deny_extensions_keys",
+            "redact_message"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -6267,6 +6317,91 @@ snapshot_kind: text
         }
       },
       "type": "object"
+    },
+    "SubgraphConfig": {
+      "anyOf": [
+        {
+          "description": "Enable or disable error redaction for a subgraph",
+          "type": "boolean"
+        },
+        {
+          "description": "Allow specific error extension keys for a subgraph",
+          "properties": {
+            "allow_extensions_keys": {
+              "description": "Allow specific extension keys for a subgraph. Will extending global allow list or override a global deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "exclude_global_keys": {
+              "default": [],
+              "description": "Exclude specific extension keys from global allow/deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "Redact error messages for a subgraph",
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "allow_extensions_keys"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Deny specific error extension keys for a subgraph",
+          "properties": {
+            "deny_extensions_keys": {
+              "description": "Allow specific extension keys for a subgraph. Will extending global deny list or override a global allow list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "exclude_global_keys": {
+              "default": [],
+              "description": "Exclude specific extension keys from global allow/deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "Redact error messages for a subgraph",
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "deny_extensions_keys"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Override global configuration, but don't allow or deny any new keys explicitly",
+          "properties": {
+            "exclude_global_keys": {
+              "default": [],
+              "description": "Exclude specific extension keys from global allow/deny list",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "redact_message": {
+              "description": "Redact error messages for a subgraph",
+              "nullable": true,
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        }
+      ]
     },
     "SubgraphConfiguration_for_CommonBatchingConfig": {
       "description": "Configuration options pertaining to the subgraph server component.",

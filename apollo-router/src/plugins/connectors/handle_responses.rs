@@ -178,7 +178,7 @@ impl RawResponse {
                     )
                     .path::<Path>((&key).into())
                     .build()
-                    .add_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
+                    .with_subgraph_name(&connector.id.subgraph_name); // for include_subgraph_errors
 
                 if let Some(debug) = debug_context {
                     debug
@@ -496,7 +496,7 @@ async fn deserialize_response<T: HttpBody>(
             )
             .path(path)
             .build()
-            .add_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
+            .with_subgraph_name(&connector.id.subgraph_name) // for include_subgraph_errors
     };
 
     let path: Path = response_key.into();
@@ -1293,7 +1293,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1329,7 +1329,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
@@ -1365,7 +1365,7 @@ mod tests {
                                 "code": String(
                                     "CONNECTOR_FETCH",
                                 ),
-                                "fetch_subgraph_name": String(
+                                "apollo.private.subgraph.name": String(
                                     "subgraph_name",
                                 ),
                             },
