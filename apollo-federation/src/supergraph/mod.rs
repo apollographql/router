@@ -1798,7 +1798,7 @@ fn add_federation_operations(
 /// impact on later query planning, because it sometimes make us try type-exploding some interfaces
 /// unnecessarily. Besides, if a usage adds something useless, there is a chance it hasn't fully
 /// understood something, and warning about that fact through an error is more helpful.
-fn remove_inactive_requires_and_provides_from_subgraph(
+pub(crate) fn remove_inactive_requires_and_provides_from_subgraph(
     supergraph_schema: &FederationSchema,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {

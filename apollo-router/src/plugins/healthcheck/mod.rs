@@ -339,8 +339,11 @@ mod test {
         Option<ServiceHandle<router::Request, router::BoxService>>,
         PluginTestHarness<HealthCheck>,
     ) {
-        let test_harness: PluginTestHarness<HealthCheck> =
-            PluginTestHarness::builder().config(config).build().await;
+        let test_harness: PluginTestHarness<HealthCheck> = PluginTestHarness::builder()
+            .config(config)
+            .build()
+            .await
+            .expect("test harness");
 
         test_harness.activate();
 

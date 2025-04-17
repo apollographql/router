@@ -9,6 +9,7 @@ mod header;
 mod id;
 mod json_selection;
 mod models;
+pub use models::ConnectorBatchSettings;
 pub(crate) mod spec;
 mod string_template;
 mod url_template;

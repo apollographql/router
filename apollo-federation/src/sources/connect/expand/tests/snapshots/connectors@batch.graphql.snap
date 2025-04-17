@@ -21,23 +21,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/api",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/api,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -88,6 +72,11 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
     "one_User_0": Connector {
         id: ConnectId {
@@ -106,23 +95,7 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         },
         transport: HttpJsonTransport {
             source_url: Some(
-                Url {
-                    scheme: "http",
-                    cannot_be_a_base: false,
-                    username: "",
-                    password: None,
-                    host: Some(
-                        Domain(
-                            "localhost",
-                        ),
-                    ),
-                    port: Some(
-                        4001,
-                    ),
-                    path: "/api",
-                    query: None,
-                    fragment: None,
-                },
+                http://localhost:4001/api,
             ),
             connect_template: URLTemplate {
                 base: None,
@@ -265,5 +238,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ba
         response_variables: {},
         request_headers: {},
         response_headers: {},
+        batch_settings: Some(
+            ConnectorBatchSettings {
+                max_size: None,
+            },
+        ),
     },
 }
