@@ -1,7 +1,7 @@
 ### `include_subgraph_errors` fine grained control ([Issue #6402](https://github.com/apollographql/router/pull/6402)
 
 Update `include_subgraph_errors` with additional configuration options for both global and subgraph levels. This update provides finer control over error messages and extension keys for each subgraph. 
-For more details, please read the [subgraph-error-inclusion](https://www.apollographql.com/docs/apollo-server/observability/subgraph-error-inclusion/).
+For more details, please read [subgraph error inclusion](https://www.apollographql.com/docs/graphos/routing/observability/subgraph-error-inclusion).
 
 ```yaml
 include_subgraph_errors:
