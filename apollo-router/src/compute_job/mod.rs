@@ -418,20 +418,19 @@ mod tests {
         ensure_queue_is_initialized().await;
 
         let start = Instant::now();
-        let sleep_duration = Duration::from_millis(100);
-        let buffered_sleep_duration = Duration::from_millis(120);
 
-        // Send in `pool_size * 3 - 1` low priority requests and 1 high priority request after the
+        // Send in `pool_size * 2 - 1` low priority requests and 1 high priority request after the
         // low priority requests.
-        // We expect the workers to begin right away, so they'll pull `pool_size` low priority
-        // elements from the queue and work on them.
-        // However, once the next worker gets free, it should pull the high priority request rather
-        // than the remaining low priority requests
-        let low_priority_handles: Vec<_> = (0..pool_size * 3 - 1)
+        // If the queue were isolated, we'd expect `pool_size` low priority requests to complete
+        // before the high priority requests, since the workers would start on the low priority
+        // requests immediately.
+        // But, the queue is not isolated. This loosens our guarantees - we expect _up to_ `pool_size`
+        // low priority requests to complete before the high priority request.
+        let low_priority_handles: Vec<_> = (0..pool_size * 2 - 1)
             .map(|_| {
                 execute(ComputeJobType::QueryPlanningWarmup, move |_| {
                     let inner_start = start;
-                    std::thread::sleep(sleep_duration);
+                    std::thread::sleep(Duration::from_millis(10));
                     inner_start.elapsed()
                 })
                 .unwrap()
@@ -439,37 +438,20 @@ mod tests {
             .collect();
         let high_priority_handle = execute(ComputeJobType::QueryPlanning, move |_| {
             let inner_start = start;
-            std::thread::sleep(sleep_duration);
+            std::thread::sleep(Duration::from_millis(5));
             inner_start.elapsed()
         })
         .unwrap();
 
-        let mut low_priority_durations =
+        let low_priority_durations =
             futures::future::join_all(low_priority_handles.into_iter()).await;
         let high_priority_duration = high_priority_handle.await;
 
-        // We expect:
-        // * `pool_size` low priority durations of `sleep_duration`
-        // * 1 high priority duration of `2 * sleep_duration`
-        // * `pool_size - 1` low priority durations of `2 * sleep_duration`
-        // * `pool_size` low priority durations of `3 * sleep_duration`
-        for _ in 0..pool_size {
-            let d = low_priority_durations.remove(0);
-            assert!(d < buffered_sleep_duration);
-        }
+        let low_before_high_count = low_priority_durations
+            .iter()
+            .filter(|d| d < &&high_priority_duration)
+            .count();
 
-        assert!(high_priority_duration < 2 * buffered_sleep_duration);
-        for _ in 0..pool_size - 1 {
-            let d = low_priority_durations.remove(0);
-            assert!(d < 2 * buffered_sleep_duration);
-        }
-
-        for _ in 0..pool_size {
-            let d = low_priority_durations.remove(0);
-            assert!(d < 3 * buffered_sleep_duration);
-        }
-
-        assert!(low_priority_durations.is_empty());
-        assert!(start.elapsed() < 3 * buffered_sleep_duration);
+        assert!(low_before_high_count <= pool_size);
     }
 }
