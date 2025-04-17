@@ -40,7 +40,7 @@ pub(crate) enum AuthenticationError {
     /// Cannot find a suitable key for: alg: '{0:?}', kid: '{1:?}' in JWKS list
     CannotFindSuitableKey(Algorithm, Option<String>),
 
-    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
+    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from JWKS configured to only accept from '{expected}'
     InvalidIssuer { expected: String, token: String },
 
     /// Unsupported key algorithm: {0}

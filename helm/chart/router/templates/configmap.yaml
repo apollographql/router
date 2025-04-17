@@ -5,7 +5,7 @@
 {{- if (.Values.router.configuration.telemetry).exporters }}
 {{- $configuration = dict "telemetry" (dict "exporters" (dict "metrics" (dict "common" (dict "resource" (dict "service.name" $routerFullName))))) -}}
 {{- else }}
-{{- $configuration := dict "telemetry" (dict "metrics" (dict "common" (dict "resources" (dict "service.name" $routerFullName)))) -}}
+{{- $configuration := dict "telemetry" (dict "metrics" (dict "common" (dict "resource" (dict "service.name" $routerFullName)))) -}}
 {{- end }}
 {{- $_ := mustMergeOverwrite $configuration .Values.router.configuration  -}}
 
