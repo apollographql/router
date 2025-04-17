@@ -4107,10 +4107,14 @@ snapshot_kind: text
           },
           "type": "array"
         },
-        "issuer": {
-          "description": "Expected issuer for tokens verified by that JWKS",
+        "issuers": {
+          "description": "Expected issuers for tokens verified by that JWKS",
+          "items": {
+            "type": "string"
+          },
           "nullable": true,
-          "type": "string"
+          "type": "array",
+          "uniqueItems": true
         },
         "poll_interval": {
           "default": {
