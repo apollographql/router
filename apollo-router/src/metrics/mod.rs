@@ -1338,6 +1338,25 @@ macro_rules! assert_histogram_not_exists {
     };
 }
 
+#[cfg(test)]
+pub(crate) fn count_operation_error_codes(
+    codes: &[&str],
+    context: &Context,
+    errors_config: &ErrorsConfiguration,
+) {
+    let errors: Vec<graphql::Error> = codes
+        .iter()
+        .map(|c| {
+            graphql::Error::builder()
+                .message("")
+                .extension_code(*c)
+                .build()
+        })
+        .collect();
+
+    count_operation_errors(&errors, context, errors_config);
+}
+
 pub(crate) fn count_operation_errors(
     errors: &[graphql::Error],
     context: &Context,
@@ -1548,6 +1567,7 @@ mod test {
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::metrics::aggregation::MeterProviderType;
+    use crate::metrics::count_operation_error_codes;
     use crate::metrics::count_operation_errors;
     use crate::metrics::meter_provider;
     use crate::metrics::meter_provider_internal;

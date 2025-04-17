@@ -188,14 +188,10 @@ impl Plugin for ContentNegotiation {
             })
             .service(service)
             .map_response(|mut response: router::Response| {
-                let protocol_mode = response.context.extensions().with_lock(|lock| {
-                    lock.get::<ProtocolMode>().cloned()
-                });
                 let ClientRequestAccepts {
-                    wildcard: accepts_wildcard,
-                    json: accepts_json,
                     multipart_defer: accepts_multipart_defer,
                     multipart_subscription: accepts_multipart_subscription,
+                    ..
                 } = response.context.extensions().with_lock(|lock| {
                     lock.get::<ClientRequestAccepts>()
                         .cloned()
@@ -205,54 +201,26 @@ impl Plugin for ContentNegotiation {
                 let headers = response.response.headers_mut();
                 process_vary_header(headers);
 
-                match protocol_mode {
-                    Some(ProtocolMode::Defer) if accepts_multipart_defer => {
-                        headers.insert(CONTENT_TYPE, MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE);
-                    }
-                    Some(ProtocolMode::Subscription) if accepts_multipart_subscription => {
-                        headers.insert(
-                            CONTENT_TYPE,
-                            MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE,
-                        );
-                    }
-                    None if accepts_json || accepts_wildcard => {
-                        headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
-                    }
-                    // None if accepts_multipart_defer => {
-                    //     // TODO: return an error?
-                    //     headers.insert(CONTENT_TYPE, MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE);
-                    // }
-                    // None if accepts_multipart_subscription => {
-                    //     // TODO: return an error?
-                    //     headers.insert(
-                    //         CONTENT_TYPE,
-                    //         MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE,
-                    //     );
-                    // }
-                    _ => {
-                        // TODO: return an error?
-                        // return router::Response::error_builder()
-                        //     .error(
-                        //         graphql::Error::builder()
-                        //             .message(format!("unexpected response value for header provided"))
-                        //             .extension_code("INVALID_ACCEPT_HEADER")
-                        //             .build(),
-                        //     )
-                        //     .status_code(StatusCode::NOT_ACCEPTABLE)
-                        //     .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
-                        //     .context(response.context)
-                        //     .build().unwrap();
-                        headers.insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE);
-                    }
-                }
+                // XX(@carodewig): I would've expected this to be based on stream protocol mode, but
+                // the tests indicate it should rely solely on the client headers
+                let content_type = if accepts_multipart_defer {
+                    MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE
+                } else if accepts_multipart_subscription {
+                    MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE
+                } else {
+                    APPLICATION_JSON_HEADER_VALUE
+                };
+                headers.insert(CONTENT_TYPE, content_type);
 
-                if protocol_mode.is_some() {
+                let is_stream = response
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ProtocolMode>().is_some());
+                if is_stream {
                     // Useful when you're using a proxy like nginx which enable proxy_buffering by default
                     // (http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
                     headers.insert(ACCEL_BUFFERING_HEADER_NAME, ACCEL_BUFFERING_HEADER_VALUE);
                 }
-
-                eprintln!("headers = {headers:?}");
 
                 response
             })
