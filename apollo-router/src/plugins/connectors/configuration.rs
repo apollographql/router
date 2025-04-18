@@ -3,10 +3,12 @@ use std::sync::Arc;
 
 use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::expand::Connectors;
+use http::Uri;
 use schemars::JsonSchema;
+use schemars::schema::InstanceType;
+use schemars::schema::SchemaObject;
 use serde::Deserialize;
 use serde::Serialize;
-use url::Url;
 
 use super::incompatible::warn_incompatible_plugins;
 use crate::Configuration;
@@ -72,7 +74,9 @@ pub(crate) struct SubgraphConnectorConfiguration {
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SourceConfiguration {
     /// Override the `@source(http: {baseURL:})`
-    pub(crate) override_url: Option<Url>,
+    #[serde(default, with = "http_serde::option::uri")]
+    #[schemars(schema_with = "uri_schema")]
+    pub(crate) override_url: Option<Uri>,
 
     /// The maximum number of requests for this source
     pub(crate) max_requests_per_operation: Option<usize>,
@@ -80,6 +84,20 @@ pub(crate) struct SourceConfiguration {
     /// Other values that can be used by connectors via `{$config.<key>}`
     #[serde(rename = "$config")]
     pub(crate) custom: CustomConfiguration,
+}
+
+fn uri_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+    SchemaObject {
+        instance_type: Some(InstanceType::String.into()),
+        format: Some("uri".to_owned()),
+        extensions: {
+            let mut map = schemars::Map::new();
+            map.insert("nullable".to_owned(), serde_json::json!(true));
+            map
+        },
+        ..Default::default()
+    }
+    .into()
 }
 
 /// Modifies connectors with values from the configuration
@@ -101,8 +119,8 @@ pub(crate) fn apply_config(
     for connector in Arc::make_mut(&mut connectors.by_service_name).values_mut() {
         if let Ok(source_ref) = ConnectorSourceRef::try_from(&mut *connector) {
             if let Some(source_config) = config.sources.get(&source_ref.to_string()) {
-                if let Some(url) = source_config.override_url.as_ref() {
-                    connector.transport.source_url = Some(url.clone());
+                if let Some(uri) = source_config.override_url.as_ref() {
+                    connector.transport.source_url = Some(uri.clone());
                 }
                 if let Some(max_requests) = source_config.max_requests_per_operation {
                     connector.max_requests = Some(max_requests);
@@ -122,8 +140,8 @@ pub(crate) fn apply_config(
             .as_ref()
             .and_then(|source_name| subgraph_config.sources.get(source_name))
         {
-            if let Some(url) = source_config.override_url.as_ref() {
-                connector.transport.source_url = Some(url.clone());
+            if let Some(uri) = source_config.override_url.as_ref() {
+                connector.transport.source_url = Some(uri.clone());
             }
             if let Some(max_requests) = source_config.max_requests_per_operation {
                 connector.max_requests = Some(max_requests);

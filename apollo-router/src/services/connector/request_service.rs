@@ -339,15 +339,12 @@ impl tower::Service<Request> for ConnectorRequestService {
                 )
             });
 
-        let log_request_level = connector_request_event.and_then(|s| match s.0.condition() {
-            Some(condition) => {
-                if condition.lock().evaluate_request(&request) == Some(true) {
-                    Some(s.0.level())
-                } else {
-                    None
-                }
+        let log_request_level = connector_request_event.and_then(|s| {
+            if s.condition.lock().evaluate_request(&request) == Some(true) {
+                Some(s.level)
+            } else {
+                None
             }
-            None => Some(s.0.level()),
         });
 
         Box::pin(async move {
@@ -407,6 +404,7 @@ impl tower::Service<Request> for ConnectorRequestService {
                 &request.context,
                 debug_request,
                 &debug,
+                request.supergraph_request,
             )
             .await)
         })
