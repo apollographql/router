@@ -2433,8 +2433,6 @@ mod tests {
 
     use super::*;
     use crate::Context;
-    use crate::context::CONTAINS_GRAPHQL_ERROR;
-    use crate::context::OPERATION_KIND;
     use crate::error::Error;
     use crate::graphql;
     use crate::http_ext::TryIntoHeaderName;
@@ -2452,7 +2450,6 @@ mod tests {
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
-    use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
