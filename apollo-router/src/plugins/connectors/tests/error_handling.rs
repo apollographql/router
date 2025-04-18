@@ -1,0 +1,401 @@
+use serde_json::json;
+use wiremock::Mock;
+use wiremock::MockServer;
+use wiremock::ResponseTemplate;
+use wiremock::matchers::method;
+use wiremock::matchers::path;
+
+#[tokio::test]
+async fn only_source_no_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+          {
+          "id": 1,
+          "name": "Leanne Graham",
+          "username": "Bret"
+        },
+        {
+          "id": 2,
+          "name": "Ervin Howell",
+          "username": "Antonette"
+        },
+        {
+          "id": 3,
+          "name": "Clementine Bauch",
+          "username": "Samantha"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { only_source { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    // TODO: Why is status not here?
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "only_source": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          }
+        ]
+      }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn only_source_with_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+            "error": {
+                "message": "Something blew up!",
+                "code": "BIG_BOOM"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { only_source { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Something blew up!",
+          "path": [
+            "only_source"
+          ],
+          "extensions": {
+            "status": 500,
+            "code": "BIG_BOOM",
+            "service": "connectors"
+          }
+        }
+      ]
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn only_connect_no_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+          {
+          "id": 1,
+          "name": "Leanne Graham",
+          "username": "Bret"
+        },
+        {
+          "id": 2,
+          "name": "Ervin Howell",
+          "username": "Antonette"
+        },
+        {
+          "id": 3,
+          "name": "Clementine Bauch",
+          "username": "Samantha"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { only_connect { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "only_connect": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          }
+        ]
+      }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn only_connect_with_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+            "error": {
+                "message": "Something blew up!",
+                "code": "BIG_BOOM"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { only_connect { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Something blew up!",
+          "path": [
+            "only_connect"
+          ],
+          "extensions": {
+            "status": 500,
+            "code": "BIG_BOOM",
+            "service": "connectors"
+          }
+        }
+      ]
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn both_source_and_connect_no_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+          {
+          "id": 1,
+          "name": "Leanne Graham",
+          "username": "Bret"
+        },
+        {
+          "id": 2,
+          "name": "Ervin Howell",
+          "username": "Antonette"
+        },
+        {
+          "id": 3,
+          "name": "Clementine Bauch",
+          "username": "Samantha"
+        }])))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { both_source_and_connect { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "both_source_and_connect": [
+          {
+            "id": 1,
+            "name": "Leanne Graham",
+            "username": "Bret"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell",
+            "username": "Antonette"
+          },
+          {
+            "id": 3,
+            "name": "Clementine Bauch",
+            "username": "Samantha"
+          }
+        ]
+      }
+    }
+    "#);
+}
+
+#[tokio::test]
+async fn both_source_and_connect_with_error() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/users"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(serde_json::json!({
+            "error": {
+                "message": "Something blew up!",
+                "code": "BIG_BOOM"
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let connector_uri = format!("{}/", &mock_server.uri());
+    let override_config = json!({
+        "connectors": {
+            "sources": {
+                "connectors.withconfig": {
+                    "override_url": connector_uri
+                },
+                "connectors.withoutconfig": {
+                    "override_url": connector_uri
+                }
+            }
+        }
+    });
+
+    let response = super::execute(
+        include_str!("../testdata/errors.graphql"),
+        &mock_server.uri(),
+        "query { both_source_and_connect { id name username } }",
+        Default::default(),
+        Some(override_config.into()),
+        |_| {},
+    )
+    .await;
+
+    // Note that status 500 is NOT included in extensions because connect is overriding source
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": null,
+      "errors": [
+        {
+          "message": "Something blew up!",
+          "path": [
+            "both_source_and_connect"
+          ],
+          "extensions": {
+            "code": "BIG_BOOM",
+            "service": "connectors"
+          }
+        }
+      ]
+    }
+    "#);
+}

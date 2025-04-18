@@ -40,6 +40,7 @@ use crate::services::supergraph;
 use crate::uplink::license_enforcement::LicenseState;
 
 mod connect_on_type;
+mod error_handling;
 mod mock_api;
 mod quickstart;
 mod req_asserts;

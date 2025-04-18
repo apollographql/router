@@ -214,8 +214,7 @@ impl Connector {
             .variable_references()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let errors_message_variables: HashSet<Namespace> = connect
-            .errors
+        let errors_message_variables: HashSet<Namespace> = error_settings
             .as_ref()
             .map_or(Default::default(), |e| e.message.as_ref())
             .map_or(Default::default(), |m| {
@@ -223,8 +222,7 @@ impl Connector {
                     .map(|var_ref| var_ref.namespace.namespace)
                     .collect()
             });
-        let errors_extensions_variables: HashSet<Namespace> = connect
-            .errors
+        let errors_extensions_variables: HashSet<Namespace> = error_settings
             .as_ref()
             .map_or(Default::default(), |e| e.extensions.as_ref())
             .map_or(Default::default(), |m| {
@@ -242,15 +240,13 @@ impl Connector {
 
         // Calculate which headers are in use on the request and the response (including errors.message and errors.extensions)
         let request_headers = extract_header_references(transport.variable_references());
-        let errors_message_headers = connect
-            .errors
+        let errors_message_headers = error_settings
             .as_ref()
             .map_or(Default::default(), |e| e.message.as_ref())
             .map_or(Default::default(), |m| {
                 extract_header_references(m.variable_references())
             });
-        let errors_extensions_headers = connect
-            .errors
+        let errors_extensions_headers = error_settings
             .as_ref()
             .map_or(Default::default(), |e| e.extensions.as_ref())
             .map_or(Default::default(), |m| {
