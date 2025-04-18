@@ -921,7 +921,6 @@ pub(crate) fn get_federation_spec_definition_from_subgraph(
 }
 
 /// Adds a bootstrap fed 1 link directive to the schema.
-#[allow(dead_code)]
 pub(crate) fn add_fed1_link_to_schema(
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
