@@ -18,7 +18,6 @@ use crate::graphql;
 use crate::metrics;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
@@ -26,6 +25,7 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
@@ -140,15 +140,15 @@ impl SupergraphCostAttributes {
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CostInstrumentsConfig {
-    /// A histogram of the estimated cost of the operation using the currently configured cost model
+    /// A histogram representing the estimated cost of the operation using the currently configured cost model
     #[serde(rename = "cost.estimated")]
     pub(crate) cost_estimated:
         DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
-    /// A histogram of the actual cost of the operation using the currently configured cost model
+    /// A histogram representing the actual cost of the operation using the currently configured cost model
     #[serde(rename = "cost.actual")]
     pub(crate) cost_actual:
         DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,
-    /// A histogram of the delta between the estimated and actual cost of the operation using the currently configured cost model
+    /// A histogram representing the delta between the estimated and actual cost of the operation using the currently configured cost model
     #[serde(rename = "cost.delta")]
     pub(crate) cost_delta:
         DefaultedStandardInstrument<Extendable<SupergraphAttributes, SupergraphSelector>>,

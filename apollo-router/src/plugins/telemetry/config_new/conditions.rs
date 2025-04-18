@@ -1,4 +1,3 @@
-use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -519,28 +518,32 @@ where
     type Response = T::Response;
     type EventResponse = T::EventResponse;
 
-    fn on_request(&self, request: &T::Request) -> Option<Value> {
+    fn on_request(&self, request: &T::Request) -> Option<opentelemetry::Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => selector.on_request(request),
         }
     }
 
-    fn on_response(&self, response: &T::Response) -> Option<Value> {
+    fn on_response(&self, response: &T::Response) -> Option<opentelemetry::Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => selector.on_response(response),
         }
     }
 
-    fn on_response_event(&self, response: &T::EventResponse, ctx: &Context) -> Option<Value> {
+    fn on_response_event(
+        &self,
+        response: &T::EventResponse,
+        ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => selector.on_response_event(response, ctx),
         }
     }
 
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => selector.on_error(error, ctx),
@@ -553,7 +556,7 @@ where
         field: &apollo_compiler::executable::Field,
         value: &serde_json_bytes::Value,
         ctx: &Context,
-    ) -> Option<Value> {
+    ) -> Option<opentelemetry::Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => {
@@ -562,14 +565,14 @@ where
         }
     }
 
-    fn on_drop(&self) -> Option<Value> {
+    fn on_drop(&self) -> Option<opentelemetry::Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
             SelectorOrValue::Selector(selector) => selector.on_drop(),
         }
     }
 
-    fn is_active(&self, stage: super::Stage) -> bool {
+    fn is_active(&self, stage: Stage) -> bool {
         match self {
             SelectorOrValue::Value(_) => true,
             SelectorOrValue::Selector(selector) => selector.is_active(stage),
@@ -652,7 +655,7 @@ mod test {
             _field: &apollo_compiler::executable::Field,
             value: &serde_json_bytes::Value,
             _ctx: &Context,
-        ) -> Option<Value> {
+        ) -> Option<opentelemetry::Value> {
             if let serde_json_bytes::Value::Number(val) = value {
                 Some(Value::I64(val.as_i64().expect("mut be i64")))
             } else {

@@ -1,4 +1,3 @@
-use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sha2::Digest;
@@ -67,6 +66,8 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    /// The response body.
+    ResponseBody {},
     /// A header from the response
     ResponseHeader {
         /// The name of the request header.
@@ -327,7 +328,7 @@ impl Selector for RouterSelector {
         }
     }
 
-    fn on_drop(&self) -> Option<Value> {
+    fn on_drop(&self) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),

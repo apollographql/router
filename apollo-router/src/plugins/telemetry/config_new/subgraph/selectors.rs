@@ -16,7 +16,6 @@ use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Stage;
 use crate::plugins::telemetry::config_new::ToOtelValue;
-use crate::plugins::telemetry::config_new::attributes::SubgraphRequestResendCountKey;
 use crate::plugins::telemetry::config_new::get_baggage;
 use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
 use crate::plugins::telemetry::config_new::instruments::Standard;
@@ -29,6 +28,7 @@ use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::selectors::Query;
 use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
 use crate::plugins::telemetry::config_new::selectors::SubgraphQuery;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphRequestResendCountKey;
 use crate::services::subgraph;
 use crate::spec::operation_limits::OperationLimits;
 
@@ -728,6 +728,7 @@ mod test {
     use super::*;
     use crate::graphql;
     use crate::plugins::cache::entity::CacheHitMiss;
+    use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphRequestResendCountKey;
     use crate::plugins::telemetry::otel;
     use crate::services::subgraph::SubgraphRequestId;
 

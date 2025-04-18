@@ -8,14 +8,10 @@ use http::header::FORWARDED;
 use http::header::USER_AGENT;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry::baggage::BaggageExt;
 use opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE;
 use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE;
 use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
 use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
-use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
-use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
-use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
 use opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
@@ -32,24 +28,13 @@ use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-use tracing::Span;
 
 use crate::Context;
 use crate::axum_factory::utils::ConnectionInfo;
-use crate::context::OPERATION_KIND;
-use crate::context::OPERATION_NAME;
-use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::cost::SupergraphCostAttributes;
-use crate::plugins::telemetry::config_new::trace_id;
-use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
-use crate::services::router::Request;
-use crate::services::subgraph;
-use crate::services::subgraph::SubgraphRequestId;
-use crate::services::supergraph;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
 pub(crate) const HTTP_REQUEST_RESEND_COUNT: Key = Key::from_static_str("http.request.resend_count");
@@ -102,183 +87,6 @@ impl StandardAttribute {
             StandardAttribute::Bool(true) => Some(original_key),
             StandardAttribute::Aliased { alias } => Some(Key::new(alias.clone())),
             _ => None,
-        }
-    }
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct RouterAttributes {
-    /// The datadog trace ID.
-    /// This can be output in logs and used to correlate traces in Datadog.
-    #[serde(rename = "dd.trace_id")]
-    pub(crate) datadog_trace_id: Option<StandardAttribute>,
-
-    /// The OpenTelemetry trace ID.
-    /// This can be output in logs.
-    pub(crate) trace_id: Option<StandardAttribute>,
-
-    /// All key values from trace baggage.
-    pub(crate) baggage: Option<bool>,
-
-    /// Http attributes from Open Telemetry semantic conventions.
-    #[serde(flatten)]
-    pub(crate) common: HttpCommonAttributes,
-    /// Http server attributes from Open Telemetry semantic conventions.
-    #[serde(flatten)]
-    pub(crate) server: HttpServerAttributes,
-}
-
-impl DefaultForLevel for RouterAttributes {
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        kind: TelemetryDataKind,
-    ) {
-        self.common.defaults_for_level(requirement_level, kind);
-        self.server.defaults_for_level(requirement_level, kind);
-    }
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SupergraphAttributes {
-    /// The GraphQL document being executed.
-    /// Examples:
-    ///
-    /// * `query findBookById { bookById(id: ?) { name } }`
-    ///
-    /// Requirement level: Recommended
-    #[serde(rename = "graphql.document")]
-    pub(crate) graphql_document: Option<StandardAttribute>,
-
-    /// The name of the operation being executed.
-    /// Examples:
-    ///
-    /// * findBookById
-    ///
-    /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.name")]
-    pub(crate) graphql_operation_name: Option<StandardAttribute>,
-
-    /// The type of the operation being executed.
-    /// Examples:
-    ///
-    /// * query
-    /// * subscription
-    /// * mutation
-    ///
-    /// Requirement level: Recommended
-    #[serde(rename = "graphql.operation.type")]
-    pub(crate) graphql_operation_type: Option<StandardAttribute>,
-
-    /// Cost attributes for the operation being executed
-    #[serde(flatten)]
-    pub(crate) cost: SupergraphCostAttributes,
-}
-
-impl DefaultForLevel for SupergraphAttributes {
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        _kind: TelemetryDataKind,
-    ) {
-        match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {}
-            DefaultAttributeRequirementLevel::Recommended => {
-                if self.graphql_document.is_none() {
-                    self.graphql_document = Some(StandardAttribute::Bool(true));
-                }
-                if self.graphql_operation_name.is_none() {
-                    self.graphql_operation_name = Some(StandardAttribute::Bool(true));
-                }
-                if self.graphql_operation_type.is_none() {
-                    self.graphql_operation_type = Some(StandardAttribute::Bool(true));
-                }
-            }
-            DefaultAttributeRequirementLevel::None => {}
-        }
-    }
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SubgraphAttributes {
-    /// The name of the subgraph
-    /// Examples:
-    ///
-    /// * products
-    ///
-    /// Requirement level: Required
-    #[serde(rename = "subgraph.name")]
-    subgraph_name: Option<StandardAttribute>,
-
-    /// The GraphQL document being executed.
-    /// Examples:
-    ///
-    /// * `query findBookById { bookById(id: ?) { name } }`
-    ///
-    /// Requirement level: Recommended
-    #[serde(rename = "subgraph.graphql.document")]
-    graphql_document: Option<StandardAttribute>,
-
-    /// The name of the operation being executed.
-    /// Examples:
-    ///
-    /// * findBookById
-    ///
-    /// Requirement level: Recommended
-    #[serde(rename = "subgraph.graphql.operation.name")]
-    graphql_operation_name: Option<StandardAttribute>,
-
-    /// The type of the operation being executed.
-    /// Examples:
-    ///
-    /// * query
-    /// * subscription
-    /// * mutation
-    ///
-    /// Requirement level: Recommended
-    #[serde(rename = "subgraph.graphql.operation.type")]
-    graphql_operation_type: Option<StandardAttribute>,
-
-    /// The number of times the request has been resent
-    #[serde(rename = "http.request.resend_count")]
-    http_request_resend_count: Option<StandardAttribute>,
-}
-
-impl DefaultForLevel for SubgraphAttributes {
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        _kind: TelemetryDataKind,
-    ) {
-        match requirement_level {
-            DefaultAttributeRequirementLevel::Required => {
-                if self.subgraph_name.is_none() {
-                    self.subgraph_name = Some(StandardAttribute::Bool(true));
-                }
-            }
-            DefaultAttributeRequirementLevel::Recommended => {
-                if self.subgraph_name.is_none() {
-                    self.subgraph_name = Some(StandardAttribute::Bool(true));
-                }
-                if self.graphql_document.is_none() {
-                    self.graphql_document = Some(StandardAttribute::Bool(true));
-                }
-                if self.graphql_operation_name.is_none() {
-                    self.graphql_operation_name = Some(StandardAttribute::Bool(true));
-                }
-                if self.graphql_operation_type.is_none() {
-                    self.graphql_operation_type = Some(StandardAttribute::Bool(true));
-                }
-                if self.http_request_resend_count.is_none() {
-                    self.http_request_resend_count = Some(StandardAttribute::Bool(true));
-                }
-            }
-            DefaultAttributeRequirementLevel::None => {}
         }
     }
 }
@@ -612,53 +420,6 @@ impl DefaultForLevel for HttpServerAttributes {
             },
             DefaultAttributeRequirementLevel::None => {}
         }
-    }
-}
-
-impl Selectors<router::Request, router::Response, ()> for RouterAttributes {
-    fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
-        let mut attrs = self.common.on_request(request);
-        attrs.extend(self.server.on_request(request));
-        if let Some(key) = self
-            .trace_id
-            .as_ref()
-            .and_then(|a| a.key(Key::from_static_str("trace_id")))
-        {
-            if let Some(trace_id) = trace_id() {
-                attrs.push(KeyValue::new(key, trace_id.to_string()));
-            }
-        }
-
-        if let Some(key) = self
-            .datadog_trace_id
-            .as_ref()
-            .and_then(|a| a.key(Key::from_static_str("dd.trace_id")))
-        {
-            if let Some(trace_id) = trace_id() {
-                attrs.push(KeyValue::new(key, trace_id.to_datadog()));
-            }
-        }
-        if let Some(true) = &self.baggage {
-            let context = Span::current().context();
-            let baggage = context.baggage();
-            for (key, (value, _)) in baggage {
-                attrs.push(KeyValue::new(key.clone(), value.clone()));
-            }
-        }
-
-        attrs
-    }
-
-    fn on_response(&self, response: &router::Response) -> Vec<KeyValue> {
-        let mut attrs = self.common.on_response(response);
-        attrs.extend(self.server.on_response(response));
-        attrs
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
-        let mut attrs = self.common.on_error(error, ctx);
-        attrs.extend(self.server.on_error(error, ctx));
-        attrs
     }
 }
 
@@ -997,7 +758,7 @@ impl Selectors<router::Request, router::Response, ()> for HttpServerAttributes {
 }
 
 impl HttpServerAttributes {
-    fn forwarded_for(request: &Request) -> Option<SocketAddr> {
+    fn forwarded_for(request: &router::Request) -> Option<SocketAddr> {
         request
             .router_request
             .headers()
@@ -1015,7 +776,7 @@ impl HttpServerAttributes {
             .next()
     }
 
-    pub(crate) fn forwarded_host(request: &Request) -> Option<Uri> {
+    pub(crate) fn forwarded_host(request: &router::Request) -> Option<Uri> {
         request
             .router_request
             .headers()
@@ -1034,162 +795,6 @@ impl HttpServerAttributes {
     }
 }
 
-impl Selectors<supergraph::Request, supergraph::Response, crate::graphql::Response>
-    for SupergraphAttributes
-{
-    fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        if let Some(key) = self
-            .graphql_document
-            .as_ref()
-            .and_then(|a| a.key(GRAPHQL_DOCUMENT.into()))
-        {
-            if let Some(query) = &request.supergraph_request.body().query {
-                attrs.push(KeyValue::new(key, query.clone()));
-            }
-        }
-        if let Some(key) = self
-            .graphql_operation_name
-            .as_ref()
-            .and_then(|a| a.key(GRAPHQL_OPERATION_NAME.into()))
-        {
-            if let Some(operation_name) = &request
-                .context
-                .get::<_, String>(OPERATION_NAME)
-                .unwrap_or_default()
-            {
-                attrs.push(KeyValue::new(key, operation_name.clone()));
-            }
-        }
-        if let Some(key) = self
-            .graphql_operation_type
-            .as_ref()
-            .and_then(|a| a.key(GRAPHQL_OPERATION_TYPE.into()))
-        {
-            if let Some(operation_type) = &request
-                .context
-                .get::<_, String>(OPERATION_KIND)
-                .unwrap_or_default()
-            {
-                attrs.push(KeyValue::new(key, operation_type.clone()));
-            }
-        }
-
-        attrs
-    }
-
-    fn on_response(&self, response: &supergraph::Response) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        attrs.append(&mut self.cost.on_response(response));
-        attrs
-    }
-
-    fn on_response_event(
-        &self,
-        response: &crate::graphql::Response,
-        context: &Context,
-    ) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        attrs.append(&mut self.cost.on_response_event(response, context));
-        attrs
-    }
-
-    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
-        Vec::default()
-    }
-}
-
-impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphAttributes {
-    fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        if let Some(key) = self
-            .graphql_document
-            .as_ref()
-            .and_then(|a| a.key(SUBGRAPH_GRAPHQL_DOCUMENT))
-        {
-            if let Some(query) = &request.subgraph_request.body().query {
-                attrs.push(KeyValue::new(key, query.clone()));
-            }
-        }
-        if let Some(key) = self
-            .graphql_operation_name
-            .as_ref()
-            .and_then(|a| a.key(SUBGRAPH_GRAPHQL_OPERATION_NAME))
-        {
-            if let Some(op_name) = &request.subgraph_request.body().operation_name {
-                attrs.push(KeyValue::new(key, op_name.clone()));
-            }
-        }
-        if let Some(key) = self
-            .graphql_operation_type
-            .as_ref()
-            .and_then(|a| a.key(SUBGRAPH_GRAPHQL_OPERATION_TYPE))
-        {
-            // Subgraph operation type wil always match the supergraph operation type
-            if let Some(operation_type) = &request
-                .context
-                .get::<_, String>(OPERATION_KIND)
-                .unwrap_or_default()
-            {
-                attrs.push(KeyValue::new(key, operation_type.clone()));
-            }
-        }
-        if let Some(key) = self
-            .subgraph_name
-            .as_ref()
-            .and_then(|a| a.key(SUBGRAPH_NAME))
-        {
-            attrs.push(KeyValue::new(key, request.subgraph_name.clone()));
-        }
-
-        attrs
-    }
-
-    fn on_response(&self, response: &subgraph::Response) -> Vec<KeyValue> {
-        let mut attrs = Vec::new();
-        if let Some(key) = self
-            .http_request_resend_count
-            .as_ref()
-            .and_then(|a| a.key(HTTP_REQUEST_RESEND_COUNT))
-        {
-            if let Some(resend_count) = response
-                .context
-                .get::<_, usize>(SubgraphRequestResendCountKey::new(&response.id))
-                .ok()
-                .flatten()
-            {
-                attrs.push(KeyValue::new(key, resend_count as i64));
-            }
-        }
-
-        attrs
-    }
-
-    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
-        Vec::default()
-    }
-}
-
-/// Key used in context to save number of retries for a subgraph http request
-pub(crate) struct SubgraphRequestResendCountKey<'a> {
-    subgraph_req_id: &'a SubgraphRequestId,
-}
-
-impl<'a> SubgraphRequestResendCountKey<'a> {
-    pub(crate) fn new(subgraph_req_id: &'a SubgraphRequestId) -> Self {
-        Self { subgraph_req_id }
-    }
-}
-
-impl From<SubgraphRequestResendCountKey<'_>> for String {
-    fn from(value: SubgraphRequestResendCountKey) -> Self {
-        format!(
-            "apollo::telemetry::http_request_resend_count_{}",
-            value.subgraph_req_id
-        )
-    }
-}
-
 #[cfg(test)]
 mod test {
     use std::net::SocketAddr;
@@ -1201,22 +806,10 @@ mod test {
     use http::Uri;
     use http::header::FORWARDED;
     use http::header::USER_AGENT;
-    use opentelemetry::Context;
-    use opentelemetry::KeyValue;
-    use opentelemetry::baggage::BaggageExt;
-    use opentelemetry::trace::SpanContext;
-    use opentelemetry::trace::SpanId;
-    use opentelemetry::trace::TraceContextExt;
-    use opentelemetry::trace::TraceFlags;
-    use opentelemetry::trace::TraceId;
-    use opentelemetry::trace::TraceState;
     use opentelemetry_semantic_conventions::attribute::HTTP_REQUEST_BODY_SIZE;
     use opentelemetry_semantic_conventions::attribute::HTTP_RESPONSE_BODY_SIZE;
     use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
     use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
-    use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
-    use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
-    use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
     use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
     use opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE;
     use opentelemetry_semantic_conventions::trace::HTTP_ROUTE;
@@ -1230,14 +823,8 @@ mod test {
     use opentelemetry_semantic_conventions::trace::URL_QUERY;
     use opentelemetry_semantic_conventions::trace::URL_SCHEME;
     use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
-    use tracing::span;
-    use tracing::subscriber;
-    use tracing_subscriber::layer::SubscriberExt;
 
     use crate::axum_factory::utils::ConnectionInfo;
-    use crate::context::OPERATION_KIND;
-    use crate::context::OPERATION_NAME;
-    use crate::graphql;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::config_new::attributes::ERROR_TYPE;
     use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
@@ -1246,320 +833,8 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::NETWORK_LOCAL_PORT;
     use crate::plugins::telemetry::config_new::attributes::NETWORK_PEER_ADDRESS;
     use crate::plugins::telemetry::config_new::attributes::NETWORK_PEER_PORT;
-    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
-    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_NAME;
-    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_OPERATION_TYPE;
-    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-    use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
-    use crate::plugins::telemetry::otel;
     use crate::services::router;
-    use crate::services::subgraph;
-    use crate::services::supergraph;
-
-    #[test]
-    fn test_router_trace_attributes() {
-        let subscriber = tracing_subscriber::registry().with(otel::layer());
-        subscriber::with_default(subscriber, || {
-            let span_context = SpanContext::new(
-                TraceId::from_u128(42),
-                SpanId::from_u64(42),
-                TraceFlags::default().with_sampled(true),
-                false,
-                TraceState::default(),
-            );
-            let _context = Context::current()
-                .with_remote_span_context(span_context)
-                .with_baggage(vec![
-                    KeyValue::new("baggage_key", "baggage_value"),
-                    KeyValue::new("baggage_key_bis", "baggage_value_bis"),
-                ])
-                .attach();
-            let span = span!(tracing::Level::INFO, "test");
-            let _guard = span.enter();
-
-            let attributes = RouterAttributes {
-                datadog_trace_id: Some(StandardAttribute::Bool(true)),
-                trace_id: Some(StandardAttribute::Bool(true)),
-                baggage: Some(true),
-                common: Default::default(),
-                server: Default::default(),
-            };
-            let attributes =
-                attributes.on_request(&router::Request::fake_builder().build().unwrap());
-
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(|key_val| key_val.key == opentelemetry::Key::from_static_str("trace_id"))
-                    .map(|key_val| &key_val.value),
-                Some(&"0000000000000000000000000000002a".into())
-            );
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(
-                        |key_val| key_val.key == opentelemetry::Key::from_static_str("dd.trace_id")
-                    )
-                    .map(|key_val| &key_val.value),
-                Some(&"42".into())
-            );
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(
-                        |key_val| key_val.key == opentelemetry::Key::from_static_str("baggage_key")
-                    )
-                    .map(|key_val| &key_val.value),
-                Some(&"baggage_value".into())
-            );
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(|key_val| key_val.key
-                        == opentelemetry::Key::from_static_str("baggage_key_bis"))
-                    .map(|key_val| &key_val.value),
-                Some(&"baggage_value_bis".into())
-            );
-
-            let attributes = RouterAttributes {
-                datadog_trace_id: Some(StandardAttribute::Aliased {
-                    alias: "datatoutou_id".to_string(),
-                }),
-                trace_id: Some(StandardAttribute::Aliased {
-                    alias: "my_trace_id".to_string(),
-                }),
-                baggage: Some(false),
-                common: Default::default(),
-                server: Default::default(),
-            };
-            let attributes =
-                attributes.on_request(&router::Request::fake_builder().build().unwrap());
-
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(
-                        |key_val| key_val.key == opentelemetry::Key::from_static_str("my_trace_id")
-                    )
-                    .map(|key_val| &key_val.value),
-                Some(&"0000000000000000000000000000002a".into())
-            );
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(|key_val| key_val.key
-                        == opentelemetry::Key::from_static_str("datatoutou_id"))
-                    .map(|key_val| &key_val.value),
-                Some(&"42".into())
-            );
-        });
-    }
-
-    #[test]
-    fn test_supergraph_graphql_document() {
-        let attributes = SupergraphAttributes {
-            graphql_document: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-        let attributes = attributes.on_request(
-            &supergraph::Request::fake_builder()
-                .query("query { __typename }")
-                .build()
-                .unwrap(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key.as_str() == GRAPHQL_DOCUMENT)
-                .map(|key_val| &key_val.value),
-            Some(&"query { __typename }".into())
-        );
-    }
-
-    #[test]
-    fn test_supergraph_graphql_operation_name() {
-        let attributes = SupergraphAttributes {
-            graphql_operation_name: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-        let context = crate::Context::new();
-        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
-        let attributes = attributes.on_request(
-            &supergraph::Request::fake_builder()
-                .context(context)
-                .build()
-                .unwrap(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key.as_str() == GRAPHQL_OPERATION_NAME)
-                .map(|key_val| &key_val.value),
-            Some(&"topProducts".into())
-        );
-        let attributes = SupergraphAttributes {
-            graphql_operation_name: Some(StandardAttribute::Aliased {
-                alias: String::from("graphql_query"),
-            }),
-            ..Default::default()
-        };
-        let context = crate::Context::new();
-        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
-        let attributes = attributes.on_request(
-            &supergraph::Request::fake_builder()
-                .context(context)
-                .build()
-                .unwrap(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key.as_str() == "graphql_query")
-                .map(|key_val| &key_val.value),
-            Some(&"topProducts".into())
-        );
-    }
-
-    #[test]
-    fn test_supergraph_graphql_operation_type() {
-        let attributes = SupergraphAttributes {
-            graphql_operation_type: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-        let context = crate::Context::new();
-        let _ = context.insert(OPERATION_KIND, "query".to_string());
-        let attributes = attributes.on_request(
-            &supergraph::Request::fake_builder()
-                .context(context)
-                .build()
-                .unwrap(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key.as_str() == GRAPHQL_OPERATION_TYPE)
-                .map(|key_val| &key_val.value),
-            Some(&"query".into())
-        );
-    }
-
-    #[test]
-    fn test_subgraph_graphql_document() {
-        let attributes = SubgraphAttributes {
-            graphql_document: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-        let attributes = attributes.on_request(
-            &subgraph::Request::fake_builder()
-                .subgraph_request(
-                    ::http::Request::builder()
-                        .uri("http://localhost/graphql")
-                        .body(
-                            graphql::Request::fake_builder()
-                                .query("query { __typename }")
-                                .build(),
-                        )
-                        .unwrap(),
-                )
-                .build(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT)
-                .map(|key_val| &key_val.value),
-            Some(&"query { __typename }".into())
-        );
-    }
-
-    #[test]
-    fn test_subgraph_graphql_operation_name() {
-        let attributes = SubgraphAttributes {
-            graphql_operation_name: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-
-        let attributes = attributes.on_request(
-            &subgraph::Request::fake_builder()
-                .subgraph_request(
-                    ::http::Request::builder()
-                        .uri("http://localhost/graphql")
-                        .body(
-                            graphql::Request::fake_builder()
-                                .operation_name("topProducts")
-                                .build(),
-                        )
-                        .unwrap(),
-                )
-                .build(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_OPERATION_NAME)
-                .map(|key_val| &key_val.value),
-            Some(&"topProducts".into())
-        );
-    }
-
-    #[test]
-    fn test_subgraph_graphql_operation_type() {
-        let attributes = SubgraphAttributes {
-            graphql_operation_type: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-
-        let context = crate::Context::new();
-        let _ = context.insert(OPERATION_KIND, "query".to_string());
-        let attributes = attributes.on_request(
-            &subgraph::Request::fake_builder()
-                .context(context)
-                .subgraph_request(
-                    ::http::Request::builder()
-                        .uri("http://localhost/graphql")
-                        .body(graphql::Request::fake_builder().build())
-                        .unwrap(),
-                )
-                .build(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_OPERATION_TYPE)
-                .map(|key_val| &key_val.value),
-            Some(&"query".into())
-        );
-    }
-
-    #[test]
-    fn test_subgraph_name() {
-        let attributes = SubgraphAttributes {
-            subgraph_name: Some(StandardAttribute::Bool(true)),
-            ..Default::default()
-        };
-
-        let attributes = attributes.on_request(
-            &subgraph::Request::fake_builder()
-                .subgraph_name("products")
-                .subgraph_request(
-                    ::http::Request::builder()
-                        .uri("http://localhost/graphql")
-                        .body(graphql::Request::fake_builder().build())
-                        .unwrap(),
-                )
-                .build(),
-        );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_NAME)
-                .map(|key_val| &key_val.value),
-            Some(&"products".into())
-        );
-    }
 
     #[test]
     fn test_http_common_error_type() {

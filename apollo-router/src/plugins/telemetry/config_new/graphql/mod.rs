@@ -3,7 +3,6 @@ use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
@@ -151,7 +150,13 @@ impl Instrumented for GraphQLInstruments {
         }
     }
 
-    fn on_response_field(&self, ty: &NamedType, field: &Field, value: &Value, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &NamedType,
+        field: &Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         if let Some(field_length) = &self.list_length {
             field_length.on_response_field(ty, field, value, ctx);
         }
@@ -174,13 +179,13 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
         variables: &Object,
         ty: &NamedType,
         field: &Field,
-        value: &Value,
+        value: &serde_json_bytes::Value,
     ) {
         self.instruments
             .on_response_field(ty, field, value, self.ctx);
 
         match value {
-            Value::Array(items) => {
+            serde_json_bytes::Value::Array(items) => {
                 for item in items {
                     self.visit_list_item(
                         request,
@@ -191,7 +196,7 @@ impl ResponseVisitor for GraphQLInstrumentsVisitor<'_> {
                     );
                 }
             }
-            Value::Object(children) => {
+            serde_json_bytes::Value::Object(children) => {
                 self.visit_selections(request, variables, &field.selection_set, children);
             }
             _ => {}

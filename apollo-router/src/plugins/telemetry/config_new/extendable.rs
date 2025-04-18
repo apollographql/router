@@ -25,7 +25,7 @@ use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
-/// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
+/// This struct can be used as an attribute container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
 pub(crate) struct Extendable<Att, Ext>
 where
@@ -281,17 +281,17 @@ mod test {
     use crate::plugins::telemetry::config::AttributeValue;
     use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
     use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
-    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::extendable::Extendable;
+    use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+    use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 
     #[test]
     fn test_extendable_serde() {

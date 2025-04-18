@@ -5,7 +5,6 @@ use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::time::Instant;
 use tower::BoxError;
 
 use crate::Context;
@@ -123,7 +122,7 @@ impl ConnectorInstruments {
                     };
                     CustomHistogram {
                         inner: Mutex::new(CustomHistogramInner {
-                            increment: Increment::Duration(Instant::now()),
+                            increment: Increment::Duration(tokio::time::Instant::now()),
                             condition: Condition::True,
                             histogram: Some(static_instruments
                                 .get(HTTP_CLIENT_REQUEST_DURATION_METRIC)

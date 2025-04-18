@@ -32,6 +32,8 @@ use super::graphql::FIELD_LENGTH;
 use super::graphql::GraphQLInstruments;
 use super::graphql::selectors::ListLength;
 use super::selectors::CacheKind;
+use super::selectors::ConnectorSelector;
+use super::selectors::ConnectorValue;
 use super::selectors::RouterSelector;
 use super::selectors::RouterValue;
 use super::selectors::SubgraphSelector;
@@ -45,28 +47,28 @@ use crate::metrics;
 use crate::metrics::meter_provider;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstruments;
 use crate::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig;
-use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelector;
-use crate::plugins::telemetry::config_new::connector::selectors::ConnectorValue;
-use crate::plugins::telemetry::config_new::cost::CostInstruments;
-use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
+use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+use crate::plugins::telemetry::config_new::router::instruments::RouterInstruments;
+use crate::plugins::telemetry::config_new::router::instruments::RouterInstrumentsConfig;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::subgraph::instruments::SubgraphInstruments;
+use crate::plugins::telemetry::config_new::subgraph::instruments::SubgraphInstrumentsConfig;
+use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
+use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphInstrumentsConfig;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 use crate::services::router::pipeline_handle::PIPELINE_METRIC;
 use crate::services::router::pipeline_handle::pipeline_counts;
-use crate::services::subgraph;
-use crate::services::supergraph;
 
 pub(crate) const METER_NAME: &str = "apollo/router";
 
@@ -1075,46 +1077,6 @@ impl StaticInstrument {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct RouterInstrumentsConfig {
-    /// Histogram of server request duration
-    #[serde(rename = "http.server.request.duration")]
-    http_server_request_duration:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
-
-    /// Counter of active requests
-    #[serde(rename = "http.server.active_requests")]
-    http_server_active_requests: DefaultedStandardInstrument<ActiveRequestsAttributes>,
-
-    /// Histogram of server request body size
-    #[serde(rename = "http.server.request.body.size")]
-    http_server_request_body_size:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
-
-    /// Histogram of server response body size
-    #[serde(rename = "http.server.response.body.size")]
-    http_server_response_body_size:
-        DefaultedStandardInstrument<Extendable<RouterAttributes, RouterSelector>>,
-}
-
-impl DefaultForLevel for RouterInstrumentsConfig {
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        kind: TelemetryDataKind,
-    ) {
-        self.http_server_request_duration
-            .defaults_for_levels(requirement_level, kind);
-        self.http_server_active_requests
-            .defaults_for_levels(requirement_level, kind);
-        self.http_server_request_body_size
-            .defaults_for_levels(requirement_level, kind);
-        self.http_server_response_body_size
-            .defaults_for_levels(requirement_level, kind);
-    }
-}
-
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
 pub(crate) struct ActiveRequestsAttributes {
     /// The HTTP request method
     #[serde(rename = "http.request.method")]
@@ -1239,56 +1201,6 @@ where
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response_event(response, ctx),
         }
-    }
-}
-
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SupergraphInstrumentsConfig {
-    #[serde(flatten)]
-    pub(crate) cost: CostInstrumentsConfig,
-}
-
-impl DefaultForLevel for SupergraphInstrumentsConfig {
-    fn defaults_for_level(
-        &mut self,
-        _requirement_level: DefaultAttributeRequirementLevel,
-        _kind: TelemetryDataKind,
-    ) {
-    }
-}
-
-#[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SubgraphInstrumentsConfig {
-    /// Histogram of client request duration
-    #[serde(rename = "http.client.request.duration")]
-    http_client_request_duration:
-        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
-
-    /// Histogram of client request body size
-    #[serde(rename = "http.client.request.body.size")]
-    http_client_request_body_size:
-        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
-
-    /// Histogram of client response body size
-    #[serde(rename = "http.client.response.body.size")]
-    http_client_response_body_size:
-        DefaultedStandardInstrument<Extendable<SubgraphAttributes, SubgraphSelector>>,
-}
-
-impl DefaultForLevel for SubgraphInstrumentsConfig {
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        kind: TelemetryDataKind,
-    ) {
-        self.http_client_request_duration
-            .defaults_for_level(requirement_level, kind);
-        self.http_client_request_body_size
-            .defaults_for_level(requirement_level, kind);
-        self.http_client_response_body_size
-            .defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -1467,32 +1379,6 @@ where
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         self.attributes.on_error(error, ctx);
-    }
-}
-
-impl Selectors<subgraph::Request, subgraph::Response, ()> for SubgraphInstrumentsConfig {
-    fn on_request(&self, request: &subgraph::Request) -> Vec<opentelemetry::KeyValue> {
-        let mut attrs = self.http_client_request_body_size.on_request(request);
-        attrs.extend(self.http_client_request_duration.on_request(request));
-        attrs.extend(self.http_client_response_body_size.on_request(request));
-
-        attrs
-    }
-
-    fn on_response(&self, response: &subgraph::Response) -> Vec<opentelemetry::KeyValue> {
-        let mut attrs = self.http_client_request_body_size.on_response(response);
-        attrs.extend(self.http_client_request_duration.on_response(response));
-        attrs.extend(self.http_client_response_body_size.on_response(response));
-
-        attrs
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue> {
-        let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
-        attrs.extend(self.http_client_request_duration.on_error(error, ctx));
-        attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
-
-        attrs
     }
 }
 
@@ -1725,208 +1611,6 @@ where
         }
     }
 }
-
-pub(crate) struct RouterInstruments {
-    http_server_request_duration: Option<
-        CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
-    >,
-    http_server_active_requests: Option<ActiveRequestsCounter>,
-    http_server_request_body_size: Option<
-        CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
-    >,
-    http_server_response_body_size: Option<
-        CustomHistogram<router::Request, router::Response, (), RouterAttributes, RouterSelector>,
-    >,
-    custom: RouterCustomInstruments,
-}
-
-impl Instrumented for RouterInstruments {
-    type Request = router::Request;
-    type Response = router::Response;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) {
-        if let Some(http_server_request_duration) = &self.http_server_request_duration {
-            http_server_request_duration.on_request(request);
-        }
-        if let Some(http_server_active_requests) = &self.http_server_active_requests {
-            http_server_active_requests.on_request(request);
-        }
-        if let Some(http_server_request_body_size) = &self.http_server_request_body_size {
-            http_server_request_body_size.on_request(request);
-        }
-        if let Some(http_server_response_body_size) = &self.http_server_response_body_size {
-            http_server_response_body_size.on_request(request);
-        }
-        self.custom.on_request(request);
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        if let Some(http_server_request_duration) = &self.http_server_request_duration {
-            http_server_request_duration.on_response(response);
-        }
-        if let Some(http_server_active_requests) = &self.http_server_active_requests {
-            http_server_active_requests.on_response(response);
-        }
-        if let Some(http_server_request_body_size) = &self.http_server_request_body_size {
-            http_server_request_body_size.on_response(response);
-        }
-        if let Some(http_server_response_body_size) = &self.http_server_response_body_size {
-            http_server_response_body_size.on_response(response);
-        }
-        self.custom.on_response(response);
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if let Some(http_server_request_duration) = &self.http_server_request_duration {
-            http_server_request_duration.on_error(error, ctx);
-        }
-        if let Some(http_server_active_requests) = &self.http_server_active_requests {
-            http_server_active_requests.on_error(error, ctx);
-        }
-        if let Some(http_server_request_body_size) = &self.http_server_request_body_size {
-            http_server_request_body_size.on_error(error, ctx);
-        }
-        if let Some(http_server_response_body_size) = &self.http_server_response_body_size {
-            http_server_response_body_size.on_error(error, ctx);
-        }
-        self.custom.on_error(error, ctx);
-    }
-}
-
-pub(crate) struct SupergraphInstruments {
-    cost: CostInstruments,
-    custom: SupergraphCustomInstruments,
-}
-
-impl Instrumented for SupergraphInstruments {
-    type Request = supergraph::Request;
-    type Response = supergraph::Response;
-    type EventResponse = crate::graphql::Response;
-
-    fn on_request(&self, request: &Self::Request) {
-        self.cost.on_request(request);
-        self.custom.on_request(request);
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        self.cost.on_response(response);
-        self.custom.on_response(response);
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        self.cost.on_error(error, ctx);
-        self.custom.on_error(error, ctx);
-    }
-
-    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
-        self.cost.on_response_event(response, ctx);
-        self.custom.on_response_event(response, ctx);
-    }
-}
-
-pub(crate) struct SubgraphInstruments {
-    http_client_request_duration: Option<
-        CustomHistogram<
-            subgraph::Request,
-            subgraph::Response,
-            (),
-            SubgraphAttributes,
-            SubgraphSelector,
-        >,
-    >,
-    http_client_request_body_size: Option<
-        CustomHistogram<
-            subgraph::Request,
-            subgraph::Response,
-            (),
-            SubgraphAttributes,
-            SubgraphSelector,
-        >,
-    >,
-    http_client_response_body_size: Option<
-        CustomHistogram<
-            subgraph::Request,
-            subgraph::Response,
-            (),
-            SubgraphAttributes,
-            SubgraphSelector,
-        >,
-    >,
-    custom: SubgraphCustomInstruments,
-}
-
-impl Instrumented for SubgraphInstruments {
-    type Request = subgraph::Request;
-    type Response = subgraph::Response;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) {
-        if let Some(http_client_request_duration) = &self.http_client_request_duration {
-            http_client_request_duration.on_request(request);
-        }
-        if let Some(http_client_request_body_size) = &self.http_client_request_body_size {
-            http_client_request_body_size.on_request(request);
-        }
-        if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
-            http_client_response_body_size.on_request(request);
-        }
-        self.custom.on_request(request);
-    }
-
-    fn on_response(&self, response: &Self::Response) {
-        if let Some(http_client_request_duration) = &self.http_client_request_duration {
-            http_client_request_duration.on_response(response);
-        }
-        if let Some(http_client_request_body_size) = &self.http_client_request_body_size {
-            http_client_request_body_size.on_response(response);
-        }
-        if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
-            http_client_response_body_size.on_response(response);
-        }
-        self.custom.on_response(response);
-    }
-
-    fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if let Some(http_client_request_duration) = &self.http_client_request_duration {
-            http_client_request_duration.on_error(error, ctx);
-        }
-        if let Some(http_client_request_body_size) = &self.http_client_request_body_size {
-            http_client_request_body_size.on_error(error, ctx);
-        }
-        if let Some(http_client_response_body_size) = &self.http_client_response_body_size {
-            http_client_response_body_size.on_error(error, ctx);
-        }
-        self.custom.on_error(error, ctx);
-    }
-}
-
-pub(crate) type RouterCustomInstruments = CustomInstruments<
-    router::Request,
-    router::Response,
-    (),
-    RouterAttributes,
-    RouterSelector,
-    RouterValue,
->;
-
-pub(crate) type SupergraphCustomInstruments = CustomInstruments<
-    supergraph::Request,
-    supergraph::Response,
-    crate::graphql::Response,
-    SupergraphAttributes,
-    SupergraphSelector,
-    SupergraphValue,
->;
-
-pub(crate) type SubgraphCustomInstruments = CustomInstruments<
-    subgraph::Request,
-    subgraph::Response,
-    (),
-    SubgraphAttributes,
-    SubgraphSelector,
-    SubgraphValue,
->;
 
 // ---------------- Counter -----------------------
 #[derive(Debug, Clone)]
@@ -2313,7 +1997,7 @@ where
     }
 }
 
-struct ActiveRequestsCounter {
+pub(crate) struct ActiveRequestsCounter {
     inner: Mutex<ActiveRequestsCounterInner>,
 }
 
@@ -2768,7 +2452,8 @@ mod tests {
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
-    use crate::services::OperationKind;
+    use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
+    use crate::services::{subgraph, supergraph, OperationKind};
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
@@ -3057,9 +2742,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_instruments() {
-        // This test is data driven.
+        // This test is data-driven.
         // It reads a list of fixtures from the fixtures directory and runs a test for each fixture.
-        // Each fixture is a yaml file that contains a list of events and a router config for the instruments.
+        // Each fixture is a YAML file that contains a list of events and a router config for the instruments.
 
         for fixture in Asset::iter() {
             // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
@@ -3566,527 +3251,5 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(schema.unwrap().as_bytes())
             .expect("write schema");
-    }
-
-    #[tokio::test]
-    async fn test_router_instruments() {
-        // Please don't add further logic to this test, it's already testing multiple things.
-        // Instead, add a data driven test via test_instruments test.
-        async {
-            let config: InstrumentsConfig = serde_json::from_str(
-                json!({
-                    "router": {
-                        "http.server.request.body.size": true,
-                        "http.server.response.body.size": {
-                            "attributes": {
-                                "http.response.status_code": false,
-                                "acme.my_attribute": {
-                                    "response_header": "x-my-header",
-                                    "default": "unknown"
-                                }
-                            }
-                        },
-                        "acme.request.on_error": {
-                            "value": "unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "not": {
-                                    "eq": [
-                                        200,
-                                        {
-                                            "response_status": "code"
-                                        }
-                                    ]
-                                }
-                            },
-                            "attributes": {
-                                "http.response.status_code": true
-                            }
-                        },
-                        "acme.request.on_critical_error": {
-                            "value": "unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "eq": [
-                                    "request time out",
-                                    {
-                                        "error": "reason"
-                                    }
-                                ]
-                            },
-                            "attributes": {
-                                "http.response.status_code": true
-                            }
-                        },
-                        "acme.request.on_error_histo": {
-                            "value": "unit",
-                            "type": "histogram",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "not": {
-                                    "eq": [
-                                        200,
-                                        {
-                                            "response_status": "code"
-                                        }
-                                    ]
-                                }
-                            },
-                            "attributes": {
-                                "http.response.status_code": true
-                            }
-                        },
-                        "acme.request.header_value": {
-                            "value": {
-                                "request_header": "x-my-header-count"
-                            },
-                            "type": "counter",
-                            "description": "my description",
-                            "unit": "nb"
-                        }
-                    }
-                })
-                .to_string()
-                .as_str(),
-            )
-            .unwrap();
-
-            let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
-            let router_req = RouterRequest::fake_builder()
-                .header("conditional-custom", "X")
-                .header("x-my-header-count", "55")
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            let router_response = RouterResponse::fake_builder()
-                .context(router_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("x-my-header", "TEST")
-                .header("content-length", "35")
-                .data(json!({"errors": [{"message": "nope"}]}))
-                .build()
-                .unwrap();
-            router_instruments.on_response(&router_response);
-
-            assert_counter!("acme.request.header_value", 55.0);
-            assert_counter!(
-                "acme.request.on_error",
-                1.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!(
-                "acme.request.on_error_histo",
-                1.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!("http.server.request.body.size", 35.0);
-            assert_histogram_sum!(
-                "http.server.response.body.size",
-                35.0,
-                "acme.my_attribute" = "TEST"
-            );
-
-            let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
-            let router_req = RouterRequest::fake_builder()
-                .header("content-length", "35")
-                .header("x-my-header-count", "5")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            let router_response = RouterResponse::fake_builder()
-                .context(router_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .data(json!({"errors": [{"message": "nope"}]}))
-                .build()
-                .unwrap();
-            router_instruments.on_response(&router_response);
-
-            assert_counter!("acme.request.header_value", 60.0);
-            assert_counter!(
-                "acme.request.on_error",
-                2.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!(
-                "acme.request.on_error_histo",
-                2.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!("http.server.request.body.size", 70.0);
-            assert_histogram_sum!(
-                "http.server.response.body.size",
-                35.0,
-                "acme.my_attribute" = "TEST"
-            );
-            assert_histogram_sum!(
-                "http.server.response.body.size",
-                35.0,
-                "acme.my_attribute" = "unknown"
-            );
-
-            let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
-            let router_req = RouterRequest::fake_builder()
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            let router_response = RouterResponse::fake_builder()
-                .context(router_req.context.clone())
-                .status_code(StatusCode::OK)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .data(json!({"errors": [{"message": "nope"}]}))
-                .build()
-                .unwrap();
-            router_instruments.on_response(&router_response);
-
-            assert_counter!("acme.request.header_value", 60.0);
-            assert_counter!(
-                "acme.request.on_error",
-                2.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!(
-                "acme.request.on_error_histo",
-                2.0,
-                "http.response.status_code" = 400
-            );
-
-            let router_instruments =
-                config.new_router_instruments(Arc::new(config.new_builtin_router_instruments()));
-            let router_req = RouterRequest::fake_builder()
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            router_instruments.on_error(&BoxError::from("request time out"), &Context::new());
-            assert_counter!(
-                "acme.request.on_critical_error",
-                1.0,
-                "http.response.status_code" = 500
-            );
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_supergraph_instruments() {
-        // Please don't add further logic to this test, it's already testing multiple things.
-        // Instead, add a data driven test via test_instruments test.
-        async {
-            let config: InstrumentsConfig = serde_json::from_str(
-                json!({
-                    "supergraph": {
-                        "acme.request.on_error": {
-                            "value": "unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "not": {
-                                    "eq": [
-                                        200,
-                                        {
-                                            "response_status": "code"
-                                        }
-                                    ]
-                                }
-                            }
-                        },
-                        "acme.request.on_graphql_error": {
-                            "value": "event_unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "eq": [
-                                    "NOPE",
-                                    {
-                                        "response_errors": "$.[0].extensions.code"
-                                    }
-                                ]
-                            },
-                            "attributes": {
-                                "response_errors": {
-                                    "response_errors": "$.*"
-                                }
-                            }
-                        },
-                        "acme.request.on_graphql_error_selector": {
-                            "value": "event_unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "eq": [
-                                    true,
-                                    {
-                                        "on_graphql_error": true
-                                    }
-                                ]
-                            },
-                            "attributes": {
-                                "response_errors": {
-                                    "response_errors": "$.*"
-                                }
-                            }
-                        },
-                        "acme.request.on_graphql_error_histo": {
-                            "value": "event_unit",
-                            "type": "histogram",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "eq": [
-                                    "NOPE",
-                                    {
-                                        "response_errors": "$.[0].extensions.code"
-                                    }
-                                ]
-                            },
-                            "attributes": {
-                                "response_errors": {
-                                    "response_errors": "$.*"
-                                }
-                            }
-                        },
-                        "acme.request.on_graphql_data": {
-                            "value": {
-                                "response_data": "$.price"
-                            },
-                            "type": "counter",
-                            "unit": "$",
-                            "description": "my description",
-                            "attributes": {
-                                "response.data": {
-                                    "response_data": "$.*"
-                                }
-                            }
-                        },
-                        "acme.query": {
-                            "value": "unit",
-                            "type": "counter",
-                            "description": "nb of queries",
-                            "condition": {
-                                "eq": [
-                                    "query",
-                                    {
-                                        "operation_kind": "string"
-                                    }
-                                ]
-                            },
-                            "unit": "query",
-                            "attributes": {
-                                "query": {
-                                    "query": "string"
-                                }
-                            }
-                        }
-                    }
-                })
-                .to_string()
-                .as_str(),
-            )
-            .unwrap();
-
-            let custom_instruments = SupergraphCustomInstruments::new(
-                &config.supergraph.custom,
-                Arc::new(config.new_builtin_supergraph_instruments()),
-            );
-            let context = crate::context::Context::new();
-            let _ = context.insert(OPERATION_KIND, "query".to_string()).unwrap();
-            let context_with_error = crate::context::Context::new();
-            let _ = context_with_error
-                .insert(OPERATION_KIND, "query".to_string())
-                .unwrap();
-            let _ = context_with_error
-                .insert(CONTAINS_GRAPHQL_ERROR, true)
-                .unwrap();
-            let supergraph_req = supergraph::Request::fake_builder()
-                .header("conditional-custom", "X")
-                .header("x-my-header-count", "55")
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .query("{me{name}}")
-                .context(context.clone())
-                .build()
-                .unwrap();
-            custom_instruments.on_request(&supergraph_req);
-            let supergraph_response = supergraph::Response::fake_builder()
-                .context(supergraph_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("x-my-header", "TEST")
-                .header("content-length", "35")
-                .errors(vec![
-                    graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build(),
-                ])
-                .build()
-                .unwrap();
-            custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_response_event(
-                &graphql::Response::builder()
-                    .data(json!({
-                        "price": 500
-                    }))
-                    .errors(vec![
-                        graphql::Error::builder()
-                            .message("nope")
-                            .extension_code("NOPE")
-                            .build(),
-                    ])
-                    .build(),
-                &context_with_error,
-            );
-
-            assert_counter!("acme.query", 1.0, query = "{me{name}}");
-            assert_counter!("acme.request.on_error", 1.0);
-            assert_counter!(
-                "acme.request.on_graphql_error",
-                1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!(
-                "acme.request.on_graphql_error_selector",
-                1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_histogram_sum!(
-                "acme.request.on_graphql_error_histo",
-                1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
-
-            let custom_instruments = SupergraphCustomInstruments::new(
-                &config.supergraph.custom,
-                Arc::new(config.new_builtin_supergraph_instruments()),
-            );
-            let supergraph_req = supergraph::Request::fake_builder()
-                .header("content-length", "35")
-                .header("x-my-header-count", "5")
-                .header("content-type", "application/graphql")
-                .context(context.clone())
-                .query("Subscription {me{name}}")
-                .build()
-                .unwrap();
-            custom_instruments.on_request(&supergraph_req);
-            let supergraph_response = supergraph::Response::fake_builder()
-                .context(supergraph_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .errors(vec![
-                    graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build(),
-                ])
-                .build()
-                .unwrap();
-            custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_response_event(
-                &graphql::Response::builder()
-                    .data(json!({
-                        "price": 500
-                    }))
-                    .errors(vec![
-                        graphql::Error::builder()
-                            .message("nope")
-                            .extension_code("NOPE")
-                            .build(),
-                    ])
-                    .build(),
-                &context_with_error,
-            );
-
-            assert_counter!("acme.query", 1.0, query = "{me{name}}");
-            assert_counter!("acme.request.on_error", 2.0);
-            assert_counter!(
-                "acme.request.on_graphql_error",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!(
-                "acme.request.on_graphql_error_selector",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_histogram_sum!(
-                "acme.request.on_graphql_error_histo",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
-
-            let custom_instruments = SupergraphCustomInstruments::new(
-                &config.supergraph.custom,
-                Arc::new(config.new_builtin_supergraph_instruments()),
-            );
-            let supergraph_req = supergraph::Request::fake_builder()
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .context(context.clone())
-                .query("{me{name}}")
-                .build()
-                .unwrap();
-            custom_instruments.on_request(&supergraph_req);
-            let supergraph_response = supergraph::Response::fake_builder()
-                .context(supergraph_req.context.clone())
-                .status_code(StatusCode::OK)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .data(serde_json_bytes::json!({"foo": "bar"}))
-                .build()
-                .unwrap();
-            custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_response_event(
-                &graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"foo": "bar"}))
-                    .build(),
-                &supergraph_req.context,
-            );
-
-            assert_counter!("acme.query", 2.0, query = "{me{name}}");
-            assert_counter!("acme.request.on_error", 2.0);
-            assert_counter!(
-                "acme.request.on_graphql_error",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!(
-                "acme.request.on_graphql_error_selector",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_histogram_sum!(
-                "acme.request.on_graphql_error_histo",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
-        }
-        .with_metrics()
-        .await;
     }
 }

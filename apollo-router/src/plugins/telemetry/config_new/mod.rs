@@ -1,6 +1,4 @@
 use events::EventOn;
-use opentelemetry::KeyValue;
-use opentelemetry::Value;
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -27,19 +25,26 @@ pub(crate) mod extendable;
 pub(crate) mod graphql;
 pub(crate) mod instruments;
 pub(crate) mod logging;
+pub(crate) mod router;
 pub(crate) mod selectors;
 pub(crate) mod spans;
+pub(crate) mod subgraph;
+pub(crate) mod supergraph;
 
 pub(crate) trait Selectors<Request, Response, EventResponse> {
-    fn on_request(&self, request: &Request) -> Vec<KeyValue>;
-    fn on_response(&self, response: &Response) -> Vec<KeyValue>;
-    fn on_response_event(&self, _response: &EventResponse, _ctx: &Context) -> Vec<KeyValue> {
+    fn on_request(&self, request: &Request) -> Vec<opentelemetry::KeyValue>;
+    fn on_response(&self, response: &Response) -> Vec<opentelemetry::KeyValue>;
+    fn on_response_event(
+        &self,
+        _response: &EventResponse,
+        _ctx: &Context,
+    ) -> Vec<opentelemetry::KeyValue> {
         Vec::with_capacity(0)
     }
-    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry::KeyValue>;
     fn on_response_field(
         &self,
-        _attrs: &mut Vec<KeyValue>,
+        _attrs: &mut Vec<opentelemetry::KeyValue>,
         _ty: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
         _value: &serde_json_bytes::Value,
@@ -108,7 +113,7 @@ pub(crate) trait Selector: std::fmt::Debug {
         None
     }
 
-    fn on_drop(&self) -> Option<Value> {
+    fn on_drop(&self) -> Option<opentelemetry::Value> {
         None
     }
 

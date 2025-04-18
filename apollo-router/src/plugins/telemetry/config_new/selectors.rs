@@ -1,15 +1,14 @@
-mod router_selector;
-mod subgraph_selector;
-mod supergraph_selector;
-
-pub(crate) use router_selector::RouterSelector;
-pub(crate) use router_selector::RouterValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-pub(crate) use subgraph_selector::SubgraphSelector;
-pub(crate) use subgraph_selector::SubgraphValue;
-pub(crate) use supergraph_selector::SupergraphSelector;
-pub(crate) use supergraph_selector::SupergraphValue;
+
+pub(crate) use super::connector::selectors::ConnectorSelector;
+pub(crate) use super::connector::selectors::ConnectorValue;
+pub(crate) use super::router::selectors::RouterSelector;
+pub(crate) use super::router::selectors::RouterValue;
+pub(crate) use super::subgraph::selectors::SubgraphSelector;
+pub(crate) use super::subgraph::selectors::SubgraphValue;
+pub(crate) use super::supergraph::selectors::SupergraphSelector;
+pub(crate) use super::supergraph::selectors::SupergraphValue;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
