@@ -28,7 +28,7 @@ use crate::sources::connect::spec::versions::AllowedHeaders;
 use crate::sources::connect::string_template;
 use crate::sources::connect::variable::VariableReference;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct HttpJsonTransport {
     pub source_url: Option<Uri>,
     pub connect_template: StringTemplate,
@@ -103,8 +103,9 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum HTTPMethod {
+    #[default]
     Get,
     Post,
     Patch,

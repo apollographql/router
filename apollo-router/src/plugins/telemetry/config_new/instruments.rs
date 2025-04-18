@@ -3361,15 +3361,13 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            source_url: None,
                                             connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
-                                            headers: Default::default(),
-                                            body: None,
+                                            ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
                                         config: None,
@@ -3427,15 +3425,13 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            source_url: None,
                                             connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
-                                            headers: Default::default(),
-                                            body: None,
+                                            ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
                                         config: None,
