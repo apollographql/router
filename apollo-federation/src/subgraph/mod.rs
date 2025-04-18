@@ -363,8 +363,8 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SubgraphError {
-    pub(crate) subgraph: String,
-    pub(crate) error: FederationError,
+    pub subgraph: String,
+    pub error: FederationError,
 }
 
 impl SubgraphError {
