@@ -627,6 +627,23 @@ impl FieldDefinitionPosition {
         }
     }
 
+    #[allow(unused)]
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        match self {
+            FieldDefinitionPosition::Object(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+            FieldDefinitionPosition::Interface(field) => !field
+                .get_applied_directives(schema, directive_name)
+                .is_empty(),
+            FieldDefinitionPosition::Union(_) => false,
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -1511,7 +1528,7 @@ impl ObjectTypeDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Node<ObjectType>, PositionLookupError> {
@@ -2023,7 +2040,7 @@ impl ObjectFieldDefinitionPosition {
         self.get(schema).ok()
     }
 
-    fn make_mut<'schema>(
+    pub(crate) fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
     ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
@@ -2140,6 +2157,22 @@ impl ObjectFieldDefinitionPosition {
         let name = directive.name.clone();
         field.make_mut().directives.push(directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Remove a directive application from this position by name.
@@ -3258,6 +3291,22 @@ impl InterfaceFieldDefinitionPosition {
         let name = directive.name.clone();
         field.make_mut().directives.push(directive);
         self.insert_directive_name_references(&mut schema.referencers, &name)
+    }
+
+    pub(crate) fn get_applied_directives<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+        directive_name: &Name,
+    ) -> Vec<&'schema Node<Directive>> {
+        if let Some(field) = self.try_get(&schema.schema) {
+            field
+                .directives
+                .iter()
+                .filter(|directive| &directive.name == directive_name)
+                .collect()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Remove a directive application from this position by name.

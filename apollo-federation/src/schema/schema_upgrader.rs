@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::schema::ExtendedType;
 
@@ -84,6 +85,14 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     todo!();
 }
 
+// Extensions for FederationError to provide additional error types
+impl FederationError {
+    pub fn extension_with_no_base(message: &str) -> Self {
+        // Fixed: use internal() instead of new()
+        FederationError::internal(format!("EXTENSION_WITH_NO_BASE: {}", message))
+    }
+}
+
 impl<'a> SchemaUpgrader<'a> {
     #[allow(unused)]
     fn new(
@@ -101,16 +110,19 @@ impl<'a> SchemaUpgrader<'a> {
 
     #[allow(unused)]
     fn upgrade(&mut self) -> Result<Subgraph<Expanded>, FederationError> {
-        self.pre_upgrade_validations();
+        // Run pre-upgrade validations to check for issues that would prevent upgrade
+        self.pre_upgrade_validations()?;
 
-        self.fix_federation_directives_arguments();
+        // Fix federation directive arguments (fields) to ensure they're proper strings
+        // Note: Implementation simplified for compilation purposes
+        self.fix_federation_directives_arguments()?;
 
         self.remove_external_on_interface();
 
         self.remove_external_on_object_types();
 
         // Note that we remove all external on type extensions first, so we don't have to care about it later in @key, @provides and @requires.
-        self.remove_external_on_type_extensions();
+        self.remove_external_on_type_extensions()?;
 
         self.fix_inactive_provides_and_requires();
 
@@ -125,19 +137,126 @@ impl<'a> SchemaUpgrader<'a> {
         // externals. Which is why this is toward  the end.
         self.remove_unused_externals();
 
-        self.add_shareable();
+        self.add_shareable()?;
 
-        self.remove_tag_on_external();
+        self.remove_tag_on_external()?;
 
         todo!();
     }
 
-    fn pre_upgrade_validations(&self) {
-        todo!();
+    // integrates checkForExtensionWithNoBase from the JS code
+    fn pre_upgrade_validations(&self) -> Result<(), FederationError> {
+        let schema = &self.schema;
+
+        // Iterate through all types and check if they're federation type extensions without a base
+        for type_pos in schema.get_types() {
+            if self.is_root_type_extension(&type_pos)
+                || !self.is_federation_type_extension(&type_pos)?
+            {
+                continue;
+            }
+
+            // Get the type name based on the type position
+            let type_name = type_pos.type_name();
+
+            // Check if any other subgraph has a proper definition for this type
+            let has_non_extension_definition = self
+                .object_type_map
+                .get(type_name)
+                .map(|subgraph_types| {
+                    subgraph_types
+                        .iter()
+                        .filter(|(subgraph_name, _)| {
+                            // Fixed: dereference the string for comparison
+                            subgraph_name.as_str() != self.original_subgraph.name.as_str()
+                        })
+                        .fallible_any(|(_, type_info)| {
+                            let extended_type = type_info.pos.get(schema.schema())?;
+                            Ok::<bool, FederationError>(Self::has_non_extension_elements(
+                                extended_type,
+                            ))
+                        })
+                })
+                .unwrap_or(Ok(false))?;
+
+            if !has_non_extension_definition {
+                return Err(FederationError::extension_with_no_base(&format!(
+                    "Type \"{}\" is an extension type, but there is no type definition for \"{}\" in any subgraph.",
+                    type_name, type_name
+                )));
+            }
+        }
+
+        Ok(())
     }
 
-    fn fix_federation_directives_arguments(&self) {
-        todo!();
+    // Either we have a string, or we have a list of strings that we need to combine
+    fn make_fields_string_if_not(arg: &Node<Value>) -> Result<Option<String>, FederationError> {
+        if let Some(arg_list) = arg.as_list() {
+            // Collect all strings from the list
+            let combined = arg_list
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            return Ok(Some(combined));
+        }
+        if let Some(enum_value) = arg.as_enum() {
+            return Ok(Some(enum_value.as_str().to_string()));
+        }
+        Ok(None)
+    }
+
+    fn fix_federation_directives_arguments(&mut self) -> Result<(), FederationError> {
+        let schema = &mut self.schema;
+
+        // both @provides and @requires will only have an object_fields referencer
+        for directive_name in ["requires", "provides"] {
+            let referencers = schema.referencers().get_directive(directive_name)?;
+            for field in &referencers.object_fields.clone() {
+                let field_type = field.make_mut(&mut schema.schema)?.make_mut();
+
+                for directive in field_type.directives.0.iter_mut() {
+                    if directive.name == directive_name {
+                        for arg in directive.make_mut().arguments.iter_mut() {
+                            if arg.name == "fields" {
+                                if let Some(new_fields_string) =
+                                    Self::make_fields_string_if_not(&arg.value)?
+                                {
+                                    *arg.make_mut().value.make_mut() =
+                                        Value::String(new_fields_string);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // now do the exact same thing for @key. The difference is that the directive location will be object_types
+        // rather than object_fields
+        let referencers = schema.referencers().get_directive("key")?;
+        for field in &referencers.object_types.clone() {
+            let field_type = field.make_mut(&mut schema.schema)?.make_mut();
+
+            for directive in field_type.directives.0.iter_mut() {
+                if directive.name == "key" {
+                    for arg in directive.make_mut().arguments.iter_mut() {
+                        if arg.name == "fields" {
+                            if let Some(new_fields_string) =
+                                Self::make_fields_string_if_not(&arg.value)?
+                            {
+                                *arg.make_mut().value.make_mut() = Value::String(new_fields_string);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn remove_external_on_interface(&mut self) -> Result<(), FederationError> {
@@ -210,7 +329,7 @@ impl<'a> SchemaUpgrader<'a> {
         Ok(())
     }
 
-    fn remove_external_on_type_extensions(&self) {
+    fn remove_external_on_type_extensions(&mut self) -> Result<(), FederationError> {
         todo!();
     }
 
@@ -437,7 +556,7 @@ impl<'a> SchemaUpgrader<'a> {
         error.into_result()
     }
 
-    fn add_shareable(&self) {
+    fn add_shareable(&mut self) -> Result<(), FederationError> {
         todo!();
     }
 
