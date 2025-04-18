@@ -123,7 +123,18 @@ impl StringTemplate {
                 Part::Constant(constant) => {
                     // We don't percent-encode constant strings, assuming the user knows what they want.
                     // `Uri::from_str` will take care of encoding completely illegal characters
-                    result.write_trusted(&constant.value)
+
+                    // New lines are used for code organization, but are not wanted in the result
+                    if constant.value.contains(['\n', '\r']) {
+                        // We don't always run this replace because it has a performance cost (allocating a string)
+                        result.write_trusted(&constant.value.replace(['\n', '\r'], ""))
+                    } else {
+                        result.write_trusted(&constant.value)
+                    }
+                    .map_err(|_err| Error {
+                        message: "Error writing string".to_string(),
+                        location: constant.location.clone(),
+                    })?;
                 }
                 Part::Expression(_) => {
                     warnings.extend(part.interpolate(vars, &mut result)?);
@@ -284,6 +295,37 @@ mod encoding {
         .remove(b'_')
         .remove(b'~');
 
+    /// Reserved characters https://www.rfc-editor.org/rfc/rfc3986#section-2.2 are valid in URLs
+    /// though not all contexts. The responsibility for these is the developer's in static pieces
+    /// of templates.
+    ///
+    /// We _also_ don't encode `%` because we need to allow users to do manual percent-encoding of
+    /// all the reserved symbols as-needed (since it's never automatic). Rather than parsing every
+    /// `%` to see if it's a valid hex sequence, we leave that up to the developer as well since
+    /// it's a pretty advanced use-case.
+    ///
+    /// This is required because percent encoding *is not idempotent*
+    const STATIC_TRUSTED: &AsciiSet = &USER_INPUT
+        .remove(b':')
+        .remove(b'/')
+        .remove(b'?')
+        .remove(b'#')
+        .remove(b'[')
+        .remove(b']')
+        .remove(b'@')
+        .remove(b'!')
+        .remove(b'$')
+        .remove(b'&')
+        .remove(b'\'')
+        .remove(b'(')
+        .remove(b')')
+        .remove(b'*')
+        .remove(b'+')
+        .remove(b',')
+        .remove(b';')
+        .remove(b'=')
+        .remove(b'%');
+
     pub(crate) struct UriString {
         value: String,
     }
@@ -304,8 +346,12 @@ mod encoding {
         }
 
         /// Write a bit of trusted input without encoding, like a constant piece of a template
-        pub(crate) fn write_trusted(&mut self, s: &str) {
-            self.value.push_str(s)
+        pub(crate) fn write_trusted(&mut self, s: &str) -> std::fmt::Result {
+            write!(
+                &mut self.value,
+                "{}",
+                utf8_percent_encode(s, STATIC_TRUSTED)
+            )
         }
 
         pub(super) fn contains(&self, pattern: &str) -> bool {
@@ -497,6 +543,158 @@ mod test_interpolate {
         let mut vars = IndexMap::default();
         vars.insert("$config".to_string(), json!({"one": "string"}));
         assert_eq!(template.interpolate(&vars).unwrap(), "string");
+    }
+}
+
+#[cfg(test)]
+mod test_interpolate_uri {
+    use pretty_assertions::assert_eq;
+    use rstest::rstest;
+
+    use super::*;
+    use crate::sources::connect::StringTemplate;
+
+    macro_rules! this {
+        ($($value:tt)*) => {{
+            let mut map = indexmap::IndexMap::with_capacity_and_hasher(1, Default::default());
+            map.insert("$this".to_string(), serde_json_bytes::json!({ $($value)* }));
+            map
+        }};
+    }
+
+    #[rstest]
+    #[case::leading_slash("/path")]
+    #[case::trailing_slash("path/")]
+    #[case::no_slash("path")]
+    #[case::query_params("?something&something")]
+    #[case::fragment("#blah")]
+    fn relative_uris(#[case] val: &str) {
+        let template = StringTemplate::from_str(val).unwrap();
+        let uri = template
+            .interpolate_uri(&Default::default())
+            .expect("case was valid URI");
+        assert!(uri.path_and_query().is_some());
+        assert!(uri.authority().is_none());
+    }
+
+    #[rstest]
+    #[case::http("http://example.com/something")]
+    #[case::https("https://example.com/something")]
+    #[case::ipv4("http://127.0.0.1/something")]
+    #[case::ipv6("http://[::1]/something")]
+    #[case::with_port("http://localhost:8080/something")]
+    fn absolute_uris(#[case] val: &str) {
+        let template = StringTemplate::from_str(val).unwrap();
+        let uri = template
+            .interpolate_uri(&Default::default())
+            .expect("case was valid URI");
+        assert!(uri.path_and_query().is_some());
+        assert!(uri.authority().is_some());
+        assert!(uri.scheme().is_some());
+    }
+
+    /// Values are all strings, they can't have semantic value for HTTP. That means no dynamic paths,
+    /// no nested query params, etc. When we expand values, we have to make sure they're safe.
+    #[test]
+    fn expression_encoding() {
+        let vars = &this! {
+            "path": "/some/path",
+            "question_mark": "a?b",
+            "ampersand": "a&b=b",
+            "hash": "a#b",
+        };
+
+        let template = StringTemplate::from_str("http://localhost/{$this.path}/{$this.question_mark}?a={$this.ampersand}&c={$this.hash}")
+            .expect("Failed to parse URL template");
+        let url = template
+            .interpolate_uri(vars)
+            .expect("Failed to generate URL");
+
+        assert_eq!(
+            url.to_string(),
+            "http://localhost/%2Fsome%2Fpath/a%3Fb?a=a%26b%3Db&c=a%23b"
+        );
+    }
+
+    /// The resulting values of each expression are always [`Value`]s, for which we have a
+    /// set way of encoding each as a string.
+    #[test]
+    fn json_value_serialization() {
+        // `extra` would be illegal (we don't serialize arrays), but any unused values should be ignored
+        let vars = &this! {
+            "number": 1.2,
+            "bool": true,
+            "null": null,
+            "string": "string",
+            "extra": []
+        };
+
+        let template =
+            StringTemplate::from_str("/{$this.number}/{$this.bool}/{$this.null}/{$this.string}")
+                .unwrap();
+
+        let uri = template.interpolate(vars).expect("Failed to interpolate");
+
+        assert_eq!(uri.to_string(), "/1.2/true//string")
+    }
+
+    #[test]
+    fn special_symbols_in_literal() {
+        let template = StringTemplate::from_str("/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='")
+            .expect("Failed to parse URL template");
+        let url = template
+            .interpolate_uri(&Default::default())
+            .expect("Failed to generate URL");
+
+        assert_eq!(
+            url.to_string(),
+            "/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='"
+        );
+    }
+
+    /// If a user writes a string template that includes _illegal_ characters which must be encoded,
+    /// we still encode them to avoid runtime errors.
+    #[test]
+    fn auto_encode_illegal_literal_characters() {
+        let template = StringTemplate::from_str("https://example.com/😈 \\")
+            .expect("Failed to parse URL template");
+
+        let url = template
+            .interpolate_uri(&Default::default())
+            .expect("Failed to generate URL");
+        assert_eq!(url.to_string(), "https://example.com/%F0%9F%98%88%20%5C")
+    }
+
+    /// Because we don't encode a bunch of characters that are situationally disallowed
+    /// (for flexibility of the connector author), we also need to allow that they can manually
+    /// percent encode characters themselves as-needed.
+    #[test]
+    fn allow_manual_percent_encoding() {
+        let template = StringTemplate::from_str("https://example.com/%20")
+            .expect("Failed to parse URL template");
+
+        let url = template
+            .interpolate_uri(&Default::default())
+            .expect("Failed to generate URL");
+        assert_eq!(url.to_string(), "https://example.com/%20")
+    }
+
+    /// Multi-line GraphQL strings are super useful for long templates. We need to make sure they're
+    /// properly handled when generating URIs, though. New lines should be ignored.
+    #[test]
+    fn multi_line_templates() {
+        let template = StringTemplate::from_str(
+            "https://example.com\n/broken\npath\n/path\n?param=value\n&param=\r\nvalue&\nparam\n=\nvalue",
+        )
+        .expect("Failed to parse URL template");
+        let url = template
+            .interpolate_uri(&Default::default())
+            .expect("Failed to generate URL");
+
+        assert_eq!(
+            url.to_string(),
+            "https://example.com/brokenpath/path?param=value&param=value&param=value"
+        )
     }
 }
 

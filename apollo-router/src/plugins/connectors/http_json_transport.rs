@@ -184,7 +184,6 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod tests {
-
     use std::str::FromStr;
 
     use apollo_compiler::ExecutableDocument;
