@@ -659,7 +659,8 @@ mod test {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let ctx = context();
         let resp = plugin
             .execution_service(|req| async {
@@ -682,7 +683,8 @@ mod test {
         let plugin = PluginTestHarness::<DemandControl>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let strategy = plugin.strategy_factory.create();
 
         let ctx = context();
