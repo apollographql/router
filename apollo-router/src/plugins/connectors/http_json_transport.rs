@@ -451,7 +451,7 @@ mod test_make_uri {
     }
 
     #[test]
-    fn fragments() {
+    fn fragments_are_dropped() {
         assert_eq!(
             make_uri(
                 Some(&Uri::from_str("http://localhost/source?a=b#SourceFragment").unwrap()),

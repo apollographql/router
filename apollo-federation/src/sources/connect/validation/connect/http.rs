@@ -436,7 +436,7 @@ fn validate_absolute_connect_url(
         return Err(Message {
             code: Code::InvalidUrl,
             message: format!(
-                "{coordinate} must not contain dynamic pieces in the domain section (before the first `/`, `?`, or `#`).",
+                "{coordinate} must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
             ),
             locations: str_value
                 .line_col_for_subslice(first.location.clone(), schema)
@@ -445,7 +445,7 @@ fn validate_absolute_connect_url(
         });
     }
 
-    let base_url = Uri::from_str(&first.value).map_err(|err| Message {
+    let base_url = Uri::from_str(first.value.trim()).map_err(|err| Message {
         code: Code::InvalidUrl,
         message: format!("In {coordinate}: {err}"),
         locations: str_value

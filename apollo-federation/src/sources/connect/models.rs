@@ -25,6 +25,8 @@ use super::json_selection::ExternalVarPaths;
 use super::spec::schema::ConnectDirectiveArguments;
 use super::spec::schema::SourceDirectiveArguments;
 use super::spec::versions::VersionInfo;
+use super::string_template;
+use super::string_template::StringTemplate;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
