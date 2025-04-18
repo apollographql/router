@@ -5,7 +5,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::validation::Valid;
 use itertools::Itertools;
 
 use crate::error::FederationError;
@@ -16,6 +15,7 @@ use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
+use crate::schema::HasFields;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::subgraph_metadata::SubgraphMetadata;
@@ -29,29 +29,24 @@ pub(crate) fn validate_key_directives(
         .federation_spec_definition()
         .directive_name_in_schema(schema, &FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC)?
         .unwrap_or(FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC);
-    let rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
+
+    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
         Box::new(DenyUnionAndInterfaceFields::new(schema.schema())),
-        Box::new(DenyAliases::new(key_directive_name.clone())),
-        Box::new(DenyDirectiveApplications::new(key_directive_name.clone())),
-        Box::new(DenyFieldsWithArguments::new(key_directive_name.clone())),
+        Box::new(DenyAliases::new(&key_directive_name)),
+        Box::new(DenyDirectiveApplications::new(&key_directive_name)),
+        Box::new(DenyFieldsWithArguments::new(&key_directive_name)),
     ];
+
     for key_directive in schema.key_directive_applications()? {
         match key_directive {
-            Ok(key) => {
-                match FieldSet::parse_and_validate(
-                    Valid::assume_valid_ref(schema.schema()),
-                    key.target.type_name().clone(),
-                    key.arguments.fields,
-                    "field_set.graphql",
-                ) {
-                    Ok(field_set) => {
-                        for rule in rules.iter() {
-                            rule.visit(key.target.type_name(), &field_set, errors);
-                        }
+            Ok(key) => match key.parse_fields(schema.schema()) {
+                Ok(fields) => {
+                    for rule in fieldset_rules.iter() {
+                        rule.visit(key.target.type_name(), &fields, errors);
                     }
-                    Err(e) => errors.push(e.into()),
                 }
-            }
+                Err(e) => errors.push(e.into()),
+            },
             Err(e) => errors.push(e),
         }
     }
@@ -67,30 +62,44 @@ pub(crate) fn validate_provides_directives(
         .federation_spec_definition()
         .directive_name_in_schema(schema, &FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC)?
         .unwrap_or(FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC);
-    let rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
-        Box::new(DenyAliases::new(provides_directive_name.clone())),
-        Box::new(DenyDirectiveApplications::new(
-            provides_directive_name.clone(),
-        )),
-        Box::new(DenyFieldsWithArguments::new(
-            provides_directive_name.clone(),
-        )),
+
+    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
+        Box::new(DenyAliases::new(&provides_directive_name)),
+        Box::new(DenyDirectiveApplications::new(&provides_directive_name)),
+        Box::new(DenyFieldsWithArguments::new(&provides_directive_name)),
         Box::new(DenyNonExternalLeafFields::new(
-            metadata.clone(), // TODO: Definitely don't clone this
-            provides_directive_name.clone(),
+            metadata,
+            &provides_directive_name,
         )),
     ];
+
     for provides_directive in schema.provides_directive_applications()? {
         match provides_directive {
             Ok(provides) => {
-                match FieldSet::parse_and_validate(
-                    Valid::assume_valid_ref(schema.schema()),
-                    provides.target_return_type.clone(),
-                    provides.arguments.fields,
-                    "field_set.graphql",
-                ) {
+                // PORT NOTE: In JS, these two checks are done inside the `targetTypeExtractor`.
+                if metadata
+                    .is_field_external(&FieldDefinitionPosition::Object(provides.target.clone()))
+                {
+                    errors.errors.push(
+                        SingleFederationError::ExternalCollisionWithAnotherDirective {
+                            message: format!(
+                                "Cannot have both @provides and @external on field \"{}.{}\"",
+                                provides.target.type_name, provides.target.field_name
+                            ),
+                        },
+                    )
+                }
+                if !schema
+                    .get_type(provides.target.type_name.clone())
+                    .is_ok_and(|ty| ty.is_composite_type())
+                {
+                    errors.errors.push(SingleFederationError::ProvidesOnNonObjectField { message: format!("Invalid @provides directive on field \"{}.{}\": field has type \"{}\"", provides.target.type_name, provides.target.field_name, provides.target_return_type) })
+                }
+
+                // PORT NOTE: Think of this as `validateFieldSet`, but the set of rules are already filtered to account for what were boolean flags in JS
+                match provides.parse_fields(schema.schema()) {
                     Ok(field_set) => {
-                        for rule in rules.iter() {
+                        for rule in fieldset_rules.iter() {
                             rule.visit(&provides.target_return_type, &field_set, errors);
                         }
                     }
@@ -112,33 +121,26 @@ pub(crate) fn validate_requires_directives(
         .federation_spec_definition()
         .directive_name_in_schema(schema, &FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC)?
         .unwrap_or(FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC);
-    let rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
-        Box::new(DenyAliases::new(requires_directive_name.clone())),
-        Box::new(DenyDirectiveApplications::new(
-            requires_directive_name.clone(),
-        )),
+
+    let fieldset_rules: Vec<Box<dyn SchemaFieldSetValidator>> = vec![
+        Box::new(DenyAliases::new(&requires_directive_name)),
+        Box::new(DenyDirectiveApplications::new(&requires_directive_name)),
         Box::new(DenyNonExternalLeafFields::new(
-            meta.clone(), // TODO: Definitely don't clone this
-            requires_directive_name.clone(),
+            meta,
+            &requires_directive_name,
         )),
     ];
+
     for requires_directive in schema.requires_directive_applications()? {
         match requires_directive {
-            Ok(requires) => {
-                match FieldSet::parse_and_validate(
-                    Valid::assume_valid_ref(schema.schema()),
-                    requires.target.type_name.clone(),
-                    requires.arguments.fields,
-                    "field_set.graphql",
-                ) {
-                    Ok(field_set) => {
-                        for rule in rules.iter() {
-                            rule.visit(&requires.target.type_name, &field_set, errors);
-                        }
+            Ok(requires) => match requires.parse_fields(schema.schema()) {
+                Ok(fields) => {
+                    for rule in fieldset_rules.iter() {
+                        rule.visit(&requires.target.type_name, &fields, errors);
                     }
-                    Err(e) => errors.push(e.into()),
                 }
-            }
+                Err(e) => errors.push(e.into()),
+            },
             Err(e) => errors.push(e),
         }
     }
@@ -228,17 +230,17 @@ impl SchemaFieldSetValidator for DenyUnionAndInterfaceFields<'_> {
     }
 }
 
-struct DenyAliases {
-    directive_name: Name,
+struct DenyAliases<'a> {
+    directive_name: &'a Name,
 }
 
-impl DenyAliases {
-    fn new(directive_name: Name) -> Self {
+impl<'a> DenyAliases<'a> {
+    fn new(directive_name: &'a Name) -> Self {
         Self { directive_name }
     }
 }
 
-impl SchemaFieldSetValidator for DenyAliases {
+impl SchemaFieldSetValidator for DenyAliases<'_> {
     fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
         // This largely duuplicates the logic of `check_absence_of_aliases`, which was implemented for the QP rewrite.
         // That requires a valid schema and some operation data, which we don't have because were only working with a
@@ -255,17 +257,17 @@ impl SchemaFieldSetValidator for DenyAliases {
     }
 }
 
-struct DenyDirectiveApplications {
-    directive_name: Name,
+struct DenyDirectiveApplications<'a> {
+    directive_name: &'a Name,
 }
 
-impl DenyDirectiveApplications {
-    fn new(directive_name: Name) -> Self {
+impl<'a> DenyDirectiveApplications<'a> {
+    fn new(directive_name: &'a Name) -> Self {
         Self { directive_name }
     }
 }
 
-impl SchemaFieldSetValidator for DenyDirectiveApplications {
+impl<'a> SchemaFieldSetValidator for DenyDirectiveApplications<'a> {
     fn visit_field(&self, _parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
         if !field.directives.is_empty() {
             errors
@@ -282,16 +284,17 @@ impl SchemaFieldSetValidator for DenyDirectiveApplications {
     }
 }
 
-struct DenyFieldsWithArguments {
-    directive_name: Name,
+struct DenyFieldsWithArguments<'a> {
+    directive_name: &'a Name,
 }
 
-impl DenyFieldsWithArguments {
-    fn new(directive_name: Name) -> Self {
+impl<'a> DenyFieldsWithArguments<'a> {
+    fn new(directive_name: &'a Name) -> Self {
         Self { directive_name }
     }
 }
-impl SchemaFieldSetValidator for DenyFieldsWithArguments {
+
+impl<'a> SchemaFieldSetValidator for DenyFieldsWithArguments<'a> {
     fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
         if !field.arguments.is_empty() {
             errors
@@ -300,21 +303,20 @@ impl SchemaFieldSetValidator for DenyFieldsWithArguments {
                 .push(SingleFederationError::KeyFieldsHasArgs {
                     message: format!(
                         "field {}.{} cannot be included because it has arguments (fields with argument are not allowed in @{})",
-                        parent_ty, field.name,
-                        self.directive_name,
+                        parent_ty, field.name, self.directive_name,
                     ),
                 })
         }
     }
 }
 
-struct DenyNonExternalLeafFields {
-    meta: SubgraphMetadata,
-    directive_name: Name,
+struct DenyNonExternalLeafFields<'a> {
+    meta: &'a SubgraphMetadata,
+    directive_name: &'a Name,
 }
 
-impl DenyNonExternalLeafFields {
-    fn new(meta: SubgraphMetadata, directive_name: Name) -> Self {
+impl<'a> DenyNonExternalLeafFields<'a> {
+    fn new(meta: &'a SubgraphMetadata, directive_name: &'a Name) -> Self {
         Self {
             meta,
             directive_name,
@@ -322,25 +324,7 @@ impl DenyNonExternalLeafFields {
     }
 }
 
-impl SchemaFieldSetValidator for DenyNonExternalLeafFields {
-    /**
-    * const mustBeExternal = !selection.selectionSet && !allowOnNonExternalLeafFields && !hasExternalInParents;
-     if (!isExternal && mustBeExternal) {
-       const errorCode = ERROR_CATEGORIES.DIRECTIVE_FIELDS_MISSING_EXTERNAL.get(directiveName);
-       if (metadata.isFieldFakeExternal(field)) {
-         onError(errorCode.err(
-           `field "${field.coordinate}" should not be part of a @${directiveName} since it is already "effectively" provided by this subgraph `
-             + `(while it is marked @${FederationDirectiveName.EXTERNAL}, it is a @${FederationDirectiveName.KEY} field of an extension type, which are not internally considered external for historical/backward compatibility reasons)`,
-           { nodes: field.sourceAST }
-         ));
-       } else {
-         onError(errorCode.err(
-           `field "${field.coordinate}" should not be part of a @${directiveName} since it is already provided by this subgraph (it is not marked @${FederationDirectiveName.EXTERNAL})`,
-           { nodes: field.sourceAST }
-         ));
-       }
-     }
-    */
+impl<'a> SchemaFieldSetValidator for DenyNonExternalLeafFields<'a> {
     fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
         // TODO: We should probably pass through the directive's target position instead of just name
         let pos = FieldDefinitionPosition::Object(ObjectFieldDefinitionPosition {
@@ -374,31 +358,6 @@ impl SchemaFieldSetValidator for DenyNonExternalLeafFields {
         } else {
             self.visit_selection_set(parent_ty, &field.selection_set, errors);
         }
-    }
-}
-
-pub(crate) struct DenyExternalParent {
-    meta: SubgraphMetadata,
-}
-
-impl DenyExternalParent {
-    pub(crate) fn new(meta: SubgraphMetadata) -> Self {
-        Self { meta }
-    }
-}
-
-impl SchemaFieldSetValidator for DenyExternalParent {
-    fn visit(&self, parent_ty: &Name, field_set: &FieldSet, errors: &mut MultipleFederationErrors) {
-        // TODO: if self.meta.is_field_external(field) {}
-    }
-
-    fn visit_field(
-        &self,
-        _parent_ty: &Name,
-        _field: &Field,
-        _errors: &mut MultipleFederationErrors,
-    ) {
-        // no-op; we only care about the top-level call to `visit`
     }
 }
 

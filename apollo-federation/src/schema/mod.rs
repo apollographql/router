@@ -8,8 +8,10 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
@@ -479,6 +481,7 @@ impl FederationSchema {
                             .provides_directive_arguments(provides_directive_application);
                         applications.push(arguments.map(|args| ProvidesDirective {
                             arguments: args,
+                            target: field_definition_position,
                             target_return_type: field_definition.ty.inner_named_type(),
                         }));
                     }
@@ -600,11 +603,35 @@ pub(crate) struct KeyDirective<'schema> {
     target: ObjectOrInterfaceTypeDefinitionPosition,
 }
 
+impl HasFields for KeyDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        self.target.type_name()
+    }
+}
+
 pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: &'schema ObjectFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
+}
+
+impl HasFields for ProvidesDirective<'_> {
+    /// The string representation of the field set
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    /// The type from which the field set selects
+    fn target_type(&self) -> &Name {
+        self.target_return_type
+    }
 }
 
 pub(crate) struct RequiresDirective<'schema> {
@@ -614,6 +641,16 @@ pub(crate) struct RequiresDirective<'schema> {
     target: &'schema ObjectFieldDefinitionPosition,
 }
 
+impl HasFields for RequiresDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        &self.target.type_name
+    }
+}
+
 pub(crate) struct TagDirective<'schema> {
     /// The parsed arguments of this `@tag` application
     arguments: TagDirectiveArguments<'schema>,
@@ -621,6 +658,20 @@ pub(crate) struct TagDirective<'schema> {
     target: TagDirectiveTargetPosition, // TODO: Make this a reference
     /// Reference to the directive in the schema
     directive: &'schema Node<Directive>,
+}
+
+pub(crate) trait HasFields {
+    fn fields(&self) -> &str;
+    fn target_type(&self) -> &Name;
+
+    fn parse_fields(&self, schema: &Schema) -> Result<Valid<FieldSet>, WithErrors<FieldSet>> {
+        FieldSet::parse_and_validate(
+            Valid::assume_valid_ref(schema),
+            self.target_type().clone(),
+            self.fields(),
+            "field_set.graphql",
+        )
+    }
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
