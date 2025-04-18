@@ -300,10 +300,9 @@ mod tests {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderValue;
     use http::StatusCode;
     use opentelemetry::Array;
@@ -349,10 +348,8 @@ mod tests {
             ),
             transport: HttpJsonTransport {
                 source_url: None,
-                connect_template: URLTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: None,
+                connect_template: StringTemplate::from_str(TEST_URL_TEMPLATE).unwrap(),
+                ..Default::default()
             },
             selection: JSONSelection::empty(),
             config: None,
@@ -361,6 +358,7 @@ mod tests {
             spec: ConnectSpec::V0_1,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
         }
