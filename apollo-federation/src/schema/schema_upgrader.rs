@@ -85,70 +85,6 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     todo!();
 }
 
-// Extensions for FederationSchema to provide additional functionality
-trait FederationSchemaExt {
-    fn has_non_extension_elements(
-        &self,
-        type_pos: &TypeDefinitionPosition,
-    ) -> Result<bool, FederationError>;
-}
-
-// Implementation of the extension trait for FederationSchema
-impl FederationSchemaExt for FederationSchema {
-    // a type has a non-extension element if the following cases
-    // 1. There is a directive on the non-extended type
-    // 2. There is a field on the non-extended type
-    // 3. There is an interface implementation on the non-extended type
-    fn has_non_extension_elements(
-        &self,
-        type_pos: &TypeDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        let schema = self.schema();
-        let result = match type_pos {
-            TypeDefinitionPosition::Object(obj_pos) => {
-                let node_obj = obj_pos.get(schema)?;
-                let directive_on_non_extended_type = node_obj
-                    .directives
-                    .iter()
-                    .any(|directive| directive.origin.extension_id().is_some());
-                let field_on_non_extended_type = obj_pos.fields(schema)?.fallible_any(
-                    |field| -> Result<bool, FederationError> {
-                        Ok(field.get(schema)?.origin.extension_id().is_some())
-                    },
-                )?;
-                let interface_implemented_on_non_extended_type = node_obj
-                    .implements_interfaces
-                    .iter()
-                    .any(|itf| itf.origin.extension_id().is_some());
-                directive_on_non_extended_type
-                    || field_on_non_extended_type
-                    || interface_implemented_on_non_extended_type
-            }
-            TypeDefinitionPosition::Interface(itf_pos) => {
-                let node_itf = itf_pos.get(schema)?;
-                let directive_on_non_extended_type = node_itf
-                    .directives
-                    .iter()
-                    .any(|directive| directive.origin.extension_id().is_some());
-                let field_on_non_extended_type = itf_pos.fields(schema)?.fallible_any(
-                    |field| -> Result<bool, FederationError> {
-                        Ok(field.get(schema)?.origin.extension_id().is_some())
-                    },
-                )?;
-                let interface_implemented_on_non_extended_type = node_itf
-                    .implements_interfaces
-                    .iter()
-                    .any(|itf| itf.origin.extension_id().is_some());
-                directive_on_non_extended_type
-                    || field_on_non_extended_type
-                    || interface_implemented_on_non_extended_type
-            }
-            _ => false,
-        };
-        Ok(result)
-    }
-}
-
 // Extensions for FederationError to provide additional error types
 impl FederationError {
     pub fn extension_with_no_base(message: &str) -> Self {
@@ -235,7 +171,10 @@ impl<'a> SchemaUpgrader<'a> {
                             subgraph_name.as_str() != self.original_subgraph.name.as_str()
                         })
                         .fallible_any(|(_, type_info)| {
-                            schema.has_non_extension_elements(&type_info.pos)
+                            let extended_type = type_info.pos.get(schema.schema())?;
+                            Ok::<bool, FederationError>(Self::has_non_extension_elements(
+                                extended_type,
+                            ))
                         })
                 })
                 .unwrap_or(Ok(false))?;
