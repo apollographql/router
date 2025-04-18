@@ -918,7 +918,7 @@ mod test {
             r#"
         all:
           deduplicate_query: true
-        subgraphs: 
+        subgraphs:
           products:
             deduplicate_query: false
         "#,
@@ -948,7 +948,7 @@ mod test {
             r#"
         all:
           experimental_http2: disable
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
           reviews:
@@ -992,7 +992,7 @@ mod test {
         all:
           experimental_http2: disable
           dns_resolution_strategy: ipv6_only
-        subgraphs: 
+        subgraphs:
           products:
             experimental_http2: enable
             dns_resolution_strategy: ipv6_then_ipv4

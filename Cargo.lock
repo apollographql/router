@@ -209,6 +209,7 @@ dependencies = [
  "multimap 0.10.0",
  "nom",
  "nom_locate",
+ "percent-encoding",
  "petgraph",
  "pretty_assertions",
  "regex",

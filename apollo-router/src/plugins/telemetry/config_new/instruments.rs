@@ -2733,7 +2733,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -3362,7 +3362,7 @@ mod tests {
                                         ),
                                         transport: HttpJsonTransport {
                                             source_url: None,
-                                            connect_template: URLTemplate::from_str(
+                                            connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
                                             .unwrap(),
@@ -3428,7 +3428,7 @@ mod tests {
                                         ),
                                         transport: HttpJsonTransport {
                                             source_url: None,
-                                            connect_template: URLTemplate::from_str(
+                                            connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
                                             .unwrap(),

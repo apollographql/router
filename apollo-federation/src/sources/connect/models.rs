@@ -24,7 +24,6 @@ use serde_json::Value;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;
-use super::URLTemplate;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::ConnectHTTPArguments;
@@ -34,6 +33,7 @@ use super::spec::schema::SourceDirectiveArguments;
 use super::spec::versions::AllowedHeaders;
 use super::spec::versions::VersionInfo;
 use super::string_template;
+use super::string_template::StringTemplate;
 use super::variable::Namespace;
 use super::variable::VariableReference;
 use crate::error::FederationError;
@@ -340,7 +340,7 @@ fn extract_header_references<'a>(
 #[derive(Clone, Debug)]
 pub struct HttpJsonTransport {
     pub source_url: Option<Uri>,
-    pub connect_template: URLTemplate,
+    pub connect_template: StringTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
@@ -689,21 +689,15 @@ mod tests {
                     source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
-                    connect_template: URLTemplate {
-                        base: None,
-                        path: [
-                            StringTemplate {
-                                parts: [
-                                    Constant(
-                                        Constant {
-                                            value: "users",
-                                            location: 1..6,
-                                        },
-                                    ),
-                                ],
-                            },
+                    connect_template: StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "/users",
+                                    location: 0..6,
+                                },
+                            ),
                         ],
-                        query: [],
                     },
                     method: Get,
                     headers: {
@@ -806,21 +800,15 @@ mod tests {
                     source_url: Some(
                         https://jsonplaceholder.typicode.com/,
                     ),
-                    connect_template: URLTemplate {
-                        base: None,
-                        path: [
-                            StringTemplate {
-                                parts: [
-                                    Constant(
-                                        Constant {
-                                            value: "posts",
-                                            location: 1..6,
-                                        },
-                                    ),
-                                ],
-                            },
+                    connect_template: StringTemplate {
+                        parts: [
+                            Constant(
+                                Constant {
+                                    value: "/posts",
+                                    location: 0..6,
+                                },
+                            ),
                         ],
-                        query: [],
                     },
                     method: Get,
                     headers: {
