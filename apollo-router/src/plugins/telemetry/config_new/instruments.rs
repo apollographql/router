@@ -2453,7 +2453,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
     use crate::plugins::telemetry::config_new::supergraph::instruments::SupergraphCustomInstruments;
-    use crate::services::{subgraph, supergraph, OperationKind};
+    use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::connector::request_service::Request;
@@ -2461,6 +2461,8 @@ mod tests {
     use crate::services::connector::request_service::TransportRequest;
     use crate::services::connector::request_service::TransportResponse;
     use crate::services::connector::request_service::transport;
+    use crate::services::subgraph;
+    use crate::services::supergraph;
     use crate::spec::operation_limits::OperationLimits;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
