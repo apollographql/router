@@ -17,6 +17,7 @@ pub(crate) use self::http_json_transport::Header;
 pub(crate) use self::http_json_transport::HeaderParseError;
 pub use self::http_json_transport::HeaderSource;
 pub use self::http_json_transport::HttpJsonTransport;
+pub use self::http_json_transport::MakeUriError;
 use super::ConnectId;
 use super::JSONSelection;
 use super::PathSelection;

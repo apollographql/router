@@ -1,21 +1,15 @@
-use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_compiler::collections::IndexMap;
 use apollo_federation::sources::connect::HTTPMethod;
 use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::connect::StringTemplate;
-use displaydoc::Display;
+use apollo_federation::sources::connect::MakeUriError;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
-use http::Uri;
 use http::header::CONTENT_LENGTH;
 use http::header::CONTENT_TYPE;
-use http::uri::InvalidUri;
-use http::uri::InvalidUriParts;
-use http::uri::PathAndQuery;
 use parking_lot::Mutex;
 use serde_json_bytes::Value;
 use serde_json_bytes::json;
@@ -37,11 +31,7 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let uri = make_uri(
-        transport.source_url.as_ref(),
-        &transport.connect_template,
-        &inputs,
-    )?;
+    let uri = transport.make_uri(&inputs)?;
 
     let request = http::Request::builder()
         .method(transport.method.as_str())
@@ -135,65 +125,6 @@ pub(crate) fn make_request(
     ))
 }
 
-fn make_uri(
-    source_url: Option<&Uri>,
-    template: &StringTemplate,
-    inputs: &IndexMap<String, Value>,
-) -> Result<Uri, HttpJsonTransportError> {
-    let connect_uri = template
-        .interpolate_uri(inputs)
-        .map_err(|err| HttpJsonTransportError::TemplateGenerationError(err.message))?;
-
-    let Some(source_uri) = source_url else {
-        return Ok(connect_uri);
-    };
-
-    let Some(connect_path_and_query) = connect_uri.path_and_query() else {
-        return Ok(source_uri.clone());
-    };
-
-    // Extract source path and query
-    let source_path = source_uri.path();
-    let source_query = source_uri.query().unwrap_or("");
-
-    // Extract connect path and query
-    let connect_path = connect_path_and_query.path();
-    let connect_query = connect_path_and_query.query().unwrap_or("");
-
-    // Merge paths (ensuring proper slash handling)
-    let merged_path = if connect_path.is_empty() || connect_path == "/" {
-        source_path.to_string()
-    } else if source_path.ends_with('/') {
-        format!("{}{}", source_path, connect_path.trim_start_matches('/'))
-    } else if connect_path.starts_with('/') {
-        format!("{}{}", source_path, connect_path)
-    } else {
-        format!("{}/{}", source_path, connect_path)
-    };
-
-    // Merge query parameters
-    let merged_query = if source_query.is_empty() {
-        connect_query.to_string()
-    } else if connect_query.is_empty() {
-        source_query.to_string()
-    } else {
-        format!("{}&{}", source_query, connect_query)
-    };
-
-    // Build the merged URI
-    let mut uri_parts = source_uri.clone().into_parts();
-    let merged_path_and_query = if merged_query.is_empty() {
-        merged_path
-    } else {
-        format!("{}?{}", merged_path, merged_query)
-    };
-
-    uri_parts.path_and_query = Some(PathAndQuery::from_str(&merged_path_and_query)?);
-
-    // Reconstruct the URI and convert to string
-    Uri::from_parts(uri_parts).map_err(HttpJsonTransportError::InvalidUri)
-}
-
 #[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
 fn add_headers(
     mut request: http::request::Builder,
@@ -237,231 +168,16 @@ fn add_headers(
     )
 }
 
-#[derive(Error, Display, Debug)]
+#[derive(Error, Debug)]
 pub(crate) enum HttpJsonTransportError {
-    /// Error building URI: {0:?}
-    NewUriError(#[from] Option<InvalidUri>),
-    /// Could not generate HTTP request: {0}
+    #[error("Could not generate HTTP request: {0}")]
     InvalidNewRequest(#[source] http::Error),
-    /// Could not serialize body: {0}
+    #[error("Could not serialize body: {0}")]
     JsonBodySerialization(#[from] serde_json::Error),
-    /// Could not serialize body: {0}
+    #[error("Could not serialize body: {0}")]
     FormBodySerialization(&'static str),
-    /// Error building URI: {0:?}
-    InvalidUri(#[from] InvalidUriParts),
-    /// Could not generate URI from inputs: {0}
-    TemplateGenerationError(String),
-}
-
-#[cfg(test)]
-mod test_make_uri {
-    use std::str::FromStr;
-
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-
-    macro_rules! this {
-        ($($value:tt)*) => {{
-            let mut map = IndexMap::with_capacity_and_hasher(1, Default::default());
-            map.insert("$this".to_string(), json!({ $($value)* }));
-            map
-        }};
-    }
-
-    mod combining_paths {
-        use pretty_assertions::assert_eq;
-        use rstest::rstest;
-
-        use super::*;
-        #[rstest]
-        #[case::connect_only("https://localhost:8080/v1", "/hello")]
-        #[case::source_only("https://localhost:8080/v1/", "hello")]
-        #[case::neither("https://localhost:8080/v1", "hello")]
-        #[case::both("https://localhost:8080/v1/", "/hello")]
-        fn slashes_between_source_and_connect(
-            #[case] source_uri: &str,
-            #[case] connect_path: &str,
-        ) {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str(source_uri).unwrap()),
-                    &connect_path.parse().unwrap(),
-                    &Default::default(),
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/hello"
-            );
-        }
-
-        #[test]
-        fn preserve_trailing_slash_from_connect() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
-                    &"/hello/".parse().unwrap(),
-                    &Default::default(),
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/hello/"
-            );
-        }
-
-        #[test]
-        fn preserve_trailing_slash_from_source() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1/").unwrap()),
-                    &"/".parse().unwrap(),
-                    &Default::default(),
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/"
-            );
-        }
-
-        #[test]
-        fn preserve_no_trailing_slash_from_source() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1").unwrap()),
-                    &"/".parse().unwrap(),
-                    &Default::default(),
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1"
-            );
-        }
-
-        #[test]
-        fn add_path_before_query_params() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1?something").unwrap()),
-                    &"/hello".parse().unwrap(),
-                    &this! { "id": 42 },
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/hello?something"
-            );
-        }
-
-        #[test]
-        fn trailing_slash_plus_query_params() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1?something").unwrap()),
-                    &"/hello/".parse().unwrap(),
-                    &this! { "id": 42 },
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/hello/?something"
-            );
-        }
-
-        #[test]
-        fn with_merged_query_params() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1?foo=bar").unwrap()),
-                    &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                    &this! {"id": 42 },
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-            );
-        }
-        #[test]
-        fn with_trailing_slash_in_base_plus_query_params() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("https://localhost:8080/v1/?foo=bar").unwrap()),
-                    &"/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                    &this! {"id": 42 },
-                )
-                .unwrap()
-                .to_string(),
-                "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-            );
-        }
-    }
-
-    mod merge_query {
-        use pretty_assertions::assert_eq;
-
-        use super::*;
-        #[test]
-        fn source_only() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("http://localhost/users?a=b").unwrap()),
-                    &"/123".parse().unwrap(),
-                    &Default::default(),
-                )
-                .unwrap(),
-                "http://localhost/users/123?a=b"
-            );
-        }
-
-        #[test]
-        fn connect_only() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("http://localhost/users").unwrap()),
-                    &"?a=b&c=d".parse().unwrap(),
-                    &Default::default(),
-                )
-                .unwrap(),
-                "http://localhost/users?a=b&c=d"
-            )
-        }
-
-        #[test]
-        fn combine_from_both() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("http://localhost/users?a=b").unwrap()),
-                    &"?c=d".parse().unwrap(),
-                    &Default::default()
-                )
-                .unwrap(),
-                "http://localhost/users?a=b&c=d"
-            )
-        }
-
-        #[test]
-        fn source_and_connect_have_same_param() {
-            assert_eq!(
-                make_uri(
-                    Some(&Uri::from_str("http://localhost/users?a=b").unwrap()),
-                    &"?a=d".parse().unwrap(),
-                    &Default::default()
-                )
-                .unwrap(),
-                "http://localhost/users?a=b&a=d"
-            )
-        }
-    }
-
-    #[test]
-    fn fragments_are_dropped() {
-        assert_eq!(
-            make_uri(
-                Some(&Uri::from_str("http://localhost/source?a=b#SourceFragment").unwrap()),
-                &"/connect?c=d#connectFragment".parse().unwrap(),
-                &Default::default()
-            )
-            .unwrap(),
-            "http://localhost/source/connect?a=b&c=d"
-        )
-    }
+    #[error(transparent)]
+    MakeUri(#[from] MakeUriError),
 }
 
 #[cfg(test)]
@@ -473,6 +189,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HeaderSource;
     use apollo_federation::sources::connect::JSONSelection;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderMap;
     use http::HeaderValue;
     use http::header::CONTENT_ENCODING;
