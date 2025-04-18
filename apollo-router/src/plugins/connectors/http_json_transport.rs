@@ -257,9 +257,7 @@ pub(crate) enum HttpJsonTransportError {
 mod test_make_uri {
     use std::str::FromStr;
 
-    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
-    use serde_json_bytes::json;
 
     use super::*;
 
