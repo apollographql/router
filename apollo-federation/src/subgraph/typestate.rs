@@ -175,6 +175,12 @@ impl Subgraph<Raw> {
         // TODO: Remove this and use metadata from this Subgraph instead of FederationSchema
         FederationBlueprint::on_constructed(&mut schema)?;
 
+        // PORT_NOTE: JS version calls `addFederationOperations` in the `validate` method.
+        //            It seems to make sense for it to be a part of expansion stage. We can create
+        //            a separate stage for it between `Expanded` and `Validated` if we need a stage
+        //            that is expanded, but federation operations are not added.
+        add_federation_operations(&mut schema)?;
+
         let metadata = compute_subgraph_metadata(&schema)?.ok_or_else(|| {
             internal_error!(
                 "Unable to detect federation version used in subgraph '{}'",
@@ -190,69 +196,63 @@ impl Subgraph<Raw> {
     }
 }
 
+fn add_federation_operations(schema: &mut FederationSchema) -> Result<(), FederationError> {
+    // Add federation operation types
+    ANY_TYPE_SPEC.check_or_add(schema, None)?;
+    SERVICE_TYPE_SPEC.check_or_add(schema, None)?;
+    entity_type_spec(schema)?.check_or_add(schema, None)?;
+
+    // Add the root `Query` Type (if not already present) and get the actual name in the schema.
+    let query_root_pos = SchemaRootDefinitionPosition {
+        root_kind: SchemaRootDefinitionKind::Query,
+    };
+    let query_root_type_name = if query_root_pos.try_get(schema.schema()).is_none() {
+        // If not present, add the default Query type with empty fields.
+        EMPTY_QUERY_TYPE_SPEC.check_or_add(schema, None)?;
+        query_root_pos.insert(schema, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
+        EMPTY_QUERY_TYPE_SPEC.name
+    } else {
+        query_root_pos.get(schema.schema())?.name.clone()
+    };
+
+    // Add or remove `Query._entities` (if applicable)
+    let entity_field_pos = ObjectFieldDefinitionPosition {
+        type_name: query_root_type_name.clone(),
+        field_name: FEDERATION_ENTITIES_FIELD_NAME,
+    };
+    if let Some(_entity_type) = schema.entity_type()? {
+        if entity_field_pos.try_get(schema.schema()).is_none() {
+            entity_field_pos.insert(schema, Component::new(entities_field_spec(schema)?.into()))?;
+        }
+        // PORT_NOTE: JS version checks if the entity field definition's type is null when the
+        //            definition is found, but the `type` field is not nullable in Rust.
+    } else {
+        // Remove the `_entities` field if it is present
+        // PORT_NOTE: It's unclear why this is necessary. Maybe it's to avoid schema confusion?
+        entity_field_pos.remove(schema)?;
+    }
+
+    // Add `Query._service` (if not already present)
+    let service_field_pos = ObjectFieldDefinitionPosition {
+        type_name: query_root_type_name.clone(),
+        field_name: FEDERATION_SERVICE_FIELD_NAME,
+    };
+    if service_field_pos.try_get(schema.schema()).is_none() {
+        service_field_pos.insert(schema, Component::new(service_field_spec(schema)?.into()))?;
+    }
+
+    Ok(())
+}
+
 impl Subgraph<Expanded> {
     pub fn upgrade(&mut self) -> Result<Self, SubgraphError> {
         todo!("Implement upgrade logic for expanded subgraphs");
-    }
-
-    fn add_federation_operations(&mut self) -> Result<(), FederationError> {
-        let schema = &mut self.state.schema;
-
-        // Add federation operation types
-        ANY_TYPE_SPEC.check_or_add(schema, None)?;
-        SERVICE_TYPE_SPEC.check_or_add(schema, None)?;
-        entity_type_spec(schema)?.check_or_add(schema, None)?;
-
-        // Add the root `Query` Type (if not already present) and get the actual name in the schema.
-        let query_root_pos = SchemaRootDefinitionPosition {
-            root_kind: SchemaRootDefinitionKind::Query,
-        };
-        let query_root_type_name = if query_root_pos.try_get(schema.schema()).is_none() {
-            // If not present, add the default Query type with empty fields.
-            EMPTY_QUERY_TYPE_SPEC.check_or_add(schema, None)?;
-            query_root_pos.insert(schema, ComponentName::from(EMPTY_QUERY_TYPE_SPEC.name))?;
-            EMPTY_QUERY_TYPE_SPEC.name
-        } else {
-            query_root_pos.get(schema.schema())?.name.clone()
-        };
-
-        // Add or remove `Query._entities` (if applicable)
-        let entity_field_pos = ObjectFieldDefinitionPosition {
-            type_name: query_root_type_name.clone(),
-            field_name: FEDERATION_ENTITIES_FIELD_NAME,
-        };
-        if let Some(_entity_type) = schema.entity_type()? {
-            if entity_field_pos.try_get(schema.schema()).is_none() {
-                entity_field_pos
-                    .insert(schema, Component::new(entities_field_spec(schema)?.into()))?;
-            }
-            // PORT_NOTE: JS version checks if the entity field definition's type is null when the
-            //            definition is found, but the `type` field is not nullable in Rust.
-        } else {
-            // Remove the `_entities` field if it is present
-            // PORT_NOTE: It's unclear why this is necessary. Maybe it's to avoid schema confusion?
-            entity_field_pos.remove(schema)?;
-        }
-
-        // Add `Query._service` (if not already present)
-        let service_field_pos = ObjectFieldDefinitionPosition {
-            type_name: query_root_type_name.clone(),
-            field_name: FEDERATION_SERVICE_FIELD_NAME,
-        };
-        if service_field_pos.try_get(schema.schema()).is_none() {
-            service_field_pos.insert(schema, Component::new(service_field_spec(schema)?.into()))?;
-        }
-
-        Ok(())
     }
 
     pub fn validate(
         mut self,
         rename_root_types: bool,
     ) -> Result<Subgraph<Validated>, SubgraphError> {
-        self.add_federation_operations()
-            .map_err(|e| SubgraphError::new(self.name.clone(), e))?;
-
         let blueprint = FederationBlueprint::new(rename_root_types);
         blueprint
             .on_validation(&mut self.state.schema)
