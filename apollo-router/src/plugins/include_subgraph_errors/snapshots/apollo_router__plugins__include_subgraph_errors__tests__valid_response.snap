@@ -1,0 +1,31 @@
+---
+source: apollo-router/src/plugins/include_subgraph_errors/tests.rs
+description: "CONFIG:\n---\nall: false\n\n\nREQUEST:\n{\n  \"data\": {\n    \"topProducts\": [\n      {\n        \"upc\": \"1\",\n        \"name\": \"Table\",\n        \"reviews\": [\n          {\n            \"id\": \"1\",\n            \"product\": {\n              \"name\": \"Table\"\n            },\n            \"author\": {\n              \"id\": \"1\",\n              \"name\": \"Ada Lovelace\"\n            }\n          },\n          {\n            \"id\": \"4\",\n            \"product\": {\n              \"name\": \"Table\"\n            },\n            \"author\": {\n              \"id\": \"2\",\n              \"name\": \"Alan Turing\"\n            }\n          }\n        ]\n      },\n      {\n        \"upc\": \"2\",\n        \"name\": \"Couch\",\n        \"reviews\": [\n          {\n            \"id\": \"2\",\n            \"product\": {\n              \"name\": \"Couch\"\n            },\n            \"author\": {\n              \"id\": \"1\",\n              \"name\": \"Ada Lovelace\"\n            }\n          }\n        ]\n      }\n    ]\n  }\n}"
+expression: actual_responses
+---
+- data:
+    topProducts:
+      - upc: "1"
+        name: Table
+        reviews:
+          - id: "1"
+            product:
+              name: Table
+            author:
+              id: "1"
+              name: Ada Lovelace
+          - id: "4"
+            product:
+              name: Table
+            author:
+              id: "2"
+              name: Alan Turing
+      - upc: "2"
+        name: Couch
+        reviews:
+          - id: "2"
+            product:
+              name: Couch
+            author:
+              id: "1"
+              name: Ada Lovelace

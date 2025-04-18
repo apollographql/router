@@ -2110,19 +2110,16 @@ mod test {
             ];
 
             let errors = codes.map(|code| {
-                graphql::Error::from_value(
-                    "mySubgraph",
-                    json!(
-                    {
-                      "message": "error occurred",
-                      "extensions": {
-                        "code": code,
-                        "service": "mySubgraph"
-                      },
-                      "path": ["obj", "field"]
-                    }
-                    ),
-                )
+                graphql::Error::from_value(json!(
+                {
+                  "message": "error occurred",
+                  "extensions": {
+                    "code": code,
+                    "service": "mySubgraph"
+                  },
+                  "path": ["obj", "field"]
+                }
+                ))
                 .unwrap()
             });
 
@@ -2221,19 +2218,16 @@ mod test {
             ];
 
             let errors = codes.map(|code| {
-                graphql::Error::from_value(
-                    "mySubgraph",
-                    json!(
-                    {
-                      "message": "error occurred",
-                      "extensions": {
-                        "code": code,
-                        "service": "mySubgraph"
-                      },
-                      "path": ["obj", "field"]
-                    }
-                    ),
-                )
+                graphql::Error::from_value(json!(
+                {
+                  "message": "error occurred",
+                  "extensions": {
+                    "code": code,
+                    "service": "mySubgraph"
+                  },
+                  "path": ["obj", "field"]
+                }
+                ))
                 .unwrap()
             });
 
