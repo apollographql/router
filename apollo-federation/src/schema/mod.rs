@@ -24,6 +24,7 @@ use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_SERVICE_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
@@ -220,6 +221,7 @@ impl FederationSchema {
     }
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
+    // PORT_NOTE: Corresponds to `FederationMetadata.entityType` in JS
     pub(crate) fn entity_type(
         &self,
     ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
@@ -236,6 +238,24 @@ impl FederationSchema {
                 FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
             ))),
             None => Ok(None),
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.serviceType` in JS
+    pub(crate) fn service_type(&self) -> Result<ObjectTypeDefinitionPosition, FederationError> {
+        // Note: `_Service` type name can't be renamed.
+        match self.schema.types.get(&FEDERATION_SERVICE_TYPE_NAME_IN_SPEC) {
+            Some(ExtendedType::Object(_)) => Ok(ObjectTypeDefinitionPosition {
+                type_name: FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{spec_name}` type definition",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
+            None => bail!(
+                "Unexpected: type not found for federation spec's `{spec_name}`",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
         }
     }
 
@@ -597,6 +617,12 @@ pub(crate) struct KeyDirective<'schema> {
     sibling_directives: &'schema apollo_compiler::schema::DirectiveList,
     /// The schema position to which this directive is applied
     target: ObjectOrInterfaceTypeDefinitionPosition,
+}
+
+impl KeyDirective<'_> {
+    pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
+        &self.target
+    }
 }
 
 pub(crate) struct ProvidesDirective<'schema> {
