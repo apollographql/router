@@ -898,14 +898,8 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |mut res: http::Request<RouterBody>| {
                 Box::pin(async move {
-<<<<<<< HEAD
-                    let deserialized_response: Externalizable<serde_json::Value> =
-                        serde_json::from_slice(&get_body_bytes(&mut res).await.unwrap()).unwrap();
-=======
                     let deserialized_response: Externalizable<Value> =
-                        serde_json::from_slice(&router::body::into_bytes(&mut res).await.unwrap())
-                            .unwrap();
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
+                        serde_json::from_slice(&get_body_bytes(&mut res).await.unwrap()).unwrap();
 
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
@@ -1051,16 +1045,9 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-<<<<<<< HEAD
-                    let mut deserialized_response: Externalizable<serde_json::Value> =
+                    let mut deserialized_response: Externalizable<Value> =
                         serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                             .unwrap();
-=======
-                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
                         PipelineStep::SupergraphResponse.to_string(),
@@ -1174,16 +1161,9 @@ mod tests {
         let mock_http_client =
             mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
                 Box::pin(async {
-<<<<<<< HEAD
-                    let mut deserialized_response: Externalizable<serde_json::Value> =
+                    let mut deserialized_response: Externalizable<Value> =
                         serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                             .unwrap();
-=======
-                    let mut deserialized_response: Externalizable<Value> = serde_json::from_slice(
-                        &router::body::into_bytes(res.into_body()).await.unwrap(),
-                    )
-                    .unwrap();
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
                     assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                     assert_eq!(
                         PipelineStep::SupergraphResponse.to_string(),

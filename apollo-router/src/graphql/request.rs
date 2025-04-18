@@ -195,11 +195,7 @@ impl Request {
     fn process_batch_values(value: Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(&value);
 
-<<<<<<< HEAD
-        if value.is_array() {
-=======
         if let Value::Array(entries) = value {
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
@@ -213,16 +209,8 @@ impl Request {
                 1,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-<<<<<<< HEAD
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
-                let bytes = serde_json::to_vec(entry)?;
-=======
             for entry in entries {
                 let bytes = serde_json::to_vec(&entry)?;
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
                 result.push(Request::deserialize_from_bytes(&bytes.into())?);
             }
         } else {
@@ -235,11 +223,7 @@ impl Request {
     fn process_query_values(value: Value) -> Result<Vec<Request>, serde_json::Error> {
         let mut result = Request::allocate_result_array(&value);
 
-<<<<<<< HEAD
-        if value.is_array() {
-=======
         if let Value::Array(entries) = value {
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
             u64_histogram!(
                 "apollo.router.operations.batching.size",
                 "Number of queries contained within each query batch",
@@ -253,16 +237,8 @@ impl Request {
                 1,
                 mode = BatchingMode::BatchHttpLink.to_string() // Only supported mode right now
             );
-<<<<<<< HEAD
-            for entry in value
-                .as_array()
-                .expect("We already checked that it was an array")
-            {
-                result.push(Request::process_value(entry)?);
-=======
             for entry in entries {
                 result.push(Request::process_value(&entry)?);
->>>>>>> 388afabe (coprocessor: fix parsing of graphql responses with null as `data` (#7141))
             }
         } else {
             result.push(Request::process_value(&value)?)
