@@ -1,9 +1,11 @@
-use crate::integration::IntegrationTest;
-use crate::integration::common::Query;
+use std::collections::HashMap;
+
 use http::HeaderValue;
 use serde_json::json;
-use std::collections::HashMap;
 use tower::BoxError;
+
+use crate::integration::IntegrationTest;
+use crate::integration::common::Query;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_content_negotiation() -> Result<(), BoxError> {
