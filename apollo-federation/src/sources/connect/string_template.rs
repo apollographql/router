@@ -538,6 +538,7 @@ mod test_interpolate_uri {
     #[rstest]
     #[case::leading_slash("/path")]
     #[case::trailing_slash("path/")]
+    #[case::sandwich_slash("/path/")]
     #[case::no_slash("path")]
     #[case::query_params("?something&something")]
     #[case::fragment("#blah")]
@@ -564,6 +565,7 @@ mod test_interpolate_uri {
         assert!(uri.path_and_query().is_some());
         assert!(uri.authority().is_some());
         assert!(uri.scheme().is_some());
+        assert_eq!(uri.to_string(), val);
     }
 
     /// Values are all strings, they can't have semantic value for HTTP. That means no dynamic paths,
@@ -595,34 +597,33 @@ mod test_interpolate_uri {
     fn json_value_serialization() {
         // `extra` would be illegal (we don't serialize arrays), but any unused values should be ignored
         let vars = &this! {
-            "number": 1.2,
+            "int": 1,
+            "float": 1.2,
             "bool": true,
             "null": null,
             "string": "string",
             "extra": []
         };
 
-        let template =
-            StringTemplate::from_str("/{$this.number}/{$this.bool}/{$this.null}/{$this.string}")
-                .unwrap();
+        let template = StringTemplate::from_str(
+            "/{$this.int}/{$this.float}/{$this.bool}/{$this.null}/{$this.string}",
+        )
+        .unwrap();
 
         let uri = template.interpolate(vars).expect("Failed to interpolate");
 
-        assert_eq!(uri.to_string(), "/1.2/true//string")
+        assert_eq!(uri.to_string(), "/1/1.2/true//string")
     }
 
     #[test]
     fn special_symbols_in_literal() {
-        let template = StringTemplate::from_str("/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='")
-            .expect("Failed to parse URL template");
+        let literal = "/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='";
+        let template = StringTemplate::from_str(literal).expect("Failed to parse URL template");
         let url = template
             .interpolate_uri(&Default::default())
             .expect("Failed to generate URL");
 
-        assert_eq!(
-            url.to_string(),
-            "/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='"
-        );
+        assert_eq!(url.to_string(), literal);
     }
 
     /// If a user writes a string template that includes _illegal_ characters which must be encoded,
