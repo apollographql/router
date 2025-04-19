@@ -5,7 +5,6 @@ use futures::future;
 use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -19,7 +18,7 @@ use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::services::execution;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct ExecutionRequestConf {
     /// Send the headers
@@ -37,7 +36,7 @@ pub(super) struct ExecutionRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct ExecutionResponseConf {
     /// Send the headers
@@ -52,7 +51,7 @@ pub(super) struct ExecutionResponseConf {
     pub(super) status_code: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct ExecutionStage {
     /// The request configuration

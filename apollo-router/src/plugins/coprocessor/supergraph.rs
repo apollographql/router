@@ -5,7 +5,6 @@ use futures::future;
 use futures::stream;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower_service::Service;
@@ -21,11 +20,10 @@ use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphRequestConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
     pub(super) condition: Option<Condition<SupergraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
@@ -40,11 +38,10 @@ pub(super) struct SupergraphRequestConf {
 }
 
 /// What information is passed to a router request/response stage
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
     /// Condition to trigger this stage
-    #[serde(skip_serializing)]
     pub(super) condition: Option<Condition<SupergraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
@@ -58,7 +55,7 @@ pub(super) struct SupergraphResponseConf {
     pub(super) status_code: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, JsonSchema)]
 #[serde(default)]
 pub(super) struct SupergraphStage {
     /// The request configuration
