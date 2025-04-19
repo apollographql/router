@@ -270,7 +270,7 @@ pub(super) struct RouterRequestConf {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
     /// Condition to trigger this stage
-    pub(super) condition: Option<Condition<RouterSelector>>,
+    pub(super) condition: Condition<RouterSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -287,7 +287,7 @@ pub(super) struct RouterResponseConf {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
     /// Condition to trigger this stage
-    pub(super) condition: Option<Condition<SubgraphSelector>>,
+    pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -309,7 +309,7 @@ pub(super) struct SubgraphRequestConf {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
     /// Condition to trigger this stage
-    pub(super) condition: Option<Condition<SubgraphSelector>>,
+    pub(super) condition: Condition<SubgraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -866,12 +866,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // split the response into parts + body
@@ -1070,12 +1065,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = request_config
-        .condition
-        .as_mut()
-        .map(|c| c.evaluate_request(&request) == Some(true))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
     }
     // Call into our out of process processor with a body of our body
@@ -1236,12 +1226,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+        if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // Call into our out of process processor with a body of our body

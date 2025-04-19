@@ -24,7 +24,7 @@ use crate::services::supergraph;
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphRequestConf {
     /// Condition to trigger this stage
-    pub(super) condition: Option<Condition<SupergraphSelector>>,
+    pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -42,7 +42,7 @@ pub(super) struct SupergraphRequestConf {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
     /// Condition to trigger this stage
-    pub(super) condition: Option<Condition<SupergraphSelector>>,
+    pub(super) condition: Condition<SupergraphSelector>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -195,12 +195,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = request_config
-        .condition
-        .as_mut()
-        .map(|c| c.evaluate_request(&request) == Some(true))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if request_config.condition.evaluate_request(&request) != Some(true) {
         return Ok(ControlFlow::Continue(request));
     }
     // Call into our out of process processor with a body of our body
@@ -346,12 +341,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-    let should_be_executed = response_config
-        .condition
-        .as_ref()
-        .map(|c| c.evaluate_response(&response))
-        .unwrap_or(true);
-    if !should_be_executed {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // split the response into parts + body
@@ -442,11 +432,7 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
-            let should_be_executed = response_config
-                .condition
-                .as_ref()
-                .map(|c| c.evaluate_event_response(&deferred_response, &map_context))
-                .unwrap_or(true);
+            let should_be_executed = response_config.condition.evaluate_event_response(&deferred_response, &map_context);
             let response_config_context = response_config.context.clone();
             async move {
                 if !should_be_executed {
