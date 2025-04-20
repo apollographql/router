@@ -820,8 +820,7 @@ mod tests {
                         default: None,
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
-                ])
-                .into(),
+                ]),
                 body: true,
                 ..Default::default()
             },
@@ -1451,8 +1450,7 @@ mod tests {
                     response_context: String::from("context_value"),
                     redact: None,
                     default: None,
-                })
-                .into(),
+                }),
                 body: true,
                 ..Default::default()
             },

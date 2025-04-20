@@ -1226,7 +1226,7 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
-        if !response_config.condition.evaluate_response(&response) {
+    if !response_config.condition.evaluate_response(&response) {
         return Ok(response);
     }
     // Call into our out of process processor with a body of our body

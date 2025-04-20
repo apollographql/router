@@ -432,7 +432,9 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
-            let should_be_executed = response_config.condition.evaluate_event_response(&deferred_response, &map_context);
+            let should_be_executed = response_config
+                .condition
+                .evaluate_event_response(&deferred_response, &map_context);
             let response_config_context = response_config.context.clone();
             async move {
                 if !should_be_executed {
@@ -726,8 +728,7 @@ mod tests {
                         default: None,
                     }),
                     SelectorOrValue::Value("value".to_string().into()),
-                ])
-                .into(),
+                ]),
                 headers: false,
                 context: ContextConf::Deprecated(false),
                 body: true,
@@ -1113,8 +1114,7 @@ mod tests {
                         is_primary_response: true,
                     }),
                     SelectorOrValue::Value(true.into()),
-                ])
-                .into(),
+                ]),
                 headers: true,
                 context: ContextConf::NewContextConf(NewContextConf::All),
                 body: true,
