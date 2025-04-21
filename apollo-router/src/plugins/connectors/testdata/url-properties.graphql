@@ -3,7 +3,7 @@ schema
   @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
   @link(url: "https://specs.apollo.dev/connect/v0.2", for: EXECUTION)
   @join__directive(graphs: [CONNECTORS], name: "link", args: {url: "https://specs.apollo.dev/connect/v0.2", import: ["@source", "@connect"]})
-  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {origin: "$config.origin", path: "$(['api', 'v1'])", queryParams: "q: $(1)"}})
+  @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "http://localhost", path: "$(['api', 'v1'])", queryParams: "q: $(1)"}})
 {
   query: Query
 }
@@ -58,5 +58,5 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
-  f(req: String!, opt: String, repeated: [Int]): String @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users", path: "$([$args.req, $args.opt, 'literal'])", queryParams: "repeated: $args.repeated"}, selection: "$"})
+  f(req: String!, opt: String, repeated: [Int]): String @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users", path: "$([$args.req, $args.opt])", queryParams: "repeated: $args.repeated"}, selection: "$"})
 }

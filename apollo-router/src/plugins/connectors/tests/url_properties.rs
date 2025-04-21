@@ -1,4 +1,3 @@
-use serde_json_bytes::json;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -17,21 +16,12 @@ async fn url_properties() {
         .await;
 
     let response = super::execute(
-        include_str!("../testdata/url-properties.graphql"),
+        &include_str!("../testdata/url-properties.graphql")
+            .replace("http://localhost", &mock_server.uri()),
         &mock_server.uri(),
         "query { f(req: \"required\", repeated: [1,2,3]) }",
         Default::default(),
-        Some(json!({
-            "connectors": {
-                "sources": {
-                    "connectors.json": {
-                        "$config": {
-                            "origin": mock_server.address(),
-                        }
-                    }
-                }
-            }
-        })),
+        None,
         |_| {},
     )
     .await;
