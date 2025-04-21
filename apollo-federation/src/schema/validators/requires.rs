@@ -140,7 +140,7 @@ impl<'a> DenyNonExternalLeafFields<'a> for DenyNonExternalLeafFieldsInRequires<'
     }
 
     fn directive_name(&self) -> &'a Name {
-        &self.directive_name
+        self.directive_name
     }
 
     fn error(&self, message: String) -> SingleFederationError {
@@ -160,9 +160,8 @@ mod tests {
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
 
-    use crate::schema::compute_subgraph_metadata;
-
     use super::*;
+    use crate::schema::compute_subgraph_metadata;
 
     #[test]
     fn deny_non_external() {

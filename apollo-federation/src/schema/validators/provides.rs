@@ -64,7 +64,7 @@ pub(crate) fn validate_provides_directives(
                 match provides.parse_fields(schema.schema()) {
                     Ok(field_set) => {
                         for rule in fieldset_rules.iter() {
-                            rule.visit(&provides.target_return_type, &field_set, errors);
+                            rule.visit(provides.target_return_type, &field_set, errors);
                         }
                     }
                     Err(e) => errors.push(e.into()),
@@ -196,7 +196,7 @@ impl<'a> DenyNonExternalLeafFields<'a> for DenyNonExternalLeafFieldsInProvides<'
     }
 }
 
-impl<'a> SchemaFieldSetValidator for DenyNonExternalLeafFieldsInProvides<'a> {
+impl SchemaFieldSetValidator for DenyNonExternalLeafFieldsInProvides<'_> {
     fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
         DenyNonExternalLeafFields::visit_field(self, parent_ty, field, errors);
     }
@@ -208,9 +208,8 @@ mod tests {
     use apollo_compiler::executable::FieldSet;
     use apollo_compiler::name;
 
-    use crate::schema::compute_subgraph_metadata;
-
     use super::*;
+    use crate::schema::compute_subgraph_metadata;
 
     #[test]
     fn deny_fields_with_arguments() {
