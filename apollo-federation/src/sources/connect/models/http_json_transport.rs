@@ -12,6 +12,7 @@ use http::HeaderName;
 use http::Uri;
 use http::uri::InvalidUri;
 use http::uri::InvalidUriParts;
+use http::uri::Parts;
 use http::uri::PathAndQuery;
 use serde_json_bytes::Value;
 use thiserror::Error;
@@ -31,6 +32,7 @@ use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAM
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::spec::versions::AllowedHeaders;
 use crate::sources::connect::string_template;
+use crate::sources::connect::string_template::UriString;
 use crate::sources::connect::variable::VariableReference;
 
 #[derive(Clone, Debug, Default)]
@@ -107,53 +109,61 @@ impl HttpJsonTransport {
     }
 
     pub fn make_uri(&self, inputs: &IndexMap<String, Value>) -> Result<Uri, MakeUriError> {
+        let mut uri_parts = Parts::default();
+
         let connect_uri = self.connect_template.interpolate_uri(inputs)?;
 
-        let Some(source_uri) = &self.source_url else {
-            return Ok(connect_uri);
-        };
-
-        let Some(connect_path_and_query) = connect_uri.path_and_query() else {
-            return Ok(source_uri.clone());
-        };
-
-        // Extract source path and query
-        let source_path = source_uri.path();
-        let source_query = source_uri.query().unwrap_or("");
-
-        // Extract connect path and query
-        let connect_path = connect_path_and_query.path();
-        let connect_query = connect_path_and_query.query().unwrap_or("");
-
-        // Merge paths (ensuring proper slash handling)
-        let merged_path = if connect_path.is_empty() || connect_path == "/" {
-            source_path.to_string()
-        } else if source_path.ends_with('/') {
-            format!("{}{}", source_path, connect_path.trim_start_matches('/'))
-        } else if connect_path.starts_with('/') {
-            format!("{}{}", source_path, connect_path)
+        if let Some(source_uri) = &self.source_url {
+            uri_parts.scheme = source_uri.scheme().cloned();
+            uri_parts.authority = source_uri.authority().cloned();
         } else {
-            format!("{}/{}", source_path, connect_path)
-        };
+            uri_parts.scheme = connect_uri.scheme().cloned();
+            uri_parts.authority = connect_uri.authority().cloned();
+        }
 
-        // Merge query parameters
-        let merged_query = if source_query.is_empty() {
-            connect_query.to_string()
-        } else if connect_query.is_empty() {
-            source_query.to_string()
-        } else {
-            format!("{}&{}", source_query, connect_query)
-        };
+        let mut path = UriString::new();
+        if let Some(source_uri_path) = self.source_url.as_ref().map(|source_uri| source_uri.path())
+        {
+            path.write_without_encoding(source_uri_path)?;
+        }
+        let connect_path = connect_uri.path();
+        if !connect_path.is_empty() && connect_path != "/" {
+            if path.ends_with('/') {
+                path.write_without_encoding(connect_path.trim_start_matches('/'))?;
+            } else if connect_path.starts_with('/') {
+                path.write_without_encoding(connect_path)?;
+            } else {
+                path.write_without_encoding("/")?;
+                path.write_without_encoding(connect_path)?;
+            };
+        }
 
-        // Build the merged URI
-        let mut uri_parts = source_uri.clone().into_parts();
-        let merged_path_and_query = if merged_query.is_empty() {
-            merged_path
-        } else {
-            format!("{}?{}", merged_path, merged_query)
-        };
+        let mut query = UriString::new();
 
-        uri_parts.path_and_query = Some(PathAndQuery::from_str(&merged_path_and_query)?);
+        if let Some(source_uri_query) = self
+            .source_url
+            .as_ref()
+            .and_then(|source_uri| source_uri.query())
+        {
+            query.write_without_encoding(source_uri_query)?;
+        }
+        let connect_query = connect_uri.query().unwrap_or_default();
+        if !connect_query.is_empty() {
+            if !query.is_empty() && !query.ends_with('&') {
+                query.write_without_encoding("&")?;
+            }
+            query.write_without_encoding(connect_query)?;
+        }
+
+        let path = path.into_string();
+        let query = query.into_string();
+
+        uri_parts.path_and_query = Some(match (path.is_empty(), query.is_empty()) {
+            (true, true) => PathAndQuery::from_static(""),
+            (true, false) => PathAndQuery::try_from(format!("?{query}"))?,
+            (false, true) => PathAndQuery::try_from(path)?,
+            (false, false) => PathAndQuery::try_from(format!("{path}?{query}"))?,
+        });
 
         // Reconstruct the URI and convert to string
         Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)
@@ -168,6 +178,8 @@ pub enum MakeUriError {
     BuildMergedUri(InvalidUriParts),
     #[error("Error rendering URI template: {0}")]
     TemplateGenerationError(#[from] string_template::Error),
+    #[error("Internal error building URI")]
+    WriteError(#[from] std::fmt::Error),
 }
 
 /// The HTTP arguments needed for a connect request
@@ -588,6 +600,36 @@ mod test_make_uri {
         assert_eq!(
             transport.make_uri(&Default::default()).unwrap(),
             "http://localhost/source/connect?a=b&c=d"
+        )
+    }
+
+    /// When merging source and connect pieces, we sometimes have to apply encoding as we go.
+    /// This double-checks that we never _double_ encode pieces.
+    #[test]
+    fn pieces_are_not_double_encoded() {
+        let transport = HttpJsonTransport {
+            source_url: Uri::from_str("http://localhost/source%20path?param=source%20param").ok(),
+            connect_template: "/connect%20path?param=connect%20param".parse().unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/source%20path/connect%20path?param=source%20param&param=connect%20param"
+        )
+    }
+
+    /// Regression test for a very specific case where the resulting `Uri` might not be valid
+    /// because we did _too little_ work.
+    #[test]
+    fn empty_path_and_query() {
+        let transport = HttpJsonTransport {
+            source_url: None,
+            connect_template: "http://localhost/".parse().unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/"
         )
     }
 }
