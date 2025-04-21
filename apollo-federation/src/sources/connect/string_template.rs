@@ -17,7 +17,7 @@ use http::uri::PathAndQuery;
 use itertools::Itertools;
 use serde_json_bytes::Value;
 
-use self::encoding::UriString;
+pub(crate) use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
 
 /// A parsed string template, containing a series of [`Part`]s.
@@ -311,19 +311,19 @@ mod encoding {
         .remove(b'=')
         .remove(b'%');
 
-    pub(super) struct UriString {
+    pub(crate) struct UriString {
         value: String,
     }
 
     impl UriString {
-        pub(super) fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self {
                 value: String::new(),
             }
         }
 
-        /// Write a bit of trusted input without encoding, like a constant piece of a template
-        pub(super) fn write_trusted(&mut self, s: &str) -> std::fmt::Result {
+        /// Write a bit of trusted input, like a constant piece of a template, only encoding illegal symbols.
+        pub(crate) fn write_trusted(&mut self, s: &str) -> std::fmt::Result {
             write!(
                 &mut self.value,
                 "{}",
@@ -331,8 +331,25 @@ mod encoding {
             )
         }
 
-        pub(super) fn contains(&self, pattern: &str) -> bool {
+        /// Add a pre-encoded string to the URI. Used for merging without duplicating percent-encoding.
+        pub(crate) fn write_without_encoding(&mut self, s: &str) -> std::fmt::Result {
+            self.value.write_str(s)
+        }
+
+        pub(crate) fn contains(&self, pattern: &str) -> bool {
             self.value.contains(pattern)
+        }
+
+        pub(crate) fn ends_with(&self, pattern: char) -> bool {
+            self.value.ends_with(pattern)
+        }
+
+        pub(crate) fn into_string(self) -> String {
+            self.value
+        }
+
+        pub(crate) fn is_empty(&self) -> bool {
+            self.value.is_empty()
         }
     }
 
