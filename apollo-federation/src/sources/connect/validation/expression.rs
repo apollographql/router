@@ -56,6 +56,8 @@ pub(super) struct Context<'schema> {
     /// The code that all resulting messages will use
     /// TODO: make code dynamic based on coordinate so new validations can be warnings
     code: Code,
+    /// Used to determine if `$root` is available (aka: we're mapping a response, not a request)
+    has_response_body: bool,
 }
 
 impl<'schema> Context<'schema> {
@@ -90,6 +92,7 @@ impl<'schema> Context<'schema> {
                     var_lookup,
                     source,
                     code,
+                    has_response_body: false,
                 }
             }
             ConnectedElement::Type { type_def } => {
@@ -108,6 +111,7 @@ impl<'schema> Context<'schema> {
                     var_lookup,
                     source,
                     code,
+                    has_response_body: false,
                 }
             }
         }
@@ -147,6 +151,7 @@ impl<'schema> Context<'schema> {
                     var_lookup,
                     source,
                     code,
+                    has_response_body: true,
                 }
             }
             ConnectedElement::Type { type_def } => {
@@ -167,6 +172,7 @@ impl<'schema> Context<'schema> {
                     var_lookup,
                     source,
                     code,
+                    has_response_body: true,
                 }
             }
         }
@@ -190,6 +196,7 @@ impl<'schema> Context<'schema> {
             var_lookup,
             source,
             code,
+            has_response_body: false,
         }
     }
 
@@ -215,6 +222,7 @@ impl<'schema> Context<'schema> {
             var_lookup,
             source,
             code,
+            has_response_body: true,
         }
     }
 }
@@ -293,6 +301,12 @@ fn resolve_shape(
         }
         ShapeCase::Name(name, key) => {
             let mut resolved = if name.value == "$root" {
+                // For response mapping, $root (aka the response body) is allowed so we will exit out early here
+                // However, $root is not allowed for requests so we will error below
+                if context.has_response_body {
+                    return Ok(Shape::unknown([]));
+                }
+
                 let mut key_str = key.iter().map(|key| key.to_string()).join(".");
                 if !key_str.is_empty() {
                     key_str = format!("`{key_str}` ");

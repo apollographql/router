@@ -71,6 +71,15 @@ impl<'schema> SourceDirective<'schema> {
         let (name, name_errors) = SourceName::from_directive(directive, &schema.sources);
         errors.extend(name_errors);
 
+        errors.extend(
+            Errors::parse(SourceDirectiveCoordinate { directive }, schema)
+                // TODO: Move type checking to a later phase so parsing can be shared with runtime
+                .and_then(|errors| errors.type_check(schema))
+                .err()
+                .into_iter()
+                .flatten(),
+        );
+
         if let Some(http_arg) = directive
             .specified_argument_by_name(&HTTP_ARGUMENT_NAME)
             .and_then(|arg| arg.as_object())
@@ -120,15 +129,6 @@ impl<'schema> SourceDirective<'schema> {
                     .collect(),
             })
         }
-
-        errors.extend(
-            Errors::parse(SourceDirectiveCoordinate { directive }, schema)
-                // TODO: Move type checking to a later phase so parsing can be shared with runtime
-                .and_then(|errors| errors.type_check(schema))
-                .err()
-                .into_iter()
-                .flatten(),
-        );
 
         (name.map(|name| SourceDirective { name, directive }), errors)
     }
