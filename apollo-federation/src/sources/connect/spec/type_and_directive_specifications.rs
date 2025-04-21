@@ -170,24 +170,22 @@ pub(super) fn check_or_add(
         },
     ];
 
-    if spec >= &ConnectSpec::V0_2 {
-        connect_http_field_list.extend([
-            InputValueDefinition {
-                description: None,
-                name: PATH_ARGUMENT_NAME.clone(),
-                ty: Type::Named(json_selection_spec.name.clone()).into(),
-                default_value: None,
-                directives: Default::default(),
-            },
-            InputValueDefinition {
-                description: None,
-                name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
-                ty: Type::Named(json_selection_spec.name.clone()).into(),
-                default_value: None,
-                directives: Default::default(),
-            },
-        ]);
-    }
+    connect_http_field_list.extend([
+        InputValueDefinition {
+            description: None,
+            name: PATH_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ]);
 
     let mut connect_http_fields = IndexMap::with_hasher(Default::default());
     for field in connect_http_field_list {
@@ -346,24 +344,22 @@ pub(super) fn check_or_add(
         },
     ];
 
-    if spec >= &ConnectSpec::V0_2 {
-        source_http_field_list.extend([
-            InputValueDefinition {
-                description: None,
-                name: PATH_ARGUMENT_NAME.clone(),
-                ty: Type::Named(json_selection_spec.name.clone()).into(),
-                default_value: None,
-                directives: Default::default(),
-            },
-            InputValueDefinition {
-                description: None,
-                name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
-                ty: Type::Named(json_selection_spec.name.clone()).into(),
-                default_value: None,
-                directives: Default::default(),
-            },
-        ]);
-    }
+    source_http_field_list.extend([
+        InputValueDefinition {
+            description: None,
+            name: PATH_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ]);
 
     let mut source_http_fields = IndexMap::with_hasher(Default::default());
     for field in source_http_field_list {
