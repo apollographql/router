@@ -46,6 +46,13 @@ To prevent increased latency upon query plan cache invalidation, the router prec
 
 Precomputed plans will be cached before the router switches traffic over to the new schema.
 
+<Tip>
+
+You can also send the header `Apollo-Expose-Query-Plan: dry-run` for [generating query plans at runtime](https://www.apollographql.com/docs/graphos/reference/federation/query-plans#outputting-query-plans-with-headers) which can be used to warm up your cache instances with a custom defined operation list.
+
+</Tip>
+
+
 By default, the router warms up the cache with 30% of the queries already in cache, but it can be configured as follows:
 
 ```yaml title="router.yaml"

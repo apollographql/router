@@ -61,7 +61,7 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
-  f(arg: String!): T @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "v1", http: {POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}", headers: [{name: "x-connect-context", value: "{$context.value}"}, {name: "x-connect-config", value: "{$config.value}"}, {name: "x-connect-arg", value: "{$args.arg->last}"}], body: "arg: $args.arg\ncontext: $context.value\nconfig: $config.value"}, selection: "arg: $args.arg\ncontext: $context.value\nconfig: $config.value\nstatus: $status\nsibling: $(\"D\")\nextra: $->echo({ arg: $args.arg, context: $context.value, config: $config.value, status: $status })"})
+  f(arg: String!): T @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "v1", http: {POST: "/f?arg={$args.arg->slice(1)}&context={$context.value}&config={$config.value}&header={$request.headers.value->first}", headers: [{name: "x-connect-context", value: "{$context.value}"}, {name: "x-connect-config", value: "{$config.value}"}, {name: "x-connect-arg", value: "{$args.arg->last}"}], body: "arg: $args.arg\ncontext: $context.value\nconfig: $config.value\nrequest: $request.headers.value->first"}, selection: "arg: $args.arg\ncontext: $context.value\nconfig: $config.value\nstatus: $status\nsibling: $(\"D\")\nextra: $->echo({ arg: $args.arg, context: $context.value, config: $config.value, status: $status })\nrequest: $request.headers.value->first\nresponse: $response.headers.value->first"})
 }
 
 type T
@@ -73,6 +73,8 @@ type T
   status: Int
   sibling: String
   extra: JSON
+  request: String
+  response: String
   f(arg: String): U @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "v1", http: {POST: "/f?arg={$args.arg->slice(2)}&context={$context.value}&config={$config.value}&sibling={$this.sibling}", headers: [{name: "x-connect-context", value: "{$context.value}"}, {name: "x-connect-config", value: "{$config.value}"}, {name: "x-connect-arg", value: "{$args.arg->first}"}, {name: "x-connect-sibling", value: "{$this.sibling}"}], body: "arg: $args.arg\ncontext: $context.value\nconfig: $config.value\nsibling: $this.sibling"}, selection: "arg: $args.arg\ncontext: $context.value\nconfig: $config.value\nsibling: $this.sibling\nstatus: $status"})
 }
 

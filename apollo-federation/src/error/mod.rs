@@ -192,8 +192,10 @@ pub enum SingleFederationError {
     RequiresHasDirectiveInFieldsArg { applied_directives: String },
     #[error("{message}")]
     ExternalUnused { message: String },
-    #[error("{message}")]
-    TypeWithOnlyUnusedExternal { message: String },
+    #[error(
+        "Type {type_name} contains only external fields and all those fields are all unused (they do not appear in any @key, @provides or @requires)."
+    )]
+    TypeWithOnlyUnusedExternal { type_name: Name },
     #[error("{message}")]
     ProvidesOnNonObjectField { message: String },
     #[error("{message}")]

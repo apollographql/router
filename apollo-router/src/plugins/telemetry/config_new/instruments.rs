@@ -2733,7 +2733,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLTemplate;
+    use apollo_federation::sources::connect::StringTemplate;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -3361,15 +3361,13 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            source_url: None,
-                                            connect_template: URLTemplate::from_str(
+                                            connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
-                                            headers: Default::default(),
-                                            body: None,
+                                            ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
                                         config: None,
@@ -3378,6 +3376,9 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        batch_settings: None,
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
@@ -3424,15 +3425,13 @@ mod tests {
                                             "label",
                                         ),
                                         transport: HttpJsonTransport {
-                                            source_url: None,
-                                            connect_template: URLTemplate::from_str(
+                                            connect_template: StringTemplate::from_str(
                                                 url_template.as_str(),
                                             )
                                             .unwrap(),
                                             method: HTTPMethod::from_str(http_method.as_str())
                                                 .unwrap(),
-                                            headers: Default::default(),
-                                            body: None,
+                                            ..Default::default()
                                         },
                                         selection: JSONSelection::empty(),
                                         config: None,
@@ -3441,6 +3440,9 @@ mod tests {
                                         spec: ConnectSpec::V0_1,
                                         request_variables: Default::default(),
                                         response_variables: Default::default(),
+                                        batch_settings: None,
+                                        request_headers: Default::default(),
+                                        response_headers: Default::default(),
                                     };
                                     let response_key = ResponseKey::RootField {
                                         name: "hello".to_string(),
