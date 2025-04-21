@@ -5,13 +5,13 @@ use super::conditional::Conditional;
 use super::connector::spans::ConnectorSpans;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
-use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
+use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::plugins::telemetry::span_factory::SpanMode;
 
@@ -153,7 +153,6 @@ mod test {
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -165,6 +164,7 @@ mod test {
     use crate::plugins::telemetry::config_new::spans::RouterSpans;
     use crate::plugins::telemetry::config_new::spans::SubgraphSpans;
     use crate::plugins::telemetry::config_new::spans::SupergraphSpans;
+    use crate::plugins::telemetry::config_new::subgraph::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
     use crate::services::router;
     use crate::services::subgraph;

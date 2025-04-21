@@ -6,7 +6,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::path::JsonPathInst;
 use sha2::Digest;
 
-use super::attributes::SubgraphRequestResendCountKey;
+use super::subgraph::attributes::SubgraphRequestResendCountKey;
 use crate::Context;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;

@@ -25,7 +25,7 @@ use tower::BoxError;
 use url::Url;
 
 use super::apollo::ErrorsConfiguration;
-use super::config_new::attributes::SUBGRAPH_NAME;
+use super::config_new::subgraph::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use super::tracing::apollo_telemetry::LightSpanData;
