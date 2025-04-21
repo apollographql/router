@@ -33,13 +33,6 @@ use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAtt
 use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventsConfig;
 use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 
-#[derive(Clone)]
-pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
-#[derive(Default, Clone)]
-pub(crate) struct DisplayRouterResponse(pub(crate) bool);
-#[derive(Default, Clone)]
-pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
-
 /// Events are
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]

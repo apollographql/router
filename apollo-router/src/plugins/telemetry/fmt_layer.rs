@@ -274,7 +274,6 @@ mod tests {
     use parking_lot::Mutex;
     use parking_lot::MutexGuard;
     use tests::events::EventLevel;
-    use tests::events::RouterResponseBodyExtensionType;
     use tracing::error;
     use tracing::info;
     use tracing::info_span;
@@ -291,6 +290,7 @@ mod tests {
     use crate::plugins::telemetry::config_new::logging::JsonFormat;
     use crate::plugins::telemetry::config_new::logging::RateLimit;
     use crate::plugins::telemetry::config_new::logging::TextFormat;
+    use crate::plugins::telemetry::config_new::router::events::RouterResponseBodyExtensionType;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::otel;
     use crate::services::connector::request_service::Request;

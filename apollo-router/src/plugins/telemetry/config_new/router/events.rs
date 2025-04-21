@@ -1,7 +1,5 @@
 use std::fmt::Debug;
 
-#[cfg(test)]
-use http::HeaderValue;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use schemars::JsonSchema;
@@ -14,14 +12,19 @@ use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_STATUS;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_VERSION;
 use crate::plugins::telemetry::config_new::events::CustomEvents;
-use crate::plugins::telemetry::config_new::events::DisplayRouterRequest;
-use crate::plugins::telemetry::config_new::events::DisplayRouterResponse;
-use crate::plugins::telemetry::config_new::events::RouterResponseBodyExtensionType;
+use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::services::router;
+
+#[derive(Clone)]
+pub(crate) struct DisplayRouterRequest(pub(crate) EventLevel);
+#[derive(Default, Clone)]
+pub(crate) struct DisplayRouterResponse(pub(crate) bool);
+#[derive(Default, Clone)]
+pub(crate) struct RouterResponseBodyExtensionType(pub(crate) String);
 
 pub(crate) type RouterEvents =
     CustomEvents<router::Request, router::Response, (), RouterAttributes, RouterSelector>;
@@ -57,7 +60,7 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
             let mut attrs = Vec::with_capacity(4);
 
             #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = response
+            let mut headers: indexmap::IndexMap<String, http::HeaderValue> = response
                 .response
                 .headers()
                 .clone()
