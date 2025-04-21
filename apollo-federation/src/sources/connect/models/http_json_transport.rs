@@ -515,17 +515,14 @@ mod test_make_uri {
 
     use apollo_compiler::collections::IndexMap;
     use http::Uri;
-    use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
     use serde_json_bytes::json;
 
-    use super::HttpJsonTransport;
     use super::*;
     use crate::sources::connect::JSONSelection;
-    use crate::sources::connect::string_template::StringTemplate;
 
     #[test]
-    fn combine_new_and_old_apis() {
+    fn merge_multiple_sources() {
         let transport = HttpJsonTransport {
             source_url: Uri::from_str("http://example.com/a?z=1").ok(),
             connect_template: "/{$args.c}?x={$args.x}".parse().unwrap(),
@@ -540,24 +537,10 @@ mod test_make_uri {
             json!({"b2": "b2", "c": "c", "d2": "d2", "y": "y", "x": "x", "w": "w"}),
         )]);
         let url = transport.make_uri(&inputs).unwrap();
-        assert_eq!(warnings, vec![]);
         assert_eq!(
             url.to_string(),
             "http://example.com/a/b/b2/c/d/d2?z=1&y=y&x=x&w=w"
         );
-    }
-
-    #[test]
-    fn only_new_api() {
-        let transport = HttpJsonTransport {
-            connect_path: JSONSelection::parse("$(['a', $args.a, ''])").ok(),
-            connect_query_params: JSONSelection::parse("$args { b }").ok(),
-            ..Default::default()
-        };
-        let inputs = IndexMap::from_iter([("$args".to_string(), json!({"a": "1", "b": "2"}))]);
-        let url = transport.make_uri(&inputs).unwrap();
-        assert_eq!(warnings, vec![]);
-        assert_eq!(url.to_string(), "/a/1/?b=2");
     }
 
     macro_rules! this {
