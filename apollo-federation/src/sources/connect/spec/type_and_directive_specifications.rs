@@ -470,7 +470,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_1, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {
           query: Query
         }
@@ -512,6 +512,8 @@ mod tests {
           DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
         }
 
         input connect__ConnectBatch {
@@ -521,8 +523,10 @@ mod tests {
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
         }
-        "#);
+        "###);
     }
 
     #[test]
