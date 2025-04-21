@@ -169,7 +169,14 @@ Currently, the router expands all interfaces into implementing types.
 
 GraphOS and router provide many features that help monitor and improve query planning performance, both at build time and runtime. 
 
+### Build time
+
+* Use [schema proposals](https://www.apollographql.com/docs/graphos/platform/schema-management/proposals) to review changes that have a large impact across entities and interfaces
+* Enable [common linter settings](https://www.apollographql.com/docs/graphos/platform/schema-management/linting)
+* Setup [custom checks](https://www.apollographql.com/docs/graphos/platform/schema-management/checks/custom) to do advanced and specific validations, like [limiting the size of query plans](https://github.com/apollosolutions/example-graphos-custom-check-query-planner)
+
 ### Runtime
+
 In the [Router configuration](https://www.apollographql.com/docs/graphos/routing/configuration) there are many settings to help monitor and improve performance impacts. Here are some features all production graphs should consider:
 
 * Monitor your query planner performance with the [standard instruments](https://www.apollographql.com/docs/graphos/routing/observability/telemetry/instrumentation/standard-instruments#query-planning)
@@ -177,9 +184,3 @@ In the [Router configuration](https://www.apollographql.com/docs/graphos/routing
 * Using the cache [warm up features](https://www.apollographql.com/docs/graphos/routing/performance/caching/in-memory#cache-warm-up) included out of the box and using the `dry-run` headers for operations
 * Enabling and configuring [distributed caches for query plans](https://www.apollographql.com/docs/graphos/routing/performance/caching/distributed) to share across router instances
 * Limiting the size of operations (and therefore their query plans) with [request limits](https://www.apollographql.com/docs/graphos/routing/security/request-limits) and the cost with [demand control](https://www.apollographql.com/docs/graphos/routing/security/demand-control)
-
-### Build time
-
-* Use [schema proposals](https://www.apollographql.com/docs/graphos/platform/schema-management/proposals) to review changes that have a large impact across entities and interfaces
-* Enable [common linter settings](https://www.apollographql.com/docs/graphos/platform/schema-management/linting)
-* Setup [custom checks](https://www.apollographql.com/docs/graphos/platform/schema-management/checks/custom) to do advanced and specific validations, like [limiting the size of query plans](https://github.com/apollosolutions/example-graphos-custom-check-query-planner)
