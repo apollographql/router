@@ -18,7 +18,6 @@ use itertools::Itertools;
 use serde_json_bytes::Value;
 
 pub(crate) use self::encoding::UriString;
-use crate::sources::connect::ApplyToError;
 use crate::sources::connect::JSONSelection;
 
 /// A parsed string template, containing a series of [`Part`]s.
@@ -112,12 +111,8 @@ impl StringTemplate {
     }
 
     /// Interpolate the expression as a URI, percent-encoding parts as needed.
-    pub(crate) fn interpolate_uri(
-        &self,
-        vars: &IndexMap<String, Value>,
-    ) -> Result<(Uri, Vec<ApplyToError>), Error> {
+    pub fn interpolate_uri(&self, vars: &IndexMap<String, Value>) -> Result<Uri, Error> {
         let mut result = UriString::new();
-        let mut warnings = Vec::new();
         for part in &self.parts {
             match part {
                 Part::Constant(constant) => {
@@ -137,7 +132,7 @@ impl StringTemplate {
                     })?;
                 }
                 Part::Expression(_) => {
-                    warnings.extend(part.interpolate(vars, &mut result)?);
+                    part.interpolate(vars, &mut result)?;
                 }
             };
         }
@@ -151,7 +146,6 @@ impl StringTemplate {
             message: format!("Invalid URI: {}", err),
             location: 0..result.as_ref().len(),
         })
-        .map(|uri| (uri, warnings))
     }
 }
 
@@ -218,15 +212,15 @@ impl Part {
         &self,
         vars: &IndexMap<String, Value>,
         mut output: Output,
-    ) -> Result<Vec<ApplyToError>, Error> {
+    ) -> Result<(), Error> {
         match self {
-            Part::Constant(Constant { value, .. }) => output
-                .write_str(value)
-                .map(|_| Vec::new())
-                .map_err(|err| err.into()),
+            Part::Constant(Constant { value, .. }) => {
+                output.write_str(value).map_err(|err| err.into())
+            }
             Part::Expression(Expression { expression, .. }) => {
-                let (value, warnings) = expression.apply_with_vars(&Value::Null, vars);
-                write_value(&mut output, value.as_ref().unwrap_or(&Value::Null)).map(|_| warnings)
+                // TODO: do something with the ApplyTo errors
+                let (value, _errs) = expression.apply_with_vars(&Value::Null, vars);
+                write_value(&mut output, value.as_ref().unwrap_or(&Value::Null))
             }
         }
         .map_err(|err| Error {
@@ -337,15 +331,7 @@ mod encoding {
             }
         }
 
-        pub(crate) fn ends_with(&self, suffix: &str) -> bool {
-            self.value.ends_with(suffix)
-        }
-
-        pub(crate) fn is_empty(&self) -> bool {
-            self.value.is_empty()
-        }
-
-        /// Write a bit of trusted input without encoding, like a constant piece of a template
+        /// Write a bit of trusted input, like a constant piece of a template, only encoding illegal symbols.
         pub(crate) fn write_trusted(&mut self, s: &str) -> std::fmt::Result {
             write!(
                 &mut self.value,
@@ -354,12 +340,25 @@ mod encoding {
             )
         }
 
-        pub(super) fn contains(&self, pattern: &str) -> bool {
+        /// Add a pre-encoded string to the URI. Used for merging without duplicating percent-encoding.
+        pub(crate) fn write_without_encoding(&mut self, s: &str) -> std::fmt::Result {
+            self.value.write_str(s)
+        }
+
+        pub(crate) fn contains(&self, pattern: &str) -> bool {
             self.value.contains(pattern)
+        }
+
+        pub(crate) fn ends_with(&self, pattern: char) -> bool {
+            self.value.ends_with(pattern)
         }
 
         pub(crate) fn into_string(self) -> String {
             self.value
+        }
+
+        pub(crate) fn is_empty(&self) -> bool {
+            self.value.is_empty()
         }
     }
 
@@ -565,6 +564,7 @@ mod test_interpolate_uri {
     #[rstest]
     #[case::leading_slash("/path")]
     #[case::trailing_slash("path/")]
+    #[case::sandwich_slash("/path/")]
     #[case::no_slash("path")]
     #[case::query_params("?something&something")]
     #[case::fragment("#blah")]
@@ -591,6 +591,7 @@ mod test_interpolate_uri {
         assert!(uri.path_and_query().is_some());
         assert!(uri.authority().is_some());
         assert!(uri.scheme().is_some());
+        assert_eq!(uri.to_string(), val);
     }
 
     /// Values are all strings, they can't have semantic value for HTTP. That means no dynamic paths,
@@ -622,34 +623,33 @@ mod test_interpolate_uri {
     fn json_value_serialization() {
         // `extra` would be illegal (we don't serialize arrays), but any unused values should be ignored
         let vars = &this! {
-            "number": 1.2,
+            "int": 1,
+            "float": 1.2,
             "bool": true,
             "null": null,
             "string": "string",
             "extra": []
         };
 
-        let template =
-            StringTemplate::from_str("/{$this.number}/{$this.bool}/{$this.null}/{$this.string}")
-                .unwrap();
+        let template = StringTemplate::from_str(
+            "/{$this.int}/{$this.float}/{$this.bool}/{$this.null}/{$this.string}",
+        )
+        .unwrap();
 
         let uri = template.interpolate(vars).expect("Failed to interpolate");
 
-        assert_eq!(uri.to_string(), "/1.2/true//string")
+        assert_eq!(uri.to_string(), "/1/1.2/true//string")
     }
 
     #[test]
     fn special_symbols_in_literal() {
-        let template = StringTemplate::from_str("/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='")
-            .expect("Failed to parse URL template");
+        let literal = "/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='";
+        let template = StringTemplate::from_str(literal).expect("Failed to parse URL template");
         let url = template
             .interpolate_uri(&Default::default())
             .expect("Failed to generate URL");
 
-        assert_eq!(
-            url.to_string(),
-            "/?brackets=[]&comma=,&parens=()&semi=;&colon=:&at=@&dollar=$&excl=!&plus=+&astr=*&quot='"
-        );
+        assert_eq!(url.to_string(), literal);
     }
 
     /// If a user writes a string template that includes _illegal_ characters which must be encoded,

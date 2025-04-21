@@ -5,7 +5,6 @@ use apollo_federation::sources::connect::HTTPMethod;
 use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::MakeUriError;
-use displaydoc::Display;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
@@ -32,7 +31,7 @@ pub(crate) fn make_request(
     original_request: &connect::Request,
     debug: &Option<Arc<Mutex<ConnectorContext>>>,
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
-    let (uri, _apply_to_errors) = transport.make_uri(&inputs)?;
+    let uri = transport.make_uri(&inputs)?;
 
     let method = transport.method;
     let request = http::Request::builder()
@@ -170,16 +169,16 @@ fn add_headers(
     )
 }
 
-#[derive(Error, Display, Debug)]
+#[derive(Error, Debug)]
 pub(crate) enum HttpJsonTransportError {
-    /// Could not generate HTTP request: {0}
+    #[error("Could not generate HTTP request: {0}")]
     InvalidNewRequest(#[source] http::Error),
-    /// Could not serialize body: {0}
+    #[error("Could not serialize body: {0}")]
     JsonBodySerialization(#[from] serde_json::Error),
-    /// Could not serialize body: {0}
+    #[error("Could not serialize body: {0}")]
     FormBodySerialization(&'static str),
-    /// Error building URI: {0:?}
-    InvalidUri(#[from] MakeUriError),
+    #[error(transparent)]
+    MakeUri(#[from] MakeUriError),
 }
 
 #[cfg(test)]

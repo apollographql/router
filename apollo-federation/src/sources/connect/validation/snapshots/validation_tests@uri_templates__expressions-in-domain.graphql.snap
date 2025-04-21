@@ -6,28 +6,28 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/uri_templ
 [
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.entireDomain` must not contain dynamic pieces in the domain section (before the first `/`, `?`, or `#`).",
+        message: "`GET` in `@connect(http:)` on `Query.entireDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
         locations: [
             10:21..10:28,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.endOfDomain` must not contain dynamic pieces in the domain section (before the first `/`, `?`, or `#`).",
+        message: "`GET` in `@connect(http:)` on `Query.endOfDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
         locations: [
             15:21..15:39,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.startOfDomain` must not contain dynamic pieces in the domain section (before the first `/`, `?`, or `#`).",
+        message: "`GET` in `@connect(http:)` on `Query.startOfDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
         locations: [
             20:21..20:28,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "`GET` in `@connect(http:)` on `Query.middleOfDomain` must not contain dynamic pieces in the domain section (before the first `/`, `?`, or `#`).",
+        message: "`GET` in `@connect(http:)` on `Query.middleOfDomain` must not contain dynamic pieces in the domain section (before the first `/` or `?`).",
         locations: [
             25:21..25:35,
         ],
