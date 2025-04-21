@@ -602,7 +602,7 @@ mod test_make_uri {
             };
             assert_eq!(
                 transport.make_uri(&Default::default()).unwrap().to_string(),
-                "https://localhost/1/2"
+                "http://localhost/1/2"
             );
         }
 

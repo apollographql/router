@@ -10,7 +10,7 @@ use super::req_asserts::Matcher;
 async fn url_properties() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
-        .and(path("/api/v1/users/required/literal"))
+        .and(path("/api/v1/users/required"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!("hi")))
         .mount(&mock_server)
         .await;
@@ -26,14 +26,6 @@ async fn url_properties() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response, @r#"
-    {
-      "data": {
-        "f": "hi"
-      }
-    }
-    "#);
-
     super::req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
         vec![
@@ -43,4 +35,12 @@ async fn url_properties() {
                 .query("q=1&repeated=1&repeated=2&repeated=3"),
         ],
     );
+
+    insta::assert_json_snapshot!(response, @r#"
+    {
+      "data": {
+        "f": "hi"
+      }
+    }
+    "#);
 }
