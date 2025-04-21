@@ -576,6 +576,10 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
+        self.referencers().interface_types.contains_key(type_name)
+    }
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
