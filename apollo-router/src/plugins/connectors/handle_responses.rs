@@ -723,9 +723,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: None,
@@ -835,9 +833,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data { id }").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
@@ -953,8 +949,8 @@ mod tests {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
                 method: HTTPMethod::Post,
-                headers: Default::default(),
                 body: Some(JSONSelection::parse("ids: $batch.id").unwrap()),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data { id name }").unwrap(),
             entity_resolver: Some(EntityResolver::TypeBatch),
@@ -1078,9 +1074,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Implicit),
@@ -1206,9 +1200,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("$.data").unwrap(),
             entity_resolver: Some(EntityResolver::Explicit),
@@ -1474,9 +1466,7 @@ mod tests {
             transport: HttpJsonTransport {
                 source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: selection.clone(),
             entity_resolver: None,

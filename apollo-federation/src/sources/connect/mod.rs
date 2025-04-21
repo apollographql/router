@@ -12,7 +12,6 @@ mod models;
 pub use models::ConnectorBatchSettings;
 pub(crate) mod spec;
 mod string_template;
-mod url_template;
 pub mod validation;
 pub(crate) mod variable;
 
@@ -26,7 +25,7 @@ pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::CustomConfiguration;
 pub use spec::ConnectSpec;
-pub use url_template::URLTemplate;
+pub use string_template::StringTemplate;
 pub use variable::Namespace;
 
 pub use self::models::Connector;
@@ -34,6 +33,7 @@ pub use self::models::EntityResolver;
 pub use self::models::HTTPMethod;
 pub use self::models::HeaderSource;
 pub use self::models::HttpJsonTransport;
+pub use self::models::MakeUriError;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;

@@ -3,4 +3,5 @@ extend schema
 
 type Query {
   resources: [String!]! @connect(http: { GET: "/resources" }, selection: "$")
+  dynamic(domain: String): String @connect(http: { GET: "{$dynamic}" }, selection: "$")
 }
