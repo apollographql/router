@@ -39,7 +39,7 @@ pub(crate) fn validate_key_directives(
     Ok(())
 }
 
-/// Instances of `@key(fields:)` cannot interface or union fields
+/// Instances of `@key(fields:)` cannot select interface or union fields
 struct DenyUnionAndInterfaceFields<'schema> {
     schema: &'schema Schema,
 }
@@ -89,6 +89,10 @@ impl DenyAliases {
 
 impl SchemaFieldSetValidator for DenyAliases {
     fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
+        // This largely duuplicates the logic of `check_absence_of_aliases`, which was implemented for the QP rewrite.
+        // That requires a valid schema and some operation data, which we don't have because were only working with a
+        // schema. Additionally, that implementation uses a slightly different error message than that used by the JS
+        // version of composition.
         if let Some(alias) = field.alias.as_ref() {
             errors.errors.push(SingleFederationError::KeyInvalidFields {
                 message: format!("Cannot use alias \"{}\" in \"{}.{}\": aliases are not currently supported in @key", alias, parent_ty, field.name),

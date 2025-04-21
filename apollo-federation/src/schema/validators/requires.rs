@@ -62,6 +62,10 @@ impl DenyAliases {
 
 impl SchemaFieldSetValidator for DenyAliases {
     fn visit_field(&self, parent_ty: &Name, field: &Field, errors: &mut MultipleFederationErrors) {
+        // This largely duuplicates the logic of `check_absence_of_aliases`, which was implemented for the QP rewrite.
+        // That requires a valid schema and some operation data, which we don't have because were only working with a
+        // schema. Additionally, that implementation uses a slightly different error message than that used by the JS
+        // version of composition.
         if let Some(alias) = field.alias.as_ref() {
             errors.errors.push(SingleFederationError::RequiresInvalidFields {
                 message: format!("Cannot use alias \"{}\" in \"{}.{}\": aliases are not currently supported in @requires", alias, parent_ty, field.name),
