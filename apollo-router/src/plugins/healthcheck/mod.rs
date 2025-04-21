@@ -45,7 +45,7 @@ struct Health {
     status: HealthStatus,
 }
 
-/// Configuration options pertaining to the readiness health interval sub-component.
+/// Configuration for readiness probe interval of health check API endpoint.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
@@ -53,26 +53,28 @@ pub(crate) struct ReadinessIntervalConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>", default)]
-    /// The sampling interval (default: 5s)
+    /// The sampling interval (default: 5s).
+    /// A router becomes unready if the number of rejections within one interval exceeds an allowed limit.
     pub(crate) sampling: Duration,
 
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[serde(serialize_with = "humantime_serde::serialize")]
     #[schemars(with = "Option<String>")]
-    /// The unready interval (default: 2 * sampling interval)
+    /// The unready interval (default: 2 * sampling interval).
+    /// Once it becomes unready, a router stays unready for this duration.
     pub(crate) unready: Option<Duration>,
 }
 
-/// Configuration options pertaining to the readiness health sub-component.
+/// Configuration for readiness probe of health check API endpoint
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct ReadinessConfig {
-    /// The readiness interval configuration
+    /// Readiness interval configuration
     pub(crate) interval: ReadinessIntervalConfig,
 
-    /// How many rejections are allowed in an interval (default: 100)
-    /// If this number is exceeded, the router will start to report unready.
+    /// Maximum number of rejected operations in an interval, above which 
+    /// the router reports itself as unready (default: 100)
     pub(crate) allowed: usize,
 }
 
@@ -94,23 +96,21 @@ impl Default for ReadinessConfig {
     }
 }
 
-/// Configuration options pertaining to the health component.
+/// Configuration for health check API endpoint
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Config {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:8088
+    /// Socket address to listen on (default: 127.0.0.1:8088)
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the health check
+    /// Flag to enable health check endpoint (default: true) 
     pub(crate) enabled: bool,
 
-    /// Optionally set a custom healthcheck path
-    /// Defaults to /health
+    /// Path of health check endpoint (default: /health)
     pub(crate) path: String,
 
-    /// Optionally specify readiness configuration
+    /// Readiness probe configuration
     pub(crate) readiness: ReadinessConfig,
 }
 
