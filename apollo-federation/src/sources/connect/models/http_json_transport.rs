@@ -521,25 +521,39 @@ mod test_make_uri {
     use super::*;
     use crate::sources::connect::JSONSelection;
 
+    /// Take data from all the places it can come from and make sure they combine in the right order
     #[test]
-    fn merge_multiple_sources() {
+    fn merge_all_sources() {
         let transport = HttpJsonTransport {
-            source_url: Uri::from_str("http://example.com/a?z=1").ok(),
-            connect_template: "/{$args.c}?x={$args.x}".parse().unwrap(),
-            source_path: JSONSelection::parse("$(['b', $args.b2])").ok(),
-            connect_path: JSONSelection::parse("$(['d', $args.d2])").ok(),
-            source_query_params: JSONSelection::parse("y: $args.y").ok(),
-            connect_query_params: JSONSelection::parse("w: $args.w").ok(),
+            source_url: Uri::from_str(
+                "http://example.com/sourceUri?shared=sourceUri&sourceUri=sourceUri",
+            )
+            .ok(),
+            connect_template: "/{$args.connectUri}?shared={$args.connectUri}&{$args.connectUri}={$args.connectUri}".parse().unwrap(),
+            source_path: JSONSelection::parse("$args.sourcePath").ok(),
+            connect_path: JSONSelection::parse("$args.connectPath").ok(),
+            source_query_params: JSONSelection::parse("$args.sourceQuery").ok(),
+            connect_query_params: JSONSelection::parse("$args.connectQuery").ok(),
             ..Default::default()
         };
         let inputs = IndexMap::from_iter([(
             "$args".to_string(),
-            json!({"b2": "b2", "c": "c", "d2": "d2", "y": "y", "x": "x", "w": "w"}),
+            json!({
+                "connectUri": "connectUri",
+                "sourcePath": ["sourcePath1", "sourcePath2"],
+                "connectPath": ["connectPath1", "connectPath2"],
+                "sourceQuery": {"shared": "sourceQuery", "sourceQuery": "sourceQuery"},
+                "connectQuery": {"shared": "connectQuery", "connectQuery": "connectQuery"},
+            }),
         )]);
         let url = transport.make_uri(&inputs).unwrap();
         assert_eq!(
             url.to_string(),
-            "http://example.com/a/b/b2/c/d/d2?z=1&y=y&x=x&w=w"
+            "http://example.com/sourceUri/sourcePath1/sourcePath2/connectUri/connectPath1/connectPath2\
+            ?shared=sourceUri&sourceUri=sourceUri\
+            &shared=sourceQuery&sourceQuery=sourceQuery\
+            &shared=connectUri&connectUri=connectUri\
+            &shared=connectQuery&connectQuery=connectQuery"
         );
     }
 
@@ -556,6 +570,7 @@ mod test_make_uri {
         use rstest::rstest;
 
         use super::*;
+
         #[rstest]
         #[case::connect_only("https://localhost:8080/v1", "/hello")]
         #[case::source_only("https://localhost:8080/v1/", "hello")]
@@ -573,6 +588,21 @@ mod test_make_uri {
             assert_eq!(
                 transport.make_uri(&Default::default()).unwrap().to_string(),
                 "https://localhost:8080/v1/hello"
+            );
+        }
+
+        #[rstest]
+        #[case::when_base_has_trailing("http://localhost/")]
+        #[case::when_base_does_not_have_trailing("http://localhost")]
+        fn handle_slashes_when_adding_path_expression(#[case] base: &str) {
+            let transport = HttpJsonTransport {
+                source_url: Uri::from_str(base).ok(),
+                source_path: JSONSelection::parse("$([1, 2])").ok(),
+                ..Default::default()
+            };
+            assert_eq!(
+                transport.make_uri(&Default::default()).unwrap().to_string(),
+                "https://localhost/1/2"
             );
         }
 
@@ -642,18 +672,6 @@ mod test_make_uri {
         }
 
         #[test]
-        fn with_merged_query_params() {
-            let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1?foo=bar").ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                ..Default::default()
-            };
-            assert_eq!(
-                transport.make_uri(&this! {"id": 42 }).unwrap().to_string(),
-                "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-            );
-        }
-        #[test]
         fn with_trailing_slash_in_base_plus_query_params() {
             let transport = HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1/?foo=bar").ok(),
@@ -698,7 +716,7 @@ mod test_make_uri {
         }
 
         #[test]
-        fn combine_from_both() {
+        fn combine_from_both_uris() {
             let transport = HttpJsonTransport {
                 source_url: Uri::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "?c=d".parse().unwrap(),
@@ -720,6 +738,25 @@ mod test_make_uri {
             assert_eq!(
                 transport.make_uri(&Default::default()).unwrap(),
                 "http://localhost/users?a=b&a=d"
+            )
+        }
+
+        #[test]
+        fn repeated_params_from_array() {
+            let transport = HttpJsonTransport {
+                connect_template: "http://localhost".parse().unwrap(),
+                connect_query_params: JSONSelection::parse("$args.connectQuery").ok(),
+                ..Default::default()
+            };
+            let inputs = IndexMap::from_iter([(
+                "$args".to_string(),
+                json!({
+                    "connectQuery": {"multi": ["first", "second"]},
+                }),
+            )]);
+            assert_eq!(
+                transport.make_uri(&inputs).unwrap(),
+                "http://localhost?multi=first&multi=second"
             )
         }
     }
