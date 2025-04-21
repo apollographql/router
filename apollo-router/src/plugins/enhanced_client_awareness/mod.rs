@@ -82,3 +82,6 @@ register_plugin!(
     "enhanced_client_awareness",
     EnhancedClientAwareness
 );
+
+#[cfg(test)]
+mod tests;
