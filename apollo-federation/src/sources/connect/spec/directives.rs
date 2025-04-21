@@ -194,7 +194,7 @@ impl SourceHTTPArguments {
 
             if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
                 let base_url_value = value.as_str().ok_or(internal!(
-                    "`baseURL` field in `@source` directive's `http` field is not a string"
+                    "`baseURL` field in `@source` directive's `http.baseURL` field is not a string"
                 ))?;
 
                 base_url = Some(
@@ -212,13 +212,13 @@ impl SourceHTTPArguments {
                 );
             } else if name == PATH_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    "`{}` field in `@source` directive's `http.path` field is not a string",
                     PATH_ARGUMENT_NAME
                 )))?;
                 path = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
             } else if name == QUERY_PARAMS_ARGUMENT_NAME.as_str() {
                 let value = value.as_str().ok_or(internal!(format!(
-                    "`{}` field in `@connect` directive's `http` field is not a string",
+                    "`{}` field in `@source` directive's `http.queryParams` field is not a string",
                     QUERY_PARAMS_ARGUMENT_NAME
                 )))?;
                 query = Some(JSONSelection::parse(value).map_err(|e| internal!(e.message))?);
