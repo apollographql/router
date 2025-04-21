@@ -201,12 +201,12 @@ impl HttpJsonTransport {
         let path = path.into_string();
         let query = query.into_string();
 
-        uri_parts.path_and_query = match (path.is_empty(), query.is_empty()) {
-            (true, true) => None,
-            (true, false) => Some(PathAndQuery::try_from(format!("?{query}"))?),
-            (false, true) => Some(PathAndQuery::try_from(path)?),
-            (false, false) => Some(PathAndQuery::try_from(format!("{path}?{query}"))?),
-        };
+        uri_parts.path_and_query = Some(match (path.is_empty(), query.is_empty()) {
+            (true, true) => PathAndQuery::from_static(""),
+            (true, false) => PathAndQuery::try_from(format!("?{query}"))?,
+            (false, true) => PathAndQuery::try_from(path)?,
+            (false, false) => PathAndQuery::try_from(format!("{path}?{query}"))?,
+        });
 
         Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)
     }
@@ -766,6 +766,21 @@ mod test_make_uri {
         assert_eq!(
             transport.make_uri(&Default::default()).unwrap(),
             "http://localhost/source%20path/connect%20path?param=source%20param&param=connect%20param"
+        )
+    }
+
+    /// Regression test for a very specific case where the resulting `Uri` might not be valid
+    /// because we did _too little_ work.
+    #[test]
+    fn empty_path_and_query() {
+        let transport = HttpJsonTransport {
+            source_url: None,
+            connect_template: "http://localhost/".parse().unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(
+            transport.make_uri(&Default::default()).unwrap(),
+            "http://localhost/"
         )
     }
 }
