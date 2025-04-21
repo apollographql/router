@@ -4,6 +4,28 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.61.4] - 2025-04-16
+
+## 🐛 Fixes
+
+### Entity-cache: handle multiple key directives ([PR #7228](https://github.com/apollographql/router/pull/7228))
+
+This PR fixes a bug in entity caching introduced by the fix in https://github.com/apollographql/router/pull/6888 for cases where several `@key` directives with different fields were declared on a type as documented [here](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#managing-types).
+
+For example if you have this kind of entity in your schema:
+
+```graphql
+type Product @key(fields: "upc") @key(fields: "sku") {
+  upc: ID!
+  sku: ID!
+  name: String
+}
+```
+
+By [@duckki](https://github.com/duckki) & [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/7228
+
+
+
 # [1.61.3] - 2025-04-14
 
 ## 🐛 Fixes

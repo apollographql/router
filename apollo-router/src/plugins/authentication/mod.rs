@@ -551,12 +551,8 @@ fn authenticate(
             1,
             kind = "JWT"
         );
-        u64_counter!(
-            "apollo.router.operations.authentication.jwt",
-            "Number of requests with JWT authentication",
-            1,
-            authentication.jwt.failed = true
-        );
+        let failed = true;
+        increment_jwt_counter_metric(failed);
         tracing::info!(message = %error, "jwt authentication failure");
         let response = router::Response::infallible_builder()
             .error(
@@ -570,6 +566,16 @@ fn authenticate(
             .context(context)
             .build();
         ControlFlow::Break(response)
+    }
+
+    /// This is the documented metric
+    fn increment_jwt_counter_metric(failed: bool) {
+        u64_counter!(
+            "apollo.router.operations.authentication.jwt",
+            "Number of requests with JWT authentication",
+            1,
+            authentication.jwt.failed = failed
+        );
     }
 
     let mut jwt = None;
@@ -663,11 +669,19 @@ fn authenticate(
             1,
             kind = "JWT"
         );
+        // Apparently intended to be `apollo.router.operations.authentication.jwt` like above,
+        // but has existed for two years with a buggy name. Keep it for now.
         u64_counter!(
             "apollo.router.operations.jwt",
-            "Number of requests with JWT authentication",
+            "Number of requests with JWT successful authentication (deprecated, \
+                use `apollo.router.operations.authentication.jwt` \
+                with `authentication.jwt.failed = false` instead)",
             1
         );
+        // Use the fixed name too:
+        let failed = false;
+        increment_jwt_counter_metric(failed);
+
         return ControlFlow::Continue(request);
     }
 

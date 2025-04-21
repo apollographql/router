@@ -378,11 +378,7 @@ impl Service<QueryPlannerRequest> for QueryPlannerService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if crate::compute_job::is_full() {
-            Poll::Pending
-        } else {
-            Poll::Ready(Ok(()))
-        }
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {

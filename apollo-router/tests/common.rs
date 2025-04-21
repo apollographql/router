@@ -160,6 +160,8 @@ pub struct IntegrationTest {
     log: String,
     subgraph_context: Arc<Mutex<Option<SpanContext>>>,
     logs: Vec<String>,
+    env: HashMap<String, String>,
+    client: reqwest::Client,
 }
 
 impl IntegrationTest {
@@ -407,6 +409,7 @@ impl IntegrationTest {
         mut subgraph_overrides: HashMap<String, String>,
         log: Option<String>,
         subgraph_callback: Option<Box<dyn Fn() + Send + Sync>>,
+        env: HashMap<String, String>,
     ) -> Self {
         let redis_namespace = Uuid::new_v4().to_string();
         let telemetry = telemetry.unwrap_or_default();
@@ -465,6 +468,7 @@ impl IntegrationTest {
         });
 
         Self {
+            client: reqwest::Client::new(),
             router: None,
             router_location: Self::router_location(),
             test_config_location,
@@ -484,6 +488,7 @@ impl IntegrationTest {
             log: log.unwrap_or_else(|| "error,apollo_router=info".to_owned()),
             subgraph_context,
             logs: vec![],
+            env,
         }
     }
 
@@ -528,6 +533,7 @@ impl IntegrationTest {
         }
 
         router
+            .envs(self.env.iter())
             .args(dbg!([
                 "--hr",
                 "--config",
@@ -659,6 +665,7 @@ impl IntegrationTest {
         );
         let telemetry = self.telemetry.clone();
         let extra_propagator = self.extra_propagator.clone();
+        let client = self.client.clone();
 
         let url = format!("http://{}", self.bind_address());
         let subgraph_context = self.subgraph_context.clone();
@@ -666,8 +673,6 @@ impl IntegrationTest {
             let span = info_span!("client_request");
             let trace_id = span.context().span().span_context().trace_id();
             async move {
-                let client = reqwest::Client::new();
-
                 let mut builder = client.post(url).header(CONTENT_TYPE, query.content_type);
 
                 for (name, value) in query.headers {
