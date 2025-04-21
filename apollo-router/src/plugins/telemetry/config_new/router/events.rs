@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::selectors::RouterSelector;
 use crate::Context;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_BODY;
 use crate::plugins::telemetry::config_new::attributes::HTTP_RESPONSE_HEADERS;
@@ -16,7 +17,6 @@ use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::services::router;
 
 #[derive(Clone)]

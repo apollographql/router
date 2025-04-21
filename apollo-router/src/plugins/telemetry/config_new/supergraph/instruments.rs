@@ -3,12 +3,12 @@ use std::fmt::Debug;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use super::selectors::SupergraphSelector;
+use super::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
-use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;

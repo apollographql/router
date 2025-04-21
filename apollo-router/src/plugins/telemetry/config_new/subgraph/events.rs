@@ -8,13 +8,13 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::selectors::SubgraphSelector;
 use crate::Context;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::events::CustomEvents;
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::services::subgraph;
 

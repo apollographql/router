@@ -8,6 +8,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::selectors::SupergraphSelector;
 use crate::Context;
 use crate::graphql;
 use crate::plugins::telemetry::config_new::attributes::HTTP_REQUEST_BODY;
@@ -19,7 +20,6 @@ use crate::plugins::telemetry::config_new::events::CustomEvents;
 use crate::plugins::telemetry::config_new::events::EventLevel;
 use crate::plugins::telemetry::config_new::events::StandardEventConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::services::supergraph;
 

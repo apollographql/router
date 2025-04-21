@@ -4,6 +4,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::selectors::SubgraphSelector;
+use super::selectors::SubgraphValue;
 use crate::Context;
 use crate::plugins::telemetry::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -13,8 +15,6 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
-use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
-use crate::plugins::telemetry::config_new::selectors::SubgraphValue;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;

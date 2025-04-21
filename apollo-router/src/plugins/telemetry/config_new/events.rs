@@ -24,13 +24,13 @@ use crate::plugins::telemetry::config_new::connector::selectors::ConnectorSelect
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::router::events::RouterEventsConfig;
-use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
-use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventsConfig;
+use crate::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::supergraph::events::SupergraphEventsConfig;
+use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::plugins::telemetry::dynamic_attribute::EventDynAttribute;
 
 /// Events are

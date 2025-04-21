@@ -428,7 +428,7 @@ mod test {
 
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
-    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
 
     fn on_response(conditional: Conditional<RouterSelector>) -> Option<Value> {
         conditional.on_response(

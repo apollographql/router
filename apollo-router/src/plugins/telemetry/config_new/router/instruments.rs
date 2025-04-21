@@ -4,6 +4,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::selectors::RouterSelector;
+use super::selectors::RouterValue;
 use crate::Context;
 use crate::plugins::telemetry::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -15,8 +17,6 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomInstruments;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
-use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-use crate::plugins::telemetry::config_new::selectors::RouterValue;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
 
