@@ -17,7 +17,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
