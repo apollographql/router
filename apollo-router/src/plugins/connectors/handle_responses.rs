@@ -160,39 +160,36 @@ impl RawResponse {
                 let mut extensions = None;
 
                 // Do we have errors settings for this connector?
-                if let Some(error_settings) = &connector.error_settings {
-                    let inputs = key.inputs().merge(
-                        &connector.response_variables,
-                        &connector.response_headers,
-                        connector.config.as_ref(),
-                        context,
-                        Some(parts.status.as_u16()),
-                        supergraph_request,
-                        Some(&parts),
-                    );
+                let inputs = key.inputs().merge(
+                    &connector.response_variables,
+                    &connector.response_headers,
+                    connector.config.as_ref(),
+                    context,
+                    Some(parts.status.as_u16()),
+                    supergraph_request,
+                    Some(&parts),
+                );
 
-                    // Do we have a error message mapping set for this connector?
-                    if let Some(message_selection) = &error_settings.message {
-                        // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                        let (res, _apply_to_errors) =
-                            message_selection.apply_with_vars(&data, &inputs);
+                // Do we have a error message mapping set for this connector?
+                if let Some(message_selection) = &connector.error_settings.message {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) = message_selection.apply_with_vars(&data, &inputs);
 
-                        message = res
-                            .unwrap_or_else(|| Value::Null)
-                            .as_str()
-                            .unwrap_or_default()
-                            .to_string();
-                    }
+                    message = res
+                        .unwrap_or_else(|| Value::Null)
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string();
+                }
 
-                    // Do we have a error extensions mapping set for this connector?
-                    if let Some(extensions_selection) = &error_settings.extensions {
-                        // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
-                        let (res, _apply_to_errors) =
-                            extensions_selection.apply_with_vars(&data, &inputs);
+                // Do we have a error extensions mapping set for this connector?
+                if let Some(extensions_selection) = &connector.error_settings.extensions {
+                    // TODO: In the future, we'll want to add to the debug context. However, we'll need a "v2" debug payload before we can do that.
+                    let (res, _apply_to_errors) =
+                        extensions_selection.apply_with_vars(&data, &inputs);
 
-                        // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
-                        extensions = res.and_then(|e| e.as_object().cloned());
-                    }
+                    // TODO: Currently this "fails silently". In the future, we probably add a warning to the debugger info.
+                    extensions = res.and_then(|e| e.as_object().cloned());
                 }
 
                 // Now we can create the error object using either the default message or the message calculated by the JSONSelection
@@ -734,7 +731,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -844,7 +841,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -961,7 +958,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         });
 
         let keys = connector
@@ -1085,7 +1082,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()
@@ -1211,7 +1208,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         });
 
         let response_plaintext: http::Response<RouterBody> = http::Response::builder()
@@ -1480,7 +1477,7 @@ mod tests {
                 .collect(),
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         });
 
         let response1: http::Response<RouterBody> = http::Response::builder()

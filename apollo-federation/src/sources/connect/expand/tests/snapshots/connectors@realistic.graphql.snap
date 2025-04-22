@@ -284,12 +284,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
     "connectors_Query_filterUsersByEmailDomain_0": Connector {
         id: ConnectId {
@@ -440,12 +438,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
     "connectors_Query_usersByCompany_0": Connector {
         id: ConnectId {
@@ -646,12 +642,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
@@ -1011,11 +1005,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/re
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
 }

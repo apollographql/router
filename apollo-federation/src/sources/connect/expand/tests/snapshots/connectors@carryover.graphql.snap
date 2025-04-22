@@ -159,12 +159,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
     "one_Query_t_0": Connector {
         id: ConnectId {
@@ -368,12 +366,10 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
     "one_T_r_0": Connector {
         id: ConnectId {
@@ -499,11 +495,9 @@ input_file: apollo-federation/src/sources/connect/expand/tests/schemas/expand/ca
                 max_size: None,
             },
         ),
-        error_settings: Some(
-            ConnectorErrorsSettings {
-                message: None,
-                extensions: None,
-            },
-        ),
+        error_settings: ConnectorErrorsSettings {
+            message: None,
+            extensions: None,
+        },
     },
 }

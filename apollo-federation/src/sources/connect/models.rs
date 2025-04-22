@@ -62,7 +62,7 @@ pub struct Connector {
 
     pub batch_settings: Option<ConnectorBatchSettings>,
 
-    pub error_settings: Option<ConnectorErrorsSettings>,
+    pub error_settings: ConnectorErrorsSettings,
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +78,7 @@ impl ConnectorBatchSettings {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ConnectorErrorsSettings {
     pub message: Option<JSONSelection>,
     pub extensions: Option<JSONSelection>,
@@ -88,7 +88,7 @@ impl ConnectorErrorsSettings {
     fn from_directive(
         connect_errors: Option<&ConnectErrorsArguments>,
         source_errors: Option<&Option<SourceErrorsArguments>>,
-    ) -> Option<Self> {
+    ) -> Self {
         let source_errors = source_errors.and_then(|s| s.as_ref());
 
         // `errors` set at @connect always overrides whatever is set at @source
@@ -108,10 +108,10 @@ impl ConnectorErrorsSettings {
             None
         };
 
-        Some(Self {
+        Self {
             message,
             extensions,
-        })
+        }
     }
 }
 
@@ -211,15 +211,15 @@ impl Connector {
             .variable_references()
             .chain(
                 error_settings
+                    .message
                     .as_ref()
-                    .and_then(|e| e.message.as_ref())
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
             )
             .chain(
                 error_settings
+                    .extensions
                     .as_ref()
-                    .and_then(|e| e.extensions.as_ref())
                     .into_iter()
                     .flat_map(|m| m.variable_references()),
             )
@@ -420,7 +420,7 @@ mod tests {
         let connectors =
             Connector::from_schema(subgraph.schema.schema(), "connectors", ConnectSpec::V0_1)
                 .unwrap();
-        assert_debug_snapshot!(&connectors, @r###"
+        assert_debug_snapshot!(&connectors, @r#"
         {
             ConnectId {
                 label: "connectors.json http: GET /users",
@@ -536,12 +536,10 @@ mod tests {
                         max_size: None,
                     },
                 ),
-                error_settings: Some(
-                    ConnectorErrorsSettings {
-                        message: None,
-                        extensions: None,
-                    },
-                ),
+                error_settings: ConnectorErrorsSettings {
+                    message: None,
+                    extensions: None,
+                },
             },
             ConnectId {
                 label: "connectors.json http: GET /posts",
@@ -669,15 +667,13 @@ mod tests {
                         max_size: None,
                     },
                 ),
-                error_settings: Some(
-                    ConnectorErrorsSettings {
-                        message: None,
-                        extensions: None,
-                    },
-                ),
+                error_settings: ConnectorErrorsSettings {
+                    message: None,
+                    extensions: None,
+                },
             },
         }
-        "###);
+        "#);
     }
 
     #[test]

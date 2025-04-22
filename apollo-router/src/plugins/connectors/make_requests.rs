@@ -879,7 +879,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -964,7 +964,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -1075,7 +1075,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::root_fields(Arc::new(connector), &req), @r#"
@@ -1198,7 +1198,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1320,7 +1320,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1423,7 +1423,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1548,7 +1548,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1708,7 +1708,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1865,7 +1865,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_with_fields_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -1993,7 +1993,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2108,7 +2108,7 @@ mod tests {
             batch_settings: Some(ConnectorBatchSettings { max_size: Some(10) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2228,7 +2228,7 @@ mod tests {
             batch_settings: Some(ConnectorBatchSettings { max_size: Some(5) }),
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::batch_entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2352,7 +2352,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         assert_debug_snapshot!(super::entities_from_request(Arc::new(connector), &req).unwrap(), @r#"
@@ -2430,7 +2430,7 @@ mod tests {
             batch_settings: None,
             request_headers: Default::default(),
             response_headers: Default::default(),
-            error_settings: None,
+            error_settings: Default::default(),
         };
 
         let requests: Vec<_> = super::make_requests(
