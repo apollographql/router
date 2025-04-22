@@ -1485,7 +1485,10 @@ impl ScalarTypeDefinitionPosition {
         directive_name: &Name,
     ) -> bool {
         if let Some(type_) = self.try_get(schema.schema()) {
-            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+            return type_
+                .directives
+                .iter()
+                .any(|directive| &directive.name == directive_name);
         }
         false
     }
@@ -2010,7 +2013,10 @@ impl ObjectTypeDefinitionPosition {
         directive_name: &Name,
     ) -> bool {
         if let Some(type_) = self.try_get(schema.schema()) {
-            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+            return type_
+                .directives
+                .iter()
+                .any(|directive| &directive.name == directive_name);
         }
         false
     }
@@ -3176,7 +3182,10 @@ impl InterfaceTypeDefinitionPosition {
         directive_name: &Name,
     ) -> bool {
         if let Some(type_) = self.try_get(schema.schema()) {
-            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+            return type_
+                .directives
+                .iter()
+                .any(|directive| &directive.name == directive_name);
         }
         false
     }
@@ -4202,7 +4211,10 @@ impl UnionTypeDefinitionPosition {
         directive_name: &Name,
     ) -> bool {
         if let Some(type_) = self.try_get(schema.schema()) {
-            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+            return type_
+                .directives
+                .iter()
+                .any(|directive| &directive.name == directive_name);
         }
         false
     }
@@ -4587,7 +4599,10 @@ impl EnumTypeDefinitionPosition {
         directive_name: &Name,
     ) -> bool {
         if let Some(type_) = self.try_get(schema.schema()) {
-            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+            return type_
+                .directives
+                .iter()
+                .any(|directive| &directive.name == directive_name);
         }
         false
     }
@@ -5108,7 +5123,10 @@ impl InputObjectTypeDefinitionPosition {
         directive_name: &Name,
     ) -> bool {
         if let Some(type_) = self.try_get(schema.schema()) {
-            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+            return type_
+                .directives
+                .iter()
+                .any(|directive| &directive.name == directive_name);
         }
         false
     }
