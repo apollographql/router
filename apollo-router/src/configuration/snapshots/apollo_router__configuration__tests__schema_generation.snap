@@ -1,7 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
-snapshot_kind: text
 ---
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -403,8 +402,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "apollo.router.operations.entity.cache": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         }
       },
       "type": "object"
@@ -2439,7 +2438,7 @@ snapshot_kind: text
         }
       ]
     },
-    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector": {
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector": {
       "anyOf": [
         {
           "type": "null"
@@ -2451,77 +2450,8 @@ snapshot_kind: text
           "additionalProperties": false,
           "properties": {
             "attributes": {
-              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
-            }
-          },
-          "required": [
-            "attributes"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "attributes": {
-              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
             }
           },
           "required": [
@@ -2568,6 +2498,75 @@ snapshot_kind: text
             "attributes": {
               "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
               "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
             }
           },
           "required": [
@@ -2928,8 +2927,8 @@ snapshot_kind: text
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_RouterSelector",
@@ -2959,8 +2958,8 @@ snapshot_kind: text
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
@@ -2990,8 +2989,8 @@ snapshot_kind: text
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SupergraphSelector",
@@ -3058,16 +3057,16 @@ snapshot_kind: text
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes, apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>"
         },
         "router": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector>"
         },
         "subgraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::SubgraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::SubgraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::events::SubgraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::events::SubgraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector>"
         },
         "supergraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::SupergraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::events::SupergraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::events::SupergraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::events::SupergraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector>"
         }
       },
       "type": "object"
@@ -3796,8 +3795,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
@@ -3904,8 +3903,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_RouterSelector",
@@ -3940,8 +3939,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SubgraphSelector",
@@ -3976,8 +3975,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         },
         "condition": {
           "$ref": "#/definitions/Condition_for_SupergraphSelector",
@@ -4031,8 +4030,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "cache": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes, apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphValue>"
         },
         "connector": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>",
@@ -4047,16 +4046,16 @@ snapshot_kind: text
           "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>"
         },
         "router": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::selectors::RouterValue>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector, apollo_router::plugins::telemetry::config_new::selectors::RouterValue>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::router::selectors::RouterValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector, apollo_router::plugins::telemetry::config_new::router::selectors::RouterValue>"
         },
         "subgraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphValue>"
         },
         "supergraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector, apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue>"
         }
       },
       "type": "object"
@@ -5383,16 +5382,16 @@ snapshot_kind: text
           "description": "#/definitions/DefaultedStandardInstrument_for_ActiveRequestsAttributes"
         },
         "http.server.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
         },
         "http.server.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
         },
         "http.server.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
         }
       },
       "type": "object"
@@ -5737,8 +5736,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector>"
         }
       },
       "type": "object"
@@ -6541,16 +6540,16 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "http.client.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         },
         "http.client.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         },
         "http.client.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
         }
       },
       "type": "object"
@@ -7135,8 +7134,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector>"
         }
       },
       "type": "object"
@@ -7349,16 +7348,16 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "cost.actual": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         },
         "cost.delta": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         },
         "cost.estimated": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         }
       },
       "type": "object"
@@ -7739,8 +7738,8 @@ snapshot_kind: text
       "additionalProperties": false,
       "properties": {
         "attributes": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector>"
         }
       },
       "type": "object"
@@ -8103,7 +8102,7 @@ snapshot_kind: text
         }
       ]
     },
-    "conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector": {
+    "conditional_attribute_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector": {
       "anyOf": [
         {
           "$ref": "#/definitions/RouterSelector",
@@ -8119,7 +8118,7 @@ snapshot_kind: text
         }
       ]
     },
-    "conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
+    "conditional_attribute_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector": {
       "anyOf": [
         {
           "$ref": "#/definitions/SubgraphSelector",
@@ -8135,7 +8134,7 @@ snapshot_kind: text
         }
       ]
     },
-    "conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector": {
+    "conditional_attribute_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector": {
       "anyOf": [
         {
           "$ref": "#/definitions/SupergraphSelector",
@@ -8151,10 +8150,188 @@ snapshot_kind: text
         }
       ]
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
+        "$ref": "#/definitions/Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue",
+        "description": "#/definitions/Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue"
+      },
+      "properties": {
+        "apollo.router.operations.entity.cache": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/SubgraphSelector",
+        "description": "#/definitions/SubgraphSelector"
+      },
+      "properties": {
+        "graphql.type.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+      },
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/ConnectorSelector",
+        "description": "#/definitions/ConnectorSelector"
+      },
+      "properties": {
+        "connector.http.method": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.source.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "connector.url.template": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "subgraph.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector",
+        "description": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector"
+      },
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
+          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue",
+        "description": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue"
+      },
+      "properties": {
+        "http.client.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        },
+        "http.client.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue",
+        "description": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue"
+      },
+      "properties": {
+        "field.execution": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "list.length": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/GraphQLSelector",
+        "description": "#/definitions/GraphQLSelector"
+      },
+      "properties": {
+        "graphql.field.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "graphql.field.type": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "graphql.list.length": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "graphql.operation.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        },
+        "graphql.type.name": {
+          "$ref": "#/definitions/StandardAttribute",
+          "description": "#/definitions/StandardAttribute",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
       },
       "description": "Common attributes for http server and client. See https://opentelemetry.io/docs/specs/semconv/http/http-spans/#common-attributes",
       "properties": {
@@ -8277,7 +8454,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector": {
       "additionalProperties": {
         "$ref": "#/definitions/RouterSelector",
         "description": "#/definitions/RouterSelector"
@@ -8403,10 +8580,56 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::router::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector>": {
       "additionalProperties": {
-        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+        "$ref": "#/definitions/Event_for_RouterAttributes_and_RouterSelector",
+        "description": "#/definitions/Event_for_RouterAttributes_and_RouterSelector"
+      },
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::router::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::router::selectors::RouterValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue",
+        "description": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue"
+      },
+      "properties": {
+        "http.server.active_requests": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_ActiveRequestsAttributes",
+          "description": "#/definitions/DefaultedStandardInstrument_for_ActiveRequestsAttributes"
+        },
+        "http.server.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
+        },
+        "http.server.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
+        },
+        "http.server.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::router::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::router::selectors::RouterSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
       },
       "properties": {
         "http.request.resend_count": {
@@ -8437,7 +8660,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector": {
       "additionalProperties": {
         "$ref": "#/definitions/SubgraphSelector",
         "description": "#/definitions/SubgraphSelector"
@@ -8471,10 +8694,52 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::events::SubgraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector>": {
       "additionalProperties": {
-        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+        "$ref": "#/definitions/Event_for_SubgraphAttributes_and_SubgraphSelector",
+        "description": "#/definitions/Event_for_SubgraphAttributes_and_SubgraphSelector"
+      },
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
+        },
+        "request": {
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
+        },
+        "response": {
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphValue>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue",
+        "description": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue"
+      },
+      "properties": {
+        "http.client.request.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        },
+        "http.client.request.duration": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        },
+        "http.client.response.body.size": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::subgraph::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::subgraph::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
       },
       "description": "Attributes for Cost",
       "properties": {
@@ -8516,7 +8781,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector": {
       "additionalProperties": {
         "$ref": "#/definitions/SupergraphSelector",
         "description": "#/definitions/SupergraphSelector"
@@ -8561,176 +8826,7 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::CacheInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue",
-        "description": "#/definitions/Instrument_for_CacheAttributes_and_SubgraphSelector_and_SubgraphValue"
-      },
-      "properties": {
-        "apollo.router.operations.entity.cache": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::cache::attributes::CacheAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector": {
-      "additionalProperties": {
-        "$ref": "#/definitions/SubgraphSelector",
-        "description": "#/definitions/SubgraphSelector"
-      },
-      "properties": {
-        "graphql.type.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::conditional::Conditional<apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
-        "description": "#/definitions/conditional_attribute_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
-      },
-      "properties": {
-        "connector.http.method": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "connector.source.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "connector.url.template": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "subgraph.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector": {
-      "additionalProperties": {
-        "$ref": "#/definitions/ConnectorSelector",
-        "description": "#/definitions/ConnectorSelector"
-      },
-      "properties": {
-        "connector.http.method": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "connector.source.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "connector.url.template": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "subgraph.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::events::ConnectorEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector",
-        "description": "#/definitions/Event_for_ConnectorAttributes_and_ConnectorSelector"
-      },
-      "properties": {
-        "error": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
-        },
-        "request": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
-        },
-        "response": {
-          "$ref": "#/definitions/StandardEventConfig_for_ConnectorSelector",
-          "description": "#/definitions/StandardEventConfig_for_ConnectorSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::instruments::ConnectorInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector,_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorValue>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue",
-        "description": "#/definitions/Instrument_for_ConnectorAttributes_and_ConnectorSelector_and_ConnectorValue"
-      },
-      "properties": {
-        "http.client.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
-        },
-        "http.client.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
-        },
-        "http.client.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::connector::attributes::ConnectorAttributes_apollo_router::plugins::telemetry::config_new::connector::selectors::ConnectorSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::events::RouterEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Event_for_RouterAttributes_and_RouterSelector",
-        "description": "#/definitions/Event_for_RouterAttributes_and_RouterSelector"
-      },
-      "properties": {
-        "error": {
-          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
-          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
-        },
-        "request": {
-          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
-          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
-        },
-        "response": {
-          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
-          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::events::SubgraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Event_for_SubgraphAttributes_and_SubgraphSelector",
-        "description": "#/definitions/Event_for_SubgraphAttributes_and_SubgraphSelector"
-      },
-      "properties": {
-        "error": {
-          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
-          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
-        },
-        "request": {
-          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
-          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
-        },
-        "response": {
-          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
-          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::events::SupergraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::events::SupergraphEventsConfig_apollo_router::plugins::telemetry::config_new::events::Event<apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector>": {
       "additionalProperties": {
         "$ref": "#/definitions/Event_for_SupergraphAttributes_and_SupergraphSelector",
         "description": "#/definitions/Event_for_SupergraphAttributes_and_SupergraphSelector"
@@ -8751,120 +8847,23 @@ snapshot_kind: text
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue",
-        "description": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue"
-      },
-      "properties": {
-        "field.execution": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
-        },
-        "list.length": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
-      "additionalProperties": {
-        "$ref": "#/definitions/GraphQLSelector",
-        "description": "#/definitions/GraphQLSelector"
-      },
-      "properties": {
-        "graphql.field.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "graphql.field.type": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "graphql.list.length": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "graphql.operation.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        },
-        "graphql.type.name": {
-          "$ref": "#/definitions/StandardAttribute",
-          "description": "#/definitions/StandardAttribute",
-          "nullable": true
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::selectors::RouterValue>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue",
-        "description": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue"
-      },
-      "properties": {
-        "http.server.active_requests": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_ActiveRequestsAttributes",
-          "description": "#/definitions/DefaultedStandardInstrument_for_ActiveRequestsAttributes"
-        },
-        "http.server.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
-        },
-        "http.server.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
-        },
-        "http.server.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>": {
-      "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue",
-        "description": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue"
-      },
-      "properties": {
-        "http.client.request.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
-        },
-        "http.client.request.duration": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
-        },
-        "http.client.response.body.size": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
-        }
-      },
-      "type": "object"
-    },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphValue>": {
       "additionalProperties": {
         "$ref": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue",
         "description": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue"
       },
       "properties": {
         "cost.actual": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         },
         "cost.delta": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         },
         "cost.estimated": {
-          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector",
-          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector"
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes_apollo_router::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector"
         }
       },
       "type": "object"

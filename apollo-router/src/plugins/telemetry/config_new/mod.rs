@@ -25,10 +25,15 @@ pub(crate) mod cost;
 pub(crate) mod events;
 pub(crate) mod extendable;
 pub(crate) mod graphql;
+pub(crate) mod http_common;
+pub(crate) mod http_server;
 pub(crate) mod instruments;
 pub(crate) mod logging;
+pub(crate) mod router;
 pub(crate) mod selectors;
 pub(crate) mod spans;
+pub(crate) mod subgraph;
+pub(crate) mod supergraph;
 
 pub(crate) trait Selectors<Request, Response, EventResponse> {
     fn on_request(&self, request: &Request) -> Vec<KeyValue>;
