@@ -366,7 +366,7 @@ fn determine_entity_resolver(
 }
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
-fn extract_header_references<'a>(
+fn extract_header_references(
     variable_references: HashSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     let headers: HashSet<String> = variable_references
