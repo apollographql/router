@@ -795,10 +795,11 @@ impl Supergraph {
     }
 }
 
-/// Router level (APQ) configuration
+/// Router level configuration for APQ
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Router {
+    /// Router cache configuration for APQ
     #[serde(default)]
     pub(crate) cache: Cache,
 }
@@ -807,11 +808,13 @@ pub(crate) struct Router {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Apq {
-    /// Activates Automatic Persisted Queries (enabled by default)
+    /// Flag to enable APQ (default: true)
     pub(crate) enabled: bool,
 
+    /// Router configuration for APQ
     pub(crate) router: Router,
 
+    /// Subgraph configuration for APQ
     pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
 }
 
@@ -957,9 +960,9 @@ fn default_query_planner_cache_pool_size() -> u32 {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Cache {
-    /// Configures the in memory cache (always active)
+    /// In-memory cache configuration. Always active
     pub(crate) in_memory: InMemoryCache,
-    /// Configures and activates the Redis cache
+    /// Redis cache configuration. Optional
     pub(crate) redis: Option<RedisCache>,
 }
 
