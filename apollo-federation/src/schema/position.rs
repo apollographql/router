@@ -279,6 +279,33 @@ impl TypeDefinitionPosition {
             TypeDefinitionPosition::InputObject(type_) => type_.remove_extensions(schema),
         }
     }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        match self {
+            TypeDefinitionPosition::Scalar(type_) => {
+                type_.has_applied_directive(schema, directive_name)
+            }
+            TypeDefinitionPosition::Object(type_) => {
+                type_.has_applied_directive(schema, directive_name)
+            }
+            TypeDefinitionPosition::Interface(type_) => {
+                type_.has_applied_directive(schema, directive_name)
+            }
+            TypeDefinitionPosition::Union(type_) => {
+                type_.has_applied_directive(schema, directive_name)
+            }
+            TypeDefinitionPosition::Enum(type_) => {
+                type_.has_applied_directive(schema, directive_name)
+            }
+            TypeDefinitionPosition::InputObject(type_) => {
+                type_.has_applied_directive(schema, directive_name)
+            }
+        }
+    }
 }
 
 fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
@@ -1451,6 +1478,17 @@ impl ScalarTypeDefinitionPosition {
         }
         Ok(())
     }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        if let Some(type_) = self.try_get(schema.schema()) {
+            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+        }
+        false
+    }
 }
 
 impl Display for ScalarTypeDefinitionPosition {
@@ -1964,6 +2002,17 @@ impl ObjectTypeDefinitionPosition {
             field.origin = ComponentOrigin::Definition;
         }
         Ok(())
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        if let Some(type_) = self.try_get(schema.schema()) {
+            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+        }
+        false
     }
 }
 
@@ -3120,6 +3169,17 @@ impl InterfaceTypeDefinitionPosition {
         }
         Ok(())
     }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        if let Some(type_) = self.try_get(schema.schema()) {
+            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+        }
+        false
+    }
 }
 
 impl Display for InterfaceTypeDefinitionPosition {
@@ -4135,6 +4195,17 @@ impl UnionTypeDefinitionPosition {
             .collect();
         Ok(())
     }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        if let Some(type_) = self.try_get(schema.schema()) {
+            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+        }
+        false
+    }
 }
 
 impl Display for UnionTypeDefinitionPosition {
@@ -4508,6 +4579,17 @@ impl EnumTypeDefinitionPosition {
             v.origin = ComponentOrigin::Definition;
         }
         Ok(())
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        if let Some(type_) = self.try_get(schema.schema()) {
+            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+        }
+        false
     }
 }
 
@@ -5018,6 +5100,17 @@ impl InputObjectTypeDefinitionPosition {
             field.origin = ComponentOrigin::Definition;
         }
         Ok(())
+    }
+
+    pub(crate) fn has_applied_directive(
+        &self,
+        schema: &FederationSchema,
+        directive_name: &Name,
+    ) -> bool {
+        if let Some(type_) = self.try_get(schema.schema()) {
+            return type_.directives.iter().any(|directive| &directive.name == directive_name);
+        }
+        false
     }
 }
 

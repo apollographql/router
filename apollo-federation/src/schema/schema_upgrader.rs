@@ -5,6 +5,7 @@ use apollo_compiler::Node;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
+use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 
 use super::FederationSchema;
@@ -20,6 +21,7 @@ use crate::error::SingleFederationError;
 use crate::schema::SubgraphMetadata;
 use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::subgraph::typestate::Expanded;
 use crate::subgraph::typestate::Subgraph;
 use crate::supergraph::remove_inactive_requires_and_provides_from_subgraph;
@@ -418,7 +420,9 @@ impl<'a> SchemaUpgrader<'a> {
 
     /// Whether the type is a root type but is declared only as an extension, which federation 1 actually accepts.
     fn is_root_type_extension(&self, pos: &TypeDefinitionPosition) -> bool {
-        if !matches!(pos, TypeDefinitionPosition::Object(_)) || !self.is_root_type(pos) {
+        if !matches!(pos, TypeDefinitionPosition::Object(_))
+            || !Self::is_root_type(&self.schema, pos)
+        {
             return false;
         }
         let Ok(ty) = pos.get(self.schema.schema()) else {
@@ -435,8 +439,8 @@ impl<'a> SchemaUpgrader<'a> {
             || (Self::has_extension_elements(ty) && !Self::has_non_extension_elements(ty))
     }
 
-    fn is_root_type(&self, ty: &TypeDefinitionPosition) -> bool {
-        self.schema
+    fn is_root_type(schema: &FederationSchema, ty: &TypeDefinitionPosition) -> bool {
+        schema
             .schema()
             .schema_definition
             .iter_root_operations()
@@ -557,7 +561,99 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     fn add_shareable(&mut self) -> Result<(), FederationError> {
-        todo!();
+        let schema = &mut self.schema;
+        let Some(metadata) = &schema.subgraph_metadata else {
+            return Ok(());
+        };
+
+        // Get key directive and shareable directive from the metadata
+        let key_directive = metadata
+            .federation_spec_definition()
+            .key_directive_definition(schema)?;
+
+        let shareable_directive = metadata
+            .federation_spec_definition()
+            .shareable_directive_definition(schema)?;
+
+        let mut fields_to_add_shareable = vec![];
+        let mut types_to_add_shareable = vec![];
+        for type_pos in schema.get_types() {
+            let has_key_directive = type_pos.has_applied_directive(schema, &key_directive.name);
+            let is_root_type = Self::is_root_type(schema, &type_pos);
+            let TypeDefinitionPosition::Object(obj_pos) = type_pos else {
+                continue;
+            };
+            let obj_name = &obj_pos.type_name;
+            // Skip Subscription root type - no shareable needed
+            if obj_pos.type_name.as_str() == SchemaRootDefinitionKind::Subscription.to_string() {
+                continue;
+            }
+            if has_key_directive || is_root_type {
+                for field in obj_pos.fields(schema.schema())? {
+                    let obj_field = FieldDefinitionPosition::Object(field.clone());
+                    if self
+                        .original_subgraph
+                        .metadata()
+                        .is_field_shareable(&obj_field)
+                    {
+                        continue;
+                    }
+                    let Some(entries) = self.object_type_map.get(obj_name) else {
+                        continue;
+                    };
+
+                    let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, info)| {
+                        if subgraph_name != self.original_subgraph.name.as_str()
+                            && (info.metadata.is_field_external(&obj_field)
+                                || info.metadata.is_field_partially_external(&obj_field))
+                        {
+                            return true;
+                        }
+                        false
+                    });
+                    if type_in_other_subgraphs
+                        && !obj_field.has_applied_directive(schema, &shareable_directive.name)
+                    {
+                        fields_to_add_shareable.push(field.clone());
+                    }
+                }
+            } else {
+                let Some(entries) = self.object_type_map.get(obj_name) else {
+                    continue;
+                };
+                let type_in_other_subgraphs = entries.iter().any(|(subgraph_name, _info)| {
+                    if subgraph_name != self.original_subgraph.name.as_str() {
+                        return true;
+                    }
+                    false
+                });
+                if type_in_other_subgraphs
+                    && !obj_pos.has_applied_directive(schema, &shareable_directive.name)
+                {
+                    types_to_add_shareable.push(obj_pos.clone());
+                }
+            }
+        }
+        let shareable_directive_name = shareable_directive.name.clone();
+        for pos in &fields_to_add_shareable {
+            pos.insert_directive(
+                schema,
+                Node::new(Directive {
+                    name: shareable_directive_name.clone(),
+                    arguments: vec![],
+                }),
+            )?;
+        }
+        for pos in &types_to_add_shareable {
+            pos.insert_directive(
+                schema,
+                Component::new(Directive {
+                    name: shareable_directive_name.clone(),
+                    arguments: vec![],
+                }),
+            )?;
+        }
+        Ok(())
     }
 
     fn remove_tag_on_external(&mut self) -> Result<(), FederationError> {
