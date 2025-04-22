@@ -2901,6 +2901,102 @@ mod tests {
     }
 
     #[test]
+    fn test_left_associative_output_shapes() {
+        assert_eq!(selection!("$batch.id").shape().pretty_print(), "$batch.id");
+
+        assert_eq!(
+            selection!("$batch.id->first").shape().pretty_print(),
+            "$batch.id.0",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->last").shape().pretty_print(),
+            "$batch.id.*",
+        );
+
+        let mut named_shapes = IndexMap::default();
+        named_shapes.insert(
+            "$batch".to_string(),
+            Shape::list(
+                Shape::record(
+                    {
+                        let mut map = Shape::empty_map();
+                        map.insert("id".to_string(), Shape::int([]));
+                        map
+                    },
+                    [],
+                ),
+                [],
+            ),
+        );
+
+        let root_shape = Shape::name("$root", []);
+        let shape_context = ShapeContext::new(SourceId::Other("JSONSelection".into()))
+            .with_named_shapes(&named_shapes);
+
+        let computed_batch_id =
+            selection!("$batch.id").compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_batch_id.pretty_print(), "List<Int>");
+
+        let computed_first =
+            selection!("$batch.id->first").compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_first.pretty_print(), "One<Int, None>");
+
+        let computed_last =
+            selection!("$batch.id->last").compute_output_shape(&shape_context, root_shape.clone());
+        assert_eq!(computed_last.pretty_print(), "One<Int, None>");
+
+        assert_eq!(
+            selection!("$batch.id->jsonStringify")
+                .shape()
+                .pretty_print(),
+            "String",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])->jsonStringify")
+                .shape()
+                .pretty_print(),
+            "String",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo(@)")
+                .shape()
+                .pretty_print(),
+            "List<$batch.id.*>",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map(@)->echo([@])")
+                .shape()
+                .pretty_print(),
+            "[List<$batch.id.*>]",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo(@)")
+                .shape()
+                .pretty_print(),
+            "List<[$batch.id.*]>",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])")
+                .shape()
+                .pretty_print(),
+            "[List<[$batch.id.*]>]",
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map([@])->echo([@])")
+                .compute_output_shape(&shape_context, root_shape,)
+                .pretty_print(),
+            "[List<[Int]>]",
+        );
+    }
+
+    #[test]
     fn test_lit_paths() {
         let data = json!({
             "value": {
