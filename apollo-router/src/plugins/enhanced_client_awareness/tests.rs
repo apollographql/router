@@ -29,10 +29,7 @@ async fn given_client_library_metadata_adds_values_to_context() {
             .get(CLIENT_LIBRARY_NAME)
             .unwrap_or_default()
             .unwrap_or_default();
-        assert_eq!(
-            client_library_name,
-            serde_json::to_string("apollo-general-client-library")?
-        );
+        assert_eq!(client_library_name, "apollo-general-client-library");
 
         assert!(
             request.context.contains_key(CLIENT_LIBRARY_VERSION),
@@ -43,7 +40,7 @@ async fn given_client_library_metadata_adds_values_to_context() {
             .get(CLIENT_LIBRARY_VERSION)
             .unwrap_or_default()
             .unwrap_or_default();
-        assert_eq!(client_library_version, serde_json::to_string("0.1.0")?);
+        assert_eq!(client_library_version, "0.1.0");
 
         SupergraphResponse::fake_builder().build()
     });

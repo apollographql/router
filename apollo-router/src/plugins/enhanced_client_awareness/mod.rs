@@ -50,16 +50,18 @@ impl Plugin for EnhancedClientAwareness {
                         .extensions
                         .get(CLIENT_LIBRARY_KEY)
                     {
-                        if let Some(client_library_name) =
-                            client_library_metadata.get(CLIENT_LIBRARY_NAME_KEY)
+                        if let Some(client_library_name) = client_library_metadata
+                            .get(CLIENT_LIBRARY_NAME_KEY)
+                            .and_then(|value| value.as_str())
                         {
                             let _ = request
                                 .context
                                 .insert(CLIENT_LIBRARY_NAME, client_library_name.to_string());
                         };
 
-                        if let Some(client_library_version) =
-                            client_library_metadata.get(CLIENT_LIBRARY_VERSION_KEY)
+                        if let Some(client_library_version) = client_library_metadata
+                            .get(CLIENT_LIBRARY_VERSION_KEY)
+                            .and_then(|value| value.as_str())
                         {
                             let _ = request
                                 .context
