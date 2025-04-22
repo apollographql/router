@@ -824,7 +824,11 @@ mod tests {
                 .expect("expecting successful response");
         }
         .with_subscriber(
-            assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
+            assert_snapshot_subscriber!({
+                r#"[].span["apollo_private.duration_ns"]"# => "[duration]",
+                r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]",
+                "[].fields.attributes" => insta::sorted_redaction()
+            }),
         )
         .await
     }
