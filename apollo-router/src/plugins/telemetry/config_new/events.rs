@@ -801,35 +801,31 @@ mod tests {
 
         async {
             test_harness
-                .router_service(
-                    |_r|async  {
-                        Ok(router::Response::fake_builder()
-                            .header("custom-header", "val1")
-                            .header(CONTENT_LENGTH, "25")
-                            .header("x-log-request", HeaderValue::from_static("log"))
-                            .data(serde_json_bytes::json!({"data": "res"}))
-                            .build()
-                            .expect("expecting valid response"))
-                    },
-                )
+                .router_service(|_r| async {
+                    Ok(router::Response::fake_builder()
+                        .header("custom-header", "val1")
+                        .header(CONTENT_LENGTH, "25")
+                        .header("x-log-request", HeaderValue::from_static("log"))
+                        .data(serde_json_bytes::json!({"data": "res"}))
+                        .build()
+                        .expect("expecting valid response"))
+                })
                 .call(
                     router::Request::fake_builder()
                         .header(CONTENT_LENGTH, "0")
                         .header("custom-header", "val1")
                         .header("x-log-request", HeaderValue::from_static("log"))
                         .build()
-                        .unwrap()
+                        .unwrap(),
                 )
                 .await
                 .expect("expecting successful response");
         }
-        .with_subscriber(
-            assert_snapshot_subscriber!({
-                r#"[].span["apollo_private.duration_ns"]"# => "[duration]",
-                r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]",
-                "[].fields.attributes" => insta::sorted_redaction()
-            }),
-        )
+        .with_subscriber(assert_snapshot_subscriber!({
+            r#"[].span["apollo_private.duration_ns"]"# => "[duration]",
+            r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]",
+            "[].fields.attributes" => insta::sorted_redaction()
+        }))
         .await
     }
 
