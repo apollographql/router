@@ -7,9 +7,11 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::collections::HashMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::validation::Valid;
 
 use super::FederationSchema;
 use super::TypeDefinitionPosition;
+use super::field_set::collect_target_fields_from_field_set;
 use super::position::FieldDefinitionPosition;
 use super::position::InterfaceFieldDefinitionPosition;
 use super::position::InterfaceTypeDefinitionPosition;
@@ -308,7 +310,7 @@ impl<'a> SchemaUpgrader<'a> {
             return Ok(());
         };
         let mut to_delete: Vec<(ObjectFieldDefinitionPosition, Node<Directive>)> = vec![];
-        for (obj_name, ty) in schema.schema().types.iter() {
+        for (obj_name, ty) in &schema.schema().types {
             let ExtendedType::Object(obj) = ty else {
                 continue;
             };
@@ -332,7 +334,108 @@ impl<'a> SchemaUpgrader<'a> {
     }
 
     fn remove_external_on_type_extensions(&mut self) -> Result<(), FederationError> {
-        todo!();
+        let Some(metadata) = &self.schema.subgraph_metadata else {
+            return Ok(());
+        };
+        let types: Vec<_> = self.schema.get_types().collect();
+        let key_directive = metadata
+            .federation_spec_definition()
+            .key_directive_definition(&self.schema)?;
+        let external_directive = metadata
+            .federation_spec_definition()
+            .external_directive_definition(&self.schema)?;
+
+        let mut to_remove = vec![];
+        for ty in &types {
+            if !ty.is_composite_type()
+                || (!self.is_federation_type_extension(ty)? && !self.is_root_type_extension(ty))
+            {
+                continue;
+            }
+
+            let key_applications = ty.get_applied_directives(&self.schema, &key_directive.name);
+            if !key_applications.is_empty() {
+                for directive in key_applications {
+                    let args = metadata
+                        .federation_spec_definition()
+                        .key_directive_arguments(directive)?;
+                    for field in collect_target_fields_from_field_set(
+                        Valid::assume_valid_ref(self.schema.schema()),
+                        ty.type_name().clone(),
+                        args.fields,
+                        false,
+                    )? {
+                        let external =
+                            field.get_applied_directives(&self.schema, &external_directive.name);
+                        if !external.is_empty() {
+                            to_remove.push((field.clone(), external[0].clone()));
+                        }
+                    }
+                }
+            } else {
+                // ... but if the extension does _not_ have a key, then if the extension has a field that is
+                // part of the _1st_ key on the subgraph owning the type, then this field is not considered
+                // external (yes, it's pretty damn random, and it's even worst in that even if the extension
+                // does _not_ have the "field of the _1st_ key on the subraph owning the type", then the
+                // query planner will still request it to the subgraph, generating an invalid query; but
+                // we ignore that here). Note however that because other subgraphs may have already been
+                // upgraded, we don't know which is the "type owner", so instead we look up at the first
+                // key of every other subgraph. It's not 100% what fed1 does, but we're in very-strange
+                // case territory in the first place, so this is probably good enough (that is, there is
+                // customer schema for which what we do here matter but not that I know of for which it's
+                // not good enough).
+                let Some(entries) = self.object_type_map.get(ty.type_name()) else {
+                    continue;
+                };
+                for (subgraph_name, info) in entries.iter() {
+                    if subgraph_name == self.original_subgraph.name.as_str() {
+                        continue;
+                    }
+                    let Some(other_schema) = self
+                        .subgraphs
+                        .iter()
+                        .find(|subgraph| &subgraph.name == subgraph_name)
+                    else {
+                        continue;
+                    };
+                    let keys_in_other = info.pos.get_applied_directives(
+                        other_schema.schema(),
+                        &info
+                            .metadata
+                            .federation_spec_definition()
+                            .key_directive_definition(other_schema.schema())?
+                            .name,
+                    );
+                    if keys_in_other.is_empty() {
+                        continue;
+                    }
+                    let directive = keys_in_other[0];
+                    let args = metadata
+                        .federation_spec_definition()
+                        .key_directive_arguments(directive)?;
+                    for field in collect_target_fields_from_field_set(
+                        Valid::assume_valid_ref(self.schema.schema()),
+                        ty.type_name().clone(),
+                        args.fields,
+                        false,
+                    )? {
+                        if TypeDefinitionPosition::from(field.parent()) != info.pos {
+                            continue;
+                        }
+                        let external =
+                            field.get_applied_directives(&self.schema, &external_directive.name);
+                        if !external.is_empty() {
+                            to_remove.push((field.clone(), external[0].clone()));
+                        }
+                    }
+                }
+            }
+        }
+
+        for (pos, directive) in &to_remove {
+            pos.remove_directive(&mut self.schema, directive);
+        }
+        Ok(())
     }
 
     fn fix_inactive_provides_and_requires(&mut self) -> Result<(), FederationError> {
