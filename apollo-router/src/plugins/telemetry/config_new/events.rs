@@ -204,20 +204,20 @@ where
 impl CustomEvents<router::Request, router::Response, (), RouterAttributes, RouterSelector> {
     pub(crate) fn on_request(&mut self, request: &router::Request) {
         if let Some(request_event) = &mut self.request {
-            if request_event.condition.evaluate_request(request) != Some(true) {
-                return;
+            if request_event.condition.evaluate_request(request) == Some(true) {
+                request
+                    .context
+                    .extensions()
+                    .with_lock(|ext| ext.insert(DisplayRouterRequest(request_event.level)));
             }
-
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(DisplayRouterRequest(request_event.level)));
         }
-        if self.response.is_some() {
-            request
-                .context
-                .extensions()
-                .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
+        if let Some(response_event) = &mut self.response {
+            if response_event.condition.evaluate_request(request) != Some(false) {
+                request
+                    .context
+                    .extensions()
+                    .with_lock(|ext| ext.insert(DisplayRouterResponse(true)));
+            }
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
@@ -226,48 +226,49 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
 
     pub(crate) fn on_response(&mut self, response: &router::Response) {
         if let Some(response_event) = &self.response {
-            if !response_event.condition.evaluate_response(response) {
-                return;
-            }
-            let mut attrs = Vec::with_capacity(4);
+            if response_event.condition.evaluate_response(response) {
+                let mut attrs = Vec::with_capacity(4);
 
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = response
-                .response
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = response.response.headers();
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_HEADERS,
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_STATUS,
-                opentelemetry::Value::String(format!("{}", response.response.status()).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_RESPONSE_VERSION,
-                opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
-            ));
-
-            if let Some(body) = response
-                .context
-                .extensions()
-                .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
-            {
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, HeaderValue> = response
+                    .response
+                    .headers()
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = response.response.headers();
                 attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_BODY,
-                    opentelemetry::Value::String(body.0.into()),
+                    HTTP_RESPONSE_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
                 ));
-            }
+                attrs.push(KeyValue::new(
+                    HTTP_RESPONSE_STATUS,
+                    opentelemetry::Value::String(format!("{}", response.response.status()).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_RESPONSE_VERSION,
+                    opentelemetry::Value::String(
+                        format!("{:?}", response.response.version()).into(),
+                    ),
+                ));
 
-            log_event(response_event.level, "router.response", attrs, "");
+                if let Some(body) = response
+                    .context
+                    .extensions()
+                    .with_lock(|ext| ext.remove::<RouterResponseBodyExtensionType>())
+                {
+                    attrs.push(KeyValue::new(
+                        HTTP_RESPONSE_BODY,
+                        opentelemetry::Value::String(body.0.into()),
+                    ));
+                }
+
+                log_event(response_event.level, "router.response", attrs, "");
+            }
         }
         for custom_event in &mut self.custom {
             custom_event.on_response(response);
@@ -276,18 +277,17 @@ impl CustomEvents<router::Request, router::Response, (), RouterAttributes, Route
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
         if let Some(error_event) = &self.error {
-            if !error_event.condition.evaluate_error(error, ctx) {
-                return;
+            if error_event.condition.evaluate_error(error, ctx) {
+                log_event(
+                    error_event.level,
+                    "router.error",
+                    vec![KeyValue::new(
+                        Key::from_static_str("error"),
+                        opentelemetry::Value::String(error.to_string().into()),
+                    )],
+                    "",
+                );
             }
-            log_event(
-                error_event.level,
-                "router.error",
-                vec![KeyValue::new(
-                    Key::from_static_str("error"),
-                    opentelemetry::Value::String(error.to_string().into()),
-                )],
-                "",
-            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
@@ -306,61 +306,62 @@ impl
 {
     pub(crate) fn on_request(&mut self, request: &supergraph::Request) {
         if let Some(request_event) = &mut self.request {
-            if request_event.condition.evaluate_request(request) != Some(true) {
-                return;
+            if request_event.condition.evaluate_request(request) == Some(true) {
+                let mut attrs = Vec::with_capacity(5);
+                #[cfg(test)]
+                let mut headers: indexmap::IndexMap<String, HeaderValue> = request
+                    .supergraph_request
+                    .headers()
+                    .clone()
+                    .into_iter()
+                    .filter_map(|(name, val)| Some((name?.to_string(), val)))
+                    .collect();
+                #[cfg(test)]
+                headers.sort_keys();
+                #[cfg(not(test))]
+                let headers = request.supergraph_request.headers();
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_HEADERS,
+                    opentelemetry::Value::String(format!("{:?}", headers).into()),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_METHOD,
+                    opentelemetry::Value::String(
+                        format!("{}", request.supergraph_request.method()).into(),
+                    ),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_URI,
+                    opentelemetry::Value::String(
+                        format!("{}", request.supergraph_request.uri()).into(),
+                    ),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_VERSION,
+                    opentelemetry::Value::String(
+                        format!("{:?}", request.supergraph_request.version()).into(),
+                    ),
+                ));
+                attrs.push(KeyValue::new(
+                    HTTP_REQUEST_BODY,
+                    opentelemetry::Value::String(
+                        serde_json::to_string(request.supergraph_request.body())
+                            .unwrap_or_default()
+                            .into(),
+                    ),
+                ));
+                log_event(request_event.level, "supergraph.request", attrs, "");
             }
-            let mut attrs = Vec::with_capacity(5);
-            #[cfg(test)]
-            let mut headers: indexmap::IndexMap<String, HeaderValue> = request
-                .supergraph_request
-                .headers()
-                .clone()
-                .into_iter()
-                .filter_map(|(name, val)| Some((name?.to_string(), val)))
-                .collect();
-            #[cfg(test)]
-            headers.sort_keys();
-            #[cfg(not(test))]
-            let headers = request.supergraph_request.headers();
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_HEADERS,
-                opentelemetry::Value::String(format!("{:?}", headers).into()),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_METHOD,
-                opentelemetry::Value::String(
-                    format!("{}", request.supergraph_request.method()).into(),
-                ),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_URI,
-                opentelemetry::Value::String(
-                    format!("{}", request.supergraph_request.uri()).into(),
-                ),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_VERSION,
-                opentelemetry::Value::String(
-                    format!("{:?}", request.supergraph_request.version()).into(),
-                ),
-            ));
-            attrs.push(KeyValue::new(
-                HTTP_REQUEST_BODY,
-                opentelemetry::Value::String(
-                    serde_json::to_string(request.supergraph_request.body())
-                        .unwrap_or_default()
-                        .into(),
-                ),
-            ));
-            log_event(request_event.level, "supergraph.request", attrs, "");
         }
-        if let Some(response_event) = self.response.take() {
-            request.context.extensions().with_lock(|lock| {
-                lock.insert(SupergraphEventResponse {
-                    level: response_event.level,
-                    condition: Arc::new(response_event.condition),
-                })
-            });
+        if let Some(mut response_event) = self.response.take() {
+            if response_event.condition.evaluate_request(request) != Some(false) {
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(SupergraphEventResponse {
+                        level: response_event.level,
+                        condition: Arc::new(response_event.condition),
+                    })
+                });
+            }
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
@@ -381,18 +382,17 @@ impl
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
         if let Some(error_event) = &self.error {
-            if !error_event.condition.evaluate_error(error, ctx) {
-                return;
+            if error_event.condition.evaluate_error(error, ctx) {
+                log_event(
+                    error_event.level,
+                    "supergraph.error",
+                    vec![KeyValue::new(
+                        Key::from_static_str("error"),
+                        opentelemetry::Value::String(error.to_string().into()),
+                    )],
+                    "",
+                );
             }
-            log_event(
-                error_event.level,
-                "supergraph.error",
-                vec![KeyValue::new(
-                    Key::from_static_str("error"),
-                    opentelemetry::Value::String(error.to_string().into()),
-                )],
-                "",
-            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
@@ -403,23 +403,24 @@ impl
 impl CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes, SubgraphSelector> {
     pub(crate) fn on_request(&mut self, request: &subgraph::Request) {
         if let Some(mut request_event) = self.request.take() {
-            if request_event.condition.evaluate_request(request) != Some(true) {
-                return;
+            if request_event.condition.evaluate_request(request) == Some(true) {
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(SubgraphEventRequest {
+                        level: request_event.level,
+                        condition: Arc::new(Mutex::new(request_event.condition)),
+                    })
+                });
             }
-            request.context.extensions().with_lock(|lock| {
-                lock.insert(SubgraphEventRequest {
-                    level: request_event.level,
-                    condition: Arc::new(Mutex::new(request_event.condition)),
-                })
-            });
         }
-        if let Some(response_event) = self.response.take() {
-            request.context.extensions().with_lock(|lock| {
-                lock.insert(SubgraphEventResponse {
-                    level: response_event.level,
-                    condition: Arc::new(response_event.condition),
-                })
-            });
+        if let Some(mut response_event) = self.response.take() {
+            if response_event.condition.evaluate_request(request) != Some(false) {
+                request.context.extensions().with_lock(|lock| {
+                    lock.insert(SubgraphEventResponse {
+                        level: response_event.level,
+                        condition: Arc::new(response_event.condition),
+                    })
+                });
+            }
         }
         for custom_event in &mut self.custom {
             custom_event.on_request(request);
@@ -434,18 +435,17 @@ impl CustomEvents<subgraph::Request, subgraph::Response, (), SubgraphAttributes,
 
     pub(crate) fn on_error(&mut self, error: &BoxError, ctx: &Context) {
         if let Some(error_event) = &self.error {
-            if !error_event.condition.evaluate_error(error, ctx) {
-                return;
+            if error_event.condition.evaluate_error(error, ctx) {
+                log_event(
+                    error_event.level,
+                    "subgraph.error",
+                    vec![KeyValue::new(
+                        Key::from_static_str("error"),
+                        opentelemetry::Value::String(error.to_string().into()),
+                    )],
+                    "",
+                );
             }
-            log_event(
-                error_event.level,
-                "subgraph.error",
-                vec![KeyValue::new(
-                    Key::from_static_str("error"),
-                    opentelemetry::Value::String(error.to_string().into()),
-                )],
-                "",
-            );
         }
         for custom_event in &mut self.custom {
             custom_event.on_error(error, ctx);
@@ -683,9 +683,7 @@ where
         }
         self.attributes = self.selectors.on_request(request);
 
-        if self.event_on == EventOn::Request
-            && self.condition.evaluate_request(request) != Some(false)
-        {
+        if self.event_on == EventOn::Request {
             let attrs = std::mem::take(&mut self.attributes);
             log_event(self.level, &self.name, attrs, &self.message);
         }

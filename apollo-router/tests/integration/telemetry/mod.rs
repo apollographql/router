@@ -12,6 +12,7 @@ mod propagation;
 mod verifier;
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod zipkin;
+mod events;
 
 struct TraceSpec {
     operation_name: Option<String>,
