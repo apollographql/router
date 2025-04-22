@@ -6,9 +6,23 @@ input_file: apollo-federation/src/connectors/validation/test_data/headers/expres
 [
     Message {
         code: InvalidHeader,
+        message: "In `@source(http.headers:)`: array values aren't valid here",
+        locations: [
+            11:50..11:52,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
         message: "In `@source(http.headers:)`: object values aren't valid here",
         locations: [
             12:45..12:47,
+        ],
+    },
+    Message {
+        code: InvalidHeader,
+        message: "In `@source(http.headers:)`: object values aren't valid here",
+        locations: [
+            13:73..13:75,
         ],
     },
     Message {
