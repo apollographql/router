@@ -786,7 +786,11 @@ fn http_response_to_graphql_response(
             // Application json expects valid graphql response if 2xx
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
                 // Application graphql json expects valid graphql response
-                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|error| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|error| {
+                    let error = FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_owned(),
+                        reason: error.reason,
+                    };
                     graphql::Response::builder()
                         .error(error.to_graphql_error(None))
                         .build()
@@ -802,7 +806,7 @@ fn http_response_to_graphql_response(
                 if original_response.is_empty() {
                     original_response = "<empty response body>".into()
                 }
-                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|_error| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|_error| {
                     graphql::Response::builder()
                         .error(
                             FetchError::SubrequestMalformedResponse {
