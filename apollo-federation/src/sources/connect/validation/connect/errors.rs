@@ -54,11 +54,7 @@ impl<'schema> Errors<'schema> {
         };
 
         ErrorsMessage::parse(errors_arg, coordinate, schema)
-            .map_err(|err| vec![err])
-            .and_try(
-                ErrorsExtensions::parse(errors_arg, coordinate, schema).map_err(|err| vec![err]),
-            )
-            .map_err(|nested| nested.into_iter().flatten().collect())
+            .and_try(ErrorsExtensions::parse(errors_arg, coordinate, schema))
             .map(|(message, extensions)| Self {
                 message,
                 extensions,
