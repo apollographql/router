@@ -196,53 +196,39 @@ impl Connector {
         let source_errors = source.map(|s| &s.errors);
         let error_settings = ConnectorErrorsSettings::from_directive(connect_errors, source_errors);
 
-        // Calculate which variables are in use on the request and the response (including errors.message and errors.extensions)
-        let request_variables: HashSet<Namespace> = transport
-            .variable_references()
+        // Calculate which variables and headers are in use in the request
+        let request_references: HashSet<VariableReference<Namespace>> =
+            transport.variable_references().collect();
+        let request_variables: HashSet<Namespace> = request_references
+            .iter()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        let errors_message_variables: HashSet<Namespace> = error_settings
-            .as_ref()
-            .map_or(Default::default(), |e| e.message.as_ref())
-            .map_or(Default::default(), |m| {
-                m.variable_references()
-                    .map(|var_ref| var_ref.namespace.namespace)
-                    .collect()
-            });
-        let errors_extensions_variables: HashSet<Namespace> = error_settings
-            .as_ref()
-            .map_or(Default::default(), |e| e.extensions.as_ref())
-            .map_or(Default::default(), |m| {
-                m.variable_references()
-                    .map(|var_ref| var_ref.namespace.namespace)
-                    .collect()
-            });
-        let mut response_variables: HashSet<Namespace> = connect
+        let request_headers = extract_header_references(request_references);
+
+        // Calculate which variables and headers are in use in the response (including errors.message and errors.extensions)
+        let response_references: HashSet<VariableReference<Namespace>> = connect
             .selection
             .variable_references()
+            .chain(
+                error_settings
+                    .as_ref()
+                    .and_then(|e| e.message.as_ref())
+                    .map(|m| Box::new(m.variable_references()) as Box<dyn Iterator<Item = _>>)
+                    .unwrap_or_else(|| Box::new(std::iter::empty())),
+            )
+            .chain(
+                error_settings
+                    .as_ref()
+                    .and_then(|e| e.extensions.as_ref())
+                    .map(|e| Box::new(e.variable_references()) as Box<dyn Iterator<Item = _>>)
+                    .unwrap_or_else(|| Box::new(std::iter::empty())),
+            )
+            .collect();
+        let response_variables: HashSet<Namespace> = response_references
+            .iter()
             .map(|var_ref| var_ref.namespace.namespace)
             .collect();
-        response_variables.extend(errors_message_variables);
-        response_variables.extend(errors_extensions_variables);
-
-        // Calculate which headers are in use on the request and the response (including errors.message and errors.extensions)
-        let request_headers = extract_header_references(transport.variable_references());
-        let errors_message_headers = error_settings
-            .as_ref()
-            .map_or(Default::default(), |e| e.message.as_ref())
-            .map_or(Default::default(), |m| {
-                extract_header_references(m.variable_references())
-            });
-        let errors_extensions_headers = error_settings
-            .as_ref()
-            .map_or(Default::default(), |e| e.extensions.as_ref())
-            .map_or(Default::default(), |m| {
-                extract_header_references(m.variable_references())
-            });
-        let mut response_headers =
-            extract_header_references(connect.selection.variable_references());
-        response_headers.extend(errors_message_headers);
-        response_headers.extend(errors_extensions_headers);
+        let response_headers = extract_header_references(response_references);
 
         // Last couple of items here!
         let entity_resolver = determine_entity_resolver(&connect, schema, &request_variables);
@@ -381,9 +367,10 @@ fn determine_entity_resolver(
 
 /// Get any headers referenced in the variable references by looking at both Request and Response namespaces.
 fn extract_header_references<'a>(
-    variable_references: impl Iterator<Item = VariableReference<'a, Namespace>> + 'a,
+    variable_references: HashSet<VariableReference<Namespace>>,
 ) -> HashSet<String> {
     let headers: HashSet<String> = variable_references
+        .iter()
         .filter_map(|var_ref| {
             if var_ref.namespace.namespace != Namespace::Request
                 && var_ref.namespace.namespace != Namespace::Response
