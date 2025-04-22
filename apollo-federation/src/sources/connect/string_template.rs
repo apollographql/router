@@ -17,7 +17,7 @@ use http::uri::PathAndQuery;
 use itertools::Itertools;
 use serde_json_bytes::Value;
 
-use self::encoding::UriString;
+pub(crate) use self::encoding::UriString;
 use crate::sources::connect::JSONSelection;
 
 /// A parsed string template, containing a series of [`Part`]s.
@@ -214,30 +214,39 @@ impl Part {
         mut output: Output,
     ) -> Result<(), Error> {
         match self {
-            Part::Constant(Constant { value, .. }) => output.write_str(value),
+            Part::Constant(Constant { value, .. }) => {
+                output.write_str(value).map_err(|err| err.into())
+            }
             Part::Expression(Expression { expression, .. }) => {
                 // TODO: do something with the ApplyTo errors
                 let (value, _errs) = expression.apply_with_vars(&Value::Null, vars);
-
-                match value.unwrap_or(Value::Null) {
-                    Value::Null => Ok(()),
-                    Value::Bool(b) => write!(output, "{b}"),
-                    Value::Number(n) => write!(output, "{n}"),
-                    Value::String(s) => output.write_str(s.as_str()),
-                    Value::Array(_) | Value::Object(_) => {
-                        return Err(Error {
-                            message: "Expressions can't evaluate to arrays or objects.".to_string(),
-                            location: self.location(),
-                        });
-                    }
-                }
+                write_value(&mut output, value.as_ref().unwrap_or(&Value::Null))
             }
         }
-        .map_err(|_err| Error {
-            message: "Error writing string".to_string(),
+        .map_err(|err| Error {
+            message: err.to_string(),
             location: self.location(),
         })
     }
+}
+
+/// A shared definition of what it means to write a [`Value`] into a string.
+///
+/// Used for string interpolation in templates and building URIs.
+pub(crate) fn write_value<Output: Write>(
+    mut output: Output,
+    value: &Value,
+) -> Result<(), Box<dyn core::error::Error>> {
+    match value {
+        Value::Null => Ok(()),
+        Value::Bool(b) => write!(output, "{b}"),
+        Value::Number(n) => write!(output, "{n}"),
+        Value::String(s) => output.write_str(s.as_str()),
+        Value::Array(_) | Value::Object(_) => {
+            return Err("Expression is not allowed to evaluate to arrays or objects.".into());
+        }
+    }
+    .map_err(|err| err.into())
 }
 
 /// A constant string literal—the piece of a [`StringTemplate`] _not_ in `{ }`
@@ -311,19 +320,19 @@ mod encoding {
         .remove(b'=')
         .remove(b'%');
 
-    pub(super) struct UriString {
+    pub(crate) struct UriString {
         value: String,
     }
 
     impl UriString {
-        pub(super) fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self {
                 value: String::new(),
             }
         }
 
-        /// Write a bit of trusted input without encoding, like a constant piece of a template
-        pub(super) fn write_trusted(&mut self, s: &str) -> std::fmt::Result {
+        /// Write a bit of trusted input, like a constant piece of a template, only encoding illegal symbols.
+        pub(crate) fn write_trusted(&mut self, s: &str) -> std::fmt::Result {
             write!(
                 &mut self.value,
                 "{}",
@@ -331,12 +340,29 @@ mod encoding {
             )
         }
 
-        pub(super) fn contains(&self, pattern: &str) -> bool {
+        /// Add a pre-encoded string to the URI. Used for merging without duplicating percent-encoding.
+        pub(crate) fn write_without_encoding(&mut self, s: &str) -> std::fmt::Result {
+            self.value.write_str(s)
+        }
+
+        pub(crate) fn contains(&self, pattern: &str) -> bool {
             self.value.contains(pattern)
+        }
+
+        pub(crate) fn ends_with(&self, pattern: char) -> bool {
+            self.value.ends_with(pattern)
+        }
+
+        pub(crate) fn into_string(self) -> String {
+            self.value
+        }
+
+        pub(crate) fn is_empty(&self) -> bool {
+            self.value.is_empty()
         }
     }
 
-    impl Write for &mut UriString {
+    impl Write for UriString {
         fn write_str(&mut self, s: &str) -> std::fmt::Result {
             write!(&mut self.value, "{}", utf8_percent_encode(s, USER_INPUT))
         }
@@ -460,7 +486,7 @@ mod test_interpolate {
             @r###"
         Err(
             Error {
-                message: "Expressions can't evaluate to arrays or objects.",
+                message: "Expression is not allowed to evaluate to arrays or objects.",
                 location: 1..12,
             },
         )
@@ -502,7 +528,7 @@ mod test_interpolate {
             @r###"
         Err(
             Error {
-                message: "Expressions can't evaluate to arrays or objects.",
+                message: "Expression is not allowed to evaluate to arrays or objects.",
                 location: 1..12,
             },
         )

@@ -6,3 +6,7 @@ expression: yaml
     kind: my.request_event
   level: INFO
   message: my event message
+- fields:
+    kind: my.response_event
+  level: INFO
+  message: my response event message

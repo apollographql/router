@@ -342,9 +342,7 @@ where
         }
         self.attributes = self.selectors.on_request(request);
 
-        if self.event_on == EventOn::Request
-            && self.condition.evaluate_request(request) != Some(false)
-        {
+        if self.event_on == EventOn::Request {
             let attrs = std::mem::take(&mut self.attributes);
             log_event(self.level, &self.name, attrs, &self.message);
         }
