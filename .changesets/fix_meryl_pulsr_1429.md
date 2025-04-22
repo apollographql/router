@@ -2,4 +2,4 @@
 
 Fixes a bug where enums that were arguments to nested queries were not being reported. 
 
-By [@merylc (https://github.com/merylc) in https://github.com/apollographql/router/pull/6900
+By [@merylc](https://github.com/merylc) in https://github.com/apollographql/router/pull/6900
