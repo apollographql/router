@@ -149,7 +149,7 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
 
-    /// Sandbox configuration
+    /// Apollo Sandbox configuration
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
@@ -157,59 +157,60 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) homepage: Homepage,
 
-    /// Configuration for the server
+    /// HTTP server configuration
     #[serde(default)]
     pub(crate) server: Server,
 
-    /// Configuration for the supergraph
+    /// Supergraph configuration
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
 
-    /// Cross origin request headers.
+    /// Cross origin request headers (CORS) configuration
     #[serde(default)]
     pub(crate) cors: Cors,
 
+    /// Transport Layer Security (TLS) configuration
     #[serde(default)]
     pub(crate) tls: Tls,
 
-    /// Configures automatic persisted queries
+    /// Automatic Persisted Queries (APQ) configuration
     #[serde(default)]
     pub(crate) apq: Apq,
 
-    /// Configures managed persisted queries
+    /// Managed persisted queries configuration
     #[serde(default)]
     pub persisted_queries: PersistedQueries,
 
-    /// Configuration for operation limits, parser limits, HTTP limits, etc.
+    /// Limits configuration. Includes limits for operations, parser, HTTP server
     #[serde(default)]
     pub(crate) limits: limits::Config,
 
-    /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
-    /// You probably don’t want this in production!
+    /// Chaos testing configuration. Reproduces bugs requiring uncommon conditions.
+    /// Not for production
     #[serde(default)]
     pub(crate) experimental_chaos: Chaos,
 
-    /// Plugin configuration
+    /// User plugin configuration
     #[serde(default)]
     pub(crate) plugins: UserPlugins,
 
-    /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
+    /// Built-in plugin configuration. Built-in plugins are pushed to the top level of config.
     #[serde(default)]
     #[serde(flatten)]
     pub(crate) apollo_plugins: ApolloPlugins,
 
-    /// Uplink configuration.
+    /// Uplink configuration
     #[serde(skip)]
     pub uplink: Option<UplinkConfig>,
 
     #[serde(default, skip_serializing, skip_deserializing)]
     pub(crate) notify: Notify<String, graphql::Response>,
 
-    /// Batching configuration.
+    /// Batching configuration
     #[serde(default)]
     pub(crate) batching: Batching,
 
-    /// Type conditioned fetching configuration.
+    /// Type-conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
 }
@@ -659,8 +660,7 @@ impl JsonSchema for UserPlugins {
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Supergraph {
-    /// The socket address and port to listen on
-    /// Defaults to 127.0.0.1:4000
+    /// The socket address and port to listen on (default: 127.0.0.1:4000)
     pub(crate) listen: ListenAddr,
 
     /// The timeout for shutting down connections during a router shutdown or a schema reload.
@@ -795,7 +795,7 @@ impl Supergraph {
     }
 }
 
-/// Router level configuration for APQ
+/// Router-level configuration for APQ
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Router {
@@ -830,11 +830,11 @@ impl Apq {
     }
 }
 
-/// Subgraph level Automatic Persisted Queries (APQ) configuration
+/// Subgraph-level Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphApq {
-    /// Enable
+    /// Flag to enable subgraph-level APQ (default: true)
     pub(crate) enabled: bool,
 }
 
@@ -858,21 +858,23 @@ impl Default for Apq {
 pub(crate) struct QueryPlanning {
     /// Cache configuration
     pub(crate) cache: QueryPlanCache,
-    /// Warms up the cache on reloads by running the query plan over
-    /// a list of the most used queries (from the in memory cache)
-    /// Configures the number of queries warmed up. Defaults to 1/3 of
-    /// the in memory cache
+
+    /// Number of warmed-up cache queries (default: 1/3 of in-memory cache size)
+    /// 
+    /// The router warms up the cache on reloads by running the query plan over
+    /// a list of the most used queries (from the in-memory cache)
     pub(crate) warmed_up_queries: Option<usize>,
 
-    /// Sets a limit to the number of generated query plans.
-    /// The planning process generates many different query plans as it
-    /// explores the graph, and the list can grow large. By using this
-    /// limit, we prevent that growth and still get a valid query plan,
-    /// but it may not be the optimal one.
-    ///
-    /// The default limit is set to 10000, but it may change in the future
+    /// Maximum number of generated query plans (default: 10000).
+    /// 
+    /// The planning process generates many query plans as it
+    /// explores the graph, and the list can grow large. 
+    /// This limit prevents that growth. 
+    /// (Note: depending on the set limit, the generated query plans may not be optimal)
     pub(crate) experimental_plans_limit: Option<u32>,
 
+    /// Maximum number of options considered per path of fields in a query (default: unlimited).
+    /// 
     /// Before creating query plans, for each path of fields in the query we compute all the
     /// possible options to traverse that path via the subgraphs. Multiple options can arise because
     /// fields in the path can be provided by multiple subgraphs, and abstract types (i.e. unions
@@ -881,32 +883,33 @@ pub(crate) struct QueryPlanning {
     /// large if the schema or query are sufficiently complex, and that will increase the time spent
     /// planning.
     ///
-    /// This config allows specifying a per-path limit to the number of options considered. If any
-    /// path's options exceeds this limit, query planning will abort and the operation will fail.
+    /// If any path's options exceeds this limit, query planning will abort and the operation will fail.
     ///
-    /// The default value is None, which specifies no limit.
+    /// The default value is None, which is treated as unlimited.
     pub(crate) experimental_paths_limit: Option<u32>,
 
+    /// Flag to reuse query plan after cache warm up (default: false).
+    /// 
     /// If cache warm up is configured, this will allow the router to keep a query plan created with
-    /// the old schema, if it determines that the schema update does not affect the corresponding query
+    /// the old schema, if it determines that the schema update does not affect the corresponding query.
     pub(crate) experimental_reuse_query_plans: bool,
 }
 
-/// Cache configuration
+/// Query planner cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanCache {
-    /// Configures the in memory cache (always active)
+    /// In-memory cache configuration. Is always active.
     pub(crate) in_memory: InMemoryCache,
-    /// Configures and activates the Redis cache
+    /// Redis cache configuration
     pub(crate) redis: Option<QueryPlanRedisCache>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// Redis cache configuration
+/// Query planner Redis cache configuration
 pub(crate) struct QueryPlanRedisCache {
-    /// List of URLs to the Redis cluster
+    /// List of URLs to the Redis cluster (default: empty list)
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
@@ -924,10 +927,10 @@ pub(crate) struct QueryPlanRedisCache {
         default = "default_query_plan_cache_ttl"
     )]
     #[schemars(with = "Option<String>", default = "default_query_plan_cache_ttl")]
-    /// TTL for entries
+    /// TTL for entries (default: 30 days)
     pub(crate) ttl: Duration,
 
-    /// namespace used to prefix Redis keys
+    /// Namespace used to prefix Redis keys
     pub(crate) namespace: Option<String>,
 
     #[serde(default)]
@@ -935,15 +938,15 @@ pub(crate) struct QueryPlanRedisCache {
     pub(crate) tls: Option<TlsClient>,
 
     #[serde(default = "default_required_to_start")]
-    /// Prevents the router from starting if it cannot connect to Redis
+    /// Flag to prevent the router from starting if it cannot connect to Redis (default: false)
     pub(crate) required_to_start: bool,
 
     #[serde(default = "default_reset_ttl")]
-    /// When a TTL is set on a key, reset it when reading the data from that key
+    /// Flag to reset the TTL of a key when reading the data from that key (default: true)
     pub(crate) reset_ttl: bool,
 
     #[serde(default = "default_query_planner_cache_pool_size")]
-    /// The size of the Redis connection pool
+    /// Number of available connections in the Redis connection pool (default: 1)
     pub(crate) pool_size: u32,
 }
 
@@ -962,7 +965,7 @@ fn default_query_planner_cache_pool_size() -> u32 {
 pub(crate) struct Cache {
     /// In-memory cache configuration. Always active
     pub(crate) in_memory: InMemoryCache,
-    /// Redis cache configuration. Optional
+    /// Redis cache configuration
     pub(crate) redis: Option<RedisCache>,
 }
 
@@ -977,9 +980,9 @@ impl From<QueryPlanCache> for Cache {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-/// In memory cache configuration
+/// In-memory cache configuration
 pub(crate) struct InMemoryCache {
-    /// Number of entries in the Least Recently Used cache
+    /// Number of entries in the LRU cache (default: 512)
     pub(crate) limit: NonZeroUsize,
 }
 
@@ -995,7 +998,7 @@ impl Default for InMemoryCache {
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
-    /// List of URLs to the Redis cluster
+    /// List of URLs to the Redis cluster (default: empty list)
     pub(crate) urls: Vec<url::Url>,
 
     /// Redis username if not provided in the URLs. This field takes precedence over the username in the URL
@@ -1013,7 +1016,7 @@ pub(crate) struct RedisCache {
     /// TTL for entries
     pub(crate) ttl: Option<Duration>,
 
-    /// namespace used to prefix Redis keys
+    /// Namespace used to prefix Redis keys
     pub(crate) namespace: Option<String>,
 
     #[serde(default)]
@@ -1021,15 +1024,15 @@ pub(crate) struct RedisCache {
     pub(crate) tls: Option<TlsClient>,
 
     #[serde(default = "default_required_to_start")]
-    /// Prevents the router from starting if it cannot connect to Redis
+    /// Flag to prevent the router from starting if it cannot connect to Redis (default: false)
     pub(crate) required_to_start: bool,
 
     #[serde(default = "default_reset_ttl")]
-    /// When a TTL is set on a key, reset it when reading the data from that key
+    /// Flag to reset the TTL of a key when reading the data from that key (default: true)
     pub(crate) reset_ttl: bool,
 
     #[serde(default = "default_pool_size")]
-    /// The size of the Redis connection pool
+     /// Number of available connections in the Redis connection pool (default: 1)
     pub(crate) pool_size: u32,
 }
 
@@ -1062,7 +1065,7 @@ fn default_reset_ttl() -> bool {
     true
 }
 
-/// TLS related configuration options.
+/// Transport Layer Security (TLS) configuration options.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
