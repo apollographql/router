@@ -213,15 +213,15 @@ impl Connector {
                 error_settings
                     .as_ref()
                     .and_then(|e| e.message.as_ref())
-                    .map(|m| Box::new(m.variable_references()) as Box<dyn Iterator<Item = _>>)
-                    .unwrap_or_else(|| Box::new(std::iter::empty())),
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
             )
             .chain(
                 error_settings
                     .as_ref()
                     .and_then(|e| e.extensions.as_ref())
-                    .map(|e| Box::new(e.variable_references()) as Box<dyn Iterator<Item = _>>)
-                    .unwrap_or_else(|| Box::new(std::iter::empty())),
+                    .into_iter()
+                    .flat_map(|m| m.variable_references()),
             )
             .collect();
         let response_variables: HashSet<Namespace> = response_references
