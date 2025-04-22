@@ -279,6 +279,25 @@ async fn test_extended_references_var_nested_type() {
 }
 
 #[test(tokio::test)]
+async fn test_extended_references_nested_query() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/extended_references_var_nested_type.graphql");
+    let query_vars_str = include_str!("testdata/extended_references_var_nested_type.json");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+    let vars: Object = serde_json::from_str(query_vars_str).unwrap();
+
+    let generated = generate_extended_refs(
+        &doc,
+        Some("NestedInputTypeVarsQuery".into()),
+        &schema,
+        Some(&vars),
+    );
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
 async fn test_enums_from_response_complex_response_type() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
     let query_str = include_str!("testdata/enums_from_response_complex_response_type.graphql");
@@ -519,4 +538,30 @@ fn test_get_operation_name() {
         "",
         usage_reporting_for_unnamed_operation.get_operation_name()
     );
+}
+
+#[test(tokio::test)]
+async fn test_enums_with_nested_query_fragment() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_with_nested_query_fragment.graphql");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_extended_refs(&doc, Some("QueryWithNestedQuery".into()), &schema, None);
+    assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_enums_with_nested_query() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_with_nested_query.graphql");
+
+    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
+
+    let generated =
+        generate_extended_refs(&doc, Some("QueryWithNestedQuery".into()), &schema, None);
+    assert_extended_references!(&generated);
 }

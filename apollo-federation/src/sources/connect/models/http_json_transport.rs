@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::fmt::Write;
+use std::iter::once;
 use std::str::FromStr;
 
 use apollo_compiler::Node;
@@ -15,9 +17,11 @@ use http::uri::InvalidUriParts;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use serde_json_bytes::Value;
+use serde_json_bytes::json;
 use thiserror::Error;
 
 use crate::error::FederationError;
+use crate::sources::connect::ApplyToError;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::PathSelection;
@@ -33,6 +37,7 @@ use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NA
 use crate::sources::connect::spec::versions::AllowedHeaders;
 use crate::sources::connect::string_template;
 use crate::sources::connect::string_template::UriString;
+use crate::sources::connect::string_template::write_value;
 use crate::sources::connect::variable::VariableReference;
 
 #[derive(Clone, Debug, Default)]
@@ -42,10 +47,14 @@ pub struct HttpJsonTransport {
     pub method: HTTPMethod,
     pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
+    pub source_path: Option<JSONSelection>,
+    pub source_query_params: Option<JSONSelection>,
+    pub connect_path: Option<JSONSelection>,
+    pub connect_query_params: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {
-    pub(crate) fn from_directive(
+    pub(super) fn from_directive(
         http: &ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
@@ -85,10 +94,14 @@ impl HttpJsonTransport {
             method,
             headers,
             body: http.body.clone(),
+            source_path: source.and_then(|s| s.path.clone()),
+            source_query_params: source.and_then(|s| s.query_params.clone()),
+            connect_path: http.path.clone(),
+            connect_query_params: http.query_params.clone(),
         })
     }
 
-    pub(crate) fn label(&self) -> String {
+    pub(super) fn label(&self) -> String {
         format!("http: {} {}", self.method, self.connect_template)
     }
 
@@ -101,6 +114,10 @@ impl HttpJsonTransport {
         url_selections
             .chain(header_selections)
             .chain(self.body.iter())
+            .chain(self.source_path.iter())
+            .chain(self.source_query_params.iter())
+            .chain(self.connect_path.iter())
+            .chain(self.connect_query_params.iter())
             .flat_map(|b| {
                 b.external_var_paths()
                     .into_iter()
@@ -110,6 +127,8 @@ impl HttpJsonTransport {
 
     pub fn make_uri(&self, inputs: &IndexMap<String, Value>) -> Result<Uri, MakeUriError> {
         let mut uri_parts = Parts::default();
+        // TODO: Return these warnings for both Sandbox debugging and mapping playground
+        let mut warnings = Vec::new();
 
         let connect_uri = self.connect_template.interpolate_uri(inputs)?;
 
@@ -126,6 +145,9 @@ impl HttpJsonTransport {
         {
             path.write_without_encoding(source_uri_path)?;
         }
+        if let Some(source_path) = self.source_path.as_ref() {
+            warnings.extend(extend_path_from_expression(&mut path, source_path, inputs)?);
+        }
         let connect_path = connect_uri.path();
         if !connect_path.is_empty() && connect_path != "/" {
             if path.ends_with('/') {
@@ -137,6 +159,13 @@ impl HttpJsonTransport {
                 path.write_without_encoding(connect_path)?;
             };
         }
+        if let Some(connect_path) = self.connect_path.as_ref() {
+            warnings.extend(extend_path_from_expression(
+                &mut path,
+                connect_path,
+                inputs,
+            )?);
+        }
 
         let mut query = UriString::new();
 
@@ -147,12 +176,26 @@ impl HttpJsonTransport {
         {
             query.write_without_encoding(source_uri_query)?;
         }
+        if let Some(source_query) = self.source_query_params.as_ref() {
+            warnings.extend(extend_query_from_expression(
+                &mut query,
+                source_query,
+                inputs,
+            )?);
+        }
         let connect_query = connect_uri.query().unwrap_or_default();
         if !connect_query.is_empty() {
             if !query.is_empty() && !query.ends_with('&') {
                 query.write_without_encoding("&")?;
             }
             query.write_without_encoding(connect_query)?;
+        }
+        if let Some(connect_query) = self.connect_query_params.as_ref() {
+            warnings.extend(extend_query_from_expression(
+                &mut query,
+                connect_query,
+                inputs,
+            )?);
         }
 
         let path = path.into_string();
@@ -165,9 +208,70 @@ impl HttpJsonTransport {
             (false, false) => PathAndQuery::try_from(format!("{path}?{query}"))?,
         });
 
-        // Reconstruct the URI and convert to string
         Uri::from_parts(uri_parts).map_err(MakeUriError::BuildMergedUri)
     }
+}
+
+/// Path segments can optionally be appended from the `http.path` inputs, each of which are a
+/// [`JSONSelection`] expression expected to evaluate to an array.
+fn extend_path_from_expression(
+    path: &mut UriString,
+    expression: &JSONSelection,
+    inputs: &IndexMap<String, Value>,
+) -> Result<Vec<ApplyToError>, MakeUriError> {
+    let (value, warnings) = expression.apply_with_vars(&json!({}), inputs);
+    let Some(value) = value else {
+        return Ok(warnings);
+    };
+    let Value::Array(values) = value else {
+        return Err(MakeUriError::PathComponents(
+            "Expression did not evaluate to an array".into(),
+        ));
+    };
+    for value in &values {
+        if !path.ends_with('/') {
+            path.write_trusted("/")?;
+        }
+        write_value(&mut *path, value)
+            .map_err(|err| MakeUriError::PathComponents(err.to_string()))?;
+    }
+    Ok(warnings)
+}
+
+fn extend_query_from_expression(
+    query: &mut UriString,
+    expression: &JSONSelection,
+    inputs: &IndexMap<String, Value>,
+) -> Result<Vec<ApplyToError>, MakeUriError> {
+    let (value, warnings) = expression.apply_with_vars(&json!({}), inputs);
+    let Some(value) = value else {
+        return Ok(warnings);
+    };
+    let Value::Object(map) = value else {
+        return Err(MakeUriError::QueryParams(
+            "Expression did not evaluate to an object".into(),
+        ));
+    };
+
+    let all_params = map.iter().flat_map(|(key, value)| {
+        if let Value::Array(values) = value {
+            // If the top-level value is an array, we're going to turn that into repeated params
+            Either::Left(values.iter().map(|value| (key.as_str(), value)))
+        } else {
+            Either::Right(once((key.as_str(), value)))
+        }
+    });
+
+    for (key, value) in all_params {
+        if !query.is_empty() && !query.ends_with('&') {
+            query.write_trusted("&")?;
+        }
+        query.write_str(key)?;
+        query.write_trusted("=")?;
+        write_value(&mut *query, value)
+            .map_err(|err| MakeUriError::QueryParams(err.to_string()))?;
+    }
+    Ok(warnings)
 }
 
 #[derive(Debug, Error)]
@@ -180,6 +284,10 @@ pub enum MakeUriError {
     TemplateGenerationError(#[from] string_template::Error),
     #[error("Internal error building URI")]
     WriteError(#[from] std::fmt::Error),
+    #[error("Error building path components from expression: {0}")]
+    PathComponents(String),
+    #[error("Error building query parameters from queryParams: {0}")]
+    QueryParams(String),
 }
 
 /// The HTTP arguments needed for a connect request
@@ -405,9 +513,49 @@ impl Error for HeaderParseError<'_> {}
 mod test_make_uri {
     use std::str::FromStr;
 
+    use apollo_compiler::collections::IndexMap;
+    use http::Uri;
     use pretty_assertions::assert_eq;
+    use serde_json_bytes::json;
 
     use super::*;
+    use crate::sources::connect::JSONSelection;
+
+    /// Take data from all the places it can come from and make sure they combine in the right order
+    #[test]
+    fn merge_all_sources() {
+        let transport = HttpJsonTransport {
+            source_url: Uri::from_str(
+                "http://example.com/sourceUri?shared=sourceUri&sourceUri=sourceUri",
+            )
+            .ok(),
+            connect_template: "/{$args.connectUri}?shared={$args.connectUri}&{$args.connectUri}={$args.connectUri}".parse().unwrap(),
+            source_path: JSONSelection::parse("$args.sourcePath").ok(),
+            connect_path: JSONSelection::parse("$args.connectPath").ok(),
+            source_query_params: JSONSelection::parse("$args.sourceQuery").ok(),
+            connect_query_params: JSONSelection::parse("$args.connectQuery").ok(),
+            ..Default::default()
+        };
+        let inputs = IndexMap::from_iter([(
+            "$args".to_string(),
+            json!({
+                "connectUri": "connectUri",
+                "sourcePath": ["sourcePath1", "sourcePath2"],
+                "connectPath": ["connectPath1", "connectPath2"],
+                "sourceQuery": {"shared": "sourceQuery", "sourceQuery": "sourceQuery"},
+                "connectQuery": {"shared": "connectQuery", "connectQuery": "connectQuery"},
+            }),
+        )]);
+        let url = transport.make_uri(&inputs).unwrap();
+        assert_eq!(
+            url.to_string(),
+            "http://example.com/sourceUri/sourcePath1/sourcePath2/connectUri/connectPath1/connectPath2\
+            ?shared=sourceUri&sourceUri=sourceUri\
+            &shared=sourceQuery&sourceQuery=sourceQuery\
+            &shared=connectUri&connectUri=connectUri\
+            &shared=connectQuery&connectQuery=connectQuery"
+        );
+    }
 
     macro_rules! this {
         ($($value:tt)*) => {{
@@ -422,6 +570,7 @@ mod test_make_uri {
         use rstest::rstest;
 
         use super::*;
+
         #[rstest]
         #[case::connect_only("https://localhost:8080/v1", "/hello")]
         #[case::source_only("https://localhost:8080/v1/", "hello")]
@@ -439,6 +588,21 @@ mod test_make_uri {
             assert_eq!(
                 transport.make_uri(&Default::default()).unwrap().to_string(),
                 "https://localhost:8080/v1/hello"
+            );
+        }
+
+        #[rstest]
+        #[case::when_base_has_trailing("http://localhost/")]
+        #[case::when_base_does_not_have_trailing("http://localhost")]
+        fn handle_slashes_when_adding_path_expression(#[case] base: &str) {
+            let transport = HttpJsonTransport {
+                source_url: Uri::from_str(base).ok(),
+                source_path: JSONSelection::parse("$([1, 2])").ok(),
+                ..Default::default()
+            };
+            assert_eq!(
+                transport.make_uri(&Default::default()).unwrap().to_string(),
+                "http://localhost/1/2"
             );
         }
 
@@ -508,18 +672,6 @@ mod test_make_uri {
         }
 
         #[test]
-        fn with_merged_query_params() {
-            let transport = HttpJsonTransport {
-                source_url: Uri::from_str("https://localhost:8080/v1?foo=bar").ok(),
-                connect_template: "/hello/{$this.id}?id={$this.id}".parse().unwrap(),
-                ..Default::default()
-            };
-            assert_eq!(
-                transport.make_uri(&this! {"id": 42 }).unwrap().to_string(),
-                "https://localhost:8080/v1/hello/42?foo=bar&id=42"
-            );
-        }
-        #[test]
         fn with_trailing_slash_in_base_plus_query_params() {
             let transport = HttpJsonTransport {
                 source_url: Uri::from_str("https://localhost:8080/v1/?foo=bar").ok(),
@@ -564,7 +716,7 @@ mod test_make_uri {
         }
 
         #[test]
-        fn combine_from_both() {
+        fn combine_from_both_uris() {
             let transport = HttpJsonTransport {
                 source_url: Uri::from_str("http://localhost/users?a=b").ok(),
                 connect_template: "?c=d".parse().unwrap(),
@@ -586,6 +738,25 @@ mod test_make_uri {
             assert_eq!(
                 transport.make_uri(&Default::default()).unwrap(),
                 "http://localhost/users?a=b&a=d"
+            )
+        }
+
+        #[test]
+        fn repeated_params_from_array() {
+            let transport = HttpJsonTransport {
+                connect_template: "http://localhost".parse().unwrap(),
+                connect_query_params: JSONSelection::parse("$args.connectQuery").ok(),
+                ..Default::default()
+            };
+            let inputs = IndexMap::from_iter([(
+                "$args".to_string(),
+                json!({
+                    "connectQuery": {"multi": ["first", "second"]},
+                }),
+            )]);
+            assert_eq!(
+                transport.make_uri(&inputs).unwrap(),
+                "http://localhost?multi=first&multi=second"
             )
         }
     }

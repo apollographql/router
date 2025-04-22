@@ -279,19 +279,19 @@ mod test {
     use parking_lot::Mutex;
 
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::attributes::HttpCommonAttributes;
-    use crate::plugins::telemetry::config_new::attributes::HttpServerAttributes;
-    use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
     use crate::plugins::telemetry::config_new::attributes::StandardAttribute;
-    use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::extendable::Extendable;
+    use crate::plugins::telemetry::config_new::http_common::attributes::HttpCommonAttributes;
+    use crate::plugins::telemetry::config_new::http_server::attributes::HttpServerAttributes;
+    use crate::plugins::telemetry::config_new::router::attributes::RouterAttributes;
+    use crate::plugins::telemetry::config_new::router::selectors::RouterSelector;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
-    use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-    use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+    use crate::plugins::telemetry::config_new::supergraph::attributes::SupergraphAttributes;
+    use crate::plugins::telemetry::config_new::supergraph::selectors::SupergraphSelector;
 
     #[test]
     fn test_extendable_serde() {
