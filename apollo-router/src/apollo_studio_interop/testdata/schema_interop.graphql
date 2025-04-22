@@ -195,6 +195,18 @@ type EnumResponse
   nestedObject: NestedEnumResponse
 }
 
+type EnumResponseWithNestedQuery 
+  @join__type(graph: MAIN)
+{
+  nestedQuery(input: SomeEnum): StringResponse
+}
+
+type StringResponse
+  @join__type(graph: MAIN)
+{
+  str: String 
+}
+
 type Query
   @join__type(graph: MAIN)
 {
@@ -222,6 +234,7 @@ type Query
     anotherEnumList: [AnotherEnum],
   ): BasicResponse
   enumResponseQuery: EnumResponse,
+  enumNestedQuery: EnumResponseWithNestedQuery
 }
 
 enum SomeEnum
