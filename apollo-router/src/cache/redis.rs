@@ -74,7 +74,7 @@ impl Drop for DropSafeRedisPool {
     fn drop(&mut self) {
         let inner = self.0.clone();
         tokio::spawn(async move {
-            let result = inner.clone().quit().await;
+            let result = inner.quit().await;
             if let Err(err) = result {
                 tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
             }
