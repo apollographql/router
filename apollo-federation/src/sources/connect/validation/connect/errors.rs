@@ -42,10 +42,10 @@ impl<'schema> Errors<'schema> {
         coordinate: ConnectDirectiveCoordinate<'schema>,
         schema: &'schema SchemaInfo,
     ) -> Result<Self, Vec<Message>> {
-        let Some((errors_arg, _errors_arg_node)) = coordinate
+        let Some(arg) = coordinate
             .directive
             .specified_argument_by_name(&ERRORS_ARGUMENT_NAME)
-            .and_then(|arg| Some((arg.as_object()?, arg)))
+            .and_then(|arg| Some(arg))
         else {
             return Ok(Self {
                 message: None,
@@ -53,12 +53,26 @@ impl<'schema> Errors<'schema> {
             });
         };
 
-        ErrorsMessage::parse(errors_arg, coordinate, schema)
-            .and_try(ErrorsExtensions::parse(errors_arg, coordinate, schema))
-            .map(|(message, extensions)| Self {
-                message,
-                extensions,
-            })
+        if let Some(errors_arg) = arg.as_object() {
+            ErrorsMessage::parse(errors_arg, coordinate, schema)
+                .and_try(ErrorsExtensions::parse(errors_arg, coordinate, schema))
+                .map(|(message, extensions)| Self {
+                    message,
+                    extensions,
+                })
+        } else {
+            return Err(vec![Message {
+                code: Code::GraphQLError,
+                message: format!(
+                    "{coordinate} `{ERRORS_ARGUMENT_NAME}` argument must be an object."
+                ),
+                locations: coordinate
+                    .directive
+                    .line_column_range(&schema.sources)
+                    .into_iter()
+                    .collect(),
+            }]);
+        }
     }
 
     /// Type-check the `@connect(errors:)` directive.
