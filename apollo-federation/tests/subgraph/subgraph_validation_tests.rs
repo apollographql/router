@@ -17,16 +17,22 @@ fn build_for_errors(schema: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-//  True if a and b contain all the same items regardless of order
-fn is_unordered_eq(a: &Vec<(String, String)>, b: &[(String, String)]) -> bool {
-    a.iter().all(|a_i| b.contains(a_i)) && b.iter().all(|b_i| a.contains(b_i))
+// True if a and b contain the same error messages
+fn errors_eq(a: &[(String, String)], b: &[(&str, &str)]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+
+    a.iter()
+        .zip(b.iter())
+        .all(|(a_i, b_i)| a_i.0.as_str() == b_i.0 && a_i.1.as_str() == b_i.1)
 }
 
 mod fieldset_based_directives {
     use super::*;
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_field_defined_with_arguments_in_key() {
         let schema_str = r#"
             type Query {		
@@ -38,17 +44,17 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "KEY_FIELDS_HAS_ARGS".to_string(),
-                r#"[S] On type "T", for @key(fields: "f"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @key)"#.to_string(),
-                )],
-        );
+        assert!(errors_eq(
+            &err,
+            &[(
+                "KEY_FIELDS_HAS_ARGS",
+                r#"[S] On type "T", for @key(fields: "f"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @key)"#,
+            )]
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_field_defined_with_arguments_in_provides() {
         let schema_str = r#"
             type Query {
@@ -61,17 +67,17 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "PROVIDES_FIELDS_HAS_ARGS".to_string(),
-                r#"[S] On field "Query.t", for @provides(fields: "f"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @provides)"#.to_string(),
+        assert!(errors_eq(
+            &err,
+            &[(
+                "PROVIDES_FIELDS_HAS_ARGS",
+                r#"[S] On field "Query.t", for @provides(fields: "f"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @provides)"#,
             )]
-        );
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -84,17 +90,17 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "PROVIDES_FIELDS_MISSING_EXTERNAL".to_string(),
-                r#"[S] On field "Query.t", for @provides(fields: "f"): field "T.f" should not be part of a @provides since it is already provided by this subgraph (it is not marked @external)"#.to_string(),
+        assert!(errors_eq(
+            &err,
+            &[(
+                "PROVIDES_FIELDS_MISSING_EXTERNAL",
+                r#"[S] On field "Query.t", for @provides(fields: "f"): field "T.f" should not be part of a @provides since it is already provided by this subgraph (it is not marked @external)"#,
             )]
-        );
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_requires_on_non_external_fields() {
         let schema_str = r#"
             type Query {
@@ -108,17 +114,17 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "REQUIRES_FIELDS_MISSING_EXTERNAL".to_string(), 
-                r#"[S] On field "T.g", for @requires(fields: "f"): field "T.f" should not be part of a @requires since it is already provided by this subgraph (it is not marked @external)"#.to_string(),
+        assert!(errors_eq(
+            &err,
+            &[(
+                "REQUIRES_FIELDS_MISSING_EXTERNAL",
+                r#"[S] On field "T.g", for @requires(fields: "f"): field "T.f" should not be part of a @requires since it is already provided by this subgraph (it is not marked @external)"#,
             )]
-        );
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_key_on_interfaces_in_all_specs() {
         for version in ["2.0", "2.1", "2.2"] {
             let schema_str = format!(
@@ -138,18 +144,18 @@ mod fieldset_based_directives {
             );
             let err = build_for_errors(&schema_str);
 
-            assert_eq!(
-                err,
-                vec![(
-                    "KEY_UNSUPPORTED_ON_INTERFACE".to_string(),
-                    r#"[S] Cannot use @key on interface "T": @key is not yet supported on interfaces"#.to_string(),
+            assert!(errors_eq(
+                &err,
+                &[(
+                    "KEY_UNSUPPORTED_ON_INTERFACE",
+                    r#"[S] Cannot use @key on interface "T": @key is not yet supported on interfaces"#,
                 )]
-            );
+            ));
         }
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_interfaces() {
         let schema_str = r#"
             type Query {
@@ -166,17 +172,17 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "PROVIDES_UNSUPPORTED_ON_INTERFACE".to_string(),
-                r#"[S] Cannot use @provides on field "T.f" of parent type "T": @provides is not yet supported within interfaces"#.to_string(),
+        assert!(errors_eq(
+            &err,
+            &[(
+                "PROVIDES_UNSUPPORTED_ON_INTERFACE",
+                r#"[S] Cannot use @provides on field "T.f" of parent type "T": @provides is not yet supported within interfaces"#,
             )]
-        );
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_requires_on_interfaces() {
         let schema_str = r#"
             type Query {
@@ -190,25 +196,23 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert!(
-            is_unordered_eq(
-                &err,
-                &[
-                    (
-                    "REQUIRES_UNSUPPORTED_ON_INTERFACE".to_string(),
-                    r#"[S] Cannot use @requires on field "T.g" of parent type "T": @requires is not yet supported within interfaces"#.to_string(),
-                    ),
-                    (
-                    "EXTERNAL_ON_INTERFACE".to_string(),
-                    r#"[S] Interface type field "T.f" is marked @external but @external is not allowed on interface fields (it is nonsensical)."#.to_string(),
-                    ),
-                ]
-            )
-        );
+        assert!(errors_eq(
+            &err,
+            &[
+                (
+                    "REQUIRES_UNSUPPORTED_ON_INTERFACE",
+                    r#"[S] Cannot use @requires on field "T.g" of parent type "T": @requires is not yet supported within interfaces"#,
+                ),
+                (
+                    "EXTERNAL_ON_INTERFACE",
+                    r#"[S] Interface type field "T.f" is marked @external but @external is not allowed on interface fields (it is nonsensical)."#,
+                ),
+            ]
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_unused_external() {
         let schema_str = r#"
             type Query {
@@ -221,17 +225,17 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "EXTERNAL_UNUSED".to_string(),
-                r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#.to_string(),
+        assert!(errors_eq(
+            &err,
+            &[(
+                "EXTERNAL_UNUSED",
+                r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#,
             )]
-        );
+        ));
     }
 
     #[test]
-    #[ignore]
+    #[should_panic(expected = r#"subgraph error was expected:"#)]
     fn rejects_provides_on_non_object_fields() {
         let schema_str = r#"
             type Query {
@@ -244,12 +248,12 @@ mod fieldset_based_directives {
         "#;
         let err = build_for_errors(schema_str);
 
-        assert_eq!(
-            err,
-            vec![(
-                "PROVIDES_ON_NON_OBJECT_FIELD".to_string(),
-                r#"[S] Invalid @provides directive on field "Query.t": field has type "Int" which is not a Composite Type"#.to_string(),
+        assert!(errors_eq(
+            &err,
+            &[(
+                "PROVIDES_ON_NON_OBJECT_FIELD",
+                r#"[S] Invalid @provides directive on field "Query.t": field has type "Int" which is not a Composite Type"#,
             )]
-        );
+        ));
     }
 }
