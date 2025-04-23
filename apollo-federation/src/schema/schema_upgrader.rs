@@ -174,8 +174,11 @@ impl<'a> SchemaUpgrader<'a> {
                             // Fixed: dereference the string for comparison
                             subgraph_name.as_str() != self.original_subgraph.name.as_str()
                         })
-                        .fallible_any(|(_, type_info)| {
-                            let extended_type = type_info.pos.get(schema.schema())?;
+                        .fallible_any(|(other_name, type_info)| {
+                            let Some(other_subgraph) = self.subgraphs.iter().find(|subgraph| &subgraph.name == other_name) else {
+                                return Ok(false);
+                            };
+                            let extended_type = type_info.pos.get(other_subgraph.schema().schema())?;
                             Ok::<bool, FederationError>(Self::has_non_extension_elements(
                                 extended_type,
                             ))
@@ -849,7 +852,6 @@ mod tests {
 
     const FEDERATION2_LINK_WITH_AUTO_EXPANDED_IMPORTS_UPGRADED: &str = r#"@link(url: "https://specs.apollo.dev/federation/v2.4", import: ["@key", "@requires", "@provides", "@external", "@tag", "@extends", "@shareable", "@inaccessible", "@override", "@composeDirective", "@interfaceObject"])"#;
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn upgrades_complex_schema() {
         let mut s1 = Subgraph::parse(
@@ -946,7 +948,6 @@ mod tests {
         );
     }
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn update_federation_directive_non_string_arguments() {
         let mut s = Subgraph::parse(
@@ -994,7 +995,6 @@ mod tests {
         );
     }
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn remove_tag_on_external_field_if_found_on_definition() {
         let mut s1 = Subgraph::parse(
@@ -1046,7 +1046,6 @@ mod tests {
         );
     }
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn reject_interface_object_usage_if_not_all_subgraphs_are_fed2() {
         // Note that this test both validates the rejection of fed1 subgraph when @interfaceObject is used somewhere, but also
@@ -1099,7 +1098,6 @@ mod tests {
         );
     }
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn handles_addition_of_shareable_when_external_is_used_on_type() {
         let mut s1 = Subgraph::parse(
@@ -1158,7 +1156,6 @@ mod tests {
         );
     }
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn fully_upgrades_schema_with_no_link_directives() {
         let mut subgraph = Subgraph::parse(
@@ -1205,7 +1202,6 @@ mod tests {
         );
     }
 
-    #[ignore = "not yet implemented"]
     #[test]
     fn does_not_add_shareable_to_subscriptions() {
         let mut subgraph1 = Subgraph::parse(
