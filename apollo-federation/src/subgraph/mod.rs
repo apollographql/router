@@ -363,8 +363,8 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SubgraphError {
-    pub subgraph: String,
-    pub error: FederationError,
+    pub(crate) subgraph: String,
+    pub(crate) error: FederationError,
 }
 
 impl SubgraphError {
@@ -373,6 +373,10 @@ impl SubgraphError {
             subgraph: subgraph.into(),
             error: error.into(),
         }
+    }
+
+    pub fn error(&self) -> &FederationError {
+        &self.error
     }
 }
 

@@ -1,53 +1,25 @@
-use apollo_federation::error::FederationError;
-use apollo_federation::subgraph::SubgraphError;
 use apollo_federation::subgraph::typestate::Subgraph;
 
-fn build_for_errors(schema: &str, err_reason: &str) -> Result<Vec<Vec<String>>, SubgraphError> {
+fn build_for_errors(schema: &str) -> Vec<(String, String)> {
     let err = Subgraph::parse("S", "", schema)
         .expect("parses schema")
         .expand_links()
         .expect("expands links")
         .validate(true)
-        .expect_err(err_reason);
+        .expect_err("subgraph error was expected");
 
-    match err.error {
-        FederationError::SingleFederationError(e) => {
-            let err_code_definition = e.code().definition();
-            let res = vec![vec![
-                err_code_definition.code().to_string(),
-                err_code_definition.doc_description().to_string(),
-            ]];
-            Ok(res)
-        }
-        FederationError::MultipleFederationErrors(e) => {
-            let mut res = Vec::new();
-            for error in e.errors {
-                let err_code_definition = error.code().definition();
-                res.push(vec![
-                    err_code_definition.code().to_string(),
-                    err_code_definition.doc_description().to_string(),
-                ]);
-            }
-            Ok(res)
-        }
-        FederationError::AggregateFederationError(e) => {
-            let res = vec![vec![e.code, e.message]];
-            Ok(res)
-        }
-    }
+    // Gather associated errors from the validation error
+    // and format them as a vector of (error_code, error_message) tuples
+    err.error()
+        .errors()
+        .into_iter()
+        .map(|e| (e.code_string(), e.to_string()))
+        .collect()
 }
 
-fn is_unordered_eq(a: &Vec<Vec<String>>, b: &[Vec<String>]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    // TODO: Implement a more efficient unordered comparison
-    for item in a {
-        if !b.contains(item) {
-            return false;
-        }
-    }
-    true
+//  True if a and b contain all the same items regardless of order
+fn is_unordered_eq(a: &Vec<(String, String)>, b: &[(String, String)]) -> bool {
+    a.iter().all(|a_i| b.contains(a_i)) && b.iter().all(|b_i| a.contains(b_i))
 }
 
 mod fieldset_based_directives {
@@ -64,15 +36,14 @@ mod fieldset_based_directives {
                 f(x: Int): Int		
             }	
         "#;
-        let err = build_for_errors(schema_str, "rejects field defined with arguments in @key");
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "KEY_FIELDS_HAS_ARGS".to_string(),
                 r#"[S] On type "T", for @key(fields: "f"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @key)"#.to_string(),
-            ]],
+                )],
         );
     }
 
@@ -88,18 +59,14 @@ mod fieldset_based_directives {
                 f(x: Int): Int @external
             }
         "#;
-        let err = build_for_errors(
-            schema_str,
-            "rejects field defined with arguments in @provides",
-        );
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "PROVIDES_FIELDS_HAS_ARGS".to_string(),
                 r#"[S] On field "Query.t", for @provides(fields: "f"): field T.f cannot be included because it has arguments (fields with argument are not allowed in @provides)"#.to_string(),
-            ]]
+            )]
         );
     }
 
@@ -115,15 +82,14 @@ mod fieldset_based_directives {
                 f: Int
             }
         "#;
-        let err = build_for_errors(schema_str, "rejects @provides on non-external fields");
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "PROVIDES_FIELDS_MISSING_EXTERNAL".to_string(),
                 r#"[S] On field "Query.t", for @provides(fields: "f"): field "T.f" should not be part of a @provides since it is already provided by this subgraph (it is not marked @external)"#.to_string(),
-            ]]
+            )]
         );
     }
 
@@ -140,22 +106,21 @@ mod fieldset_based_directives {
                 g: Int @requires(fields: "f")
             }
         "#;
-        let err = build_for_errors(schema_str, "rejects @requires on non-external fields");
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "REQUIRES_FIELDS_MISSING_EXTERNAL".to_string(), 
                 r#"[S] On field "T.g", for @requires(fields: "f"): field "T.f" should not be part of a @requires since it is already provided by this subgraph (it is not marked @external)"#.to_string(),
-            ]]
+            )]
         );
     }
 
     #[test]
     #[ignore]
     fn rejects_key_on_interfaces_in_all_specs() {
-        for version in ["2.0", "2.1", "2.2"].iter() {
+        for version in ["2.0", "2.1", "2.2"] {
             let schema_str = format!(
                 r#"
                 extend schema
@@ -171,21 +136,14 @@ mod fieldset_based_directives {
             "#,
                 version
             );
-
-            let err = build_for_errors(
-                &schema_str,
-                &format!("rejects @key on interfaces in the {} spec", version),
-            );
+            let err = build_for_errors(&schema_str);
 
             assert_eq!(
-                err.unwrap(),
-                vec![
-                    vec![
+                err,
+                vec![(
                     "KEY_UNSUPPORTED_ON_INTERFACE".to_string(),
                     r#"[S] Cannot use @key on interface "T": @key is not yet supported on interfaces"#.to_string(),
-                ]],
-                "Test failed for version {}",
-                version
+                )]
             );
         }
     }
@@ -206,15 +164,14 @@ mod fieldset_based_directives {
                 g: Int @external
             }
         "#;
-        let err = build_for_errors(schema_str, "rejects @provides on interfaces");
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "PROVIDES_UNSUPPORTED_ON_INTERFACE".to_string(),
                 r#"[S] Cannot use @provides on field "T.f" of parent type "T": @provides is not yet supported within interfaces"#.to_string(),
-            ]]
+            )]
         );
     }
 
@@ -231,20 +188,20 @@ mod fieldset_based_directives {
                 g: Int @requires(fields: "f")
             }
         "#;
-        let err = build_for_errors(schema_str, "rejects @requires on interfaces");
+        let err = build_for_errors(schema_str);
 
         assert!(
             is_unordered_eq(
-                &err.unwrap(),
+                &err,
                 &[
-                    vec![
+                    (
                     "REQUIRES_UNSUPPORTED_ON_INTERFACE".to_string(),
                     r#"[S] Cannot use @requires on field "T.g" of parent type "T": @requires is not yet supported within interfaces"#.to_string(),
-                    ],
-                    vec![
+                    ),
+                    (
                     "EXTERNAL_ON_INTERFACE".to_string(),
                     r#"[S] Interface type field "T.f" is marked @external but @external is not allowed on interface fields (it is nonsensical)."#.to_string(),
-                    ],
+                    ),
                 ]
             )
         );
@@ -262,15 +219,14 @@ mod fieldset_based_directives {
                 f: Int @external
             }
         "#;
-        let err = build_for_errors(schema_str, "rejects unused @external");
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "EXTERNAL_UNUSED".to_string(),
                 r#"[S] Field "T.f" is marked @external but is not used in any federation directive (@key, @provides, @requires) or to satisfy an interface; the field declaration has no use and should be removed (or the field should not be @external)."#.to_string(),
-            ]]
+            )]
         );
     }
 
@@ -286,15 +242,14 @@ mod fieldset_based_directives {
                 f: Int
             }
         "#;
-        let err = build_for_errors(schema_str, "rejects @provides on non-object fields");
+        let err = build_for_errors(schema_str);
 
         assert_eq!(
-            err.unwrap(),
-            vec![
-                vec![
+            err,
+            vec![(
                 "PROVIDES_ON_NON_OBJECT_FIELD".to_string(),
                 r#"[S] Invalid @provides directive on field "Query.t": field has type "Int" which is not a Composite Type"#.to_string(),
-            ]]
+            )]
         );
     }
 }
