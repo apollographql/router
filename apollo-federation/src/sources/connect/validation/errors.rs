@@ -1,4 +1,4 @@
-//! Parsing and validation for `@connect(errors:)`
+//! Parsing and validation for `@connect(errors:)` or `@source(errors:)`
 
 use std::fmt::Display;
 
@@ -16,20 +16,21 @@ use crate::sources::connect::spec::schema::ERRORS_MESSAGE_ARGUMENT_NAME;
 use crate::sources::connect::string_template::Expression;
 use crate::sources::connect::validation::Code;
 use crate::sources::connect::validation::Message;
-use crate::sources::connect::validation::coordinates::ConnectDirectiveCoordinate;
 use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
-/// A valid, parsed (but not type-checked) `@connect(errors:)`.
+use super::coordinates::ErrorsCoordinate;
+
+/// A valid, parsed (but not type-checked) `@connect(errors:)` or `@source(errors:)`.
 pub(super) struct Errors<'schema> {
     message: Option<ErrorsMessage<'schema>>,
     extensions: Option<ErrorsExtensions<'schema>>,
 }
 
 impl<'schema> Errors<'schema> {
-    /// Parse the `@connect(errors:)` argument and run just enough checks to be able to use the
+    /// Parse the `@connect(errors:)` or `@source(errors:)` argument and run just enough checks to be able to use the
     /// argument at runtime. More advanced checks are done in [`Self::type_check`].
     ///
     /// Two sub-pieces are always parsed, and the errors from _all_ of those pieces are returned
@@ -39,11 +40,14 @@ impl<'schema> Errors<'schema> {
     ///
     /// The order these pieces run in doesn't matter and shouldn't affect the output.
     pub(super) fn parse(
-        coordinate: ConnectDirectiveCoordinate<'schema>,
+        coordinate: ErrorsCoordinate<'schema>,
         schema: &'schema SchemaInfo,
     ) -> Result<Self, Vec<Message>> {
-        let Some(arg) = coordinate
-            .directive
+        let directive = match coordinate {
+            ErrorsCoordinate::Source { source } => source.directive,
+            ErrorsCoordinate::Connect { connect } => connect.directive,
+        };
+        let Some(arg) = directive
             .specified_argument_by_name(&ERRORS_ARGUMENT_NAME)
             .and_then(|arg| Some(arg))
         else {
@@ -66,8 +70,7 @@ impl<'schema> Errors<'schema> {
                 message: format!(
                     "{coordinate} `{ERRORS_ARGUMENT_NAME}` argument must be an object."
                 ),
-                locations: coordinate
-                    .directive
+                locations: directive
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
@@ -75,7 +78,7 @@ impl<'schema> Errors<'schema> {
         }
     }
 
-    /// Type-check the `@connect(errors:)` directive.
+    /// Type-check the `@connect(errors:)` or `@source(errors:)` directive.
     ///
     /// Does things like ensuring that every accessed variable actually exists and that expressions
     /// used in the URL and headers result in scalars.
@@ -129,7 +132,7 @@ struct ErrorsMessage<'schema> {
 impl<'schema> ErrorsMessage<'schema> {
     pub(super) fn parse(
         errors_arg: &'schema [(Name, Node<Value>)],
-        connect: ConnectDirectiveCoordinate<'schema>,
+        coordinate: ErrorsCoordinate<'schema>,
         schema: &'schema SchemaInfo,
     ) -> Result<Option<Self>, Message> {
         let Some((_, value)) = errors_arg
@@ -138,7 +141,7 @@ impl<'schema> ErrorsMessage<'schema> {
         else {
             return Ok(None);
         };
-        let coordinate = ErrorsMessageCoordinate { connect };
+        let coordinate = ErrorsMessageCoordinate { coordinate };
 
         // Ensure that the message selection is a valid JSON selection string
         let string = match GraphQLString::new(value, &schema.sources) {
@@ -194,17 +197,21 @@ impl<'schema> ErrorsMessage<'schema> {
             string,
             coordinate,
         } = self;
+        let context = match coordinate.coordinate {
+            ErrorsCoordinate::Source { .. } => {
+                &Context::for_source_response(schema, &string, Code::InvalidErrorsMessage)
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                &Context::for_connect_response(schema, connect, &string, Code::InvalidErrorsMessage)
+            }
+        };
+
         expression::validate(
             &Expression {
                 expression: selection,
                 location: 0..string.as_str().len(),
             },
-            &Context::for_connect_response(
-                schema,
-                coordinate.connect,
-                &string,
-                Code::InvalidErrorsMessage,
-            ),
+            context,
             &Shape::string([]),
         )
         .map_err(|mut message| {
@@ -216,17 +223,28 @@ impl<'schema> ErrorsMessage<'schema> {
 
 #[derive(Clone, Copy)]
 struct ErrorsMessageCoordinate<'schema> {
-    connect: ConnectDirectiveCoordinate<'schema>,
+    coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsMessageCoordinate<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "`@{connect_directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_MESSAGE_ARGUMENT_NAME}:}})` on `{element}`",
-            connect_directive_name = self.connect.directive.name,
-            element = self.connect.element
-        )
+        match self.coordinate {
+            ErrorsCoordinate::Source { source } => {
+                write!(
+                    f,
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_MESSAGE_ARGUMENT_NAME}:}})`",
+                    directive_name = source.directive.name
+                )
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                write!(
+                    f,
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_MESSAGE_ARGUMENT_NAME}:}})` on `{element}`",
+                    directive_name = connect.directive.name,
+                    element = connect.element
+                )
+            }
+        }
     }
 }
 
@@ -239,7 +257,7 @@ struct ErrorsExtensions<'schema> {
 impl<'schema> ErrorsExtensions<'schema> {
     pub(super) fn parse(
         errors_arg: &'schema [(Name, Node<Value>)],
-        connect: ConnectDirectiveCoordinate<'schema>,
+        coordinate: ErrorsCoordinate<'schema>,
         schema: &'schema SchemaInfo,
     ) -> Result<Option<Self>, Message> {
         let Some((_, value)) = errors_arg
@@ -248,7 +266,7 @@ impl<'schema> ErrorsExtensions<'schema> {
         else {
             return Ok(None);
         };
-        let coordinate = ErrorsExtensionsCoordinate { connect };
+        let coordinate = ErrorsExtensionsCoordinate { coordinate };
 
         // Ensure that the message selection is a valid JSON selection string
         let string = match GraphQLString::new(value, &schema.sources) {
@@ -304,17 +322,21 @@ impl<'schema> ErrorsExtensions<'schema> {
             string,
             coordinate,
         } = self;
+        let context = match coordinate.coordinate {
+            ErrorsCoordinate::Source { .. } => {
+                &Context::for_source_response(schema, &string, Code::InvalidErrorsMessage)
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                &Context::for_connect_response(schema, connect, &string, Code::InvalidErrorsMessage)
+            }
+        };
+
         expression::validate(
             &Expression {
                 expression: selection,
                 location: 0..string.as_str().len(),
             },
-            &Context::for_connect_response(
-                schema,
-                coordinate.connect,
-                &string,
-                Code::InvalidErrorsMessage,
-            ),
+            context,
             &Shape::empty_object([]),
         )
         .map_err(|mut message| {
@@ -326,16 +348,27 @@ impl<'schema> ErrorsExtensions<'schema> {
 
 #[derive(Clone, Copy)]
 struct ErrorsExtensionsCoordinate<'schema> {
-    connect: ConnectDirectiveCoordinate<'schema>,
+    coordinate: ErrorsCoordinate<'schema>,
 }
 
 impl Display for ErrorsExtensionsCoordinate<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "`@{connect_directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_EXTENSIONS_ARGUMENT_NAME}:}})` on `{element}`",
-            connect_directive_name = self.connect.directive.name,
-            element = self.connect.element
-        )
+        match self.coordinate {
+            ErrorsCoordinate::Source { source } => {
+                write!(
+                    f,
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_EXTENSIONS_ARGUMENT_NAME}:}})`",
+                    directive_name = source.directive.name
+                )
+            }
+            ErrorsCoordinate::Connect { connect } => {
+                write!(
+                    f,
+                    "`@{directive_name}({ERRORS_ARGUMENT_NAME}: {{{ERRORS_EXTENSIONS_ARGUMENT_NAME}:}})` on `{element}`",
+                    directive_name = connect.directive.name,
+                    element = connect.element
+                )
+            }
+        }
     }
 }

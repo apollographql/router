@@ -16,6 +16,7 @@
 
 mod connect;
 mod coordinates;
+mod errors;
 mod expression;
 mod graphql;
 mod http;

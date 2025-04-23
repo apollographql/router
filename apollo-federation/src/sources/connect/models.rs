@@ -24,9 +24,8 @@ use super::PathSelection;
 use super::id::ConnectorPosition;
 use super::json_selection::ExternalVarPaths;
 use super::spec::schema::ConnectDirectiveArguments;
-use super::spec::schema::ConnectErrorsArguments;
+use super::spec::schema::ErrorsArguments;
 use super::spec::schema::SourceDirectiveArguments;
-use super::spec::schema::SourceErrorsArguments;
 use super::spec::versions::VersionInfo;
 use super::variable::Namespace;
 use super::variable::VariableReference;
@@ -86,8 +85,8 @@ pub struct ConnectorErrorsSettings {
 
 impl ConnectorErrorsSettings {
     fn from_directive(
-        connect_errors: Option<&ConnectErrorsArguments>,
-        source_errors: Option<&Option<SourceErrorsArguments>>,
+        connect_errors: Option<&ErrorsArguments>,
+        source_errors: Option<&Option<ErrorsArguments>>,
     ) -> Self {
         let source_errors = source_errors.and_then(|s| s.as_ref());
 

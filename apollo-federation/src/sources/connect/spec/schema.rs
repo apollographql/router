@@ -15,21 +15,21 @@ pub(crate) const CONNECT_ENTITY_ARGUMENT_NAME: Name = name!("entity");
 
 pub(crate) const CONNECT_HTTP_NAME_IN_SPEC: Name = name!("ConnectHTTP");
 pub(crate) const CONNECT_BATCH_NAME_IN_SPEC: Name = name!("ConnectBatch");
-pub(crate) const CONNECT_ERRORS_NAME_IN_SPEC: Name = name!("ConnectErrors");
 pub(crate) const CONNECT_BODY_ARGUMENT_NAME: Name = name!("body");
+
+pub(crate) const ERRORS_NAME_IN_SPEC: Name = name!("ConnectorErrors");
+pub(crate) const ERRORS_ARGUMENT_NAME: Name = name!("errors");
+pub(crate) const ERRORS_MESSAGE_ARGUMENT_NAME: Name = name!("message");
+pub(crate) const ERRORS_EXTENSIONS_ARGUMENT_NAME: Name = name!("extensions");
 
 pub(crate) const SOURCE_DIRECTIVE_NAME_IN_SPEC: Name = name!("source");
 pub(crate) const SOURCE_NAME_ARGUMENT_NAME: Name = name!("name");
 pub(crate) const BATCH_ARGUMENT_NAME: Name = name!("batch");
 
 pub(crate) const SOURCE_HTTP_NAME_IN_SPEC: Name = name!("SourceHTTP");
-pub(crate) const SOURCE_ERRORS_NAME_IN_SPEC: Name = name!("SourceErrors");
 pub(crate) const SOURCE_BASE_URL_ARGUMENT_NAME: Name = name!("baseURL");
 pub(crate) const HTTP_ARGUMENT_NAME: Name = name!("http");
-pub(crate) const ERRORS_ARGUMENT_NAME: Name = name!("errors");
 pub(crate) const HEADERS_ARGUMENT_NAME: Name = name!("headers");
-pub(crate) const ERRORS_MESSAGE_ARGUMENT_NAME: Name = name!("message");
-pub(crate) const ERRORS_EXTENSIONS_ARGUMENT_NAME: Name = name!("extensions");
 
 pub(crate) const PATH_ARGUMENT_NAME: Name = name!("path");
 pub(crate) const QUERY_PARAMS_ARGUMENT_NAME: Name = name!("queryParams");
@@ -54,7 +54,7 @@ pub(crate) struct SourceDirectiveArguments {
     pub(crate) http: SourceHTTPArguments,
 
     /// Configure the error mapping functionality for this source
-    pub(crate) errors: Option<SourceErrorsArguments>,
+    pub(crate) errors: Option<ErrorsArguments>,
 }
 
 /// Common HTTP options for a connector [SourceSpecDefinition]
@@ -70,9 +70,9 @@ pub(crate) struct SourceHTTPArguments {
     pub(crate) query_params: Option<JSONSelection>,
 }
 
-/// Configure the error mapping functionality for a source
+/// Configure the error mapping functionality for a source or connect
 #[cfg_attr(test, derive(Debug))]
-pub(crate) struct SourceErrorsArguments {
+pub(crate) struct ErrorsArguments {
     /// Configure the mapping for the "message" portion of an error
     pub(crate) message: Option<JSONSelection>,
 
@@ -115,7 +115,7 @@ pub(crate) struct ConnectDirectiveArguments {
     pub(crate) batch: Option<ConnectBatchArguments>,
 
     /// Configure the error mapping functionality for this connect
-    pub(crate) errors: Option<ConnectErrorsArguments>,
+    pub(crate) errors: Option<ErrorsArguments>,
 }
 
 /// The HTTP arguments needed for a connect request
@@ -152,14 +152,4 @@ pub(crate) struct ConnectBatchArguments {
     ///
     /// Over this maximum, will be split into multiple batch requests of max_size.
     pub(crate) max_size: Option<usize>,
-}
-
-/// Configure the error mapping functionality for a connect
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct ConnectErrorsArguments {
-    /// Configure the mapping for the "message" portion of an error
-    pub(crate) message: Option<JSONSelection>,
-
-    /// Configure the mapping for the "extensions" portion of an error
-    pub(crate) extensions: Option<JSONSelection>,
 }

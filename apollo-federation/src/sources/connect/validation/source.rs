@@ -7,6 +7,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Value;
 use hashbrown::HashMap;
 
+use super::coordinates::ErrorsCoordinate;
 use super::coordinates::SourceDirectiveCoordinate;
 use super::coordinates::source_name_argument_coordinate;
 use super::coordinates::source_name_value_coordinate;
@@ -18,12 +19,10 @@ use crate::sources::connect::validation::Message;
 use crate::sources::connect::validation::coordinates::BaseUrlCoordinate;
 use crate::sources::connect::validation::coordinates::HttpHeadersCoordinate;
 use crate::sources::connect::validation::coordinates::source_http_argument_coordinate;
+use crate::sources::connect::validation::errors::Errors;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 use crate::sources::connect::validation::http::headers::Headers;
 use crate::sources::connect::validation::parse_url;
-use crate::sources::connect::validation::source::errors::Errors;
-
-mod errors;
 
 /// A `@source` directive along with any errors related to it.
 pub(super) struct SourceDirective<'schema> {
@@ -72,12 +71,17 @@ impl<'schema> SourceDirective<'schema> {
         errors.extend(name_errors);
 
         errors.extend(
-            Errors::parse(SourceDirectiveCoordinate { directive }, schema)
-                // TODO: Move type checking to a later phase so parsing can be shared with runtime
-                .and_then(|errors| errors.type_check(schema))
-                .err()
-                .into_iter()
-                .flatten(),
+            Errors::parse(
+                ErrorsCoordinate::Source {
+                    source: SourceDirectiveCoordinate { directive },
+                },
+                schema,
+            )
+            // TODO: Move type checking to a later phase so parsing can be shared with runtime
+            .and_then(|errors| errors.type_check(schema))
+            .err()
+            .into_iter()
+            .flatten(),
         );
 
         if let Some(http_arg) = directive

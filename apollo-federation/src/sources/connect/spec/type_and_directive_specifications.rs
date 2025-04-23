@@ -35,15 +35,14 @@ use crate::sources::connect::spec::ConnectSpec;
 use crate::sources::connect::spec::schema::BATCH_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_BATCH_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_ERRORS_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::ERRORS_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::ERRORS_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::PATH_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::QUERY_PARAMS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::SOURCE_ERRORS_NAME_IN_SPEC;
 
 pub(super) fn check_or_add(
     link: &Link,
@@ -234,7 +233,7 @@ pub(super) fn check_or_add(
 
     // @connect error settings
 
-    let connect_errors_field_list = vec![
+    let connector_errors_field_list = vec![
         InputValueDefinition {
             description: None,
             name: name!(message),
@@ -251,20 +250,20 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut connect_errors_fields = IndexMap::with_hasher(Default::default());
-    for field in connect_errors_field_list {
-        connect_errors_fields.insert(field.name.clone(), Component::new(field));
+    let mut connector_errors_fields = IndexMap::with_hasher(Default::default());
+    for field in connector_errors_field_list {
+        connector_errors_fields.insert(field.name.clone(), Component::new(field));
     }
 
-    let connect_errors = InputObjectType {
-        name: link.type_name_in_schema(&CONNECT_ERRORS_NAME_IN_SPEC),
+    let connector_errors = InputObjectType {
+        name: link.type_name_in_schema(&ERRORS_NAME_IN_SPEC),
         description: None,
         directives: Default::default(),
-        fields: connect_errors_fields,
+        fields: connector_errors_fields,
     };
 
-    let connect_errors_pos = InputObjectTypeDefinitionPosition {
-        type_name: connect_errors.name.clone(),
+    let connector_errors_pos = InputObjectTypeDefinitionPosition {
+        type_name: connector_errors.name.clone(),
     };
 
     // -------------------------------------------------------------------------
@@ -338,7 +337,7 @@ pub(super) fn check_or_add(
                             .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
-                            .type_name_in_schema(&CONNECT_ERRORS_NAME_IN_SPEC);
+                            .type_name_in_schema(&ERRORS_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -436,41 +435,6 @@ pub(super) fn check_or_add(
         type_name: source_http_spec.name.clone(),
     };
 
-    // @source error settings
-
-    let source_errors_field_list = vec![
-        InputValueDefinition {
-            description: None,
-            name: name!(message),
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-        InputValueDefinition {
-            description: None,
-            name: name!(extensions),
-            ty: Type::Named(json_selection_spec.name.clone()).into(),
-            default_value: None,
-            directives: Default::default(),
-        },
-    ];
-
-    let mut source_errors_fields = IndexMap::with_hasher(Default::default());
-    for field in source_errors_field_list {
-        source_errors_fields.insert(field.name.clone(), Component::new(field));
-    }
-
-    let source_errors = InputObjectType {
-        name: link.type_name_in_schema(&SOURCE_ERRORS_NAME_IN_SPEC),
-        description: None,
-        directives: Default::default(),
-        fields: source_errors_fields,
-    };
-
-    let source_errors_pos = InputObjectTypeDefinitionPosition {
-        type_name: source_errors.name.clone(),
-    };
-
     // -------------------------------------------------------------------------
 
     // directive @source(
@@ -513,7 +477,7 @@ pub(super) fn check_or_add(
                             .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
-                            .type_name_in_schema(&SOURCE_ERRORS_NAME_IN_SPEC);
+                            .type_name_in_schema(&ERRORS_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -537,14 +501,12 @@ pub(super) fn check_or_add(
     connect_http_pos.insert(schema, connect_http.into())?;
     connect_batch_pos.pre_insert(schema)?;
     connect_batch_pos.insert(schema, connect_batch.into())?;
-    connect_errors_pos.pre_insert(schema)?;
-    connect_errors_pos.insert(schema, connect_errors.into())?;
+    connector_errors_pos.pre_insert(schema)?;
+    connector_errors_pos.insert(schema, connector_errors.into())?;
     connect_spec.check_or_add(schema, None)?;
 
     source_http_pos.pre_insert(schema)?;
     source_http_pos.insert(schema, source_http_spec.into())?;
-    source_errors_pos.pre_insert(schema)?;
-    source_errors_pos.insert(schema, source_errors.into())?;
     source_spec.check_or_add(schema, None)?;
 
     Ok(())
@@ -580,7 +542,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_1, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
           query: Query
         }
@@ -589,9 +551,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__SourceErrors) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -630,7 +592,7 @@ mod tests {
           maxSize: Int
         }
 
-        input connect__ConnectErrors {
+        input connect__ConnectorErrors {
           message: connect__JSONSelection
           extensions: connect__JSONSelection
         }
@@ -641,12 +603,7 @@ mod tests {
           path: connect__JSONSelection
           queryParams: connect__JSONSelection
         }
-
-        input connect__SourceErrors {
-          message: connect__JSONSelection
-          extensions: connect__JSONSelection
-        }
-        "###);
+        "#);
     }
 
     #[test]
@@ -670,7 +627,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
         schema {
           query: Query
         }
@@ -679,9 +636,9 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, errors: connect__ConnectorErrors, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
 
-        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__SourceErrors) repeatable on SCHEMA
+        directive @source(name: String!, http: connect__SourceHTTP, errors: connect__ConnectorErrors) repeatable on SCHEMA
 
         type Query {
           hello: String
@@ -720,7 +677,7 @@ mod tests {
           maxSize: Int
         }
 
-        input connect__ConnectErrors {
+        input connect__ConnectorErrors {
           message: connect__JSONSelection
           extensions: connect__JSONSelection
         }
@@ -731,11 +688,6 @@ mod tests {
           path: connect__JSONSelection
           queryParams: connect__JSONSelection
         }
-
-        input connect__SourceErrors {
-          message: connect__JSONSelection
-          extensions: connect__JSONSelection
-        }
-        "###);
+        "#);
     }
 }

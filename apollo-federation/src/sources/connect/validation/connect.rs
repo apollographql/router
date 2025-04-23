@@ -13,6 +13,7 @@ use self::selection::Selection;
 use super::Code;
 use super::Message;
 use super::coordinates::ConnectDirectiveCoordinate;
+use super::coordinates::ErrorsCoordinate;
 use super::coordinates::connect_directive_name_coordinate;
 use super::coordinates::source_name_value_coordinate;
 use super::source::SourceName;
@@ -21,12 +22,11 @@ use crate::sources::connect::Namespace;
 use crate::sources::connect::id::ConnectedElement;
 use crate::sources::connect::id::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::sources::connect::validation::connect::errors::Errors;
 use crate::sources::connect::validation::connect::http::Http;
+use crate::sources::connect::validation::errors::Errors;
 use crate::sources::connect::validation::graphql::SchemaInfo;
 
 mod entity;
-mod errors;
 mod http;
 mod selection;
 
@@ -196,7 +196,12 @@ impl<'schema> Connect<'schema> {
                     .map_err(|err| vec![err])
                     .and_then(|source_name| Http::parse(coordinate, source_name, schema)),
             )
-            .and_try(Errors::parse(coordinate, schema))
+            .and_try(Errors::parse(
+                ErrorsCoordinate::Connect {
+                    connect: coordinate,
+                },
+                schema,
+            ))
             .map_err(|nested| nested.into_iter().flatten().collect_vec())?;
 
         Ok(Self {
