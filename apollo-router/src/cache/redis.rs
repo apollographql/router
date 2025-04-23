@@ -236,6 +236,7 @@ impl RedisCacheStorage {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_client(
         client_config: RedisConfig,
         timeout: Duration,
