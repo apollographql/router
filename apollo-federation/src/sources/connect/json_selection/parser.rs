@@ -1,7 +1,8 @@
 use std::fmt::Display;
+use std::marker::PhantomData;
 use std::str::FromStr;
 
-use apollo_compiler::collections::IndexSet;
+use apollo_compiler::collections::HashSet;
 use nom::IResult;
 use nom::Slice;
 use nom::branch::alt;
@@ -254,55 +255,94 @@ impl ExternalVarPaths for JSONSelection {
 // NamedGroupSelection  ::= Alias SubSelection
 // PathSelection        ::= Path SubSelection?
 // PathWithSubSelection ::= Path SubSelection
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct NonInitialized;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum NamedSelection {
-    Field(Option<Alias>, WithRange<Key>, Option<SubSelection>),
-    // Represents either NamedPathSelection or PathWithSubSelection, with the
-    // invariant alias.is_some() || path.has_subselection() enforced by
-    // NamedSelection::parse_path.
-    Path {
-        alias: Option<Alias>,
-        // True for PathWithSubSelection, and potentially in the future for
-        // object/null-returning NamedSelection::Path items that do not have an
-        // explicit trailing SubSelection.
-        inline: bool,
-        path: PathSelection,
-    },
-    Group(Alias, SubSelection),
+pub struct Initialized;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct NamedSelection<T = NonInitialized> {
+    pub alias: Option<Alias>,
+    pub path: Option<PathSelection>,
+    pub sub_selection: Option<SubSelection>,
+    _marker: PhantomData<T>
 }
 
 // Like PathSelection, NamedSelection is an AST structure that takes its range
 // entirely from its children, so NamedSelection itself does not need to provide
 // separate storage for its own range, and therefore does not need to be wrapped
 // as WithRange<NamedSelection>, but merely needs to implement the Ranged trait.
-impl Ranged for NamedSelection {
+impl Ranged for NamedSelection<Initialized> {
     fn range(&self) -> OffsetRange {
-        match self {
-            Self::Field(alias, key, sub) => {
-                let range = key.range();
-                let range = if let Some(alias) = alias.as_ref() {
-                    merge_ranges(alias.range(), range)
-                } else {
-                    range
-                };
-                if let Some(sub) = sub.as_ref() {
-                    merge_ranges(range, sub.range())
-                } else {
-                    range
-                }
-            }
-            Self::Path { alias, path, .. } => {
-                let alias_range = alias.as_ref().and_then(|alias| alias.range());
-                merge_ranges(alias_range, path.range())
-            }
-            Self::Group(alias, sub) => merge_ranges(alias.range(), sub.range()),
+        match (&self.alias, &self.path, &self.sub_selection) {
+            (None, None, None) => unreachable!("An initialized NamedSelection cannot have all `None` fields"),
+            (None, None, Some(sub)) => sub.range(),
+            (None, Some(path), None) => path.range(),
+            (Some(alias), None, None) => alias.range(),
+            (None, Some(path), Some(sub)) => merge_ranges(path.range(), sub.range()),
+            (Some(alias), None, Some(sub)) => merge_ranges(alias.range(), sub.range()),
+            (Some(alias), Some(path), None) => merge_ranges(alias.range(), path.range()),
+            (Some(alias), Some(path), Some(sub)) => merge_ranges(merge_ranges(alias.range(), path.range()), sub.range())
         }
     }
 }
 
-impl NamedSelection {
-    pub(crate) fn parse(input: Span) -> ParseResult<Self> {
+impl ExternalVarPaths for NamedSelection<Initialized> {
+    fn external_var_paths(&self) -> Vec<&PathSelection> {
+        match (&self.alias, &self.path, &self.sub_selection) {
+            (None, None, None) => unreachable!("An initialized NamedSelection cannot have all `None` fields"),
+            (_, None, Some(sub)) => sub.external_var_paths(),
+            (_, Some(path), None) => path.external_var_paths(),
+            (_, Some(path), Some(sub)) => path.external_var_paths().into_iter().chain(sub.external_var_paths()).collect(),
+            _ => Vec::new()
+        }
+    }
+}
+
+impl NamedSelection<Initialized> {
+    pub(crate) fn names(&self) -> Vec<&str> {
+        match (&self.alias, &self.path) {
+            (None, None) => Vec::new(),
+            (None, Some(path),) => {
+                if let Some(sub) = path.next_subselection() {
+                    // Flatten and deduplicate the names of the NamedSelection
+                    // items in the SubSelection.
+                    sub.selections_iter()
+                        .flat_map(|selection| selection.names())
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect()
+                } else {
+                    vec![]
+                }
+            },
+            (Some(alias), None,) => vec![alias.name.as_str()],
+            (Some(alias), Some(_path),) => vec![alias.name.as_str()],
+        }
+    }
+
+    /// Find the next subselection, if present
+    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+        match (&self.path, &self.sub_selection) {
+            (Some(path), None) => path.next_subselection(),
+            (_, sub) => sub.as_ref(),
+            _ => None
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match (&mut self.path, &mut self.sub_selection) {
+            (Some(path), None) => path.next_mut_subselection(),
+            (_, sub) => sub.as_mut(),
+            _ => None
+        }
+    }
+}
+
+impl NamedSelection<NonInitialized> {
+    pub(crate) fn parse(input: Span) -> ParseResult<NamedSelection<Initialized>> {
         alt((
             // We must try parsing NamedPathSelection before NamedFieldSelection
             // and NamedQuotedSelection because a NamedPathSelection without a
@@ -313,34 +353,49 @@ impl NamedSelection {
             // Named{Field,Quoted}Selection, but negative lookahead is tricky in
             // nom, so instead we greedily parse NamedPathSelection first.
             Self::parse_path,
-            Self::parse_field,
             Self::parse_group,
+            Self::parse_field,
         ))(input)
     }
 
-    fn parse_field(input: Span) -> ParseResult<Self> {
+    fn parse_field(input: Span) -> ParseResult<NamedSelection<Initialized>> {
         tuple((
             opt(Alias::parse),
             Key::parse,
             spaces_or_comments,
             opt(SubSelection::parse),
         ))(input)
-        .map(|(remainder, (alias, name, _, selection))| {
-            (remainder, Self::Field(alias, name, selection))
+        .and_then(|(remainder, (alias, _name, _, sub_selection))| {
+            if alias.is_none() && sub_selection.is_none() {
+                Err(
+                    nom_error_message(
+                        input,
+                        "Alias or SubSelection must exist",
+                    )
+                )
+            } else {
+                Ok((remainder, NamedSelection {
+                    _marker: PhantomData::<Initialized>,
+                    alias,
+                    path: None,
+                    sub_selection,
+                }))
+            }
         })
     }
 
     // Parses either NamedPathSelection or PathWithSubSelection.
-    fn parse_path(input: Span) -> ParseResult<Self> {
+    fn parse_path(input: Span) -> ParseResult<NamedSelection<Initialized>> {
         if let Ok((remainder, alias)) = Alias::parse(input) {
             match PathSelection::parse(remainder) {
                 Ok((remainder, path)) => Ok((
                     remainder,
-                    Self::Path {
+                    NamedSelection {
+                        _marker: PhantomData::<Initialized>,
                         alias: Some(alias),
-                        inline: false,
-                        path,
-                    },
+                        path: Some(path),
+                        sub_selection: None
+                    }
                 )),
                 Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(e)),
                 Err(_) => Err(nom_error_message(
@@ -354,12 +409,12 @@ impl NamedSelection {
                     if path.has_subselection() {
                         Ok((
                             remainder,
-                            Self::Path {
+                            NamedSelection {
+                                _marker: PhantomData::<Initialized>,
                                 alias: None,
-                                // Inline without ...
-                                inline: true,
-                                path,
-                            },
+                                path: Some(path),
+                                sub_selection: None
+                            }
                         ))
                     } else {
                         Err(nom_fail_message(
@@ -377,78 +432,18 @@ impl NamedSelection {
         }
     }
 
-    fn parse_group(input: Span) -> ParseResult<Self> {
+    fn parse_group(input: Span) -> ParseResult<NamedSelection<Initialized>> {
         tuple((Alias::parse, SubSelection::parse))(input)
-            .map(|(input, (alias, group))| (input, Self::Group(alias, group)))
-    }
-
-    pub(crate) fn names(&self) -> Vec<&str> {
-        match self {
-            Self::Field(alias, name, _) => {
-                if let Some(alias) = alias {
-                    vec![alias.name.as_str()]
-                } else {
-                    vec![name.as_str()]
-                }
-            }
-            Self::Path { alias, path, .. } => {
-                #[allow(clippy::if_same_then_else)]
-                if let Some(alias) = alias {
-                    vec![alias.name.as_str()]
-                } else if let Some(sub) = path.next_subselection() {
-                    // Flatten and deduplicate the names of the NamedSelection
-                    // items in the SubSelection.
-                    let mut name_set = IndexSet::default();
-                    for selection in sub.selections_iter() {
-                        name_set.extend(selection.names());
-                    }
-                    name_set.into_iter().collect()
-                } else {
-                    vec![]
-                }
-            }
-            Self::Group(alias, _) => vec![alias.name.as_str()],
-        }
-    }
-
-    /// Find the next subselection, if present
-    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
-        match self {
-            // Paths are complicated because they can have a subselection deeply nested
-            Self::Path { path, .. } => path.next_subselection(),
-
-            // The other options have it at the root
-            Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => Some(sub),
-
-            // Every other option does not have a subselection
-            _ => None,
-        }
-    }
-
-    #[allow(unused)]
-    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
-        match self {
-            // Paths are complicated because they can have a subselection deeply nested
-            Self::Path { path, .. } => path.next_mut_subselection(),
-
-            // The other options have it at the root
-            Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => Some(sub),
-
-            // Every other option does not have a subselection
-            _ => None,
-        }
+            .map(|(input, (alias, group))| 
+                (input, NamedSelection {
+                    _marker: PhantomData::<Initialized>,
+                    alias: Some(alias),
+                    path: None,
+                    sub_selection: Some(group)
+                }))
     }
 }
 
-impl ExternalVarPaths for NamedSelection {
-    fn external_var_paths(&self) -> Vec<&PathSelection> {
-        match self {
-            Self::Field(_, _, Some(sub)) | Self::Group(_, sub) => sub.external_var_paths(),
-            Self::Path { path, .. } => path.external_var_paths(),
-            _ => vec![],
-        }
-    }
-}
 
 // Path                 ::= VarPath | KeyPath | AtPath | ExprPath
 // PathSelection        ::= Path SubSelection?
@@ -898,7 +893,7 @@ impl ExternalVarPaths for PathList {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct SubSelection {
-    pub(super) selections: Vec<NamedSelection>,
+    pub(super) selections: Vec<NamedSelection<Initialized>>,
     pub(super) range: OffsetRange,
 }
 
@@ -950,44 +945,27 @@ impl SubSelection {
     // name to the output object. This is more complicated than returning
     // self.selections.iter() because some NamedSelection::Path elements can
     // contribute multiple names if they do no have an Alias.
-    pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
+    pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection<Initialized>> {
         // TODO Implement a NamedSelectionIterator to traverse nested selections
         // lazily, rather than using an intermediary vector.
         let mut selections = vec![];
         for selection in &self.selections {
-            match selection {
-                NamedSelection::Path { alias, path, .. } => {
-                    if alias.is_some() {
-                        // If the PathSelection has an Alias, then it has a
-                        // singular name and should be visited directly.
-                        selections.push(selection);
-                    } else if let Some(sub) = path.next_subselection() {
-                        // If the PathSelection does not have an Alias but does
-                        // have a SubSelection, then it represents the
-                        // PathWithSubSelection non-terminal from the grammar
-                        // (see README.md + PR #6076), which produces multiple
-                        // names derived from the SubSelection, which need to be
-                        // recursively collected.
-                        selections.extend(sub.selections_iter());
-                    } else {
-                        // This no-Alias, no-SubSelection case should be
-                        // forbidden by NamedSelection::parse_path.
-                        debug_assert!(false, "PathSelection without Alias or SubSelection");
-                    }
-                }
-                _ => {
-                    selections.push(selection);
-                }
-            };
+            if let Some(_alias)  = &selection.alias {
+                selections.push(selection);
+            } else if let Some(sub) = selection.path.as_ref().and_then(|path| path.next_subselection()) {
+                selections.extend(sub.selections_iter());
+            } else {
+                selections.push(selection);
+            }
         }
         selections.into_iter()
     }
 
-    pub fn append_selection(&mut self, selection: NamedSelection) {
+    pub fn append_selection(&mut self, selection: NamedSelection<Initialized>) {
         self.selections.push(selection);
     }
 
-    pub fn last_selection_mut(&mut self) -> Option<&mut NamedSelection> {
+    pub fn last_selection_mut(&mut self) -> Option<&mut NamedSelection<Initialized>> {
         self.selections.last_mut()
     }
 }
