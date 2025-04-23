@@ -18,7 +18,6 @@ use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
-use crate::schema::KeyDirective;
 use crate::schema::blueprint::FederationBlueprint;
 use crate::schema::compute_subgraph_metadata;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -278,13 +277,6 @@ impl Subgraph<Expanded> {
             },
         })
     }
-
-    #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(
-        &self,
-    ) -> Result<Vec<Result<KeyDirective, FederationError>>, FederationError> {
-        self.state.schema.key_directive_applications()
-    }
 }
 
 impl Subgraph<Validated> {
@@ -298,11 +290,6 @@ impl Subgraph<Validated> {
                 metadata: self.state.metadata,
             },
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn key_directive_applications(&self) -> Vec<KeyDirective> {
-        todo!("Validated @key directives should be made available after validation")
     }
 }
 

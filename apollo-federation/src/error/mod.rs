@@ -154,10 +154,20 @@ pub enum SingleFederationError {
     UnknownFederationLinkVersion { message: String },
     #[error("{message}")]
     UnknownLinkVersion { message: String },
-    #[error("{message}")]
-    KeyFieldsHasArgs { message: String },
-    #[error("{message}")]
-    ProvidesFieldsHasArgs { message: String },
+    #[error(
+        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @key)"
+    )]
+    KeyFieldsHasArgs {
+        type_name: String,
+        field_name: String,
+    },
+    #[error(
+        "field {type_name}.{field_name} cannot be included because it has arguments (fields with arguments are not allowed in @provides)"
+    )]
+    ProvidesFieldsHasArgs {
+        type_name: String,
+        field_name: String,
+    },
     #[error("{message}")]
     ProvidesFieldsMissingExternal { message: String },
     #[error("{message}")]
@@ -168,12 +178,18 @@ pub enum SingleFederationError {
     ProvidesUnsupportedOnInterface { message: String },
     #[error("{message}")]
     RequiresUnsupportedOnInterface { message: String },
-    #[error("{message}")]
-    KeyDirectiveInFieldsArgs { message: String },
-    #[error("{message}")]
-    ProvidesDirectiveInFieldsArgs { message: String },
-    #[error("{message}")]
-    RequiresDirectiveInFieldsArgs { message: String },
+    #[error(
+        "cannot have directive applications in the @key(fields:) argument but found {applied_directives}."
+    )]
+    KeyHasDirectiveInFieldsArg { applied_directives: String },
+    #[error(
+        "cannot have directive applications in the @provides(fields:) argument but found {applied_directives}."
+    )]
+    ProvidesHasDirectiveInFieldsArg { applied_directives: String },
+    #[error(
+        "cannot have directive applications in the @requires(fields:) argument but found {applied_directives}."
+    )]
+    RequiresHasDirectiveInFieldsArg { applied_directives: String },
     #[error("{message}")]
     ExternalUnused { message: String },
     #[error(
@@ -377,13 +393,13 @@ impl SingleFederationError {
             SingleFederationError::RequiresUnsupportedOnInterface { .. } => {
                 ErrorCode::RequiresUnsupportedOnInterface
             }
-            SingleFederationError::KeyDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::KeyHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::KeyDirectiveInFieldsArgs
             }
-            SingleFederationError::ProvidesDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::ProvidesHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::ProvidesDirectiveInFieldsArgs
             }
-            SingleFederationError::RequiresDirectiveInFieldsArgs { .. } => {
+            SingleFederationError::RequiresHasDirectiveInFieldsArg { .. } => {
                 ErrorCode::RequiresDirectiveInFieldsArgs
             }
             SingleFederationError::ExternalUnused { .. } => ErrorCode::ExternalUnused,
