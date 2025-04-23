@@ -8,6 +8,7 @@ use apollo_compiler::ast::Value;
 use multi_try::MultiTry;
 use shape::Shape;
 
+use super::coordinates::ErrorsCoordinate;
 use crate::sources::connect::JSONSelection;
 use crate::sources::connect::Namespace;
 use crate::sources::connect::spec::schema::ERRORS_ARGUMENT_NAME;
@@ -20,8 +21,6 @@ use crate::sources::connect::validation::expression;
 use crate::sources::connect::validation::expression::Context;
 use crate::sources::connect::validation::graphql::GraphQLString;
 use crate::sources::connect::validation::graphql::SchemaInfo;
-
-use super::coordinates::ErrorsCoordinate;
 
 /// A valid, parsed (but not type-checked) `@connect(errors:)` or `@source(errors:)`.
 pub(super) struct Errors<'schema> {
@@ -47,10 +46,7 @@ impl<'schema> Errors<'schema> {
             ErrorsCoordinate::Source { source } => source.directive,
             ErrorsCoordinate::Connect { connect } => connect.directive,
         };
-        let Some(arg) = directive
-            .specified_argument_by_name(&ERRORS_ARGUMENT_NAME)
-            .and_then(|arg| Some(arg))
-        else {
+        let Some(arg) = directive.specified_argument_by_name(&ERRORS_ARGUMENT_NAME) else {
             return Ok(Self {
                 message: None,
                 extensions: None,
@@ -65,7 +61,7 @@ impl<'schema> Errors<'schema> {
                     extensions,
                 })
         } else {
-            return Err(vec![Message {
+            Err(vec![Message {
                 code: Code::GraphQLError,
                 message: format!(
                     "{coordinate} `{ERRORS_ARGUMENT_NAME}` argument must be an object."
@@ -74,7 +70,7 @@ impl<'schema> Errors<'schema> {
                     .line_column_range(&schema.sources)
                     .into_iter()
                     .collect(),
-            }]);
+            }])
         }
     }
 
