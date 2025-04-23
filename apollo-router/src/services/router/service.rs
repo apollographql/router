@@ -306,10 +306,9 @@ impl RouterService {
             .unwrap_or_default();
 
         // XXX(@goto-bus-stop): I strongly suspect that it would be better to move this into its own layer.
-        let display_router_response: DisplayRouterResponse = context
+        let display_router_response = context
             .extensions()
-            .with_lock(|lock| lock.get().cloned())
-            .unwrap_or_default();
+            .with_lock(|lock| lock.get::<DisplayRouterResponse>().is_some());
 
         let (mut parts, mut body) = response.into_parts();
         process_vary_header(&mut parts.headers);
@@ -367,7 +366,7 @@ impl RouterService {
                         });
                     let body = body?;
 
-                    if display_router_response.0 {
+                    if display_router_response {
                         context.extensions().with_lock(|ext| {
                             ext.insert(RouterResponseBodyExtensionType(body.clone()));
                         });
