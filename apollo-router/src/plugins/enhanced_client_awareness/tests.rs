@@ -45,15 +45,11 @@ async fn given_client_library_metadata_adds_values_to_context() {
         SupergraphResponse::fake_builder().build()
     });
 
-    let service_stack = EnhancedClientAwareness::new(PluginInit::fake_new(
-        Config {
-            enable_client_library_metrics: true,
-        },
-        Default::default(),
-    ))
-    .await
-    .unwrap()
-    .supergraph_service(mock_service.boxed());
+    let service_stack =
+        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+            .await
+            .unwrap()
+            .supergraph_service(mock_service.boxed());
 
     // given
     let mut clients_map = serde_json_bytes::map::Map::new();
@@ -88,15 +84,11 @@ async fn without_client_library_metadata_does_not_add_values_to_context() {
         SupergraphResponse::fake_builder().build()
     });
 
-    let service_stack = EnhancedClientAwareness::new(PluginInit::fake_new(
-        Config {
-            enable_client_library_metrics: true,
-        },
-        Default::default(),
-    ))
-    .await
-    .unwrap()
-    .supergraph_service(mock_service.boxed());
+    let service_stack =
+        EnhancedClientAwareness::new(PluginInit::fake_new(Config {}, Default::default()))
+            .await
+            .unwrap()
+            .supergraph_service(mock_service.boxed());
 
     // when
     let request = supergraph::Request::fake_builder()

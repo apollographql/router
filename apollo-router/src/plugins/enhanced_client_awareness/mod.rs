@@ -15,18 +15,9 @@ const CLIENT_LIBRARY_NAME_KEY: &str = "name";
 const CLIENT_LIBRARY_VERSION_KEY: &str = "version";
 
 #[derive(Debug, Deserialize, JsonSchema)]
-struct Config {
-    #[serde(default = "default_enable_client_library_metrics")]
-    enable_client_library_metrics: bool,
-}
+struct Config {}
 
-fn default_enable_client_library_metrics() -> bool {
-    true
-}
-
-struct EnhancedClientAwareness {
-    enabled: bool,
-}
+struct EnhancedClientAwareness {}
 
 #[async_trait::async_trait]
 impl Plugin for EnhancedClientAwareness {
@@ -34,48 +25,42 @@ impl Plugin for EnhancedClientAwareness {
 
     // This is invoked once after the router starts and compiled-in
     // plugins are registered
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(EnhancedClientAwareness {
-            enabled: init.config.enable_client_library_metrics,
-        })
+    async fn new(_init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(EnhancedClientAwareness {})
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        if self.enabled {
-            ServiceBuilder::new()
-                .map_request(move |request: supergraph::Request| {
-                    if let Some(client_library_metadata) = request
-                        .supergraph_request
-                        .body()
-                        .extensions
-                        .get(CLIENT_LIBRARY_KEY)
+        ServiceBuilder::new()
+            .map_request(move |request: supergraph::Request| {
+                if let Some(client_library_metadata) = request
+                    .supergraph_request
+                    .body()
+                    .extensions
+                    .get(CLIENT_LIBRARY_KEY)
+                {
+                    if let Some(client_library_name) = client_library_metadata
+                        .get(CLIENT_LIBRARY_NAME_KEY)
+                        .and_then(|value| value.as_str())
                     {
-                        if let Some(client_library_name) = client_library_metadata
-                            .get(CLIENT_LIBRARY_NAME_KEY)
-                            .and_then(|value| value.as_str())
-                        {
-                            let _ = request
-                                .context
-                                .insert(CLIENT_LIBRARY_NAME, client_library_name.to_string());
-                        };
-
-                        if let Some(client_library_version) = client_library_metadata
-                            .get(CLIENT_LIBRARY_VERSION_KEY)
-                            .and_then(|value| value.as_str())
-                        {
-                            let _ = request
-                                .context
-                                .insert(CLIENT_LIBRARY_VERSION, client_library_version.to_string());
-                        };
+                        let _ = request
+                            .context
+                            .insert(CLIENT_LIBRARY_NAME, client_library_name.to_string());
                     };
 
-                    request
-                })
-                .service(service)
-                .boxed()
-        } else {
-            service
-        }
+                    if let Some(client_library_version) = client_library_metadata
+                        .get(CLIENT_LIBRARY_VERSION_KEY)
+                        .and_then(|value| value.as_str())
+                    {
+                        let _ = request
+                            .context
+                            .insert(CLIENT_LIBRARY_VERSION, client_library_version.to_string());
+                    };
+                };
+
+                request
+            })
+            .service(service)
+            .boxed()
     }
 }
 
