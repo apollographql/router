@@ -33,6 +33,7 @@ pub(crate) fn make_request(
 ) -> Result<(TransportRequest, Vec<Problem>), HttpJsonTransportError> {
     let uri = transport.make_uri(&inputs)?;
 
+    let method = transport.method;
     let request = http::Request::builder()
         .method(transport.method.as_str())
         .uri(uri);
@@ -73,7 +74,7 @@ pub(crate) fn make_request(
             (None, None, "".into(), 0, vec![])
         };
 
-    match transport.method {
+    match method {
         HTTPMethod::Post | HTTPMethod::Patch | HTTPMethod::Put => {
             request = request.header(CONTENT_LENGTH, content_length);
         }
@@ -269,8 +270,8 @@ mod tests {
                 source_url: None,
                 connect_template: StringTemplate::from_str("http://localhost:8080/").unwrap(),
                 method: HTTPMethod::Post,
-                headers: Default::default(),
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
+                ..Default::default()
             },
             vars,
             &connect::Request {
@@ -330,6 +331,7 @@ mod tests {
                 method: HTTPMethod::Post,
                 headers,
                 body: Some(JSONSelection::parse("$args { a }").unwrap()),
+                ..Default::default()
             },
             vars,
             &connect::Request {

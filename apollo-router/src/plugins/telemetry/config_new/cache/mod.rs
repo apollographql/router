@@ -8,7 +8,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
-use super::selectors::SubgraphSelector;
+use super::subgraph::selectors::SubgraphSelector;
 use crate::plugins::cache::entity::CacheHitMiss;
 use crate::plugins::cache::entity::CacheSubgraph;
 use crate::plugins::cache::metrics::CacheMetricContextKey;
