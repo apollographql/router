@@ -18,23 +18,12 @@ use tracing::Instrument;
 
 use crate::Configuration;
 use crate::apollo_studio_interop::UsageReporting;
-<<<<<<< HEAD
-<<<<<<< HEAD
 use crate::cache::DeduplicatingCache;
-use crate::cache::estimate_size;
-use crate::cache::storage::InMemoryCache;
-use crate::cache::storage::ValueType;
-=======
-=======
-use crate::cache::DeduplicatingCache;
-use crate::cache::EntryError;
->>>>>>> 13e338b3 (run formatter)
 use crate::cache::estimate_size;
 use crate::cache::storage::InMemoryCache;
 use crate::cache::storage::ValueType;
 use crate::compute_job::ComputeBackPressureError;
 use crate::compute_job::MaybeBackPressureError;
->>>>>>> 3e08471b (remove duplicate starstuff schema)
 use crate::configuration::PersistedQueriesPrewarmQueryPlanCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
