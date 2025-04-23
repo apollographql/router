@@ -1,0 +1,236 @@
+---
+title: Router CLI Configuration Reference
+subtitle: ""
+description: Reference of command-line options for Apollo GraphOS Router and Apollo Router Core.
+---
+import RouterYaml from '../../../shared/router-yaml-complete.mdx';
+import RouterConfigTable from '../../../shared/router-config-properties-table.mdx';
+
+This reference covers the command-line options for configuring an Apollo Router. 
+
+## Command-line options
+
+This reference lists and describes the options supported by the `router` binary. Where indicated, some of these options can also be provided via an environment variable. 
+
+<Tip>
+
+For options available as both a command-line option and an environment variable, the command-line value takes precedence.
+
+</Tip>
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Option / Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr class="required">
+<td>
+
+##### `-s` / `--supergraph`
+
+`APOLLO_ROUTER_SUPERGRAPH_PATH`, `APOLLO_ROUTER_SUPERGRAPH_URLS`
+
+</td>
+<td>
+
+The [supergraph schema](/federation/federated-types/overview#supergraph-schema) of a router. Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`--supergraph-urls <urls>`, or `APOLLO_ROUTER_SUPERGRAPH_URLS`).
+
+> &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages.
+
+Setting this option disables polling from Apollo Uplink to fetch the latest supergraph schema.
+
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart).
+
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, you may need to set this option when following [advanced deployment workflows](/federation/managed-federation/deployment/#advanced-deployment-workflows).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `-c` / `--config`
+
+`APOLLO_ROUTER_CONFIG_PATH`
+
+</td>
+<td>
+
+The absolute or relative path to the router's optional [YAML configuration file](#yaml-config-file).
+
+</td>
+
+</tr>
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-key-path`
+
+`APOLLO_KEY_PATH`
+
+</td>
+<td>
+
+⚠️ **This is not available on Windows.**
+
+The absolute or relative path to a file containing the Apollo graph API key for use with managed federation.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--dev`
+
+</td>
+<td>
+
+⚠️ **Do not set this option in production!**
+
+If set, a router runs in dev mode to help with local development.
+
+[Learn more about dev mode.](/graphos/routing/configuration/yaml#dev-mode-defaults)
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--hr` / `--hot-reload`
+
+`APOLLO_ROUTER_HOT_RELOAD`
+
+</td>
+<td>
+
+If set, the router watches for changes to its configuration file and any supergraph file passed with `--supergraph` and reloads them automatically without downtime. This setting only affects local files provided to the router. The supergraph and configuration provided from GraphOS via Launches (and delivered via Uplink) are _always_ loaded automatically, regardless of this setting.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--log`
+
+`APOLLO_ROUTER_LOG`
+
+</td>
+<td>
+
+The log level, indicating the _most_ severe log message type to include. In ascending order of verbosity, can be one of: `off`, `error`, `warn`, `info`, `debug`, or `trace`.
+
+The default value is `info`.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--license`
+
+`APOLLO_ROUTER_LICENSE_PATH`, `APOLLO_ROUTER_LICENSE`
+
+</td>
+<td>
+
+An offline GraphOS Enterprise license. Enables Enterprise router features when disconnected from GraphOS.
+
+An offline license is specified either as an absolute or relative path to a license file (`--license <license_path>` or `APOLLO_ROUTER_LICENSE_PATH`), or as the stringified contents of a license (`APOLLO_ROUTER_LICENSE`).
+
+When not set, the router retrieves an Enterprise license [from GraphOS via Apollo Uplink](/router/enterprise-features/#the-enterprise-license).
+
+For information about fetching an offline license and configuring the router, see [Offline Enterprise license](/router/enterprise-features/#offline-enterprise-license).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-endpoints`
+
+`APOLLO_UPLINK_ENDPOINTS`
+
+</td>
+<td>
+
+If using [managed federation](/federation/managed-federation/overview/), the Apollo Uplink URL(s) that the router should poll to fetch its latest configuration. Almost all managed router instances should _omit_ this option to use the default set of Uplink URLs.
+
+If you specify multiple URLs, separate them with commas (no whitespace).
+
+For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--apollo-uplink-timeout`
+
+`APOLLO_UPLINK_TIMEOUT`
+
+</td>
+<td>
+
+The request timeout for each poll sent to Apollo Uplink.
+
+The default value is `30s` (thirty seconds).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--anonymous-telemetry-disabled`
+
+`APOLLO_TELEMETRY_DISABLED`
+
+</td>
+<td>
+
+If set, disables sending anonymous usage information to Apollo.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `--listen`
+
+`APOLLO_ROUTER_LISTEN_ADDRESS`
+
+</td>
+<td>
+
+If set, the listen address of the router.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `-V` / `--version`
+
+</td>
+<td>
+
+If set, the router prints its version number, then exits.
+
+</td>
+</tr>
+
+</tbody>
+</table>
