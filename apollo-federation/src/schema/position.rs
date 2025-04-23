@@ -661,6 +661,10 @@ impl FieldDefinitionPosition {
     ) -> Option<&'schema Component<FieldDefinition>> {
         self.get(schema).ok()
     }
+
+    pub(crate) fn is_interface(&self) -> bool {
+        matches!(self, FieldDefinitionPosition::Interface(_))
+    }
 }
 
 infallible_conversions!(ObjectOrInterfaceFieldDefinitionPosition::{Object, Interface} -> FieldDefinitionPosition);
