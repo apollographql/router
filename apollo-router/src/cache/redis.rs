@@ -175,7 +175,7 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
+    pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
         let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
@@ -211,6 +211,7 @@ impl RedisCacheStorage {
             config.ttl,
             config.reset_ttl,
             is_cluster,
+            caller,
         )
         .await
     }
@@ -230,6 +231,7 @@ impl RedisCacheStorage {
             None,
             false,
             false,
+            "test",
         )
         .await
     }
@@ -242,6 +244,7 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
         reset_ttl: bool,
         is_cluster: bool,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         let pooled_client = RedisPool::new(
             client_config,
@@ -260,6 +263,14 @@ impl RedisCacheStorage {
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
 
+            i64_up_down_counter_with_unit!(
+                "apollo.router.cache.redis.clients",
+                "Number of connected Redis clients",
+                "{client}",
+                1,
+                kind = caller
+            );
+
             tokio::spawn(async move {
                 while let Ok(error) = error_rx.recv().await {
                     tracing::error!("Client disconnected with error: {:?}", error);
@@ -269,6 +280,13 @@ impl RedisCacheStorage {
                 while reconnect_rx.recv().await.is_ok() {
                     tracing::info!("Redis client reconnected.");
                 }
+                i64_up_down_counter_with_unit!(
+                    "apollo.router.cache.redis.clients",
+                    "Number of connected Redis clients",
+                    "{client}",
+                    -1,
+                    kind = caller
+                );
             });
         }
 

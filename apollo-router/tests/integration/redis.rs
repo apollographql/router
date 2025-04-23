@@ -1115,3 +1115,29 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
         .assert_redis_cache_contains(new_cache_key, Some(starting_key))
         .await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_redis_connections_are_closed_on_router_reload() {
+    if !graph_os_enabled() {
+        return;
+    }
+
+    let router_config = include_str!("fixtures/redis_connection_closure.router.yaml");
+    let mut router = IntegrationTest::builder()
+        .config(router_config)
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let expected_metric = r#"apollo_router_cache_redis_clients{kind="query planner",otel_scope_name="apollo/router"} 4"#;
+    router.assert_metrics_contains(expected_metric, None).await;
+
+    // check that reloading the schema yields the same number of redis clients
+    let new_router_config = format!("{router_config}\ninclude_subgraph_errors:\n  all: true");
+    router.update_config(&new_router_config).await;
+    router.assert_reloaded().await;
+
+    router.assert_metrics_contains(expected_metric, None).await;
+}
