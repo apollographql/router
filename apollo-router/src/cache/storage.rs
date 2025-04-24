@@ -81,7 +81,7 @@ where
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
-                match RedisCacheStorage::new(config).await {
+                match RedisCacheStorage::new(config, caller).await {
                     Err(e) => {
                         tracing::error!(
                             cache = caller,
