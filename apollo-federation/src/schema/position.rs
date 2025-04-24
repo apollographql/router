@@ -333,7 +333,7 @@ impl TypeDefinitionPosition {
             }
         }
     }
-    
+
     /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
@@ -341,26 +341,14 @@ impl TypeDefinitionPosition {
         directive: &Component<Directive>,
     ) {
         match self {
-            TypeDefinitionPosition::Scalar(type_) => {
-                type_.remove_directive(schema, directive)
-            }
-            TypeDefinitionPosition::Object(type_) => {
-                type_.remove_directive(schema, directive)
-            }
-            TypeDefinitionPosition::Interface(type_) => {
-                type_.remove_directive(schema, directive)
-            }
-            TypeDefinitionPosition::Union(type_) => {
-                type_.remove_directive(schema, directive)
-            }
-            TypeDefinitionPosition::Enum(type_) => {
-                type_.remove_directive(schema, directive)
-            }
-            TypeDefinitionPosition::InputObject(type_) => {
-                type_.remove_directive(schema, directive)
-            }
+            TypeDefinitionPosition::Scalar(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Object(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Interface(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Union(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::Enum(type_) => type_.remove_directive(schema, directive),
+            TypeDefinitionPosition::InputObject(type_) => type_.remove_directive(schema, directive),
         }
-    }    
+    }
 }
 
 impl From<&ExtendedType> for TypeDefinitionPosition {
@@ -1627,7 +1615,7 @@ impl ScalarTypeDefinitionPosition {
             Vec::new()
         }
     }
-    
+
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1641,8 +1629,7 @@ impl ScalarTypeDefinitionPosition {
         }) {
             self.remove_directive_name_references(&mut schema.referencers, &directive.name);
         }
-        obj
-            .make_mut()
+        obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
@@ -2204,8 +2191,7 @@ impl ObjectTypeDefinitionPosition {
         }) {
             self.remove_directive_name_references(&mut schema.referencers, &directive.name);
         }
-        obj
-            .make_mut()
+        obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
@@ -3394,7 +3380,7 @@ impl InterfaceTypeDefinitionPosition {
             Vec::new()
         }
     }
-    
+
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -3408,8 +3394,7 @@ impl InterfaceTypeDefinitionPosition {
         }) {
             self.remove_directive_name_references(&mut schema.referencers, &directive.name);
         }
-        obj
-            .make_mut()
+        obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
@@ -4458,7 +4443,7 @@ impl UnionTypeDefinitionPosition {
             Vec::new()
         }
     }
-    
+
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -4472,8 +4457,7 @@ impl UnionTypeDefinitionPosition {
         }) {
             self.remove_directive_name_references(&mut schema.referencers, &directive.name);
         }
-        obj
-            .make_mut()
+        obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
@@ -4881,7 +4865,7 @@ impl EnumTypeDefinitionPosition {
             Vec::new()
         }
     }
-    
+
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -4895,8 +4879,7 @@ impl EnumTypeDefinitionPosition {
         }) {
             self.remove_directive_name_references(&mut schema.referencers, &directive.name);
         }
-        obj
-            .make_mut()
+        obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }
@@ -5440,7 +5423,7 @@ impl InputObjectTypeDefinitionPosition {
             Vec::new()
         }
     }
-    
+
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -5454,8 +5437,7 @@ impl InputObjectTypeDefinitionPosition {
         }) {
             self.remove_directive_name_references(&mut schema.referencers, &directive.name);
         }
-        obj
-            .make_mut()
+        obj.make_mut()
             .directives
             .retain(|other_directive| !other_directive.ptr_eq(directive));
     }

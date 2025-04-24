@@ -6,7 +6,6 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::Type;
 
-use crate::link::federation_spec_definition::add_fed2_link_to_schema;
 use crate::LinkSpecDefinition;
 use crate::ValidFederationSchema;
 use crate::bail;
@@ -17,6 +16,7 @@ use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SP
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::add_fed1_link_to_schema;
+use crate::link::federation_spec_definition::add_fed2_link_to_schema;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::FederationSchema;
 use crate::schema::blueprint::FederationBlueprint;
@@ -72,7 +72,7 @@ impl HasMetadata for Expanded {
     fn schema(&self) -> &FederationSchema {
         &self.schema
     }
-    
+
     fn is_fed_1(&self) -> bool {
         self.is_fed_1
     }
@@ -152,7 +152,11 @@ impl Subgraph<Raw> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata, is_fed_1: false },
+            state: Expanded {
+                schema,
+                metadata,
+                is_fed_1: false,
+            },
         })
     }
 
@@ -181,7 +185,7 @@ impl Subgraph<Raw> {
             // //            Rust, we add it, so that fed 1 and fed 2 can be processed the same way.
             // add_fed1_link_to_schema(&mut schema)?;
             LinkSpecDefinition::latest().add_to_schema(&mut schema, /*alias*/ None)?;
-            
+
             add_fed2_link_to_schema(&mut schema)?;
             is_fed_1 = true;
         }
@@ -213,7 +217,11 @@ impl Subgraph<Raw> {
         Ok(Subgraph {
             name: self.name,
             url: self.url,
-            state: Expanded { schema, metadata, is_fed_1 },
+            state: Expanded {
+                schema,
+                metadata,
+                is_fed_1,
+            },
         })
     }
 }
@@ -320,7 +328,7 @@ impl<S: HasMetadata> Subgraph<S> {
     pub(crate) fn schema(&self) -> &FederationSchema {
         self.state.schema()
     }
-    
+
     pub(crate) fn is_fed_1(&self) -> bool {
         self.state.is_fed_1()
     }

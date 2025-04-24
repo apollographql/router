@@ -53,10 +53,7 @@ pub(crate) fn upgrade_subgraphs_if_necessary(
     subgraphs: &[&mut Subgraph<Expanded>],
 ) -> Result<(), FederationError> {
     // if all subgraphs are fed 2, there is no upgrade to be done
-    if subgraphs
-        .iter()
-        .all(|subgraph| !subgraph.is_fed_1())
-    {
+    if subgraphs.iter().all(|subgraph| !subgraph.is_fed_1()) {
         return Ok(());
     }
 
@@ -146,7 +143,11 @@ impl<'a> SchemaUpgrader<'a> {
 
         self.remove_tag_on_external()?;
 
-        let new_subgraph = Subgraph::<Raw>::new(self.original_subgraph.name.as_str(), self.original_subgraph.url.as_str(), self.schema.schema().clone());
+        let new_subgraph = Subgraph::<Raw>::new(
+            self.original_subgraph.name.as_str(),
+            self.original_subgraph.url.as_str(),
+            self.schema.schema().clone(),
+        );
         Ok(new_subgraph.assume_expanded()?)
     }
 
@@ -177,10 +178,15 @@ impl<'a> SchemaUpgrader<'a> {
                             subgraph_name.as_str() != self.original_subgraph.name.as_str()
                         })
                         .fallible_any(|(other_name, type_info)| {
-                            let Some(other_subgraph) = self.subgraphs.iter().find(|subgraph| &subgraph.name == other_name) else {
+                            let Some(other_subgraph) = self
+                                .subgraphs
+                                .iter()
+                                .find(|subgraph| &subgraph.name == other_name)
+                            else {
                                 return Ok(false);
                             };
-                            let extended_type = type_info.pos.get(other_subgraph.schema().schema())?;
+                            let extended_type =
+                                type_info.pos.get(other_subgraph.schema().schema())?;
                             Ok::<bool, FederationError>(Self::has_non_extension_elements(
                                 extended_type,
                             ))
@@ -319,7 +325,7 @@ impl<'a> SchemaUpgrader<'a> {
             let ExtendedType::Object(obj) = ty else {
                 continue;
             };
-            
+
             let object_pos = ObjectTypeDefinitionPosition::new(obj_name.clone());
             let directives = object_pos.get_applied_directives(schema, &external_directive.name);
             if !directives.is_empty() {
