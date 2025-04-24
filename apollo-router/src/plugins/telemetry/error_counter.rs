@@ -12,9 +12,9 @@ use crate::services::router::ClientRequestAccepts;
 use crate::spec::query::EXTENSIONS_VALUE_COMPLETION_KEY;
 
 // TODO migrate subgraph and extended errors config
-pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config: &ErrorsConfiguration) {
+pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config: &ErrorsConfiguration) -> SupergraphResponse {
     let context = response.context.clone();
-    // TODO do we really need this? 
+    // TODO do we really need this?
     let ClientRequestAccepts {
         wildcard: accepts_wildcard,
         json: accepts_json,
@@ -58,9 +58,10 @@ pub(crate) async fn count_errors(mut response: SupergraphResponse, errors_config
             );
         }
     }
-    
-    // TODO router service plugin fn to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER? Would need to parse json response
+    response
 }
+
+// TODO router service plugin fn to capture SERVICE_UNAVAILABLE or INVALID_ACCEPT_HEADER? Would need to parse json response
 
 fn count_operation_error_codes(
     codes: &[&str],
