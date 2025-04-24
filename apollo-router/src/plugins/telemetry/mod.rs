@@ -113,6 +113,7 @@ use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
 use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+use crate::plugins::telemetry::error_counter::count_errors;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -154,6 +155,7 @@ pub(crate) mod config_new;
 pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
+mod error_counter;
 mod error_handler;
 mod fmt_layer;
 pub(crate) mod formatters;
@@ -639,6 +641,12 @@ impl PluginPrivate for Telemetry {
                 {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
+
+                resp
+            })
+            .map_response(move |mut resp: SupergraphResponse| {
+                // TODO make sure this doesn't override the above map_response
+                count_errors(resp, config);
 
                 resp
             })
