@@ -17,6 +17,7 @@ use crate::schema::FederationSchema;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
 
 fn unwrap_schema(fed_schema: &FederationSchema) -> &Valid<Schema> {
@@ -87,6 +88,10 @@ impl SubgraphMetadata {
 
     pub(crate) fn is_field_external(&self, field: &FieldDefinitionPosition) -> bool {
         self.external_metadata().is_external(field)
+    }
+
+    pub(crate) fn is_field_external_in_implementer(&self, field: &FieldDefinitionPosition) -> bool {
+        self.external_metadata().is_external_in_implementer(field)
     }
 
     pub(crate) fn is_field_fake_external(&self, field: &FieldDefinitionPosition) -> bool {
@@ -305,6 +310,9 @@ pub(crate) struct ExternalMetadata {
     fake_external_fields: IndexSet<FieldDefinitionPosition>,
     /// Fields that are external because their parent type has an `@external` directive.
     fields_on_external_types: IndexSet<FieldDefinitionPosition>,
+    /// Fields which are not necessarily external on their source interface but have an implementation
+    /// which does mark that field as external.
+    fields_with_external_implementation: IndexSet<FieldDefinitionPosition>,
 }
 
 impl ExternalMetadata {
@@ -329,10 +337,34 @@ impl ExternalMetadata {
             Default::default()
         };
 
+        // We want to be able to check if an interface field has an implementation which marks it as external.
+        // We take the external fields we already collected and find possible interface candidates for object
+        // types. Then, we filter down to those candidates which actually have the field we're looking at.
+        let fields_with_external_implementation = external_fields
+            .iter()
+            .flat_map(|external_field| {
+                let Ok(ExtendedType::Object(ty)) = external_field.parent().get(schema.schema())
+                else {
+                    return vec![];
+                };
+                ty.implements_interfaces
+                    .iter()
+                    .map(|itf| {
+                        FieldDefinitionPosition::Interface(InterfaceFieldDefinitionPosition {
+                            type_name: itf.name.clone(),
+                            field_name: external_field.field_name().clone(),
+                        })
+                    })
+                    .filter(|candidate_field| candidate_field.try_get(schema.schema()).is_some())
+                    .collect()
+            })
+            .collect();
+
         Ok(Self {
             external_fields,
             fake_external_fields,
             fields_on_external_types,
+            fields_with_external_implementation,
         })
     }
 
@@ -441,6 +473,14 @@ impl ExternalMetadata {
                 .fields_on_external_types
                 .contains(field_definition_position))
             && !self.is_fake_external(field_definition_position)
+    }
+
+    pub(crate) fn is_external_in_implementer(
+        &self,
+        field_definition_position: &FieldDefinitionPosition,
+    ) -> bool {
+        self.fields_with_external_implementation
+            .contains(field_definition_position)
     }
 
     pub(crate) fn is_fake_external(

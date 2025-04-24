@@ -27,21 +27,21 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
     },
     Message {
         code: InvalidBody,
-        message: "In `@connect(http: {body:})` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context",
+        message: "In `@connect(http: {body:})` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context, $request",
         locations: [
             14:40..14:46,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `POST` in `@connect(http:)` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context",
+        message: "In `POST` in `@connect(http:)` on `Query.ts`: $batch is not valid here, must be one of $args, $config, $context, $request",
         locations: [
             19:31..19:37,
         ],
     },
     Message {
         code: InvalidUrl,
-        message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context",
+        message: "In `GET` in `@connect(http:)` on `T`: $args is not valid here, must be one of $this, $batch, $config, $context, $request",
         locations: [
             37:29..37:34,
         ],
@@ -70,7 +70,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/batch.gra
     },
     Message {
         code: InvalidSelection,
-        message: "In `@connect(selection:)` on `T`: variable `$batch` is not valid at this location, must be one of $args, $config, $context, $status, $this",
+        message: "In `@connect(selection:)` on `T`: variable `$batch` is not valid at this location, must be one of $args, $config, $context, $request, $response, $status, $this",
         locations: [
             64:35..64:41,
         ],

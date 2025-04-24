@@ -8,8 +8,10 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexSet;
+use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use position::ObjectFieldDefinitionPosition;
 use position::ObjectOrInterfaceTypeDefinitionPosition;
 use position::TagDirectiveTargetPosition;
@@ -24,6 +26,7 @@ use crate::link::LinksMetadata;
 use crate::link::federation_spec_definition::ContextDirectiveArguments;
 use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_FIELDSET_TYPE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_SERVICE_TYPE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FromContextDirectiveArguments;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
@@ -52,6 +55,7 @@ pub(crate) mod position;
 pub(crate) mod referencer;
 pub(crate) mod schema_upgrader;
 pub(crate) mod subgraph_metadata;
+pub(crate) mod validators;
 
 pub(crate) fn compute_subgraph_metadata(
     schema: &FederationSchema,
@@ -220,6 +224,7 @@ impl FederationSchema {
     }
 
     /// Note that a subgraph may have no "entities" and so no `_Entity` type.
+    // PORT_NOTE: Corresponds to `FederationMetadata.entityType` in JS
     pub(crate) fn entity_type(
         &self,
     ) -> Result<Option<UnionTypeDefinitionPosition>, FederationError> {
@@ -236,6 +241,24 @@ impl FederationSchema {
                 FEDERATION_ENTITY_TYPE_NAME_IN_SPEC
             ))),
             None => Ok(None),
+        }
+    }
+
+    // PORT_NOTE: Corresponds to `FederationMetadata.serviceType` in JS
+    pub(crate) fn service_type(&self) -> Result<ObjectTypeDefinitionPosition, FederationError> {
+        // Note: `_Service` type name can't be renamed.
+        match self.schema.types.get(&FEDERATION_SERVICE_TYPE_NAME_IN_SPEC) {
+            Some(ExtendedType::Object(_)) => Ok(ObjectTypeDefinitionPosition {
+                type_name: FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            }),
+            Some(_) => bail!(
+                "Unexpected type found for federation spec's `{spec_name}` type definition",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
+            None => bail!(
+                "Unexpected: type not found for federation spec's `{spec_name}`",
+                spec_name = FEDERATION_SERVICE_TYPE_NAME_IN_SPEC,
+            ),
         }
     }
 
@@ -478,6 +501,7 @@ impl FederationSchema {
                             .provides_directive_arguments(provides_directive_application);
                         applications.push(arguments.map(|args| ProvidesDirective {
                             arguments: args,
+                            target: field_definition_position,
                             target_return_type: field_definition.ty.inner_named_type(),
                         }));
                     }
@@ -572,6 +596,10 @@ impl FederationSchema {
         }
         Ok(applications)
     }
+
+    pub(crate) fn is_interface(&self, type_name: &Name) -> bool {
+        self.referencers().interface_types.contains_key(type_name)
+    }
 }
 
 type FallibleDirectiveIterator<D> = Result<Vec<Result<D, FederationError>>, FederationError>;
@@ -599,11 +627,41 @@ pub(crate) struct KeyDirective<'schema> {
     target: ObjectOrInterfaceTypeDefinitionPosition,
 }
 
+impl HasFields for KeyDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        self.target.type_name()
+    }
+}
+
+impl KeyDirective<'_> {
+    pub(crate) fn target(&self) -> &ObjectOrInterfaceTypeDefinitionPosition {
+        &self.target
+    }
+}
+
 pub(crate) struct ProvidesDirective<'schema> {
     /// The parsed arguments of this `@provides` application
     arguments: ProvidesDirectiveArguments<'schema>,
+    /// The schema position to which this directive is applied
+    target: &'schema ObjectFieldDefinitionPosition,
     /// The return type of the target field
     target_return_type: &'schema Name,
+}
+
+impl HasFields for ProvidesDirective<'_> {
+    /// The string representation of the field set
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    /// The type from which the field set selects
+    fn target_type(&self) -> &Name {
+        self.target_return_type
+    }
 }
 
 pub(crate) struct RequiresDirective<'schema> {
@@ -613,6 +671,16 @@ pub(crate) struct RequiresDirective<'schema> {
     target: &'schema ObjectFieldDefinitionPosition,
 }
 
+impl HasFields for RequiresDirective<'_> {
+    fn fields(&self) -> &str {
+        self.arguments.fields
+    }
+
+    fn target_type(&self) -> &Name {
+        &self.target.type_name
+    }
+}
+
 pub(crate) struct TagDirective<'schema> {
     /// The parsed arguments of this `@tag` application
     arguments: TagDirectiveArguments<'schema>,
@@ -620,6 +688,20 @@ pub(crate) struct TagDirective<'schema> {
     target: TagDirectiveTargetPosition, // TODO: Make this a reference
     /// Reference to the directive in the schema
     directive: &'schema Node<Directive>,
+}
+
+pub(crate) trait HasFields {
+    fn fields(&self) -> &str;
+    fn target_type(&self) -> &Name;
+
+    fn parse_fields(&self, schema: &Schema) -> Result<Valid<FieldSet>, WithErrors<FieldSet>> {
+        FieldSet::parse_and_validate(
+            Valid::assume_valid_ref(schema),
+            self.target_type().clone(),
+            self.fields(),
+            "field_set.graphql",
+        )
+    }
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.

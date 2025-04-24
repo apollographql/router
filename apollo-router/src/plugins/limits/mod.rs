@@ -433,7 +433,8 @@ mod test {
         let plugin: PluginTestHarness<LimitsPlugin> = PluginTestHarness::builder()
             .config(include_str!("fixtures/content_length_limit.router.yaml"))
             .build()
-            .await;
+            .await
+            .expect("test harness");
         plugin
     }
 }

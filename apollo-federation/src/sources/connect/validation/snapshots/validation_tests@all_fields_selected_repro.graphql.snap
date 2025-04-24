@@ -27,7 +27,7 @@ input_file: apollo-federation/src/sources/connect/validation/test_data/all_field
     },
     Message {
         code: MissingEntityConnector,
-        message: "Entity resolution for `@key(fields: \"userId\")` on `Cart` is not implemented by a connector. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+        message: "Entity resolution for `@key(fields: \"userId\")` on `Cart` is not implemented by a connector. See https://go.apollo.dev/connectors/entity-rules",
         locations: [
             11:11..11:33,
         ],

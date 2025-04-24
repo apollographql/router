@@ -127,8 +127,11 @@ mod test {
             }),
         };
 
-        let test_harness: PluginTestHarness<LicenseEnforcement> =
-            PluginTestHarness::builder().license(license).build().await;
+        let test_harness: PluginTestHarness<LicenseEnforcement> = PluginTestHarness::builder()
+            .license(license)
+            .build()
+            .await
+            .expect("test harness");
 
         let service = test_harness.router_service(|_req| async {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -180,8 +183,11 @@ mod test {
                 }),
             };
 
-            let test_harness: PluginTestHarness<LicenseEnforcement> =
-                PluginTestHarness::builder().license(license).build().await;
+            let test_harness: PluginTestHarness<LicenseEnforcement> = PluginTestHarness::builder()
+                .license(license)
+                .build()
+                .await
+                .expect("test harness");
 
             let service = test_harness.router_service(|_req| async {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
