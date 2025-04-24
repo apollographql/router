@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -51,9 +52,39 @@ pub(crate) struct RedisValue<V>(pub(crate) V)
 where
     V: ValueType;
 
+/// `DropSafeRedisPool` is a wrapper for `fred::prelude::RedisPool` which closes the pool's Redis
+/// connections when it is dropped.
+//
+// Dev notes:
+// * the inner `RedisPool` must be wrapped in an `Arc` because closing the connections happens
+//   in a spawned async task.
+// * why not just implement this within `Drop` for `RedisCacheStorage`? Because `RedisCacheStorage`
+//   is cloned frequently throughout the router, and we don't want to close the connections
+//   when each clone is dropped, only when the last instance is dropped.
+struct DropSafeRedisPool(Arc<RedisPool>);
+impl Deref for DropSafeRedisPool {
+    type Target = RedisPool;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for DropSafeRedisPool {
+    fn drop(&mut self) {
+        let inner = self.0.clone();
+        tokio::spawn(async move {
+            let result = inner.quit().await;
+            if let Err(err) = result {
+                tracing::warn!("Caught error while closing unused Redis connections: {err:?}");
+            }
+        });
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
-    inner: Arc<RedisPool>,
+    inner: Arc<DropSafeRedisPool>,
     namespace: Option<Arc<String>>,
     pub(crate) ttl: Option<Duration>,
     is_cluster: bool,
@@ -144,7 +175,7 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(config: RedisCache) -> Result<Self, BoxError> {
+    pub(crate) async fn new(config: RedisCache, caller: &'static str) -> Result<Self, BoxError> {
         let url = Self::preprocess_urls(config.urls)?;
         let mut client_config = RedisConfig::from_url(url.as_str())?;
         let is_cluster = url.scheme() == "redis-cluster" || url.scheme() == "rediss-cluster";
@@ -177,6 +208,7 @@ impl RedisCacheStorage {
             config.ttl,
             config.reset_ttl,
             is_cluster,
+            caller,
         )
         .await
     }
@@ -196,10 +228,12 @@ impl RedisCacheStorage {
             None,
             false,
             false,
+            "test",
         )
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_client(
         client_config: RedisConfig,
         timeout: Duration,
@@ -208,6 +242,7 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
         reset_ttl: bool,
         is_cluster: bool,
+        caller: &'static str,
     ) -> Result<Self, BoxError> {
         let pooled_client = RedisPool::new(
             client_config,
@@ -226,6 +261,14 @@ impl RedisCacheStorage {
             let mut error_rx = client.error_rx();
             let mut reconnect_rx = client.reconnect_rx();
 
+            i64_up_down_counter_with_unit!(
+                "apollo.router.cache.redis.connections",
+                "Number of Redis connections",
+                "{connection}",
+                1,
+                kind = caller
+            );
+
             tokio::spawn(async move {
                 while let Ok(error) = error_rx.recv().await {
                     tracing::error!("Client disconnected with error: {:?}", error);
@@ -235,6 +278,13 @@ impl RedisCacheStorage {
                 while reconnect_rx.recv().await.is_ok() {
                     tracing::info!("Redis client reconnected.");
                 }
+                i64_up_down_counter_with_unit!(
+                    "apollo.router.cache.redis.connections",
+                    "Number of Redis connections",
+                    "{connection}",
+                    -1,
+                    kind = caller
+                );
             });
         }
 
@@ -247,7 +297,7 @@ impl RedisCacheStorage {
 
         tracing::trace!("redis connection established");
         Ok(Self {
-            inner: Arc::new(pooled_client),
+            inner: Arc::new(DropSafeRedisPool(Arc::new(pooled_client))),
             namespace: namespace.map(Arc::new),
             ttl,
             is_cluster,
