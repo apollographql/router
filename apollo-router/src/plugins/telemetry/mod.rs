@@ -484,6 +484,19 @@ impl PluginPrivate for Telemetry {
                         span.set_span_dyn_attributes(custom_attributes);
                         let response: Result<router::Response, BoxError> = fut.await;
 
+                        let get_from_context = |context: &Context, name| {
+                            context.get::<&str, String>(name).ok().flatten()
+                        };
+                        let client_name = get_from_context(&ctx, CLIENT_NAME)
+                            .or_else(|| get_from_context(&ctx, DEPRECATED_CLIENT_NAME));
+
+                        // ::tracing::info!("found client name: {client_name:?}");
+
+                        span.set_span_dyn_attributes([KeyValue::new(
+                            CLIENT_NAME_KEY,
+                            client_name.unwrap_or("".to_string()),
+                        )]);
+
                         span.record(
                             APOLLO_PRIVATE_DURATION_NS,
                             start.elapsed().as_nanos() as i64,
