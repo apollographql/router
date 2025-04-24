@@ -165,7 +165,7 @@ impl Display for StringTemplate {
 
 /// A general-purpose error type which includes both a description of the problem and the offset span
 /// within the original expression where the problem occurred. Used for both parsing and interpolation.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Error {
     /// A human-readable description of the issue.
     pub message: String,
@@ -325,7 +325,7 @@ mod encoding {
     }
 
     impl UriString {
-        pub(crate) fn new() -> Self {
+        pub(crate) const fn new() -> Self {
             Self {
                 value: String::new(),
             }

@@ -254,7 +254,7 @@ mod helpers {
     }
 
     impl<'a> Expander<'a> {
-        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Expander<'a> {
+        pub(super) fn new(link: &Link, subgraph: &'a ValidFederationSubgraph) -> Self {
             let connect_name = ConnectSpec::connect_directive_name(link);
             let source_name = ConnectSpec::source_directive_name(link);
 
@@ -361,9 +361,15 @@ mod helpers {
                             )
                             .walk((
                                 object,
-                                connector.selection.next_subselection().cloned().ok_or(
-                                    FederationError::internal("empty selections are not allowed"),
-                                )?,
+                                connector
+                                    .selection
+                                    .next_subselection()
+                                    .cloned()
+                                    .ok_or_else(|| {
+                                        FederationError::internal(
+                                            "empty selections are not allowed",
+                                        )
+                                    })?,
                             ))?;
                         }
 
@@ -431,9 +437,13 @@ mod helpers {
                         ObjectTypeDefinitionPosition {
                             type_name: type_def.name.clone(),
                         },
-                        connector.selection.next_subselection().cloned().ok_or(
-                            FederationError::internal("empty selections are not allowed"),
-                        )?,
+                        connector
+                            .selection
+                            .next_subselection()
+                            .cloned()
+                            .ok_or_else(|| {
+                                FederationError::internal("empty selections are not allowed")
+                            })?,
                     ))?;
 
                     // we need a Query root field to be valid
@@ -508,7 +518,7 @@ mod helpers {
             };
 
             let parent_type = self.original_schema.get_type(parent_type_name)?;
-            let output_type = to_schema.get_type(output_type_name.clone())?;
+            let output_type = to_schema.get_type(output_type_name)?;
             let key_for_type = match &connector.entity_resolver {
                 Some(EntityResolver::Explicit) => output_type,
                 _ => parent_type,
@@ -537,9 +547,7 @@ mod helpers {
                 parsed
                     .next_subselection()
                     .cloned()
-                    .ok_or(FederationError::internal(
-                        "empty selections are not allowed",
-                    ))?,
+                    .ok_or_else(|| FederationError::internal("empty selections are not allowed"))?,
             ))?;
 
             // This actually adds the key fields if necessary, which is only

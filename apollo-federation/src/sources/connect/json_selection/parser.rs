@@ -93,7 +93,8 @@ pub enum JSONSelection {
 // To keep JSONSelection::parse consumers from depending on details of the nom
 // error types, JSONSelection::parse reports this custom error type. Other
 // ::parse methods still internally report nom::error::Error for the most part.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq, Clone)]
+#[error("{message}: {fragment}")]
 pub struct JSONSelectionParseError {
     // The message will be a meaningful error message in many cases, but may
     // fall back to a formatted nom::error::ErrorKind in some cases, e.g. when
@@ -112,20 +113,9 @@ pub struct JSONSelectionParseError {
     pub offset: usize,
 }
 
-impl std::error::Error for JSONSelectionParseError {}
-
-impl Display for JSONSelectionParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.message, self.fragment)
-    }
-}
-
 impl JSONSelection {
     pub fn empty() -> Self {
-        JSONSelection::Named(SubSelection {
-            selections: vec![],
-            ..Default::default()
-        })
+        JSONSelection::Named(SubSelection::default())
     }
 
     pub fn is_empty(&self) -> bool {

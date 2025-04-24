@@ -74,3 +74,19 @@ path = "tests/dhat_profiling/supergraph.rs"
 [[test]]
 name = "query_plan_creation_profiling"
 path = "tests/dhat_profiling/query_plan.rs"
+
+[lints.rust]
+future-incompatible = "warn"
+nonstandard_style = "deny"
+
+[lints.clippy]
+nursery = { level = "warn", priority = 9 }
+all = { level = "deny", priority = 10 }
+# Restricted
+redundant_pub_crate = { level = "allow", priority = 11 }
+get_unwrap = { level = "deny", priority = 5 }
+manual_while_let_some = { level = "deny", priority = 4 }
+panicking_unwrap = { level = "deny", priority = 3 }
+unnecessary_unwrap = { level = "deny", priority = 2 }
+unnecessary_literal_unwrap = { level = "deny", priority = 1 }
+unwrap_in_result = { level = "deny", priority = 0 }

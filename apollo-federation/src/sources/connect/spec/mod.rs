@@ -158,7 +158,7 @@ impl ConnectSpec {
         }
     }
 
-    pub(crate) fn connect_directive_locations(&self) -> &'static [DirectiveLocation] {
+    pub(crate) const fn connect_directive_locations(&self) -> &'static [DirectiveLocation] {
         match self {
             ConnectSpec::V0_1 => CONNECT_V0_1_LOCATIONS,
             ConnectSpec::V0_2 => CONNECT_V0_2_LOCATIONS,
