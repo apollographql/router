@@ -29,6 +29,7 @@ use super::location::WithRange;
 use super::location::merge_ranges;
 use super::location::new_span;
 use super::location::ranged_span;
+use crate::sources::connect::Namespace;
 use crate::sources::connect::variable::VariableNamespace;
 use crate::sources::connect::variable::VariablePathPart;
 use crate::sources::connect::variable::VariableReference;
@@ -231,11 +232,10 @@ impl JSONSelection {
         }
     }
 
-    pub fn external_variables<N: FromStr + ToString>(&self) -> impl Iterator<Item = N> {
+    pub fn variable_references(&self) -> impl Iterator<Item = VariableReference<Namespace>> + '_ {
         self.external_var_paths()
             .into_iter()
             .flat_map(|var_path| var_path.variable_reference())
-            .map(|var_ref| var_ref.namespace.namespace)
     }
 }
 

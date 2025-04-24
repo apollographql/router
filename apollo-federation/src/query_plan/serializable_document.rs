@@ -11,7 +11,7 @@ use serde::Serialize;
 ///
 /// The relevant schema is required to parse from string but not available during deserialization,
 /// so this contains a dual (either or both) “string” or “parsed” representation.
-/// Accessing the latter is fallible, and requires an explicit initilization step to provide the schema.
+/// Accessing the latter is fallible, and requires an explicit initialization step to provide the schema.
 #[derive(Clone)]
 pub struct SerializableDocument {
     serialized: String,

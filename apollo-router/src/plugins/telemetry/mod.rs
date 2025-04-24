@@ -64,13 +64,13 @@ use self::apollo_exporter::Sender;
 use self::apollo_exporter::proto;
 use self::config::Conf;
 use self::config::TraceIdFormat;
-use self::config_new::events::RouterEvents;
-use self::config_new::events::SubgraphEvents;
-use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
-use self::config_new::instruments::RouterInstruments;
-use self::config_new::instruments::SubgraphInstruments;
+use self::config_new::router::events::RouterEvents;
+use self::config_new::router::instruments::RouterInstruments;
 use self::config_new::spans::Spans;
+use self::config_new::subgraph::events::SubgraphEvents;
+use self::config_new::subgraph::instruments::SubgraphInstruments;
+use self::config_new::supergraph::events::SupergraphEvents;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::reload::reload_fmt;
 pub(crate) use self::span_factory::SpanMode;
@@ -140,12 +140,10 @@ use crate::services::SupergraphResponse;
 use crate::services::connector;
 use crate::services::execution;
 use crate::services::layers::apq::PERSISTED_QUERY_CACHE_HIT;
+use crate::services::layers::persisted_queries::UsedQueryIdFromManifest;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spec::GRAPHQL_PARSE_FAILURE_ERROR_KEY;
-use crate::spec::GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY;
-use crate::spec::GRAPHQL_VALIDATION_FAILURE_ERROR_KEY;
 use crate::spec::operation_limits::OperationLimits;
 
 pub(crate) mod apollo;
@@ -172,8 +170,10 @@ pub(crate) mod utils;
 
 // Tracing consts
 pub(crate) const CLIENT_NAME: &str = "apollo::telemetry::client_name";
+pub(crate) const CLIENT_LIBRARY_NAME: &str = "apollo::telemetry::client_library_name";
 pub(crate) const DEPRECATED_CLIENT_NAME: &str = "apollo_telemetry::client_name";
 pub(crate) const CLIENT_VERSION: &str = "apollo::telemetry::client_version";
+pub(crate) const CLIENT_LIBRARY_VERSION: &str = "apollo::telemetry::client_library_version";
 pub(crate) const DEPRECATED_CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 pub(crate) const SUBGRAPH_FTV1: &str = "apollo::telemetry::subgraph_ftv1";
 pub(crate) const DEPRECATED_SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
@@ -455,7 +455,7 @@ impl PluginPrivate for Telemetry {
                         .new_router_instruments(static_router_instruments.clone());
                     custom_instruments.on_request(request);
 
-                    let custom_events: RouterEvents =
+                    let mut custom_events: RouterEvents =
                         config_request.instrumentation.events.new_router_events();
                     custom_events.on_request(request);
 
@@ -466,7 +466,7 @@ impl PluginPrivate for Telemetry {
                         request.context.clone(),
                     )
                 },
-                move |(custom_attributes, custom_instruments, custom_events, ctx): (
+                move |(custom_attributes, custom_instruments, mut custom_events, ctx): (
                     Vec<KeyValue>,
                     RouterInstruments,
                     RouterEvents,
@@ -525,12 +525,7 @@ impl PluginPrivate for Telemetry {
 
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
-                                    .map(|u| {
-                                        u.stats_report_key == GRAPHQL_VALIDATION_FAILURE_ERROR_KEY
-                                            || u.stats_report_key == GRAPHQL_PARSE_FAILURE_ERROR_KEY
-                                            || u.stats_report_key
-                                                == GRAPHQL_UNKNOWN_OPERATION_NAME_ERROR_KEY
-                                    })
+                                    .map(|u| matches!(**u, UsageReporting::Error { .. }))
                                     .unwrap_or(false)
                             }) {
                                 Self::update_apollo_metrics(
@@ -609,7 +604,7 @@ impl PluginPrivate for Telemetry {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.stats_report_key.as_str(),
+                        usage_reporting.get_stats_report_key().as_str(),
                     );
                 }
                 // To expose trace_id or not
@@ -667,7 +662,8 @@ impl PluginPrivate for Telemetry {
                         .new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
-                    let supergraph_events = config.instrumentation.events.new_supergraph_events();
+                    let mut supergraph_events =
+                        config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
                     (
@@ -682,7 +678,7 @@ impl PluginPrivate for Telemetry {
                     ctx,
                     custom_instruments,
                     mut custom_attributes,
-                    supergraph_events,
+                    mut supergraph_events,
                     custom_graphql_instruments,
                 ): (
                     Context,
@@ -811,7 +807,7 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_subgraph_instruments(static_subgraph_instruments.clone());
                     custom_instruments.on_request(sub_request);
-                    let custom_events = config.instrumentation.events.new_subgraph_events();
+                    let mut custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
                     let custom_cache_instruments: CacheInstruments = config
@@ -832,7 +828,7 @@ impl PluginPrivate for Telemetry {
                     context,
                     custom_instruments,
                     custom_attributes,
-                    custom_events,
+                    mut custom_events,
                     custom_cache_instruments,
                 ): (
                     Context,
@@ -914,7 +910,8 @@ impl PluginPrivate for Telemetry {
                         .instruments
                         .new_connector_instruments(static_connector_instruments.clone());
                     custom_instruments.on_request(request);
-                    let custom_events = req_fn_config.instrumentation.events.new_connector_events();
+                    let mut custom_events =
+                        req_fn_config.instrumentation.events.new_connector_events();
                     custom_events.on_request(request);
 
                     let custom_span_attributes = req_fn_config
@@ -940,7 +937,11 @@ impl PluginPrivate for Telemetry {
                     let conf = res_fn_config.clone();
                     async move {
                         match custom_telemetry {
-                            Some((custom_instruments, custom_events, custom_span_attributes)) => {
+                            Some((
+                                custom_instruments,
+                                mut custom_events,
+                                custom_span_attributes,
+                            )) => {
                                 let span = Span::current();
                                 span.set_span_dyn_attributes(custom_span_attributes);
 
@@ -1358,8 +1359,7 @@ impl Telemetry {
             .extensions()
             .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
         {
-            let licensed_operation_count =
-                licensed_operation_count(&usage_reporting.stats_report_key);
+            let licensed_operation_count = licensed_operation_count(&usage_reporting);
             let persisted_query_hit = context
                 .get::<_, bool>(PERSISTED_QUERY_CACHE_HIT)
                 .unwrap_or_default();
@@ -1411,6 +1411,16 @@ impl Telemetry {
                     .with_lock(|lock| lock.remove::<ReferencedEnums>())
                     .unwrap_or_default();
 
+                let maybe_pq_id = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<UsedQueryIdFromManifest>().cloned())
+                    .map(|u| u.pq_id);
+                let usage_reporting = if let Some(pq_id) = maybe_pq_id {
+                    Arc::new(usage_reporting.with_pq_id(pq_id))
+                } else {
+                    usage_reporting
+                };
+
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1428,7 +1438,7 @@ impl Telemetry {
                         },
                     ),
                     stats: HashMap::from([(
-                        usage_reporting.stats_report_key.to_string(),
+                        usage_reporting.get_stats_report_key(),
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
@@ -1441,8 +1451,14 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
-                                    client_library_name: String::new(),
-                                    client_library_version: String::new(),
+                                    client_library_name: context
+                                        .get(CLIENT_LIBRARY_NAME)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
+                                    client_library_version: context
+                                        .get(CLIENT_LIBRARY_VERSION)
+                                        .unwrap_or_default()
+                                        .unwrap_or_default(),
                                     operation_type: operation_kind
                                         .as_apollo_operation_type()
                                         .to_string(),
@@ -1464,11 +1480,11 @@ impl Telemetry {
                                 local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
-                                .referenced_fields_by_type
-                                .clone()
+                                .get_referenced_fields()
                                 .into_iter()
                                 .map(|(k, v)| (k, convert(v)))
                                 .collect(),
+                            query_metadata: usage_reporting.get_query_metadata(),
                         },
                     )]),
                 }
@@ -1756,13 +1772,10 @@ fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String
     }
 }
 
-// Planner errors return stats report key that start with `## `
-// while successful planning stats report key start with `# `
-fn licensed_operation_count(stats_report_key: &str) -> u64 {
-    if stats_report_key.starts_with("## ") {
-        0
-    } else {
-        1
+fn licensed_operation_count(usage_reporting: &UsageReporting) -> u64 {
+    match usage_reporting {
+        UsageReporting::Error(_) => 0,
+        _ => 1,
     }
 }
 
@@ -2899,6 +2912,22 @@ mod tests {
             let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
 
             assert!(prometheus_metrics.is_empty());
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_units_are_included() {
+        async {
+            let plugin =
+                create_plugin_with_config(include_str!("testdata/prometheus.router.yaml")).await;
+            u64_histogram_with_unit!("apollo.test.histo1", "no unit", "{request}", 1u64);
+            f64_histogram_with_unit!("apollo.test.histo2", "unit", "s", 1f64);
+
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+            assert_snapshot!(prometheus_metrics);
         }
         .with_metrics()
         .await;

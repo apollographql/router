@@ -67,7 +67,7 @@ impl<'schema> EntityKeyChecker<'schema> {
                 messages.push(Message {
                     code: Code::MissingEntityConnector,
                     message: format!(
-                        "Entity resolution for `@key(fields: \"{}\")` on `{}` is not implemented by a connector. See https://go.apollo.dev/connectors/directives/#rules-for-entity-true",
+                        "Entity resolution for `@key(fields: \"{}\")` on `{}` is not implemented by a connector. See https://go.apollo.dev/connectors/entity-rules",
                         directive.argument_by_name(&FEDERATION_FIELDS_ARGUMENT_NAME, schema).ok().and_then(|arg| arg.as_str()).unwrap_or_default(),
                         key.selection_set.ty,
                     ),

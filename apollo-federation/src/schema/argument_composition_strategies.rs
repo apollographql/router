@@ -140,7 +140,7 @@ impl ArgumentComposition for MaxArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
@@ -180,7 +180,7 @@ impl ArgumentComposition for MinArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
@@ -220,7 +220,7 @@ impl ArgumentComposition for SumArgumentCompositionStrategy {
         self.validator.is_type_supported(schema, ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         values
@@ -247,7 +247,7 @@ impl ArgumentComposition for IntersectionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         // Each item in `values` must be a Value::List(...).
@@ -280,7 +280,7 @@ impl ArgumentComposition for UnionArgumentCompositionStrategy {
         support_any_non_null_array(ty)
     }
 
-    // TODO: check if this neeeds to be an Result<Value> to avoid the panic!()
+    // TODO: check if this needs to be an Result<Value> to avoid the panic!()
     // https://apollographql.atlassian.net/browse/FED-170
     fn merge_values(&self, values: &[Value]) -> Value {
         // Each item in `values` must be a Value::List(...).

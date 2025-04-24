@@ -779,7 +779,7 @@ telemetry:
     metrics_reference_mode: extended # Default is legacy
 ```
 
-<MinVersion version="2.1.0">
+<MinVersion version="2.1.2">
 
 ### Extended error reporting
 
@@ -791,7 +791,7 @@ telemetry:
 
 The router supports extended error reporting in the following versions:
 
-- [Preview](/resources/product-launch-stages/#preview) in v2.1.0 and later
+- [Preview](/resources/product-launch-stages/#preview) in v2.1.2 and later
 - [Experimental](/resources/product-launch-stages/#experimental-features) in v2.0.0
 
 </Note>
@@ -1208,18 +1208,32 @@ supergraph:
 When the Router schema or configuration updates all connections must be closed for resources to be freed.
 To ensure that long-lived connections do not hang on to resources, a maximum graceful shutdown timeout can be configured.
 
-```yaml
-connection_shutdown_timeout: 60s
+```yaml title="router.yaml"
+supergraph:
+  connection_shutdown_timeout: 60s
 ```
 
 The default value is 60 seconds.
 
 Note that if `early_cancel` is `false` (default), then requests in progress will still hold onto pipeline resources.
 Traffic shaping request timeouts should be used to prevent long-running requests.
-```
+
+```yaml title="router.yaml"
 traffic_shaping:
   router:
     timeout: 60s
+```
+
+### Header Read Timeout
+
+The header read timeout is the amount of time the Router will wait to receive the complete request headers from a client before timing out. It applies both when the connection is fully idle and when a request has been started but sending the headers has not been completed.
+
+By default, the header read timeout is set to 10 seconds. A longer timeout can be configured using the `server.http.header_read_timeout` configuration option.
+
+```yaml title="router.yaml"
+server:
+  http:
+    header_read_timeout: 30s
 ```
 
 ### Plugins

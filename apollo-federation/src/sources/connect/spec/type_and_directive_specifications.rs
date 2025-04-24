@@ -32,10 +32,14 @@ use crate::schema::type_and_directive_specification::DirectiveSpecification;
 use crate::schema::type_and_directive_specification::ScalarTypeSpecification;
 use crate::schema::type_and_directive_specification::TypeAndDirectiveSpecification;
 use crate::sources::connect::spec::ConnectSpec;
+use crate::sources::connect::spec::schema::BATCH_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_BATCH_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::CONNECT_BODY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::PATH_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::QUERY_PARAMS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 
 pub(super) fn check_or_add(
@@ -111,7 +115,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let connect_http_field_list = vec![
+    let mut connect_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: name!(GET),
@@ -166,6 +170,23 @@ pub(super) fn check_or_add(
         },
     ];
 
+    connect_http_field_list.extend([
+        InputValueDefinition {
+            description: None,
+            name: PATH_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ]);
+
     let mut connect_http_fields = IndexMap::with_hasher(Default::default());
     for field in connect_http_field_list {
         connect_http_fields.insert(field.name.clone(), Component::new(field));
@@ -180,6 +201,32 @@ pub(super) fn check_or_add(
 
     let connect_http_pos = InputObjectTypeDefinitionPosition {
         type_name: connect_http.name.clone(),
+    };
+
+    // @connect batch settings
+
+    let connect_batch_field_list = vec![InputValueDefinition {
+        description: None,
+        name: name!(maxSize),
+        ty: ty!(Int).into(),
+        default_value: None,
+        directives: Default::default(),
+    }];
+
+    let mut connect_batch_fields = IndexMap::with_hasher(Default::default());
+    for field in connect_batch_field_list {
+        connect_batch_fields.insert(field.name.clone(), Component::new(field));
+    }
+
+    let connect_batch = InputObjectType {
+        name: link.type_name_in_schema(&CONNECT_BATCH_NAME_IN_SPEC),
+        description: None,
+        directives: Default::default(),
+        fields: connect_batch_fields,
+    };
+
+    let connect_batch_pos = InputObjectTypeDefinitionPosition {
+        type_name: connect_batch.name.clone(),
     };
 
     // -------------------------------------------------------------------------
@@ -198,6 +245,7 @@ pub(super) fn check_or_add(
     //   http: ConnectHTTP
     //   selection: JSONSelection!
     //   entity: Boolean = false
+    //   batch: ConnectBatch
     // ) repeatable on FIELD_DEFINITION | OBJECT
     let connect_spec = DirectiveSpecification::new(
         link.directive_name_in_schema(&CONNECT_DIRECTIVE_NAME_IN_SPEC),
@@ -220,6 +268,22 @@ pub(super) fn check_or_add(
                             .for_identity(&ConnectSpec::identity())
                             .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&CONNECT_HTTP_NAME_IN_SPEC);
+                        Ok(Type::Named(name))
+                    },
+                    default_value: None,
+                },
+                composition_strategy: None,
+            },
+            DirectiveArgumentSpecification {
+                base_spec: ArgumentSpecification {
+                    name: BATCH_ARGUMENT_NAME.clone(),
+                    get_type: |s, _| {
+                        let name = s
+                            .metadata()
+                            .ok_or_else(|| internal!("missing metadata"))?
+                            .for_identity(&ConnectSpec::identity())
+                            .ok_or_else(|| internal!("missing connect spec"))?
+                            .type_name_in_schema(&CONNECT_BATCH_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },
                     default_value: None,
@@ -260,7 +324,7 @@ pub(super) fn check_or_add(
 
     // -------------------------------------------------------------------------
 
-    let source_http_field_list = vec![
+    let mut source_http_field_list = vec![
         InputValueDefinition {
             description: None,
             name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
@@ -279,6 +343,23 @@ pub(super) fn check_or_add(
             directives: Default::default(),
         },
     ];
+
+    source_http_field_list.extend([
+        InputValueDefinition {
+            description: None,
+            name: PATH_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+        InputValueDefinition {
+            description: None,
+            name: QUERY_PARAMS_ARGUMENT_NAME.clone(),
+            ty: Type::Named(json_selection_spec.name.clone()).into(),
+            default_value: None,
+            directives: Default::default(),
+        },
+    ]);
 
     let mut source_http_fields = IndexMap::with_hasher(Default::default());
     for field in source_http_field_list {
@@ -348,6 +429,8 @@ pub(super) fn check_or_add(
 
     connect_http_pos.pre_insert(schema)?;
     connect_http_pos.insert(schema, connect_http.into())?;
+    connect_batch_pos.pre_insert(schema)?;
+    connect_batch_pos.insert(schema, connect_batch.into())?;
     connect_spec.check_or_add(schema, None)?;
 
     source_http_pos.pre_insert(schema)?;
@@ -396,7 +479,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION
 
         directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
 
@@ -429,11 +512,19 @@ mod tests {
           DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
+        }
+
+        input connect__ConnectBatch {
+          maxSize: Int
         }
 
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
         }
         "###);
     }
@@ -459,7 +550,7 @@ mod tests {
 
         check_or_add(&link, &ConnectSpec::V0_2, &mut federation_schema).unwrap();
 
-        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r#"
+        assert_snapshot!(federation_schema.schema().serialize().to_string(), @r###"
         schema {
           query: Query
         }
@@ -468,7 +559,7 @@ mod tests {
 
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-        directive @connect(source: String, http: connect__ConnectHTTP, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
+        directive @connect(source: String, http: connect__ConnectHTTP, batch: connect__ConnectBatch, selection: connect__JSONSelection!, entity: Boolean = false) repeatable on FIELD_DEFINITION | OBJECT
 
         directive @source(name: String!, http: connect__SourceHTTP) repeatable on SCHEMA
 
@@ -501,12 +592,20 @@ mod tests {
           DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
+        }
+
+        input connect__ConnectBatch {
+          maxSize: Int
         }
 
         input connect__SourceHTTP {
           baseURL: String!
           headers: [connect__HTTPHeaderMapping!]
+          path: connect__JSONSelection
+          queryParams: connect__JSONSelection
         }
-        "#);
+        "###);
     }
 }

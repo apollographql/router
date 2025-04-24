@@ -226,6 +226,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 all_routers.main.1,
                 configuration.limits.http1_max_request_headers,
                 configuration.limits.http1_max_request_buf_size,
+                configuration.server.http.header_read_timeout,
                 all_connections_stopped_sender.clone(),
             );
 
@@ -268,6 +269,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                             router,
                             configuration.limits.http1_max_request_headers,
                             configuration.limits.http1_max_request_buf_size,
+                            configuration.server.http.header_read_timeout,
                             all_connections_stopped_sender.clone(),
                         );
                         (
@@ -425,7 +427,7 @@ async fn license_handler(
     ) {
         // This will rate limit logs about license to 1 a second.
         // The way it works is storing the delta in seconds from a starting instant.
-        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successful log.
         // If not successful some other thread will have logged.
         let last_elapsed_seconds = delta.load(Ordering::SeqCst);
         let elapsed_seconds = start.elapsed().as_secs();

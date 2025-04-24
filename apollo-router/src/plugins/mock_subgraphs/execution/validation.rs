@@ -1,6 +1,6 @@
 use apollo_compiler::parser::SourceSpan;
 
-/// Returned as an error for situtations that should not happen with a valid schema or document.
+/// Returned as an error for situations that should not happen with a valid schema or document.
 ///
 /// Since the relevant APIs take [`Valid<_>`][crate::validation::Valid] parameters,
 /// either apollo-compiler has a validation bug

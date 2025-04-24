@@ -2559,6 +2559,218 @@ mod tests {
     }
 
     #[test]
+    fn test_left_associative_path_evaluation() {
+        assert_eq!(
+            selection!("batch.id->first").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(1)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->last").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(3)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->size").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(3)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->slice(1)->first").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!(2)), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map({ batchId: @ })").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (
+                Some(json!([
+                    { "batchId": 1 },
+                    { "batchId": 2 },
+                    { "batchId": 3 },
+                ])),
+                vec![],
+            ),
+        );
+
+        let mut vars = IndexMap::default();
+        vars.insert(
+            "$batch".to_string(),
+            json!([
+                { "id": 4 },
+                { "id": 5 },
+                { "id": 6 },
+            ]),
+        );
+        assert_eq!(
+            selection!("$batch.id->map({ batchId: @ })").apply_with_vars(
+                &json!({
+                    "batch": "ignored",
+                }),
+                &vars
+            ),
+            (
+                Some(json!([
+                    { "batchId": 4 },
+                    { "batchId": 5 },
+                    { "batchId": 6 },
+                ])),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map({ batchId: @ })->first").apply_to(&json!({
+                "batch": [
+                    { "id": 7 },
+                    { "id": 8 },
+                    { "id": 9 },
+                ],
+            })),
+            (Some(json!({ "batchId": 7 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map({ batchId: @ })->last").apply_to(&json!({
+                "batch": [
+                    { "id": 7 },
+                    { "id": 8 },
+                    { "id": 9 },
+                ],
+            })),
+            (Some(json!({ "batchId": 9 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map({ batchId: @ })->first").apply_with_vars(
+                &json!({
+                    "batch": "ignored",
+                }),
+                &vars
+            ),
+            (Some(json!({ "batchId": 4 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("$batch.id->map({ batchId: @ })->last").apply_with_vars(
+                &json!({
+                    "batch": "ignored",
+                }),
+                &vars
+            ),
+            (Some(json!({ "batchId": 6 })), vec![]),
+        );
+
+        assert_eq!(
+            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+                "arrays": [
+                    { "as": { "bs": [10, 20, 30] } },
+                    { "as": { "bs": [40, 50, 60] } },
+                    { "as": { "bs": [70, 80, 90] } },
+                ],
+            })),
+            (
+                Some(json!({
+                    "echoed": [
+                        [10, 20, 30],
+                        [40, 50, 60],
+                        [70, 80, 90],
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("arrays.as.bs->echo({ echoed: @ })").apply_to(&json!({
+                "arrays": [
+                    { "as": { "bs": [10, 20, 30] } },
+                    { "as": [
+                        { "bs": [40, 50, 60] },
+                        { "bs": [70, 80, 90] },
+                    ] },
+                    { "as": { "bs": [100, 110, 120] } },
+                ],
+            })),
+            (
+                Some(json!({
+                    "echoed": [
+                        [10, 20, 30],
+                        [
+                            [40, 50, 60],
+                            [70, 80, 90],
+                        ],
+                        [100, 110, 120],
+                    ],
+                })),
+                vec![],
+            ),
+        );
+
+        assert_eq!(
+            selection!("batch.id->jsonStringify").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!("[1,2,3]")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map([@])->echo([@])->jsonStringify").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!("[[[1],[2],[3]]]")), vec![]),
+        );
+
+        assert_eq!(
+            selection!("batch.id->map([@])->echo([@])->jsonStringify->typeof").apply_to(&json!({
+                "batch": [
+                    { "id": 1 },
+                    { "id": 2 },
+                    { "id": 3 },
+                ],
+            })),
+            (Some(json!("string")), vec![]),
+        );
+    }
+
+    #[test]
     fn test_compute_output_shape() {
         assert_eq!(selection!("").shape().pretty_print(), "{}");
 

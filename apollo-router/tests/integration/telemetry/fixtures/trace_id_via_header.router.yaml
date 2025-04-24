@@ -1,9 +1,6 @@
 telemetry:
-
   instrumentation:
-
     spans:
-
       mode: spec_compliant
       router:
         attributes:
@@ -30,4 +27,3 @@ telemetry:
             display_span_id: true
             ansi_escape_codes: false
             display_current_span: true
-

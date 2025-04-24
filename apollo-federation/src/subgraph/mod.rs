@@ -3,7 +3,6 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
-use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::collections::IndexMap;
@@ -35,6 +34,7 @@ use crate::subgraph::spec::SERVICE_TYPE;
 
 mod database;
 pub mod spec;
+pub mod typestate; // TODO: Move here to overwrite Subgraph after API is reasonable
 
 pub struct Subgraph {
     pub name: String,
@@ -362,9 +362,22 @@ impl From<ValidFederationSubgraph> for ValidSubgraph {
 /// for missing error codes and the like.
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) struct SubgraphError {
-    pub(crate) subgraph: Name,
+pub struct SubgraphError {
+    pub(crate) subgraph: String,
     pub(crate) error: FederationError,
+}
+
+impl SubgraphError {
+    pub(crate) fn new(subgraph: impl Into<String>, error: impl Into<FederationError>) -> Self {
+        SubgraphError {
+            subgraph: subgraph.into(),
+            error: error.into(),
+        }
+    }
+
+    pub fn error(&self) -> &FederationError {
+        &self.error
+    }
 }
 
 impl Display for SubgraphError {

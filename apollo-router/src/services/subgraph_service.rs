@@ -68,9 +68,9 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::create_verifier;
-use crate::plugins::telemetry::config_new::events::SubgraphEventRequest;
-use crate::plugins::telemetry::config_new::events::SubgraphEventResponse;
 use crate::plugins::telemetry::config_new::events::log_event;
+use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventRequest;
+use crate::plugins::telemetry::config_new::subgraph::events::SubgraphEventResponse;
 use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::protocols::websocket::convert_websocket_stream;
@@ -484,15 +484,12 @@ async fn call_websocket(
     let subgraph_request_event = context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
-    let log_request_level = subgraph_request_event.and_then(|s| match s.0.condition() {
-        Some(condition) => {
-            if condition.lock().evaluate_request(&request) == Some(true) {
-                Some(s.0.level())
-            } else {
-                None
-            }
+    let log_request_level = subgraph_request_event.and_then(|s| {
+        if s.condition.lock().evaluate_request(&request) == Some(true) {
+            Some(s.level)
+        } else {
+            None
         }
-        None => Some(s.0.level()),
     });
 
     let SubgraphRequest {
@@ -754,7 +751,11 @@ fn http_response_to_graphql_response(
             // Application json expects valid graphql response if 2xx
             tracing::debug_span!("parse_subgraph_response").in_scope(|| {
                 // Application graphql json expects valid graphql response
-                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|error| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|error| {
+                    let error = FetchError::SubrequestMalformedResponse {
+                        service: service_name.to_owned(),
+                        reason: error.reason,
+                    };
                     graphql::Response::builder()
                         .error(error.to_graphql_error(None))
                         .build()
@@ -770,7 +771,7 @@ fn http_response_to_graphql_response(
                 if original_response.is_empty() {
                     original_response = "<empty response body>".into()
                 }
-                graphql::Response::from_bytes(service_name, body).unwrap_or_else(|_error| {
+                graphql::Response::from_bytes(body).unwrap_or_else(|_error| {
                     graphql::Response::builder()
                         .error(
                             FetchError::SubrequestMalformedResponse {
@@ -925,7 +926,7 @@ pub(crate) async fn process_batch(
     let subgraph_response_event = batch_context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
-    if let Some(level) = subgraph_response_event {
+    if let Some(event) = subgraph_response_event {
         let mut attrs = Vec::with_capacity(5);
         attrs.push(KeyValue::new(
             Key::from_static_str("http.response.headers"),
@@ -950,7 +951,7 @@ pub(crate) async fn process_batch(
             opentelemetry::Value::String(service.clone().into()),
         ));
         log_event(
-            level.0.level(),
+            event.level,
             "subgraph.response",
             attrs,
             &format!("Raw response from subgraph {service:?} received"),
@@ -1233,15 +1234,12 @@ pub(crate) async fn call_single_http(
     let subgraph_request_event = context
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
-    let log_request_level = subgraph_request_event.and_then(|s| match s.0.condition() {
-        Some(condition) => {
-            if condition.lock().evaluate_request(&request) == Some(true) {
-                Some(s.0.level())
-            } else {
-                None
-            }
+    let log_request_level = subgraph_request_event.and_then(|s| {
+        if s.condition.lock().evaluate_request(&request) == Some(true) {
+            Some(s.level)
+        } else {
+            None
         }
-        None => Some(s.0.level()),
     });
 
     let SubgraphRequest {
@@ -1352,25 +1350,25 @@ pub(crate) async fn call_single_http(
         .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
 
     if let Some(subgraph_response_event) = subgraph_response_event {
-        let mut should_log = true;
-        if let Some(condition) = subgraph_response_event.0.condition() {
-            // We have to do this in order to use selectors
-            let mut resp_builder = http::Response::builder()
-                .status(parts.status)
-                .version(parts.version);
-            if let Some(headers) = resp_builder.headers_mut() {
-                *headers = parts.headers.clone();
-            }
-            let subgraph_response = SubgraphResponse::new_from_response(
-                resp_builder
-                    .body(graphql::Response::default())
-                    .expect("it won't fail everything is coming from an existing response"),
-                context.clone(),
-                service_name.to_owned(),
-                subgraph_request_id.clone(),
-            );
-            should_log = condition.lock().evaluate_response(&subgraph_response);
+        // We have to do this in order to use selectors
+        let mut resp_builder = http::Response::builder()
+            .status(parts.status)
+            .version(parts.version);
+        if let Some(headers) = resp_builder.headers_mut() {
+            *headers = parts.headers.clone();
         }
+        let subgraph_response = SubgraphResponse::new_from_response(
+            resp_builder
+                .body(graphql::Response::default())
+                .expect("it won't fail everything is coming from an existing response"),
+            context.clone(),
+            service_name.to_owned(),
+            subgraph_request_id.clone(),
+        );
+
+        let should_log = subgraph_response_event
+            .condition
+            .evaluate_response(&subgraph_response);
         if should_log {
             let mut attrs = Vec::with_capacity(5);
             attrs.push(KeyValue::new(
@@ -1396,7 +1394,7 @@ pub(crate) async fn call_single_http(
                 opentelemetry::Value::String(service_name.to_string().into()),
             ));
             log_event(
-                subgraph_response_event.0.level(),
+                subgraph_response_event.level,
                 "subgraph.response",
                 attrs,
                 &format!("Raw response from subgraph {service_name:?} received"),

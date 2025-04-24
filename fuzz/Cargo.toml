@@ -11,11 +11,11 @@ license-file = "../LICENSE"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "=0.4.7"
+libfuzzer-sys = "=0.4.9"
 apollo-federation = { path = "../apollo-federation" }
 apollo-parser.workspace = true
 apollo-smith.workspace = true
-bnf = "0.4.4"
+bnf = "0.5.0"
 env_logger = "0.11.0"
 log = "0.4"
 rand = "0.8.0"

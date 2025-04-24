@@ -436,7 +436,7 @@ impl FederationSpecDefinitions {
         }
     }
 
-    // The directive is named `@fromContex`. This is confusing for clippy, as
+    // The directive is named `@fromContext`. This is confusing for clippy, as
     // `from` is a conventional prefix used in conversion methods, which do not
     // take `self` as an argument. This function does **not** perform
     // conversion, but extracts `@fromContext` directive definition.

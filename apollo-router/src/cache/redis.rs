@@ -448,7 +448,7 @@ impl RedisCacheStorage {
         } else if self.is_cluster {
             // when using a cluster of redis nodes, the keys are hashed, and the hash number indicates which
             // node will store it. So first we have to group the keys by hash, because we cannot do a MGET
-            // across multipe nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
+            // across multiple nodes (error: "ERR CROSSSLOT Keys in request don't hash to the same slot")
             let len = keys.len();
             let mut h: HashMap<u16, (Vec<usize>, Vec<String>)> = HashMap::new();
             for (index, key) in keys.into_iter().enumerate() {
@@ -555,7 +555,7 @@ impl RedisCacheStorage {
         tracing::trace!("insert result {:?}", r);
     }
 
-    /// Delete keys *without* adding the `namepsace` prefix because `keys` is from
+    /// Delete keys *without* adding the `namespace` prefix because `keys` is from
     /// `scan_with_namespaced_results` and already includes it.
     pub(crate) async fn delete_from_scan_result(
         &self,

@@ -156,7 +156,7 @@ impl LinkSpecDefinition {
         //   (in practice, our own code can actually handle this as it does not strongly rely on
         //   that "it should be the first" rule, but that would set a bad example).
         // 2. earlier versions (pre-#1875) were always putting that directive on the definition,
-        //   and we wanted to avoid suprising users by changing that for not reason.
+        //   and we wanted to avoid surprising users by changing that for not reason.
         //
         // So instead, we put the directive on the schema definition unless some extensions exists
         // but no definition does (that is, no non-extension elements are populated).

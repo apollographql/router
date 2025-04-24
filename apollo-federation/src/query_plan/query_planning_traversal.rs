@@ -90,6 +90,7 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) statistics: &'a QueryPlanningStatistics,
     pub(crate) override_conditions: EnabledOverrideConditions,
     pub(crate) check_for_cooperative_cancellation: Option<&'a dyn Fn() -> ControlFlow<()>>,
+    pub(crate) disabled_subgraphs: IndexSet<Arc<str>>,
 }
 
 impl QueryPlanningParameters<'_> {
@@ -332,6 +333,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_destinations,
             excluded_conditions,
             &parameters.override_conditions,
+            &parameters.disabled_subgraphs,
         )?;
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
@@ -448,6 +450,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 /*resolver*/ self,
                 &self.parameters.override_conditions,
                 &|| self.parameters.check_cancellation(),
+                &self.parameters.disabled_subgraphs,
             )?;
             let Some(followups_for_option) = followups_for_option else {
                 // There is no valid way to advance the current operation element from this option
@@ -549,10 +552,16 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             // happen for a top-level query planning (unless the supergraph has *not* been
             // validated), but can happen when computing sub-plans for a key condition.
             return if self.is_top_level {
-                Err(FederationError::internal(format!(
-                    "Was not able to find any options for {}: This shouldn't have happened.",
-                    selection,
-                )))
+                if self.parameters.disabled_subgraphs.is_empty() {
+                    Err(FederationError::internal(format!(
+                        "Was not able to find any options for {}: This shouldn't have happened.",
+                        selection,
+                    )))
+                } else {
+                    // If subgraphs were disabled, this could be expected, and we indicate this in
+                    // the error accordingly.
+                    Err(SingleFederationError::NoPlanFoundWithDisabledSubgraphs.into())
+                }
             } else {
                 // Indicate to the caller that query planning should terminate with no plan.
                 Ok((true, None))
@@ -640,7 +649,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         // To guarantee that the selection is fully local from the provided vertex/type, we must have:
         // - no edge crossing subgraphs from that vertex.
         // - the type must be compositeType (mostly just ensuring the selection make sense).
-        // - everything in the selection must be avaiable in the type (which `rebaseOn` essentially validates).
+        // - everything in the selection must be available in the type (which `rebaseOn` essentially validates).
         // - the selection must not "type-cast" into any abstract type that has inconsistent runtimes acrosse subgraphs. The reason for the
         //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
         //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
@@ -913,11 +922,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     }
 
     /// Look at how many plans we'd have to generate and if it's "too much"
-    /// reduce it to something manageable by arbitrarilly throwing out options.
+    /// reduce it to something manageable by arbitrarily throwing out options.
     /// This effectively means that when a query has too many options,
     /// we give up on always finding the "best" query plan in favor of an "ok" query plan.
     ///
-    /// TODO: currently, when we need to reduce options, we do so somewhat arbitrarilly.
+    /// TODO: currently, when we need to reduce options, we do so somewhat arbitrarily.
     /// More precisely, we reduce the branches with the most options first
     /// and then drop the last option of the branch,
     /// repeating until we have a reasonable number of plans to consider.
@@ -1174,6 +1183,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             override_conditions: self.parameters.override_conditions.clone(),
             fetch_id_generator: self.parameters.fetch_id_generator.clone(),
             check_for_cooperative_cancellation: self.parameters.check_for_cooperative_cancellation,
+            disabled_subgraphs: self.parameters.disabled_subgraphs.clone(),
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
@@ -1338,7 +1348,7 @@ fn test_prune_and_reorder_first_branch() {
         assert_eq!(branches, expected)
     }
     // Either the first branch had strictly more options than the second,
-    // so it is still at its correct potition after removing one option…
+    // so it is still at its correct position after removing one option…
     assert(
         &["abcdE", "fgh", "ijk", "lmn", "op"],
         &["abcd", "fgh", "ijk", "lmn", "op"],

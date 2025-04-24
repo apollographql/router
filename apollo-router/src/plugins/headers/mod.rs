@@ -594,13 +594,12 @@ mod test {
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::ConnectSpec;
     use apollo_federation::sources::connect::Connector;
-    use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
+    use http::Uri;
     use serde_json::json;
     use subgraph::SubgraphRequestId;
     use tower::BoxError;
-    use url::Url;
 
     use super::*;
     use crate::Context;
@@ -1513,11 +1512,9 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
@@ -1525,6 +1522,9 @@ mod test {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -1599,11 +1599,9 @@ mod test {
                 "test label",
             ),
             transport: HttpJsonTransport {
-                source_url: Some(Url::parse("http://localhost/api").unwrap()),
+                source_url: Some(Uri::from_str("http://localhost/api").unwrap()),
                 connect_template: "/path".parse().unwrap(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
+                ..Default::default()
             },
             selection: JSONSelection::parse("f").unwrap(),
             entity_resolver: None,
@@ -1611,6 +1609,9 @@ mod test {
             max_requests: None,
             request_variables: Default::default(),
             response_variables: Default::default(),
+            batch_settings: None,
+            request_headers: Default::default(),
+            response_headers: Default::default(),
         };
         let key = ResponseKey::RootField {
             name: "hello".to_string(),
@@ -1710,7 +1711,8 @@ mod test {
         let test_harness = PluginTestHarness::<Headers>::builder()
             .config(config)
             .build()
-            .await;
+            .await
+            .expect("test harness");
         let service = test_harness.subgraph_service("test", move |r| {
             let output = output.clone();
             async move {

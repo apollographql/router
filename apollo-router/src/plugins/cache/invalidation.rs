@@ -5,7 +5,6 @@ use fred::error::RedisError;
 use fred::types::Scanner;
 use futures::StreamExt;
 use futures::stream;
-use indexmap::IndexMap;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -187,7 +186,7 @@ impl Invalidation {
 
                 f64_histogram!(
                     "apollo.router.cache.invalidation.duration",
-                    "Duration of the invalidation event execution.",
+                    "Duration of the invalidation event execution, in seconds.",
                     start.elapsed().as_secs_f64()
                 );
                 res
@@ -225,7 +224,7 @@ pub(crate) enum InvalidationRequest {
     Entity {
         subgraph: String,
         r#type: String,
-        key: IndexMap<ByteString, Value>,
+        key: serde_json_bytes::Map<ByteString, Value>,
     },
 }
 
