@@ -83,4 +83,3 @@ nonstandard_style = "deny"
 all = { level = "deny", priority = 10 }
 redundant_clone = { level = "deny", priority = 9 }
 manual_while_let_some = { level = "deny", priority = 4 }
-missing_const_for_fn = { level = "warn", priority = 1 }
