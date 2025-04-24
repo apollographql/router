@@ -14,8 +14,8 @@ expression: aggregated_metrics
             "operation_type": "",
             "operation_subtype": "",
             "result": "",
-            "client_library_name": "",
-            "client_library_version": ""
+            "client_library_name": "library_name_1",
+            "client_library_version": "library_version_1"
           },
           {
             "context": {
@@ -24,8 +24,8 @@ expression: aggregated_metrics
               "operation_type": "",
               "operation_subtype": "",
               "result": "",
-              "client_library_name": "",
-              "client_library_version": ""
+              "client_library_name": "library_name_1",
+              "client_library_version": "library_version_1"
             },
             "query_latency_stats": {
               "request_latencies": {
