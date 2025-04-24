@@ -28,7 +28,7 @@ Operations that need to query multiple subgraphs can impact performance because 
 - Using directives like `@requires` or `@interfaceObject` carefully to control complexity.
 
 
-### `@requires` Directive
+### `@requires` directive
 
 The [`@requires` directive](https://www.apollographql.com/docs/graphos/schema-design/federated-schemas/reference/directives#requires) allows a subgraph to fetch additional fields needed to resolve an entity. This can be powerful but must be handled with care.
 - Changes to fields utilized by `@requires` can impact the subgraph fetches that current operations depend on and may create larger and slower plans.
