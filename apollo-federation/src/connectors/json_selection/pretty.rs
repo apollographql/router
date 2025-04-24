@@ -115,7 +115,7 @@ impl PrettyPrintable for PathSelection {
         // to indentation.
         let leading_space_count = inner.chars().take_while(|c| *c == ' ').count();
         let suffix = inner[leading_space_count..].to_string();
-        if suffix.starts_with('.') && !self.path.is_single_key() {
+        if suffix.starts_with('.') {
             // Strip the '.' but keep any leading spaces.
             format!("{}{}", " ".repeat(leading_space_count), &suffix[1..])
         } else {
@@ -299,47 +299,24 @@ impl PrettyPrintable for NamedSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
-        match self {
-            Self::Field(alias, field_key, sub) => {
-                if let Some(alias) = alias {
-                    result.push_str(alias.pretty_print().as_str());
-                    result.push(' ');
-                }
+        if let Some(alias) = &self.alias {
+            result.push_str(alias.pretty_print().as_str());
+            result.push(' ');
+        } else if self.has_single_output_key() {
+            // If there was no alias but the selection consists of a single key,
+            // then it's a named field (or possibly field?) selection, so its
+            // value should not be inlined/spread with `...`.
+        } else if !self.path.has_subselection() {
+            // Prepend `...` to path selections that do not have an alias and
+            // also do not have a trailing SubSelection.
+            result.push_str("...");
+        }
 
-                result.push_str(field_key.pretty_print().as_str());
-
-                if let Some(sub) = sub {
-                    let sub = sub.pretty_print_with_indentation(inline, indentation);
-                    result.push(' ');
-                    result.push_str(sub.as_str());
-                }
-            }
-            Self::Path { alias, path, .. } => {
-                // TODO Once we reintroduce conditional selections, I believe we
-                // should print the ... even for PathWithSubSelection selections
-                // which were not originally written with the ... (but for which
-                // *inline is nevertheless true), because the version with ...
-                // will be equivalent to the version without, and using the ...
-                // makes it much more obvious that the output of the selection
-                // will be inlined into the parent object.
-                // if *inline {
-                //     result.push_str("...");
-                // }
-                if let Some(alias) = alias {
-                    result.push_str(alias.pretty_print().as_str());
-                    result.push(' ');
-                }
-                let path = path.pretty_print_with_indentation(inline, indentation);
-                result.push_str(path.trim_start());
-            }
-            Self::Group(alias, sub) => {
-                result.push_str(alias.pretty_print().as_str());
-                result.push(' ');
-
-                let sub = sub.pretty_print_with_indentation(inline, indentation);
-                result.push_str(sub.as_str());
-            }
-        };
+        // The .trim_start() handles the case when self.path is just a
+        // SubSelection (i.e., a NamedGroupSelection), since that PathList
+        // variant typically prints a single leading space.
+        let pretty_path = self.path.pretty_print_with_indentation(inline, indentation);
+        result.push_str(pretty_path.trim_start());
 
         result
     }

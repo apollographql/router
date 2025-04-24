@@ -308,86 +308,40 @@ impl ApplyToInternal for NamedSelection {
         let mut output: Option<JSON> = None;
         let mut errors = Vec::new();
 
-        match self {
-            Self::Field(alias, key, selection) => {
-                let input_path_with_key = input_path.append(key.to_json());
-                let name = key.as_str();
-                if let Some(child) = data.get(name) {
-                    let output_name = alias.as_ref().map_or(name, |alias| alias.name());
-                    if let Some(selection) = selection {
-                        let (value, apply_errors) =
-                            selection.apply_to_path(child, vars, &input_path_with_key);
-                        errors.extend(apply_errors);
-                        if let Some(value) = value {
-                            output = Some(json!({ output_name: value }));
-                        }
-                    } else {
-                        output = Some(json!({ output_name: child.clone() }));
-                    }
-                } else {
-                    errors.push(ApplyToError::new(
-                        format!(
-                            "Property {} not found in {}",
-                            key.dotted(),
-                            json_type_name(data),
-                        ),
-                        input_path_with_key.to_vec(),
-                        key.range(),
-                    ));
-                }
-            }
-            Self::Path {
-                alias,
-                path,
-                inline,
-            } => {
-                let (value_opt, apply_errors) = path.apply_to_path(data, vars, input_path);
-                errors.extend(apply_errors);
+        let (value_opt, apply_errors) = self.path.apply_to_path(data, vars, input_path);
+        errors.extend(apply_errors);
 
-                if let Some(alias) = alias {
-                    // Handle the NamedPathSelection case.
-                    if let Some(value) = value_opt {
-                        output = Some(json!({ alias.name(): value }));
-                    }
-                } else if *inline {
-                    match value_opt {
-                        Some(JSON::Object(map)) => {
-                            output = Some(JSON::Object(map));
-                        }
-                        Some(JSON::Null) => {
-                            output = Some(JSON::Null);
-                        }
-                        Some(value) => {
-                            errors.push(ApplyToError::new(
-                                format!("Expected object or null, not {}", json_type_name(&value)),
-                                input_path.to_vec(),
-                                path.range(),
-                            ));
-                        }
-                        None => {
-                            errors.push(ApplyToError::new(
-                                "Expected object or null, not nothing".to_string(),
-                                input_path.to_vec(),
-                                path.range(),
-                            ));
-                        }
-                    }
-                } else {
+        // If the selection has an alias, that will become the single output
+        // key. However, the NamedSelection can also have a single output key if
+        // it originated from NamedFieldSelection syntax.
+        if let Some(single_output_key) = self.get_single_key() {
+            if let Some(value) = value_opt {
+                output = Some(json!({ single_output_key.as_str(): value }));
+            }
+        } else {
+            match value_opt {
+                Some(JSON::Object(map)) => {
+                    output = Some(JSON::Object(map.clone()));
+                }
+                Some(JSON::Null) => {
+                    output = Some(JSON::Null);
+                }
+                Some(value) => {
                     errors.push(ApplyToError::new(
-                        "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
+                        format!("Expected object or null, not {}", json_type_name(&value)),
                         input_path.to_vec(),
-                        path.range(),
+                        self.path.range(),
+                    ));
+                }
+                None => {
+                    errors.push(ApplyToError::new(
+                        "Expected object or null, not nothing".to_string(),
+                        input_path.to_vec(),
+                        self.path.range(),
                     ));
                 }
             }
-            Self::Group(alias, sub_selection) => {
-                let (value_opt, apply_errors) = sub_selection.apply_to_path(data, vars, input_path);
-                errors.extend(apply_errors);
-                if let Some(value) = value_opt {
-                    output = Some(json!({ alias.name(): value }));
-                }
-            }
-        };
+        }
 
         (output, errors)
     }
@@ -399,55 +353,17 @@ impl ApplyToInternal for NamedSelection {
         named_var_shapes: &IndexMap<&str, Shape>,
         source_id: &SourceId,
     ) -> Shape {
-        let mut output = Shape::empty_map();
+        let path_shape =
+            self.path
+                .compute_output_shape(input_shape, dollar_shape, named_var_shapes, source_id);
 
-        match self {
-            Self::Field(alias_opt, key, selection) => {
-                let output_key = alias_opt
-                    .as_ref()
-                    .map_or(key.as_str(), |alias| alias.name());
-                let field_shape = field(&dollar_shape, key, source_id);
-                output.insert(
-                    output_key.to_string(),
-                    if let Some(selection) = selection {
-                        selection.compute_output_shape(
-                            field_shape,
-                            dollar_shape,
-                            named_var_shapes,
-                            source_id,
-                        )
-                    } else {
-                        field_shape
-                    },
-                );
-            }
-            Self::Path { alias, path, .. } => {
-                let path_shape = path.compute_output_shape(
-                    input_shape,
-                    dollar_shape,
-                    named_var_shapes,
-                    source_id,
-                );
-                if let Some(alias) = alias {
-                    output.insert(alias.name().to_string(), path_shape);
-                } else {
-                    return path_shape;
-                }
-            }
-            Self::Group(alias, sub_selection) => {
-                output.insert(
-                    alias.name().to_string(),
-                    sub_selection.compute_output_shape(
-                        input_shape,
-                        dollar_shape,
-                        named_var_shapes,
-                        source_id,
-                    ),
-                );
-            }
-        };
-
-        Shape::object(output, Shape::none(), self.shape_location(source_id))
+        if let Some(single_output_key) = self.get_single_key() {
+            let mut map = Shape::empty_map();
+            map.insert(single_output_key.as_string(), path_shape);
+            Shape::record(map, self.shape_location(source_id))
+        } else {
+            path_shape
+        }
     }
 }
 
@@ -763,7 +679,7 @@ impl ApplyToInternal for WithRange<PathList> {
             // ensuring that some.nested.path is equivalent to
             // $.some.nested.path.
             PathList::Key(key, tail) => {
-                let child_shape = input_shape.field(key.as_str(), key.shape_location(source_id));
+                let child_shape = field(&input_shape, key, source_id);
 
                 // Here input_shape was not None, but input_shape.field(key) was
                 // None, so it's the responsibility of this PathList::Key node
@@ -2723,50 +2639,9 @@ mod tests {
             ),
         );
 
-        // We have to construct this invalid selection manually because we want
-        // to test an error case requiring a PathWithSubSelection that does not
-        // actually have a SubSelection, which should not be possible to
-        // construct through normal parsing.
-        let invalid_inline_path_selection = JSONSelection::Named(SubSelection {
-            selections: vec![NamedSelection::Path {
-                alias: None,
-                inline: false,
-                path: PathSelection {
-                    path: PathList::Key(
-                        Key::field("some").into_with_range(),
-                        PathList::Key(
-                            Key::field("number").into_with_range(),
-                            PathList::Empty.into_with_range(),
-                        )
-                        .into_with_range(),
-                    )
-                    .into_with_range(),
-                },
-            }],
-            ..Default::default()
-        });
-
-        assert_eq!(
-            invalid_inline_path_selection.apply_to(&json!({
-                "some": {
-                    "number": 579,
-                },
-            })),
-            (
-                Some(json!({})),
-                vec![ApplyToError::new(
-                    "Named path must have an alias, a trailing subselection, or be inlined with ... and produce an object or null".to_string(),
-                    vec![],
-                    // No range because this is a manually constructed selection.
-                    None,
-                ),],
-            ),
-        );
-
         let valid_inline_path_selection = JSONSelection::Named(SubSelection {
-            selections: vec![NamedSelection::Path {
+            selections: vec![NamedSelection {
                 alias: None,
-                inline: true, // This makes it valid.
                 path: PathSelection {
                     path: PathList::Key(
                         Key::field("some").into_with_range(),
